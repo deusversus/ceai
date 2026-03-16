@@ -414,8 +414,201 @@ public sealed class AiToolFunctions(
         var (mods, vk) = GlobalHotkeyService.ParseHotkeyString(hotkey);
         if (vk == 0) return Task.FromResult($"Could not parse hotkey '{hotkey}'. Use format like 'Ctrl+F1' or 'Alt+G'.");
 
-        // Can't register here since we don't have the window handle.
-        // Return the parsed info for the UI to register.
         return Task.FromResult($"Hotkey parsed: modifiers=0x{mods:X}, vk=0x{vk:X}. Node '{node.Label}' at {node.Address}. The UI should call GlobalHotkeyService.Register() with these values.");
+    }
+
+    // ── State & control tools (agent needs these to act autonomously) ──
+
+    [Description("Find a running process by name (partial match). Returns PID and full name. Use this instead of ListProcesses when you know the game name.")]
+    public async Task<string> FindProcess([Description("Process name or partial name to search for")] string name)
+    {
+        var processes = await engineFacade.ListProcessesAsync();
+        var matches = processes
+            .Where(p => p.Name.Contains(name, StringComparison.OrdinalIgnoreCase))
+            .Take(10).ToList();
+        if (matches.Count == 0)
+            return $"No process found matching '{name}'. Use ListProcesses to see all.";
+        var lines = matches.Select(p => $"  PID {p.Id} | {p.Name} | {p.Architecture}");
+        return $"Found {matches.Count} match(es) for '{name}':\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Freeze (lock) an address table entry so its value is continuously written back. The value is frozen at its current reading.")]
+    public Task<string> FreezeAddress([Description("Node ID of the address table entry")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (node.IsGroup) return Task.FromResult("Cannot freeze a group.");
+        if (node.IsScriptEntry) return Task.FromResult("Use ToggleScript for script entries.");
+        if (node.IsLocked) return Task.FromResult($"'{node.Label}' is already frozen at {node.LockedValue}.");
+
+        node.IsLocked = true;
+        node.LockedValue = node.CurrentValue;
+        return Task.FromResult($"Frozen '{node.Label}' at value {node.CurrentValue}. It will be continuously written back.");
+    }
+
+    [Description("Unfreeze (unlock) an address table entry so it can change naturally again.")]
+    public Task<string> UnfreezeAddress([Description("Node ID of the address table entry")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (!node.IsLocked) return Task.FromResult($"'{node.Label}' is not frozen.");
+
+        node.IsLocked = false;
+        node.LockedValue = null;
+        return Task.FromResult($"Unfrozen '{node.Label}'. Value can now change freely.");
+    }
+
+    [Description("Freeze an address at a specific value (not just its current value). Useful for setting health to 9999, gold to max, etc.")]
+    public Task<string> FreezeAddressAtValue(
+        [Description("Node ID of the address table entry")] string nodeId,
+        [Description("Value to freeze at")] string value)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (node.IsGroup || node.IsScriptEntry) return Task.FromResult("Can only freeze value entries.");
+
+        node.IsLocked = true;
+        node.LockedValue = value;
+        return Task.FromResult($"Frozen '{node.Label}' at value {value}. Will continuously write {value}.");
+    }
+
+    [Description("Enable or disable a script (Auto Assembler) entry in the address table. Returns the new state.")]
+    public Task<string> ToggleScript([Description("Node ID of the script entry")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (!node.IsScriptEntry) return Task.FromResult($"'{node.Label}' is not a script entry. Use FreezeAddress for value entries.");
+
+        node.IsScriptEnabled = !node.IsScriptEnabled;
+        return Task.FromResult($"Script '{node.Label}' is now {(node.IsScriptEnabled ? "ENABLED" : "DISABLED")}.");
+    }
+
+    [Description("Get detailed info about a specific address table node by its ID. Shows address, type, value, pointer chain, locked state, and children.")]
+    public Task<string> GetAddressTableNode([Description("Node ID")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"ID: {node.Id}");
+        sb.AppendLine($"Label: {node.Label}");
+        sb.AppendLine($"Type: {(node.IsGroup ? "Group" : node.IsScriptEntry ? "Script" : node.DataType.ToString())}");
+        sb.AppendLine($"Address: {node.Address}");
+        if (node.ResolvedAddress.HasValue)
+            sb.AppendLine($"Resolved: 0x{node.ResolvedAddress.Value:X}");
+        sb.AppendLine($"Value: {node.CurrentValue}");
+        if (node.IsLocked) sb.AppendLine($"FROZEN at: {node.LockedValue}");
+        if (node.IsPointer)
+            sb.AppendLine($"Pointer chain: [{string.Join(", ", node.PointerOffsets.Select(o => $"0x{o:X}"))}]");
+        if (node.IsOffset) sb.AppendLine("Is parent-relative offset");
+        if (node.Children.Count > 0)
+        {
+            sb.AppendLine($"Children ({node.Children.Count}):");
+            foreach (var child in node.Children.Take(20))
+                sb.AppendLine($"  {child.Id}: {child.Label} = {child.CurrentValue} {(child.IsLocked ? "[FROZEN]" : "")}");
+            if (node.Children.Count > 20)
+                sb.AppendLine($"  ... and {node.Children.Count - 20} more");
+        }
+        return Task.FromResult(sb.ToString());
+    }
+
+    [Description("Get the current scan results (top N results from the last scan or refinement).")]
+    public Task<string> GetScanResults(
+        [Description("Maximum results to return (default 20)")] int maxResults = 20)
+    {
+        if (scanService.LastScanResults is null)
+            return Task.FromResult("No active scan. Use StartScan first.");
+
+        var results = scanService.LastScanResults;
+        var count = results.Results.Count;
+        var lines = results.Results.Take(maxResults)
+            .Select(r => $"  0x{r.Address:X} = {r.CurrentValue} (was {r.PreviousValue})");
+        return Task.FromResult(
+            $"Scan: {count:N0} results ({results.Constraints.DataType})\n{string.Join('\n', lines)}" +
+            (count > maxResults ? $"\n  ... {count - maxResults:N0} more" : ""));
+    }
+
+    [Description("Get current context: attached process, address table summary, scan state. Use this to orient yourself before taking action.")]
+    public Task<string> GetCurrentContext()
+    {
+        var sb = new System.Text.StringBuilder();
+
+        // Process
+        var dashboard = dashboardService.CurrentDashboard;
+        if (dashboard?.CurrentInspection is not null)
+        {
+            var p = dashboard.CurrentInspection;
+            sb.AppendLine($"Attached: {p.ProcessName} (PID {p.ProcessId}, {p.Architecture})");
+            sb.AppendLine($"Modules: {p.Modules.Count}");
+        }
+        else
+        {
+            sb.AppendLine("No process attached.");
+        }
+
+        // Address table
+        var roots = addressTableService.Roots;
+        var totalEntries = CountNodes(roots);
+        var frozenCount = CountNodes(roots, n => n.IsLocked);
+        var scriptCount = CountNodes(roots, n => n.IsScriptEntry);
+        sb.AppendLine($"Address table: {totalEntries} entries, {frozenCount} frozen, {scriptCount} scripts");
+
+        // Scan
+        if (scanService.LastScanResults is not null)
+        {
+            var s = scanService.LastScanResults;
+            sb.AppendLine($"Active scan: {s.Results.Count:N0} results ({s.Constraints.DataType})");
+        }
+        else
+        {
+            sb.AppendLine("No active scan.");
+        }
+
+        return Task.FromResult(sb.ToString());
+    }
+
+    [Description("Read memory at an address as multiple data types at once. Useful when you don't know the type — shows Int32, UInt32, Float, Int64, Double interpretations.")]
+    public async Task<string> ProbeAddress(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex string)")] string address)
+    {
+        var addr = ParseAddress(address);
+        var bytes = await engineFacade.ReadMemoryAsync(processId, addr, 8);
+        var raw = bytes.Bytes.ToArray();
+        if (raw.Length < 8) return $"Could not read 8 bytes at {address}.";
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Memory probe at {address}:");
+        sb.AppendLine($"  Int16:  {BitConverter.ToInt16(raw, 0)}");
+        sb.AppendLine($"  UInt16: {BitConverter.ToUInt16(raw, 0)}");
+        sb.AppendLine($"  Int32:  {BitConverter.ToInt32(raw, 0)}");
+        sb.AppendLine($"  UInt32: {BitConverter.ToUInt32(raw, 0)}");
+        sb.AppendLine($"  Float:  {BitConverter.ToSingle(raw, 0):G9}");
+        sb.AppendLine($"  Int64:  {BitConverter.ToInt64(raw, 0)}");
+        sb.AppendLine($"  UInt64: {BitConverter.ToUInt64(raw, 0)}");
+        sb.AppendLine($"  Double: {BitConverter.ToDouble(raw, 0):G17}");
+        sb.AppendLine($"  Hex:    {Convert.ToHexString(raw)}");
+        return sb.ToString();
+    }
+
+    // ── Helpers ──
+
+    private static nuint ParseAddress(string address)
+    {
+        var addr = address.Trim();
+        if (addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            addr = addr[2..];
+        return (nuint)ulong.Parse(addr, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+    }
+
+    private static int CountNodes(IEnumerable<AddressTableNode> nodes, Func<AddressTableNode, bool>? predicate = null)
+    {
+        int count = 0;
+        foreach (var node in nodes)
+        {
+            if (predicate is null || predicate(node)) count++;
+            count += CountNodes(node.Children, predicate);
+        }
+        return count;
     }
 }

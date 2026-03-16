@@ -8,6 +8,8 @@ public sealed class WorkspaceDashboardService(
     IEngineFacade engineFacade,
     IInvestigationSessionRepository sessionRepository)
 {
+    /// <summary>Most recently built dashboard (set by BuildAsync/InspectProcessAsync).</summary>
+    public WorkspaceDashboard? CurrentDashboard { get; private set; }
     public async Task<WorkspaceDashboard> BuildAsync(string dataStorePath, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataStorePath);
@@ -23,7 +25,7 @@ public sealed class WorkspaceDashboardService(
 
         var processes = await engineFacade.ListProcessesAsync(cancellationToken);
 
-        return new WorkspaceDashboard(
+        return CurrentDashboard = new WorkspaceDashboard(
             WorkspaceBootstrap.CreateOverview(),
             processes
                 .Take(25)

@@ -59,10 +59,10 @@ public partial class MainWindow : Window
         _autoAssemblerEngine = new WindowsAutoAssemblerEngine();
         _hotkeyService = new GlobalHotkeyService();
 
-        // Wire up AI operator
+        // Wire up AI operator with dynamic context injection
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService);
         IChatClient? chatClient = CreateChatClient();
-        _aiOperatorService = new AiOperatorService(chatClient, toolFunctions);
+        _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 
         DataContext = WorkspaceDashboard.CreateLoading();
         Loaded += OnLoaded;
@@ -77,6 +77,41 @@ public partial class MainWindow : Window
         return new OpenAIClient(apiKey)
             .GetChatClient(model)
             .AsIChatClient();
+    }
+
+    /// <summary>Provides dynamic context to the AI agent before each message.</summary>
+    private string BuildAiContext()
+    {
+        var sb = new System.Text.StringBuilder();
+        if (DataContext is WorkspaceDashboard dashboard)
+        {
+            if (dashboard.CurrentInspection is { } p)
+                sb.AppendLine($"Attached: {p.ProcessName} (PID {p.ProcessId}, {p.Architecture}, {p.Modules.Count} modules)");
+            else
+                sb.AppendLine("No process attached.");
+
+            var roots = _addressTableService.Roots;
+            int total = 0, frozen = 0, scripts = 0;
+            CountNodesRecursive(roots, ref total, ref frozen, ref scripts);
+            sb.AppendLine($"Address table: {total} entries, {frozen} frozen, {scripts} scripts");
+
+            if (_scanService.LastScanResults is { } scan)
+                sb.AppendLine($"Active scan: {scan.Results.Count:N0} results ({scan.Constraints.DataType})");
+        }
+        return sb.ToString();
+    }
+
+    private static void CountNodesRecursive(
+        System.Collections.ObjectModel.ObservableCollection<AddressTableNode> nodes,
+        ref int total, ref int frozen, ref int scripts)
+    {
+        foreach (var n in nodes)
+        {
+            total++;
+            if (n.IsLocked) frozen++;
+            if (n.IsScriptEntry) scripts++;
+            CountNodesRecursive(n.Children, ref total, ref frozen, ref scripts);
+        }
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)

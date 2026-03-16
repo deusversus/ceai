@@ -15,6 +15,7 @@ public sealed class AiToolFunctions(
     ScanService scanService,
     AddressTableService addressTableService,
     DisassemblyService disassemblyService,
+    ScriptGenerationService scriptGenerationService,
     BreakpointService? breakpointService = null)
 {
     [Description("List running processes on the system. Returns process ID, name, and architecture.")]
@@ -62,8 +63,8 @@ public sealed class AiToolFunctions(
     public async Task<string> StartScan(
         [Description("Process ID to scan")] int processId,
         [Description("Data type: Int32, Int64, Float, Double")] string dataType,
-        [Description("Scan type: ExactValue, UnknownInitialValue")] string scanType,
-        [Description("Value to search for (leave empty for unknown scan)")] string? value)
+        [Description("Scan type: ExactValue, UnknownInitialValue, ArrayOfBytes")] string scanType,
+        [Description("Value to search for. For ArrayOfBytes use hex pattern like '48 8B 05 ?? ?? ?? ??' where ?? is wildcard")] string? value)
     {
         var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
         var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
@@ -126,6 +127,63 @@ public sealed class AiToolFunctions(
         var entries = addressTableService.Entries;
         var lines = entries.Select(e => $"  {e.Label}: {e.Address} = {e.CurrentValue} (was {e.PreviousValue})");
         return $"Refreshed {entries.Count} entries:\n{string.Join('\n', lines)}";
+    }
+
+    // ── Artifact generation tools ──
+
+    [Description("Generate a C# trainer script from locked entries in the address table.")]
+    public Task<string> GenerateTrainerScript([Description("Process name for the trainer target")] string processName)
+    {
+        var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
+        if (locked.Count == 0) return Task.FromResult("No locked entries to generate trainer from. Lock some address table entries first.");
+        var script = scriptGenerationService.GenerateTrainerScript(locked, processName);
+        return Task.FromResult($"Generated C# trainer script ({locked.Count} entries):\n\n{script}");
+    }
+
+    [Description("Generate an Auto Assembler (AA) script from locked entries in the address table.")]
+    public Task<string> GenerateAutoAssemblerScript([Description("Process name")] string processName)
+    {
+        var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
+        if (locked.Count == 0) return Task.FromResult("No locked entries. Lock entries first.");
+        var script = scriptGenerationService.GenerateAutoAssemblerScript(locked, processName);
+        return Task.FromResult($"Generated AA script ({locked.Count} entries):\n\n{script}");
+    }
+
+    [Description("Generate a Lua script from locked entries in the address table.")]
+    public Task<string> GenerateLuaScript([Description("Process name")] string processName)
+    {
+        var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
+        if (locked.Count == 0) return Task.FromResult("No locked entries. Lock entries first.");
+        var script = scriptGenerationService.GenerateLuaScript(locked, processName);
+        return Task.FromResult($"Generated Lua script ({locked.Count} entries):\n\n{script}");
+    }
+
+    [Description("Summarize the current investigation including address table, scan results, and disassembly.")]
+    public Task<string> SummarizeInvestigation(
+        [Description("Process name")] string processName,
+        [Description("Process ID")] int processId)
+    {
+        var dashboard = dashboardService.BuildAsync(
+            System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CEAISuite", "workspace.db")).GetAwaiter().GetResult();
+        var summary = scriptGenerationService.SummarizeInvestigation(
+            processName, processId, addressTableService.Entries.ToList(),
+            scanService.LastScanResults is not null
+                ? scanService.LastScanResults.Results.Take(10).Select(r =>
+                    new ScanResultOverview($"0x{r.Address:X}", r.CurrentValue, r.PreviousValue,
+                        Convert.ToHexString(r.RawBytes.ToArray()))).ToArray()
+                : null,
+            dashboard.Disassembly);
+        return Task.FromResult(summary);
+    }
+
+    [Description("Attach to a process by PID for memory operations. Must be called before scans/reads/breakpoints.")]
+    public async Task<string> AttachProcess([Description("Process ID")] int processId)
+    {
+        var inspection = await dashboardService.InspectProcessAsync(processId);
+        return $"Attached to {inspection.ProcessName} (PID {inspection.ProcessId}, {inspection.Architecture}). " +
+               $"{inspection.Modules.Count} modules loaded.";
     }
 
     // ── Breakpoint tools ──

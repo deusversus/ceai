@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
 
@@ -61,6 +62,142 @@ public sealed class ScriptGenerationService
 
         return sb.ToString();
     }
+
+    public string GenerateAutoAssemblerScript(IReadOnlyList<AddressTableEntry> entries, string processName)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"// CE AI Suite - Auto Assembler Script");
+        sb.AppendLine($"// Target: {processName}");
+        sb.AppendLine($"// Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine();
+        sb.AppendLine("[ENABLE]");
+        sb.AppendLine();
+
+        foreach (var entry in entries.Where(e => e.IsLocked && e.LockedValue is not null))
+        {
+            sb.AppendLine($"// {entry.Label}");
+            sb.AppendLine($"alloc(newmem_{entry.Id},2048)");
+            sb.AppendLine($"label(returnhere_{entry.Id})");
+            sb.AppendLine($"label(originalcode_{entry.Id})");
+            sb.AppendLine();
+            sb.AppendLine($"newmem_{entry.Id}:");
+            sb.AppendLine($"  // overwrite with {entry.LockedValue} ({entry.DataType})");
+            sb.AppendLine($"  mov [{entry.Address}],{FormatAAValue(entry.DataType, entry.LockedValue!)}");
+            sb.AppendLine($"  jmp returnhere_{entry.Id}");
+            sb.AppendLine();
+            sb.AppendLine($"originalcode_{entry.Id}:");
+            sb.AppendLine($"  // original bytes go here");
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("[DISABLE]");
+        sb.AppendLine();
+        foreach (var entry in entries.Where(e => e.IsLocked && e.LockedValue is not null))
+        {
+            sb.AppendLine($"dealloc(newmem_{entry.Id})");
+        }
+
+        return sb.ToString();
+    }
+
+    public string GenerateLuaScript(IReadOnlyList<AddressTableEntry> entries, string processName)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"-- CE AI Suite - Lua Script");
+        sb.AppendLine($"-- Target: {processName}");
+        sb.AppendLine($"-- Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine();
+        sb.AppendLine($"local processName = \"{processName.Replace(".exe", "")}\"");
+        sb.AppendLine();
+        sb.AppendLine("-- Open the process");
+        sb.AppendLine("local pid = getProcessIDFromProcessName(processName .. \".exe\")");
+        sb.AppendLine("if pid == nil then");
+        sb.AppendLine("  print(\"Process not found: \" .. processName)");
+        sb.AppendLine("  return");
+        sb.AppendLine("end");
+        sb.AppendLine("openProcess(pid)");
+        sb.AppendLine("print(\"Attached to \" .. processName .. \" (PID: \" .. pid .. \")\")");
+        sb.AppendLine();
+
+        foreach (var entry in entries.Where(e => e.IsLocked && e.LockedValue is not null))
+        {
+            var writeFunc = entry.DataType switch
+            {
+                MemoryDataType.Int32 => "writeInteger",
+                MemoryDataType.Int64 => "writeQword",
+                MemoryDataType.Float => "writeFloat",
+                MemoryDataType.Double => "writeDouble",
+                _ => "writeInteger"
+            };
+            sb.AppendLine($"-- {entry.Label}");
+            sb.AppendLine($"{writeFunc}(\"{entry.Address}\", {entry.LockedValue})");
+        }
+
+        sb.AppendLine();
+        sb.AppendLine("print(\"Trainer applied.\")");
+
+        return sb.ToString();
+    }
+
+    public string SummarizeInvestigation(
+        string processName,
+        int processId,
+        IReadOnlyList<AddressTableEntry> addressEntries,
+        IReadOnlyList<ScanResultOverview>? scanResults,
+        DisassemblyOverview? disassembly)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("# Investigation Summary");
+        sb.AppendLine($"**Target:** {processName} (PID {processId})");
+        sb.AppendLine($"**Date:** {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine();
+
+        sb.AppendLine("## Address Table");
+        if (addressEntries.Count == 0)
+        {
+            sb.AppendLine("No entries recorded.");
+        }
+        else
+        {
+            sb.AppendLine($"{addressEntries.Count} entries tracked:");
+            foreach (var e in addressEntries)
+            {
+                sb.AppendLine($"- **{e.Label}** @ `{e.Address}` ({e.DataType}) = {e.CurrentValue}{(e.IsLocked ? " [LOCKED]" : "")}");
+            }
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("## Scan Results");
+        if (scanResults is null || scanResults.Count == 0)
+        {
+            sb.AppendLine("No scan results in current session.");
+        }
+        else
+        {
+            sb.AppendLine($"{scanResults.Count} results from last scan.");
+        }
+        sb.AppendLine();
+
+        if (disassembly is not null)
+        {
+            sb.AppendLine("## Disassembly");
+            sb.AppendLine($"From `{disassembly.StartAddress}` — {disassembly.Lines.Count} instructions:");
+            foreach (var line in disassembly.Lines.Take(10))
+            {
+                sb.AppendLine($"  `{line.Address}` {line.Mnemonic} {line.Operands}");
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static string FormatAAValue(MemoryDataType dt, string value) =>
+        dt switch
+        {
+            MemoryDataType.Float => $"(float){value}",
+            MemoryDataType.Double => $"(double){value}",
+            _ => value
+        };
 
     private static string GetValueBytes(string dataType, string value)
     {

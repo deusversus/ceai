@@ -242,6 +242,13 @@ public sealed class WindowsScanEngine : IScanEngine
         int valueSize,
         List<ScanResultEntry> results)
     {
+        // Array of Bytes scan uses pattern matching with wildcards
+        if (constraints.ScanType == ScanType.ArrayOfBytes && !string.IsNullOrWhiteSpace(constraints.Value))
+        {
+            ScanRegionForAob(regionBase, regionBytes, constraints.Value, results);
+            return;
+        }
+
         for (var offset = 0; offset <= regionBytes.Length - valueSize; offset += valueSize)
         {
             if (results.Count >= MaxScanResults)
@@ -263,6 +270,52 @@ public sealed class WindowsScanEngine : IScanEngine
             {
                 var address = regionBase + (nuint)offset;
                 results.Add(new ScanResultEntry(address, currentValue, null, slice.ToArray()));
+            }
+        }
+    }
+
+    private static void ScanRegionForAob(
+        nuint regionBase,
+        byte[] regionBytes,
+        string pattern,
+        List<ScanResultEntry> results)
+    {
+        // Parse "48 8B 05 ?? ?? ?? ?? 48 89" pattern: ?? = wildcard
+        var parts = pattern.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var patternBytes = new byte[parts.Length];
+        var wildcardMask = new bool[parts.Length];
+
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i] is "?" or "??" or "*")
+            {
+                wildcardMask[i] = true;
+            }
+            else
+            {
+                patternBytes[i] = byte.Parse(parts[i], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            }
+        }
+
+        for (var offset = 0; offset <= regionBytes.Length - parts.Length; offset++)
+        {
+            if (results.Count >= MaxScanResults) return;
+
+            var match = true;
+            for (var i = 0; i < parts.Length; i++)
+            {
+                if (!wildcardMask[i] && regionBytes[offset + i] != patternBytes[i])
+                {
+                    match = false;
+                    break;
+                }
+            }
+
+            if (match)
+            {
+                var address = regionBase + (nuint)offset;
+                var slice = regionBytes[offset..(offset + parts.Length)];
+                results.Add(new ScanResultEntry(address, Convert.ToHexString(slice), null, slice));
             }
         }
     }

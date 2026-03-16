@@ -53,7 +53,7 @@ public partial class MainWindow : Window
         _breakpointService = new BreakpointService(null); // Engine injected when available
 
         // Wire up AI operator
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _breakpointService);
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService);
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions);
 

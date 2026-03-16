@@ -126,6 +126,59 @@ public class ScriptGenerationServiceTests
         Assert.Contains("WriteValue", script);
         Assert.Contains("Health", script);
     }
+
+    [Fact]
+    public void GenerateAutoAssemblerScript_IncludesAllocAndDealloc()
+    {
+        var sut = new ScriptGenerationService();
+        var entries = new[]
+        {
+            new AddressTableEntry("id1", "Health", "0x400000", MemoryDataType.Int32, "999", null, null, true, "999")
+        };
+
+        var script = sut.GenerateAutoAssemblerScript(entries, "TestGame.exe");
+
+        Assert.Contains("[ENABLE]", script);
+        Assert.Contains("[DISABLE]", script);
+        Assert.Contains("alloc(", script);
+        Assert.Contains("dealloc(", script);
+        Assert.Contains("Health", script);
+    }
+
+    [Fact]
+    public void GenerateLuaScript_IncludesWriteFunction()
+    {
+        var sut = new ScriptGenerationService();
+        var entries = new[]
+        {
+            new AddressTableEntry("id1", "Health", "0x400000", MemoryDataType.Int32, "999", null, null, true, "999"),
+            new AddressTableEntry("id2", "Speed", "0x400010", MemoryDataType.Float, "3.5", null, null, true, "3.5")
+        };
+
+        var script = sut.GenerateLuaScript(entries, "TestGame.exe");
+
+        Assert.Contains("writeInteger", script);
+        Assert.Contains("writeFloat", script);
+        Assert.Contains("Health", script);
+        Assert.Contains("openProcess", script);
+    }
+
+    [Fact]
+    public void SummarizeInvestigation_ReturnsMarkdownSummary()
+    {
+        var sut = new ScriptGenerationService();
+        var entries = new[]
+        {
+            new AddressTableEntry("id1", "Health", "0x400000", MemoryDataType.Int32, "999", null, null, true, "999")
+        };
+
+        var summary = sut.SummarizeInvestigation("TestGame.exe", 1234, entries, null, null);
+
+        Assert.Contains("# Investigation Summary", summary);
+        Assert.Contains("TestGame.exe", summary);
+        Assert.Contains("Health", summary);
+        Assert.Contains("[LOCKED]", summary);
+    }
 }
 
 public class SessionServiceTests

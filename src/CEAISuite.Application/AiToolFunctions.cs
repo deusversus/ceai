@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
 using CEAISuite.Engine.Abstractions;
@@ -16,8 +17,12 @@ public sealed class AiToolFunctions(
     AddressTableService addressTableService,
     DisassemblyService disassemblyService,
     ScriptGenerationService scriptGenerationService,
-    BreakpointService? breakpointService = null)
+    BreakpointService? breakpointService = null,
+    IAutoAssemblerEngine? autoAssemblerEngine = null,
+    IScreenCaptureEngine? screenCaptureEngine = null)
 {
+    /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
+    public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
     [Description("List running processes on the system. Returns process ID, name, and architecture.")]
     public async Task<string> ListProcesses()
     {
@@ -311,16 +316,15 @@ public sealed class AiToolFunctions(
 
     [Description("Validate a script entry by parsing it. Checks for syntax errors without executing.")]
     public Task<string> ValidateScript(
-        [Description("Node ID of the script entry")] string nodeId,
-        [Description("Auto Assembler engine instance (injected)")] IAutoAssemblerEngine? aaEngine = null)
+        [Description("Node ID of the script entry")] string nodeId)
     {
         var node = addressTableService.FindNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
 
-        if (aaEngine is null) return Task.FromResult("Auto Assembler engine not available for validation.");
+        if (autoAssemblerEngine is null) return Task.FromResult("Auto Assembler engine not available for validation.");
 
-        var result = aaEngine.Parse(node.AssemblerScript);
+        var result = autoAssemblerEngine.Parse(node.AssemblerScript);
         if (result.IsValid)
             return Task.FromResult($"Script '{node.Label}' is valid. Has [ENABLE]: {result.EnableSection is not null}, [DISABLE]: {result.DisableSection is not null}");
 
@@ -472,15 +476,54 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Frozen '{node.Label}' at value {value}. Will continuously write {value}.");
     }
 
-    [Description("Enable or disable a script (Auto Assembler) entry in the address table. Returns the new state.")]
-    public Task<string> ToggleScript([Description("Node ID of the script entry")] string nodeId)
+    [Description("Enable or disable a script (Auto Assembler) entry in the address table. Actually executes the AA engine. Returns the execution result.")]
+    public async Task<string> ToggleScript([Description("Node ID of the script entry")] string nodeId)
     {
         var node = addressTableService.FindNode(nodeId);
-        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
-        if (!node.IsScriptEntry) return Task.FromResult($"'{node.Label}' is not a script entry. Use FreezeAddress for value entries.");
+        if (node is null) return $"Node '{nodeId}' not found.";
+        if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry. Use FreezeAddress for value entries.";
 
-        node.IsScriptEnabled = !node.IsScriptEnabled;
-        return Task.FromResult($"Script '{node.Label}' is now {(node.IsScriptEnabled ? "ENABLED" : "DISABLED")}.");
+        if (autoAssemblerEngine is null)
+            return "Auto Assembler engine not available.";
+
+        var dashboard = dashboardService.CurrentDashboard;
+        if (dashboard?.CurrentInspection is null)
+            return "No process attached. Attach to a process before toggling scripts.";
+
+        var processId = dashboard.CurrentInspection.ProcessId;
+        var wantEnabled = !node.IsScriptEnabled;
+
+        try
+        {
+            if (wantEnabled)
+            {
+                var result = await autoAssemblerEngine.EnableAsync(processId, node.AssemblerScript!);
+                if (result.Success)
+                {
+                    node.IsScriptEnabled = true;
+                    node.ScriptStatus = $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)";
+                    return $"Script '{node.Label}' ENABLED successfully. {result.Allocations.Count} allocations, {result.Patches.Count} patches applied.";
+                }
+                else
+                {
+                    node.ScriptStatus = $"FAILED: {result.Error}";
+                    return $"Script '{node.Label}' FAILED to enable: {result.Error}";
+                }
+            }
+            else
+            {
+                var result = await autoAssemblerEngine.DisableAsync(processId, node.AssemblerScript!);
+                node.IsScriptEnabled = false;
+                node.ScriptStatus = result.Success ? "Disabled" : $"Disable failed: {result.Error}";
+                return $"Script '{node.Label}' DISABLED. {(result.Success ? "Clean disable." : $"Warning: {result.Error}")}";
+            }
+        }
+        catch (Exception ex)
+        {
+            node.IsScriptEnabled = false;
+            node.ScriptStatus = $"Error: {ex.Message}";
+            return $"Script '{node.Label}' error: {ex.Message}";
+        }
     }
 
     [Description("Get detailed info about a specific address table node by its ID. Shows address, type, value, pointer chain, locked state, and children.")]
@@ -588,6 +631,207 @@ public sealed class AiToolFunctions(
         sb.AppendLine($"  UInt64: {BitConverter.ToUInt64(raw, 0)}");
         sb.AppendLine($"  Double: {BitConverter.ToDouble(raw, 0):G17}");
         sb.AppendLine($"  Hex:    {Convert.ToHexString(raw)}");
+        return sb.ToString();
+    }
+
+    // ── Script editing tools ──
+
+    [Description("Edit/replace the Auto Assembler script content of an existing script entry. Use this to fix or improve scripts. The script must have [ENABLE] and [DISABLE] sections.")]
+    public Task<string> EditScript(
+        [Description("Node ID of the script entry")] string nodeId,
+        [Description("New complete script content (must include [ENABLE] and [DISABLE] sections)")] string newScript)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (!node.IsScriptEntry) return Task.FromResult($"'{node.Label}' is not a script entry.");
+
+        if (node.IsScriptEnabled)
+            return Task.FromResult("Script is currently ENABLED. Disable it first before editing (use ToggleScript).");
+
+        // Validate the new script if AA engine is available
+        if (autoAssemblerEngine is not null)
+        {
+            var parseResult = autoAssemblerEngine.Parse(newScript);
+            if (!parseResult.IsValid)
+            {
+                return Task.FromResult(
+                    $"New script has validation errors — NOT applied:\n" +
+                    string.Join("\n", parseResult.Errors));
+            }
+        }
+
+        var oldSnippet = node.AssemblerScript?.Length > 60
+            ? node.AssemblerScript[..60] + "..."
+            : node.AssemblerScript ?? "(empty)";
+        node.AssemblerScript = newScript;
+        return Task.FromResult(
+            $"Script '{node.Label}' updated successfully.\n" +
+            $"Old: {oldSnippet}\n" +
+            $"New script is {newScript.Length} chars. Use ValidateScript to verify, then ToggleScript to enable.");
+    }
+
+    [Description("Create a new Auto Assembler script entry in the address table. Use this to add entirely new scripts (hooks, patches, multipliers, etc.).")]
+    public Task<string> CreateScriptEntry(
+        [Description("Label/name for the script entry")] string label,
+        [Description("Auto Assembler script content (must include [ENABLE] and [DISABLE] sections)")] string script,
+        [Description("Optional: parent group node ID to add the script under")] string? parentGroupId = null)
+    {
+        // Validate if possible
+        if (autoAssemblerEngine is not null)
+        {
+            var parseResult = autoAssemblerEngine.Parse(script);
+            if (!parseResult.IsValid)
+            {
+                return Task.FromResult(
+                    $"Script validation failed — NOT created:\n" +
+                    string.Join("\n", parseResult.Errors));
+            }
+        }
+
+        var nodeId = Guid.NewGuid().ToString("N")[..12];
+        var node = new AddressTableNode(nodeId, label, false)
+        {
+            AssemblerScript = script
+        };
+
+        if (parentGroupId is not null)
+        {
+            var parent = addressTableService.FindNode(parentGroupId);
+            if (parent is null) return Task.FromResult($"Parent group '{parentGroupId}' not found.");
+            if (!parent.IsGroup) return Task.FromResult($"'{parent.Label}' is not a group.");
+            addressTableService.AddEntryToGroup(node, parentGroupId);
+        }
+        else
+        {
+            addressTableService.Roots.Add(node);
+        }
+
+        return Task.FromResult(
+            $"Script entry '{label}' created (ID: {node.Id}). " +
+            $"Script is {script.Length} chars. Use ToggleScript to enable it.");
+    }
+
+    [Description("Enable a script by its node ID. Executes the [ENABLE] section of the Auto Assembler script.")]
+    public async Task<string> EnableScript([Description("Node ID of the script entry")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return $"Node '{nodeId}' not found.";
+        if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry.";
+        if (node.IsScriptEnabled) return $"Script '{node.Label}' is already enabled.";
+
+        if (autoAssemblerEngine is null) return "Auto Assembler engine not available.";
+
+        var dashboard = dashboardService.CurrentDashboard;
+        if (dashboard?.CurrentInspection is null)
+            return "No process attached. Attach first.";
+
+        try
+        {
+            var result = await autoAssemblerEngine.EnableAsync(
+                dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
+            if (result.Success)
+            {
+                node.IsScriptEnabled = true;
+                node.ScriptStatus = $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)";
+                return $"Script '{node.Label}' ENABLED. {result.Allocations.Count} allocations, {result.Patches.Count} patches.";
+            }
+            else
+            {
+                node.ScriptStatus = $"FAILED: {result.Error}";
+                return $"Script '{node.Label}' FAILED: {result.Error}";
+            }
+        }
+        catch (Exception ex)
+        {
+            node.ScriptStatus = $"Error: {ex.Message}";
+            return $"Script error: {ex.Message}";
+        }
+    }
+
+    [Description("Disable a script by its node ID. Executes the [DISABLE] section to restore original bytes.")]
+    public async Task<string> DisableScript([Description("Node ID of the script entry")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return $"Node '{nodeId}' not found.";
+        if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry.";
+        if (!node.IsScriptEnabled) return $"Script '{node.Label}' is already disabled.";
+
+        if (autoAssemblerEngine is null) return "Auto Assembler engine not available.";
+
+        var dashboard = dashboardService.CurrentDashboard;
+        if (dashboard?.CurrentInspection is null) return "No process attached.";
+
+        try
+        {
+            var result = await autoAssemblerEngine.DisableAsync(
+                dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
+            node.IsScriptEnabled = false;
+            node.ScriptStatus = result.Success ? "Disabled" : $"Disable warning: {result.Error}";
+            return $"Script '{node.Label}' DISABLED. {(result.Success ? "Original bytes restored." : $"Warning: {result.Error}")}";
+        }
+        catch (Exception ex)
+        {
+            node.IsScriptEnabled = false;
+            node.ScriptStatus = $"Error: {ex.Message}";
+            return $"Disable error: {ex.Message}";
+        }
+    }
+
+    // ── Screen capture tool ──
+
+    [Description("Capture a screenshot of the attached process's game window. The image will be sent to you for visual analysis. Use this to verify game state, check if scripts are working, or see what the user sees.")]
+    public async Task<string> CaptureProcessWindow()
+    {
+        if (screenCaptureEngine is null)
+            return "Screen capture engine not available.";
+
+        var dashboard = dashboardService.CurrentDashboard;
+        if (dashboard?.CurrentInspection is null)
+            return "No process attached. Attach to a process first.";
+
+        var processId = dashboard.CurrentInspection.ProcessId;
+        var result = await screenCaptureEngine.CaptureWindowAsync(processId);
+        if (result is null)
+            return "Failed to capture process window. The window may be minimized or not visible.";
+
+        // Queue the image for injection into the AI conversation
+        PendingImages.Enqueue(($"Screenshot of '{result.WindowTitle}' ({result.Width}x{result.Height})", result.PngData));
+
+        return $"Screenshot captured: '{result.WindowTitle}' ({result.Width}x{result.Height}, {result.PngData.Length / 1024}KB). The image has been queued for your visual analysis.";
+    }
+
+    [Description("Read a range of raw bytes from process memory and display as hex dump. Useful for examining code bytes, data structures, or verifying patches.")]
+    public async Task<string> HexDump(
+        [Description("Process ID")] int processId,
+        [Description("Start address (hex string)")] string address,
+        [Description("Number of bytes to read (default 64, max 256)")] int length = 64)
+    {
+        length = Math.Clamp(length, 1, 256);
+        var addr = ParseAddress(address);
+        var mem = await engineFacade.ReadMemoryAsync(processId, addr, length);
+        var raw = mem.Bytes.ToArray();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Hex dump at 0x{addr:X} ({raw.Length} bytes):");
+        for (int i = 0; i < raw.Length; i += 16)
+        {
+            sb.Append($"  {addr + (nuint)i:X8}: ");
+            var lineBytes = Math.Min(16, raw.Length - i);
+            for (int j = 0; j < lineBytes; j++)
+            {
+                sb.Append($"{raw[i + j]:X2} ");
+                if (j == 7) sb.Append(' ');
+            }
+            // ASCII representation
+            sb.Append(new string(' ', (16 - lineBytes) * 3 + (lineBytes <= 7 ? 1 : 0)));
+            sb.Append(" | ");
+            for (int j = 0; j < lineBytes; j++)
+            {
+                var c = (char)raw[i + j];
+                sb.Append(c is >= ' ' and <= '~' ? c : '.');
+            }
+            sb.AppendLine();
+        }
         return sb.ToString();
     }
 

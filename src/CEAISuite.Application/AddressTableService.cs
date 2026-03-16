@@ -265,6 +265,15 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         AddEntry(result.Address, dataType, result.CurrentValue, label);
     }
 
+    /// <summary>Add an existing node to a group by ID.</summary>
+    public void AddEntryToGroup(AddressTableNode node, string groupId)
+    {
+        var group = FindNode(groupId) ?? throw new InvalidOperationException($"Group '{groupId}' not found.");
+        if (!group.IsGroup) throw new InvalidOperationException($"'{groupId}' is not a group.");
+        node.Parent = group;
+        group.Children.Add(node);
+    }
+
     public void RemoveEntry(string id)
     {
         RemoveFromCollection(_roots, id);

@@ -19,6 +19,7 @@ public sealed class AiOperatorService
     private readonly List<AiActionLogEntry> _actionLog = new();
     private readonly ChatOptions _chatOptions;
     private readonly Func<string>? _contextProvider;
+    private readonly AiToolFunctions? _toolFunctions;
 
     public IReadOnlyList<AiChatMessage> DisplayHistory => _displayHistory;
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
@@ -28,6 +29,7 @@ public sealed class AiOperatorService
     {
         IsConfigured = chatClient is not null;
         _contextProvider = contextProvider;
+        _toolFunctions = toolFunctions;
         var baseClient = chatClient ?? new StubChatClient();
 
         // Build AIFunction list from the tool functions instance using reflection
@@ -125,6 +127,37 @@ public sealed class AiOperatorService
                 _conversationHistory.Add(message);
             }
 
+            // Inject any pending screenshots as image content for future turns
+            if (_toolFunctions is not null)
+            {
+                while (_toolFunctions.PendingImages.TryDequeue(out var img))
+                {
+                    var imageContent = new List<AIContent>
+                    {
+                        new TextContent($"[Screenshot: {img.Description}]"),
+                        new DataContent(img.PngData, "image/png")
+                    };
+                    var imageMsg = new ChatMessage(ChatRole.User, imageContent);
+                    _conversationHistory.Add(imageMsg);
+
+                    // Re-invoke the model so it can analyze the screenshot
+                    var imageResponse = await _chatClient.GetResponseAsync(
+                        _conversationHistory,
+                        _chatOptions,
+                        cancellationToken);
+
+                    foreach (var msg in imageResponse.Messages)
+                    {
+                        foreach (var content in msg.Contents)
+                        {
+                            if (content is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
+                                assistantText += "\n" + tc.Text;
+                        }
+                        _conversationHistory.Add(msg);
+                    }
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(assistantText))
             {
                 assistantText = "(Tool calls executed — see action log for details)";
@@ -173,18 +206,22 @@ public sealed class AiOperatorService
         • When something fails, analyze why, adjust your approach, and try again.
         • Chain multiple tool calls in sequence to accomplish complex tasks.
         • After completing actions, verify the results before reporting success.
+        • When you CANNOT verify something (e.g. "did the damage increase?"), ASK the user to check
+          and report back. Frame these clearly: "Please do X in-game and tell me what happens."
 
         ═══ YOUR TOOLS ═══
         Process: ListProcesses, InspectProcess, AttachProcess, FindProcess
-        Memory: ReadMemory, WriteMemory, BrowseMemory
+        Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
         Scanning: StartScan, RefineScan, GetScanResults
         Analysis: Disassemble, DissectStructure, ScanForPointers
         Address Table: ListAddressTable, AddToAddressTable, RefreshAddressTable,
-                       FreezeAddress, UnfreezeAddress, ToggleScript, GetAddressTableNode
+                        FreezeAddress, UnfreezeAddress, ToggleScript, GetAddressTableNode
         Breakpoints: SetBreakpoint, RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog
-        Scripts: ListScripts, ViewScript, ValidateScript, LoadCheatTable
+        Scripts: ListScripts, ViewScript, ValidateScript, EnableScript, DisableScript,
+                 EditScript, CreateScriptEntry
+        Vision: CaptureProcessWindow (captures game window screenshot for visual analysis)
         Artifacts: GenerateTrainerScript, GenerateAutoAssemblerScript, GenerateLuaScript
-        Other: SummarizeInvestigation, SetHotkey
+        Other: SummarizeInvestigation, SetHotkey, GetCurrentContext, LoadCheatTable
 
         ═══ KEY WORKFLOWS ═══
 
@@ -217,6 +254,54 @@ public sealed class AiOperatorService
         2. ScanForPointers to find static pointer chains
         3. Add the pointer chain to the address table
 
+        ═══ ITERATING ON SCRIPTS (CRITICAL WORKFLOW) ═══
+
+        When the user asks you to fix, improve, or create Auto Assembler scripts:
+
+        UNDERSTANDING AN EXISTING SCRIPT:
+        1. ViewScript to read the current script source
+        2. Identify: what address it hooks, what it does (multiply, set, NOP, etc.)
+        3. Disassemble at the hook address to see surrounding code
+        4. Check if the hook point makes sense (is it too late? too early? wrong register?)
+
+        FINDING A BETTER HOOK POINT:
+        1. SetBreakpoint (HardwareWrite or HardwareExecute) on the relevant address
+        2. Ask user to trigger the game event (fight a battle, gain EXP, etc.)
+        3. GetBreakpointHitLog to see which instruction wrote the value
+        4. Disassemble the hit instruction and surrounding code
+        5. Trace backward to find where the value is CALCULATED (not just stored)
+        6. The best hook is where the value is computed BEFORE it's written
+
+        WRITING/EDITING A SCRIPT:
+        1. Write the full AA script with [ENABLE] and [DISABLE] sections
+        2. Use EditScript to replace existing script, or CreateScriptEntry for new ones
+        3. ValidateScript to check syntax
+        4. EnableScript to test it
+        5. Ask user to trigger the game event to test
+        6. CaptureProcessWindow to visually verify if possible
+        7. If wrong, DisableScript, analyze what went wrong, EditScript with fix, repeat
+
+        COMMON AA SCRIPT PATTERNS:
+        • Multiplier: imul reg,reg,N or mov reg,N then imul dest,src,reg
+        • NOP (disable a write): nop or db 90 90 90...
+        • Value override: mov [addr],value
+        • Code cave: alloc memory, jmp to cave, do custom logic, jmp back
+
+        ITERATION PHILOSOPHY FOR SCRIPTS:
+        • A script rarely works perfectly the first time
+        • Check register contents with breakpoints to verify your assumptions
+        • If an EXP multiplier gives wrong values, the hook may be at the wrong stage
+        • Use HexDump to verify original bytes match the assert pattern
+        • After enabling a script, ALWAYS ask the user to test it in-game
+        • If the user reports it's not working, gather more data before guessing
+
+        ═══ SCREEN CAPTURE ═══
+        Use CaptureProcessWindow to take a screenshot of the game window. This lets you:
+        • Verify game state (menus, battle screens, inventory)
+        • Confirm that value changes are reflected visually
+        • Help diagnose why a script isn't working
+        • See what the user sees without relying on their description
+
         ═══ DOMAIN KNOWLEDGE ═══
         Common data types in games:
         • Health/MP/Stamina: often Float (try both Int32 and Float)
@@ -235,6 +320,12 @@ public sealed class AiOperatorService
         • FName pooling for strings
         • UObject hierarchy with consistent offsets
 
+        x86/x64 Assembly Quick Reference:
+        • mov [rax+14],ebx — writes ebx (4 bytes) to address in rax+0x14
+        • imul ebx,ecx,4 — ebx = ecx * 4
+        • test reg,reg / jle — jump if reg <= 0
+        • nop = 0x90, jmp near = 0xE9 + 4-byte relative offset
+
         ═══ COMMUNICATION STYLE ═══
         • Be concise but informative
         • Show addresses in hex format (0x...)
@@ -243,6 +334,8 @@ public sealed class AiOperatorService
         • When multiple approaches exist, pick the best one and execute — don't list options
         • Warn before writing to memory, but don't require confirmation for reads/scans/analysis
         • If a tool returns an error, explain what went wrong and what you'll try next
+        • When you need the user to act in-game, be specific:
+          "Please fight a battle and tell me the EXP you received" NOT "try it out"
 
         ═══ CONTEXT ═══
         A [CURRENT STATE] system message is injected before each user message with:

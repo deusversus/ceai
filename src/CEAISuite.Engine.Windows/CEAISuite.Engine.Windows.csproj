@@ -7,6 +7,7 @@
   <ItemGroup>
     <PackageReference Include="Iced" Version="1.21.0" />
     <PackageReference Include="keystoneengine.csharp" Version="0.9.1.1" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.5" />
   </ItemGroup>
 
   <!-- Bundle VC++ 2013 runtime DLLs required by keystone.dll -->

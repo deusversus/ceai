@@ -60,7 +60,7 @@ public partial class MainWindow : Window
         _hotkeyService = new GlobalHotkeyService();
 
         // Wire up AI operator with dynamic context injection
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService);
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine());
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 

@@ -83,6 +83,53 @@ public class AddressTableServiceTests
         Assert.Equal("999", sut.Entries[0].CurrentValue);
         Assert.Equal("0", sut.Entries[0].PreviousValue);
     }
+
+    [Fact]
+    public void CreateGroup_AddsGroupNode()
+    {
+        var group = _sut.CreateGroup("Player Stats");
+        Assert.True(group.IsGroup);
+        Assert.Equal("Player Stats", group.Label);
+        Assert.Single(_sut.Roots);
+        Assert.Empty(_sut.Entries); // groups don't appear in flat Entries
+    }
+
+    [Fact]
+    public void AddEntryToGroup_NestsCorrectly()
+    {
+        var group = _sut.CreateGroup("Player");
+        _sut.AddEntryToGroup(group.Id, "0x100", MemoryDataType.Int32, "100", "Health");
+        _sut.AddEntryToGroup(group.Id, "0x200", MemoryDataType.Int32, "50", "Mana");
+
+        Assert.Single(_sut.Roots); // one root (the group)
+        Assert.Equal(2, _sut.Roots[0].Children.Count);
+        Assert.Equal(2, _sut.Entries.Count); // flat view sees 2 leaf entries
+    }
+
+    [Fact]
+    public void MoveToGroup_RelocatesEntry()
+    {
+        var entry = _sut.AddEntry("0x100", MemoryDataType.Int32, "42", "Score");
+        var group = _sut.CreateGroup("Stats");
+
+        _sut.MoveToGroup(entry.Id, group.Id);
+
+        Assert.Single(_sut.Roots); // only the group at root
+        Assert.Single(group.Children);
+        Assert.Equal("Score", group.Children[0].Label);
+    }
+
+    [Fact]
+    public void CreateSubGroup_NestsInsideParent()
+    {
+        var parent = _sut.CreateGroup("Game");
+        var child = _sut.CreateSubGroup(parent.Id, "Player");
+
+        Assert.Single(_sut.Roots);
+        Assert.Single(parent.Children);
+        Assert.True(child.IsGroup);
+        Assert.Equal("Player", child.Label);
+    }
 }
 
 public class AddressTableExportServiceTests

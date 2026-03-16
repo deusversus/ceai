@@ -411,6 +411,10 @@
                             Content="Toggle lock" />
                     <Button Padding="10,6"
                             Margin="0,0,8,0"
+                            Click="CreateAddressGroup"
+                            Content="New group" />
+                    <Button Padding="10,6"
+                            Margin="0,0,8,0"
                             Click="ExportAddressTable"
                             Content="Export JSON" />
                     <Button Padding="10,6"
@@ -426,26 +430,36 @@
                                Foreground="#555555"
                                Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
                 </StackPanel>
-                <ListView x:Name="AddressTableList" ItemsSource="{Binding AddressTableEntries}">
-                    <ListView.View>
-                        <GridView>
-                            <GridViewColumn Header="Label" Width="140"
-                                            DisplayMemberBinding="{Binding Label}" />
-                            <GridViewColumn Header="Address" Width="130"
-                                            DisplayMemberBinding="{Binding Address}" />
-                            <GridViewColumn Header="Type" Width="70"
-                                            DisplayMemberBinding="{Binding DataType}" />
-                            <GridViewColumn Header="Value" Width="110"
-                                            DisplayMemberBinding="{Binding CurrentValue}" />
-                            <GridViewColumn Header="Previous" Width="110"
-                                            DisplayMemberBinding="{Binding PreviousValue}" />
-                            <GridViewColumn Header="Locked" Width="60"
-                                            DisplayMemberBinding="{Binding IsLocked}" />
-                            <GridViewColumn Header="Lock value" Width="100"
-                                            DisplayMemberBinding="{Binding LockedValue}" />
-                        </GridView>
-                    </ListView.View>
-                </ListView>
+                <TreeView x:Name="AddressTableTree"
+                          ItemsSource="{Binding AddressTableNodes}"
+                          FontFamily="Consolas"
+                          FontSize="12">
+                    <TreeView.ItemContainerStyle>
+                        <Style TargetType="TreeViewItem">
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                        </Style>
+                    </TreeView.ItemContainerStyle>
+                    <TreeView.ItemTemplate>
+                        <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                            <Grid Margin="2">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="140" />
+                                    <ColumnDefinition Width="70" />
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="110" />
+                                    <ColumnDefinition Width="30" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Label}" FontWeight="SemiBold" />
+                                <TextBlock Grid.Column="1" Text="{Binding Address}" Foreground="#336699" />
+                                <TextBlock Grid.Column="2" Text="{Binding DisplayType}" Foreground="#555555" />
+                                <TextBlock Grid.Column="3" Text="{Binding DisplayValue}" />
+                                <TextBlock Grid.Column="4" Text="{Binding PreviousValue}" Foreground="#888888" />
+                                <TextBlock Grid.Column="5" Text="{Binding DisplayLock}" />
+                            </Grid>
+                        </HierarchicalDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
             </DockPanel>
         </GroupBox>
     </Grid>

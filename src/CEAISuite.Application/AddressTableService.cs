@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -13,28 +14,116 @@ public sealed record AddressTableEntry(
     bool IsLocked,
     string? LockedValue);
 
+/// <summary>
+/// A node in the address table tree. Can be a group (has children, no address)
+/// or a leaf entry (has address/value, no children).
+/// </summary>
+public sealed class AddressTableNode
+{
+    public string Id { get; set; }
+    public string Label { get; set; }
+    public bool IsGroup { get; set; }
+
+    // Leaf fields
+    public string Address { get; set; } = "";
+    public MemoryDataType DataType { get; set; }
+    public string CurrentValue { get; set; } = "";
+    public string? PreviousValue { get; set; }
+    public string? Notes { get; set; }
+    public bool IsLocked { get; set; }
+    public string? LockedValue { get; set; }
+
+    // Tree structure
+    public ObservableCollection<AddressTableNode> Children { get; } = new();
+    public bool IsExpanded { get; set; } = true;
+
+    // Display helpers
+    public string DisplayValue => IsGroup ? $"[{Children.Count} items]" : CurrentValue;
+    public string DisplayType => IsGroup ? "Group" : DataType.ToString();
+    public string DisplayLock => IsGroup ? "" : (IsLocked ? "🔒" : "");
+
+    public AddressTableNode(string id, string label, bool isGroup)
+    {
+        Id = id;
+        Label = label;
+        IsGroup = isGroup;
+    }
+
+    /// <summary>Flatten this node and its descendants into AddressTableEntry list (leaves only).</summary>
+    public IEnumerable<AddressTableEntry> Flatten()
+    {
+        if (!IsGroup)
+        {
+            yield return new AddressTableEntry(Id, Label, Address, DataType, CurrentValue, PreviousValue, Notes, IsLocked, LockedValue);
+        }
+        foreach (var child in Children)
+        {
+            foreach (var entry in child.Flatten())
+                yield return entry;
+        }
+    }
+}
+
 public sealed class AddressTableService(IEngineFacade engineFacade)
 {
-    private readonly List<AddressTableEntry> _entries = new();
+    private readonly ObservableCollection<AddressTableNode> _roots = new();
 
-    public IReadOnlyList<AddressTableEntry> Entries => _entries;
+    /// <summary>Observable root nodes for TreeView binding.</summary>
+    public ObservableCollection<AddressTableNode> Roots => _roots;
+
+    /// <summary>Flat list of all leaf entries (for export, AI, scripts).</summary>
+    public IReadOnlyList<AddressTableEntry> Entries =>
+        _roots.SelectMany(n => n.Flatten()).ToList();
 
     public AddressTableEntry AddEntry(string address, MemoryDataType dataType, string currentValue, string? label = null)
     {
         var id = Guid.NewGuid().ToString("N")[..8];
-        var entry = new AddressTableEntry(
-            id,
-            label ?? $"Address_{id}",
-            address,
-            dataType,
-            currentValue,
-            null,
-            null,
-            false,
-            null);
+        var node = new AddressTableNode(id, label ?? $"Address_{id}", false)
+        {
+            Address = address,
+            DataType = dataType,
+            CurrentValue = currentValue
+        };
+        _roots.Add(node);
+        return new AddressTableEntry(id, node.Label, address, dataType, currentValue, null, null, false, null);
+    }
 
-        _entries.Add(entry);
-        return entry;
+    /// <summary>Add an entry into a specific group. Creates the group if it doesn't exist.</summary>
+    public AddressTableEntry AddEntryToGroup(string groupId, string address, MemoryDataType dataType, string currentValue, string? label = null)
+    {
+        var group = FindNode(groupId) ?? throw new InvalidOperationException($"Group '{groupId}' not found.");
+        if (!group.IsGroup) throw new InvalidOperationException($"'{groupId}' is not a group.");
+
+        var id = Guid.NewGuid().ToString("N")[..8];
+        var node = new AddressTableNode(id, label ?? $"Address_{id}", false)
+        {
+            Address = address,
+            DataType = dataType,
+            CurrentValue = currentValue
+        };
+        group.Children.Add(node);
+        return new AddressTableEntry(id, node.Label, address, dataType, currentValue, null, null, false, null);
+    }
+
+    /// <summary>Create a named group at root level.</summary>
+    public AddressTableNode CreateGroup(string label)
+    {
+        var id = Guid.NewGuid().ToString("N")[..8];
+        var group = new AddressTableNode(id, label, true);
+        _roots.Add(group);
+        return group;
+    }
+
+    /// <summary>Create a named subgroup inside an existing group.</summary>
+    public AddressTableNode CreateSubGroup(string parentGroupId, string label)
+    {
+        var parent = FindNode(parentGroupId) ?? throw new InvalidOperationException($"Group '{parentGroupId}' not found.");
+        if (!parent.IsGroup) throw new InvalidOperationException($"'{parentGroupId}' is not a group.");
+
+        var id = Guid.NewGuid().ToString("N")[..8];
+        var group = new AddressTableNode(id, label, true);
+        parent.Children.Add(group);
+        return group;
     }
 
     public void AddFromScanResult(ScanResultOverview result, MemoryDataType dataType, string? label = null)
@@ -44,76 +133,126 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
 
     public void RemoveEntry(string id)
     {
-        _entries.RemoveAll(entry => entry.Id == id);
+        RemoveFromCollection(_roots, id);
     }
 
     public void UpdateLabel(string id, string newLabel)
     {
-        var index = _entries.FindIndex(entry => entry.Id == id);
-        if (index >= 0)
-        {
-            _entries[index] = _entries[index] with { Label = newLabel };
-        }
+        var node = FindNode(id);
+        if (node is not null) node.Label = newLabel;
     }
 
     public void UpdateNotes(string id, string? notes)
     {
-        var index = _entries.FindIndex(entry => entry.Id == id);
-        if (index >= 0)
-        {
-            _entries[index] = _entries[index] with { Notes = notes };
-        }
+        var node = FindNode(id);
+        if (node is not null) node.Notes = notes;
     }
 
     public void ToggleLock(string id)
     {
-        var index = _entries.FindIndex(entry => entry.Id == id);
-        if (index >= 0)
+        var node = FindNode(id);
+        if (node is null || node.IsGroup) return;
+        node.IsLocked = !node.IsLocked;
+        node.LockedValue = node.IsLocked ? node.CurrentValue : null;
+    }
+
+    /// <summary>Move an entry into a group (or to root if groupId is null).</summary>
+    public void MoveToGroup(string entryId, string? groupId)
+    {
+        var node = FindNode(entryId);
+        if (node is null) return;
+
+        RemoveFromCollection(_roots, entryId);
+
+        if (groupId is null)
         {
-            var entry = _entries[index];
-            _entries[index] = entry with
-            {
-                IsLocked = !entry.IsLocked,
-                LockedValue = !entry.IsLocked ? entry.CurrentValue : null
-            };
+            _roots.Add(node);
+        }
+        else
+        {
+            var group = FindNode(groupId);
+            if (group is not null && group.IsGroup)
+                group.Children.Add(node);
+            else
+                _roots.Add(node); // fallback to root
         }
     }
 
     public async Task RefreshAllAsync(int processId, CancellationToken cancellationToken = default)
     {
-        for (var i = 0; i < _entries.Count; i++)
+        await RefreshNodes(_roots, processId, cancellationToken);
+    }
+
+    private async Task RefreshNodes(ObservableCollection<AddressTableNode> nodes, int processId, CancellationToken cancellationToken)
+    {
+        foreach (var node in nodes)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (node.IsGroup)
+            {
+                await RefreshNodes(node.Children, processId, cancellationToken);
+                continue;
+            }
             try
             {
-                var entry = _entries[i];
-                var typed = await engineFacade.ReadValueAsync(processId, ParseAddress(entry.Address), entry.DataType, cancellationToken);
-                _entries[i] = entry with
-                {
-                    PreviousValue = entry.CurrentValue,
-                    CurrentValue = typed.DisplayValue
-                };
+                var typed = await engineFacade.ReadValueAsync(processId, ParseAddress(node.Address), node.DataType, cancellationToken);
+                node.PreviousValue = node.CurrentValue;
+                node.CurrentValue = typed.DisplayValue;
 
-                if (entry.IsLocked && entry.LockedValue is not null)
+                if (node.IsLocked && node.LockedValue is not null)
                 {
-                    await engineFacade.WriteValueAsync(processId, ParseAddress(entry.Address), entry.DataType, entry.LockedValue, cancellationToken);
+                    await engineFacade.WriteValueAsync(processId, ParseAddress(node.Address), node.DataType, node.LockedValue, cancellationToken);
                 }
             }
             catch
             {
-                // Value unreadable — keep last known value
+                // Value unreadable — keep last known
             }
         }
+    }
+
+    /// <summary>Import a flat list of entries as root nodes (for backward compat).</summary>
+    public void ImportFlat(IEnumerable<AddressTableEntry> entries)
+    {
+        foreach (var e in entries)
+            AddEntry(e.Address, e.DataType, e.CurrentValue, e.Label);
+    }
+
+    /// <summary>Import nodes from CT parser with hierarchy preserved.</summary>
+    public void ImportNodes(IEnumerable<AddressTableNode> nodes)
+    {
+        foreach (var node in nodes)
+            _roots.Add(node);
+    }
+
+    public AddressTableNode? FindNode(string id) => FindInCollection(_roots, id);
+
+    private static AddressTableNode? FindInCollection(ObservableCollection<AddressTableNode> nodes, string id)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.Id == id) return node;
+            var found = FindInCollection(node.Children, id);
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
+    private static bool RemoveFromCollection(ObservableCollection<AddressTableNode> nodes, string id)
+    {
+        for (var i = 0; i < nodes.Count; i++)
+        {
+            if (nodes[i].Id == id) { nodes.RemoveAt(i); return true; }
+            if (RemoveFromCollection(nodes[i].Children, id)) return true;
+        }
+        return false;
     }
 
     private static nuint ParseAddress(string addressText)
     {
         var normalized = addressText.Trim();
         if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
             return (nuint)ulong.Parse(normalized[2..], System.Globalization.NumberStyles.HexNumber);
-        }
-
         return (nuint)ulong.Parse(normalized);
     }
 }

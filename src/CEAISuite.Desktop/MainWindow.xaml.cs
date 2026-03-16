@@ -89,7 +89,7 @@ public partial class MainWindow : Window
                 ScanResults = dashboard.ScanResults,
                 ScanStatus = dashboard.ScanStatus,
                 ScanDetails = dashboard.ScanDetails,
-                AddressTableEntries = dashboard.AddressTableEntries,
+                AddressTableNodes = _addressTableService.Roots,
                 AddressTableStatus = dashboard.AddressTableStatus,
                 Disassembly = dashboard.Disassembly,
                 BreakpointStatus = dashboard.BreakpointStatus,
@@ -335,7 +335,7 @@ public partial class MainWindow : Window
         _addressTableService.AddFromScanResult(selected, GetScanDataType());
         DataContext = dashboard with
         {
-            AddressTableEntries = _addressTableService.Entries.ToArray(),
+            AddressTableNodes = _addressTableService.Roots,
             AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
             StatusMessage = $"Added {selected.Address} to address table."
         };
@@ -352,7 +352,7 @@ public partial class MainWindow : Window
         _addressTableService.AddEntry(probe.Address, GetSelectedDataType(), probe.DisplayValue);
         DataContext = dashboard with
         {
-            AddressTableEntries = _addressTableService.Entries.ToArray(),
+            AddressTableNodes = _addressTableService.Roots,
             AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
             StatusMessage = $"Added {probe.Address} to address table."
         };
@@ -370,7 +370,7 @@ public partial class MainWindow : Window
             await _addressTableService.RefreshAllAsync(dashboard.CurrentInspection.ProcessId);
             DataContext = dashboard with
             {
-                AddressTableEntries = _addressTableService.Entries.ToArray(),
+                AddressTableNodes = _addressTableService.Roots,
                 AddressTableStatus = $"{_addressTableService.Entries.Count} entries (refreshed)",
                 StatusMessage = "Address table refreshed."
             };
@@ -388,7 +388,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (AddressTableList.SelectedItem is not AddressTableEntry selected)
+        if (AddressTableTree.SelectedItem is not AddressTableNode selected)
         {
             DataContext = dashboard with { StatusMessage = "Select an address to remove." };
             return;
@@ -397,9 +397,9 @@ public partial class MainWindow : Window
         _addressTableService.RemoveEntry(selected.Id);
         DataContext = dashboard with
         {
-            AddressTableEntries = _addressTableService.Entries.ToArray(),
+            AddressTableNodes = _addressTableService.Roots,
             AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
-            StatusMessage = $"Removed {selected.Address} from address table."
+            StatusMessage = $"Removed {selected.Label} from address table."
         };
     }
 
@@ -410,7 +410,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (AddressTableList.SelectedItem is not AddressTableEntry selected)
+        if (AddressTableTree.SelectedItem is not AddressTableNode selected)
         {
             DataContext = dashboard with { StatusMessage = "Select an address to toggle lock." };
             return;
@@ -419,8 +419,8 @@ public partial class MainWindow : Window
         _addressTableService.ToggleLock(selected.Id);
         DataContext = dashboard with
         {
-            AddressTableEntries = _addressTableService.Entries.ToArray(),
-            StatusMessage = $"Toggled lock on {selected.Address}."
+            AddressTableNodes = _addressTableService.Roots,
+            StatusMessage = $"Toggled lock on {selected.Label}."
         };
     }
 
@@ -482,7 +482,7 @@ public partial class MainWindow : Window
             {
                 DataContext = dashboard with
                 {
-                    AddressTableEntries = _addressTableService.Entries.ToArray(),
+                    AddressTableNodes = _addressTableService.Roots,
                     AddressTableStatus = $"{_addressTableService.Entries.Count} entries"
                 };
             }
@@ -567,7 +567,7 @@ public partial class MainWindow : Window
 
                 DataContext = dashboard with
                 {
-                    AddressTableEntries = _addressTableService.Entries.ToArray(),
+                    AddressTableNodes = _addressTableService.Roots,
                     AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
                     StatusMessage = $"Imported {imported.Count} entries from {Path.GetFileName(dialog.FileName)}"
                 };
@@ -607,6 +607,42 @@ public partial class MainWindow : Window
         }
     }
 
+    // ─── Address Table Grouping ──────────────────────────────────────
+
+    private void CreateAddressGroup(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+
+        var inputDialog = new System.Windows.Window
+        {
+            Title = "New Group",
+            Width = 320,
+            Height = 140,
+            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = System.Windows.ResizeMode.NoResize
+        };
+
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
+        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = "Group name:" });
+        var textBox = new System.Windows.Controls.TextBox { Margin = new Thickness(0, 6, 0, 8) };
+        panel.Children.Add(textBox);
+        var okBtn = new System.Windows.Controls.Button { Content = "Create", Padding = new Thickness(16, 4, 16, 4), HorizontalAlignment = System.Windows.HorizontalAlignment.Right };
+        okBtn.Click += (_, _) => { inputDialog.DialogResult = true; };
+        panel.Children.Add(okBtn);
+        inputDialog.Content = panel;
+
+        if (inputDialog.ShowDialog() != true || string.IsNullOrWhiteSpace(textBox.Text)) return;
+
+        _addressTableService.CreateGroup(textBox.Text.Trim());
+        DataContext = dashboard with
+        {
+            AddressTableNodes = _addressTableService.Roots,
+            AddressTableStatus = $"{_addressTableService.Entries.Count} entries in {_addressTableService.Roots.Count} nodes",
+            StatusMessage = $"Created group '{textBox.Text.Trim()}'."
+        };
+    }
+
     // ─── Cheat Table Import ──────────────────────────────────────────
 
     private void LoadCheatTable(object sender, RoutedEventArgs e)
@@ -625,22 +661,17 @@ public partial class MainWindow : Window
 
             var parser = new CheatTableParser();
             var ctFile = parser.ParseFile(dialog.FileName);
-            var entries = parser.ToAddressTableEntries(ctFile);
-
-            foreach (var entry in entries)
-            {
-                _addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
-            }
+            var nodes = parser.ToAddressTableNodes(ctFile);
+            _addressTableService.ImportNodes(nodes);
 
             var scriptCount = CountScripts(ctFile.Entries);
-            var pointerCount = entries.Count(e2 => e2.Notes?.StartsWith("Pointer") == true);
+            var leafCount = _addressTableService.Entries.Count;
 
             DataContext = dashboard with
             {
-                AddressTableEntries = _addressTableService.Entries.ToArray(),
-                AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
-                StatusMessage = $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries → " +
-                                $"{entries.Count} addresses imported, {pointerCount} pointers, {scriptCount} scripts" +
+                AddressTableNodes = _addressTableService.Roots,
+                AddressTableStatus = $"{leafCount} entries in {_addressTableService.Roots.Count} nodes",
+                StatusMessage = $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries imported with hierarchy, {scriptCount} scripts" +
                                 (ctFile.LuaScript is not null ? " (has Lua script)" : "")
             };
         }
@@ -740,7 +771,7 @@ public partial class MainWindow : Window
 
             DataContext = dashboard with
             {
-                AddressTableEntries = _addressTableService.Entries.ToArray(),
+                AddressTableNodes = _addressTableService.Roots,
                 AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
                 StatusMessage = $"Loaded session {selected.Id} with {loaded.Value.Entries.Count} address entries."
             };

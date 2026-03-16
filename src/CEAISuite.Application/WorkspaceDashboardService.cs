@@ -49,6 +49,7 @@ public sealed class WorkspaceDashboardService(
             null,
             null,
             null,
+            null,
             false,
             null,
             dataStorePath,

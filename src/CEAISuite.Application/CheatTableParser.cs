@@ -69,14 +69,62 @@ public sealed class CheatTableParser
     }
 
     /// <summary>
-    /// Convert parsed CT entries into AddressTableEntry objects for import into our address table.
-    /// Groups and scripts are skipped; pointer entries get a descriptive address.
+    /// Convert parsed CT entries into AddressTableEntry objects (flat, for backward compat).
     /// </summary>
     public IReadOnlyList<AddressTableEntry> ToAddressTableEntries(CheatTableFile ctFile)
     {
         var result = new List<AddressTableEntry>();
         FlattenEntries(ctFile.Entries, result, null);
         return result;
+    }
+
+    /// <summary>
+    /// Convert parsed CT entries into a tree of AddressTableNode, preserving group hierarchy.
+    /// </summary>
+    public IReadOnlyList<AddressTableNode> ToAddressTableNodes(CheatTableFile ctFile)
+    {
+        return ConvertToNodes(ctFile.Entries);
+    }
+
+    private static List<AddressTableNode> ConvertToNodes(IReadOnlyList<CheatTableEntry> entries)
+    {
+        var nodes = new List<AddressTableNode>();
+        foreach (var entry in entries)
+        {
+            if (entry.IsGroupHeader)
+            {
+                var group = new AddressTableNode($"ct-{entry.Id}", entry.Description, true);
+                foreach (var child in ConvertToNodes(entry.Children))
+                    group.Children.Add(child);
+                nodes.Add(group);
+                continue;
+            }
+
+            // Skip script-only entries with no address
+            if (entry.AssemblerScript is not null && entry.Address == "0")
+                continue;
+
+            var address = entry.IsPointer
+                ? $"{entry.Address}+{string.Join("+", entry.PointerOffsets)}"
+                : entry.Address;
+
+            if (!address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                && !address.Contains('+')
+                && !address.Contains('.'))
+            {
+                address = $"0x{address}";
+            }
+
+            var node = new AddressTableNode($"ct-{entry.Id}", entry.Description, false)
+            {
+                Address = address,
+                DataType = entry.DataType,
+                CurrentValue = entry.LastValue ?? "0",
+                Notes = entry.IsPointer ? $"Pointer: [{string.Join(" -> ", entry.PointerOffsets)}]" : null
+            };
+            nodes.Add(node);
+        }
+        return nodes;
     }
 
     private void FlattenEntries(

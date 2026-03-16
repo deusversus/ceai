@@ -50,7 +50,7 @@ public partial class MainWindow : Window
         _scriptGenerationService = new ScriptGenerationService();
         _addressTableExportService = new AddressTableExportService();
         _sessionService = new SessionService(new SqliteInvestigationSessionRepository(_databasePath));
-        _breakpointService = new BreakpointService(null); // Engine injected when available
+        _breakpointService = new BreakpointService(new WindowsBreakpointEngine());
 
         // Wire up AI operator
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService);

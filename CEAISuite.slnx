@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CEAISuite.AI.Contracts/CEAISuite.AI.Contracts.csproj" />
+    <Project Path="src/CEAISuite.Application/CEAISuite.Application.csproj" />
+    <Project Path="src/CEAISuite.Desktop/CEAISuite.Desktop.csproj" />
+    <Project Path="src/CEAISuite.Domain/CEAISuite.Domain.csproj" />
+    <Project Path="src/CEAISuite.Engine.Abstractions/CEAISuite.Engine.Abstractions.csproj" />
+    <Project Path="src/CEAISuite.Engine.Windows/CEAISuite.Engine.Windows.csproj" />
+    <Project Path="src/CEAISuite.Persistence.Sqlite/CEAISuite.Persistence.Sqlite.csproj" />
+  </Folder>
+</Solution>

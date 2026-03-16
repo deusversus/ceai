@@ -90,6 +90,10 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     public bool IsPointer { get; set; }
     /// <summary>CE stores offsets deepest-first. Resolution reverses them.</summary>
     public List<long> PointerOffsets { get; set; } = new();
+    /// <summary>True if address starts with + or - (relative to parent's resolved address, per CE 7.5).</summary>
+    public bool IsOffset { get; set; }
+    /// <summary>Parent node reference for CE-style offset resolution.</summary>
+    public AddressTableNode? Parent { get; set; }
 
     private nuint? _resolvedAddress;
     /// <summary>The resolved runtime address (set during RefreshAll).</summary>
@@ -226,7 +230,8 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         {
             Address = address,
             DataType = dataType,
-            CurrentValue = currentValue
+            CurrentValue = currentValue,
+            Parent = group
         };
         group.Children.Add(node);
         return new AddressTableEntry(id, node.Label, address, dataType, currentValue, null, null, false, null);
@@ -248,7 +253,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         if (!parent.IsGroup) throw new InvalidOperationException($"'{parentGroupId}' is not a group.");
 
         var id = Guid.NewGuid().ToString("N")[..8];
-        var group = new AddressTableNode(id, label, true);
+        var group = new AddressTableNode(id, label, true) { Parent = parent };
         parent.Children.Add(group);
         return group;
     }
@@ -342,12 +347,26 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         foreach (var node in nodes)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
             if (node.IsGroup)
             {
+                // CE 7.5: Groups can have their own address + pointer chain.
+                // Children use the parent's resolved address as their base.
+                if (!string.IsNullOrEmpty(node.Address) && node.Address != "0" && node.Address != "(script)")
+                {
+                    try
+                    {
+                        var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
+                        node.ResolvedAddress = resolvedAddr != nuint.Zero ? resolvedAddr : null;
+                    }
+                    catch { node.ResolvedAddress = null; }
+                }
                 await RefreshNodes(node.Children, processId, cancellationToken);
                 continue;
             }
+
             if (node.IsScriptEntry && node.Address == "(script)") continue;
+
             try
             {
                 var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
@@ -379,8 +398,8 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
     /// </summary>
     private async Task<nuint> ResolveAddress(AddressTableNode node, int processId, CancellationToken ct)
     {
-        // Step 1: Resolve the base address (may be module-relative)
-        var baseAddr = ResolveBaseAddress(node.Address);
+        // Step 1: Resolve the base address (may be module-relative or parent-relative)
+        var baseAddr = ResolveBaseAddress(node);
         if (baseAddr == nuint.Zero) return nuint.Zero;
 
         // Step 2: If not a pointer, the base is the final address
@@ -412,16 +431,50 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
     }
 
     /// <summary>
-    /// Resolves a base address string. Handles:
-    /// - Raw hex: "1A2B3C" or "0x1A2B3C"
-    /// - Module-relative: "GameAssembly.dll"+02E9EBB0  or  "module.dll"+offset
-    /// - Main-module-relative: "+0" or "+1234"
+    /// Resolves a base address string using CE 7.5's algorithm:
+    /// - If address starts with +/- and has a parent with a resolved address, use parent.RealAddress + offset
+    /// - Module-relative: "GameAssembly.dll"+hexOffset
+    /// - Raw hex: 1A2B3C or 0x1A2B3C
     /// </summary>
-    private nuint ResolveBaseAddress(string address)
+    private nuint ResolveBaseAddress(AddressTableNode node)
     {
+        var address = node.Address;
         if (string.IsNullOrWhiteSpace(address) || address == "(script)") return nuint.Zero;
 
         var addr = address.Trim().Replace("\"", ""); // strip quotes CE puts around module names
+
+        // CE 7.5 parent-relative offset: fIsOffset && hasParent
+        // Walk up parent chain to find first ancestor with a real interpretable address
+        if (node.IsOffset && node.Parent is not null)
+        {
+            var offset = ParseHexOffset(addr.TrimStart('+', '-'));
+            if (addr.TrimStart().StartsWith('-'))
+                offset = -offset;
+
+            // Walk up to find first parent with resolved address
+            var ancestor = node.Parent;
+            while (ancestor is not null)
+            {
+                if (ancestor.ResolvedAddress.HasValue && ancestor.ResolvedAddress.Value != nuint.Zero)
+                    return (nuint)((long)ancestor.ResolvedAddress.Value + offset);
+
+                // Also try if ancestor has a real address (not just "+0")
+                if (!string.IsNullOrEmpty(ancestor.Address) &&
+                    !ancestor.Address.TrimStart().StartsWith('+') &&
+                    !ancestor.Address.TrimStart().StartsWith('-') &&
+                    ancestor.Address != "0")
+                    break; // ancestor has its own address but not yet resolved — can't continue
+
+                ancestor = ancestor.Parent;
+            }
+
+            // Fallback: if no parent resolved, try main module
+            var mainMod = _processModules.FirstOrDefault();
+            if (mainMod is not null)
+                return (nuint)((long)mainMod.BaseAddress + offset);
+
+            return nuint.Zero;
+        }
 
         // Module-relative: "module.dll"+hexOffset
         var plusIdx = addr.IndexOf('+');
@@ -438,7 +491,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
             return (nuint)((long)mod.BaseAddress + offset);
         }
 
-        // Main-module-relative: "+hexOffset"
+        // Main-module-relative: "+hexOffset" without parent (top-level)
         if (addr.StartsWith('+'))
         {
             var offsetStr = addr[1..].Trim();

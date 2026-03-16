@@ -86,15 +86,22 @@ public sealed class CheatTableParser
         return ConvertToNodes(ctFile.Entries);
     }
 
-    private static List<AddressTableNode> ConvertToNodes(IReadOnlyList<CheatTableEntry> entries)
+    private static List<AddressTableNode> ConvertToNodes(IReadOnlyList<CheatTableEntry> entries, AddressTableNode? parent = null)
     {
         var nodes = new List<AddressTableNode>();
         foreach (var entry in entries)
         {
             if (entry.IsGroupHeader)
             {
-                var group = new AddressTableNode($"ct-{entry.Id}", entry.Description, true);
-                foreach (var child in ConvertToNodes(entry.Children))
+                var group = new AddressTableNode($"ct-{entry.Id}", entry.Description, true)
+                {
+                    Address = entry.Address,
+                    IsPointer = entry.IsPointer,
+                    PointerOffsets = entry.PointerOffsets.Select(o => ParseCeOffset(o)).ToList(),
+                    IsOffset = entry.Address.TrimStart().StartsWith('+') || entry.Address.TrimStart().StartsWith('-'),
+                    Parent = parent
+                };
+                foreach (var child in ConvertToNodes(entry.Children, group))
                     group.Children.Add(child);
                 nodes.Add(group);
                 continue;
@@ -107,10 +114,11 @@ public sealed class CheatTableParser
                 {
                     Address = "(script)",
                     AssemblerScript = entry.AssemblerScript,
-                    Notes = entry.AssemblerScript.Contains("LuaCall") ? "LuaCall script (display only)" : "Auto Assembler script"
+                    Notes = entry.AssemblerScript.Contains("LuaCall") ? "LuaCall script (display only)" : "Auto Assembler script",
+                    Parent = parent
                 };
                 // Also import any children the script entry may have
-                foreach (var child in ConvertToNodes(entry.Children))
+                foreach (var child in ConvertToNodes(entry.Children, scriptNode))
                     scriptNode.Children.Add(child);
                 nodes.Add(scriptNode);
                 continue;
@@ -123,12 +131,14 @@ public sealed class CheatTableParser
                 CurrentValue = entry.LastValue ?? "0",
                 IsPointer = entry.IsPointer,
                 PointerOffsets = entry.PointerOffsets.Select(o => ParseCeOffset(o)).ToList(),
+                IsOffset = entry.Address.TrimStart().StartsWith('+') || entry.Address.TrimStart().StartsWith('-'),
                 Notes = entry.IsPointer ? $"Pointer: [{string.Join(" → ", entry.PointerOffsets)}]" : null,
-                AssemblerScript = entry.AssemblerScript
+                AssemblerScript = entry.AssemblerScript,
+                Parent = parent
             };
 
             // Import any children
-            foreach (var child in ConvertToNodes(entry.Children))
+            foreach (var child in ConvertToNodes(entry.Children, node))
                 node.Children.Add(child);
 
             nodes.Add(node);

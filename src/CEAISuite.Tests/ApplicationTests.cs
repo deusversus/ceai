@@ -263,6 +263,55 @@ public class CheatTablePointerTests
         Assert.Contains("GameAssembly.dll", node.Address);
         Assert.DoesNotContain("+0+", node.Address); // no flattened format
     }
+
+    [Fact]
+    public void ParsedCT_GroupPreservesPointerData()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""44"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>""Characters""</Description>
+      <GroupHeader>1</GroupHeader>
+      <Address>""GameAssembly.dll""+02E9EBB0</Address>
+      <Offsets>
+        <Offset>20</Offset>
+        <Offset>10</Offset>
+        <Offset>18</Offset>
+      </Offsets>
+      <CheatEntries>
+        <CheatEntry>
+          <ID>2</ID>
+          <Description>""EXP""</Description>
+          <VariableType>4 Bytes</VariableType>
+          <Address>+38</Address>
+        </CheatEntry>
+      </CheatEntries>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        Assert.Single(nodes);
+        var group = nodes[0];
+
+        // Group should preserve its pointer chain
+        Assert.True(group.IsGroup);
+        Assert.True(group.IsPointer);
+        Assert.Equal(3, group.PointerOffsets.Count);
+        Assert.Contains("GameAssembly.dll", group.Address);
+
+        // Child should be marked as offset and have parent reference
+        Assert.Single(group.Children);
+        var child = group.Children[0];
+        Assert.True(child.IsOffset);
+        Assert.Equal("+38", child.Address);
+        Assert.Same(group, child.Parent);
+    }
 }
 
 public class AddressTableExportServiceTests

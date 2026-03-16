@@ -19,6 +19,30 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     private const uint MemRelease = 0x8000;
     private const uint PageExecuteReadWrite = 0x40;
 
+    static WindowsAutoAssemblerEngine()
+    {
+        // Keystone NuGet package puts native DLLs in x64/x86 subdirs.
+        // Register a resolver so DllImport("keystone") finds the right one.
+        NativeLibrary.SetDllImportResolver(typeof(Keystone.Engine).Assembly, (name, assembly, path) =>
+        {
+            if (!name.Equals("keystone", StringComparison.OrdinalIgnoreCase))
+                return IntPtr.Zero;
+
+            var arch = RuntimeInformation.ProcessArchitecture == Architecture.X86 ? "x86" : "x64";
+            var baseDir = AppContext.BaseDirectory;
+            var candidate = Path.Combine(baseDir, arch, "keystone.dll");
+            if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out var handle))
+                return handle;
+
+            // Fallback: try root directory
+            candidate = Path.Combine(baseDir, "keystone.dll");
+            if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out handle))
+                return handle;
+
+            return IntPtr.Zero;
+        });
+    }
+
     public ScriptParseResult Parse(string script)
     {
         var errors = new List<string>();

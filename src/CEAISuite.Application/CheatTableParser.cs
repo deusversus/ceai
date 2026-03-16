@@ -116,24 +116,15 @@ public sealed class CheatTableParser
                 continue;
             }
 
-            var address = entry.IsPointer
-                ? $"{entry.Address}+{string.Join("+", entry.PointerOffsets)}"
-                : entry.Address;
-
-            if (!address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                && !address.Contains('+')
-                && !address.Contains('.'))
-            {
-                address = $"0x{address}";
-            }
-
             var node = new AddressTableNode($"ct-{entry.Id}", entry.Description, false)
             {
-                Address = address,
+                Address = entry.Address,
                 DataType = entry.DataType,
                 CurrentValue = entry.LastValue ?? "0",
-                Notes = entry.IsPointer ? $"Pointer: [{string.Join(" -> ", entry.PointerOffsets)}]" : null,
-                AssemblerScript = entry.AssemblerScript // Entries can have both address + script
+                IsPointer = entry.IsPointer,
+                PointerOffsets = entry.PointerOffsets.Select(o => ParseCeOffset(o)).ToList(),
+                Notes = entry.IsPointer ? $"Pointer: [{string.Join(" → ", entry.PointerOffsets)}]" : null,
+                AssemblerScript = entry.AssemblerScript
             };
 
             // Import any children
@@ -185,16 +176,19 @@ public sealed class CheatTableParser
                 ? $"{groupPrefix}/{entry.Description}"
                 : entry.Description;
 
-            var address = entry.IsPointer
-                ? $"{entry.Address}+{string.Join("+", entry.PointerOffsets)}"
-                : entry.Address;
+            var address = entry.Address;
 
-            // Normalize address format
+            // For display in flat mode, show module-relative address
             if (!address.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                 && !address.Contains('+')
                 && !address.Contains('.'))
             {
                 address = $"0x{address}";
+            }
+
+            if (entry.IsPointer)
+            {
+                address = $"P->{address}+[{string.Join(",", entry.PointerOffsets)}]";
             }
 
             result.Add(new AddressTableEntry(
@@ -266,8 +260,8 @@ public sealed class CheatTableParser
     private static MemoryDataType MapVariableType(string ceType) =>
         ceType.ToLowerInvariant() switch
         {
-            "byte" => MemoryDataType.Int32,         // Upcast byte to Int32
-            "2 bytes" => MemoryDataType.Int32,       // Upcast Int16 to Int32
+            "byte" => MemoryDataType.Byte,
+            "2 bytes" => MemoryDataType.Int16,
             "4 bytes" => MemoryDataType.Int32,
             "8 bytes" => MemoryDataType.Int64,
             "float" => MemoryDataType.Float,
@@ -285,6 +279,15 @@ public sealed class CheatTableParser
         if (raw.Length >= 2 && raw[0] == '"' && raw[^1] == '"')
             return raw[1..^1];
         return raw;
+    }
+
+    /// <summary>Parse a CE hex offset string (e.g. "B8", "0x10") into a long.</summary>
+    private static long ParseCeOffset(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return 0;
+        s = s.Trim();
+        if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
+        return long.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var val) ? val : 0;
     }
 
     private static int CountEntries(IReadOnlyList<CheatTableEntry> entries)

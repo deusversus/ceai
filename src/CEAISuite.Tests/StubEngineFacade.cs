@@ -40,12 +40,25 @@ public sealed class StubEngineFacade : IEngineFacade
 
     public Task<TypedMemoryValue> ReadValueAsync(int processId, nuint address, MemoryDataType dataType, CancellationToken ct = default)
     {
-        byte[] raw = new byte[4];
+        var size = dataType switch
+        {
+            MemoryDataType.Byte => 1,
+            MemoryDataType.Int16 => 2,
+            MemoryDataType.Int32 => 4,
+            MemoryDataType.Int64 => 8,
+            MemoryDataType.Float => 4,
+            MemoryDataType.Double => 8,
+            MemoryDataType.Pointer => 8,
+            _ => 4
+        };
+        byte[] raw = new byte[size];
         if (_memory.TryGetValue(address, out var data))
             Array.Copy(data, raw, Math.Min(data.Length, raw.Length));
 
         string display = dataType switch
         {
+            MemoryDataType.Byte => raw[0].ToString(),
+            MemoryDataType.Int16 => BitConverter.ToInt16(raw).ToString(),
             MemoryDataType.Int32 => BitConverter.ToInt32(raw).ToString(),
             MemoryDataType.Float => BitConverter.ToSingle(raw).ToString(),
             _ => "0"

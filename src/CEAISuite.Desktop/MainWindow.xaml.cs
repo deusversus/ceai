@@ -33,6 +33,8 @@ public partial class MainWindow : Window
     private readonly SessionService _sessionService;
     private readonly BreakpointService _breakpointService;
     private readonly IAutoAssemblerEngine? _autoAssemblerEngine;
+    private readonly IEngineFacade _engineFacade;
+    private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
     public MainWindow()
     {
@@ -42,6 +44,7 @@ public partial class MainWindow : Window
             "CEAISuite",
             "workspace.db");
         var engineFacade = new WindowsEngineFacade();
+        _engineFacade = engineFacade;
         _dashboardService = new WorkspaceDashboardService(
             engineFacade,
             new SqliteInvestigationSessionRepository(_databasePath));
@@ -125,11 +128,54 @@ public partial class MainWindow : Window
                 CurrentInspection = inspection,
                 StatusMessage = inspection.StatusMessage
             };
+
+            // Set process context for pointer chain resolution
+            try
+            {
+                var attachment = await _engineFacade.AttachAsync(selectedProcess.Id);
+                _addressTableService.SetProcessContext(
+                    attachment.Modules,
+                    selectedProcess.Architecture == "x86");
+            }
+            catch { /* non-fatal — address resolution will try again during refresh */ }
+
+            // Start auto-refresh timer for address table values
+            StartAutoRefresh();
         }
         catch (Exception exception)
         {
             DataContext = dashboard with { StatusMessage = exception.Message };
         }
+    }
+
+    private void StartAutoRefresh()
+    {
+        _refreshTimer?.Stop();
+        _refreshTimer = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(500)
+        };
+        _refreshTimer.Tick += async (_, _) =>
+        {
+            if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
+            if (_addressTableService.Roots.Count == 0) return;
+            try
+            {
+                _refreshTimer!.Stop(); // pause during refresh
+                await _addressTableService.RefreshAllAsync(dashboard.CurrentInspection.ProcessId);
+                DataContext = dashboard with
+                {
+                    AddressTableNodes = _addressTableService.Roots,
+                    AddressTableStatus = $"{_addressTableService.Entries.Count} entries (live)"
+                };
+            }
+            catch { /* non-fatal */ }
+            finally
+            {
+                _refreshTimer?.Start(); // resume
+            }
+        };
+        _refreshTimer.Start();
     }
 
     private async void ReadAddress(object sender, RoutedEventArgs e)

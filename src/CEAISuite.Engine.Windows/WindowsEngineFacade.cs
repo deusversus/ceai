@@ -122,6 +122,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
 
         var displayValue = dataType switch
         {
+            MemoryDataType.Byte => bytes[0].ToString(),
+            MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(),
             MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(),
             MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(),
             MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9"),
@@ -221,6 +223,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
     private static int GetReadSize(int processId, MemoryDataType dataType) =>
         dataType switch
         {
+            MemoryDataType.Byte => 1,
+            MemoryDataType.Int16 => sizeof(short),
             MemoryDataType.Int32 => sizeof(int),
             MemoryDataType.Int64 => sizeof(long),
             MemoryDataType.Float => sizeof(float),
@@ -234,6 +238,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
     private static byte[] ConvertValueToBytes(int processId, MemoryDataType dataType, string value) =>
         dataType switch
         {
+            MemoryDataType.Byte => [(byte)int.Parse(value, CultureInfo.InvariantCulture)],
+            MemoryDataType.Int16 => BitConverter.GetBytes(short.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Int32 => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Int64 => BitConverter.GetBytes(long.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Float => BitConverter.GetBytes(float.Parse(value, CultureInfo.InvariantCulture)),

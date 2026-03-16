@@ -130,6 +130,139 @@ public class AddressTableServiceTests
         Assert.True(child.IsGroup);
         Assert.Equal("Player", child.Label);
     }
+
+    [Fact]
+    public async Task RefreshAll_ResolvesModuleRelativeAddress()
+    {
+        var engine = new StubEngineFacade();
+        var sut = new AddressTableService(engine);
+        // Module "main.exe" at base 0x400000
+        sut.SetProcessContext(
+            new[] { new ModuleDescriptor("main.exe", (nuint)0x400000, 4096) },
+            is32Bit: false);
+
+        // Write value 42 at main.exe+0x100 = 0x400100
+        engine.WriteMemoryDirect((nuint)0x400100, BitConverter.GetBytes(42));
+
+        var node = new AddressTableNode("test1", "Test", false)
+        {
+            Address = "main.exe+100",
+            DataType = MemoryDataType.Int32,
+            CurrentValue = "0"
+        };
+        sut.Roots.Add(node);
+
+        await sut.RefreshAllAsync(1000);
+
+        Assert.Equal("42", node.CurrentValue);
+        Assert.Equal((nuint)0x400100, node.ResolvedAddress);
+    }
+
+    [Fact]
+    public async Task RefreshAll_ResolvesPointerChain()
+    {
+        var engine = new StubEngineFacade();
+        var sut = new AddressTableService(engine);
+        sut.SetProcessContext(
+            new[] { new ModuleDescriptor("game.dll", (nuint)0x10000000, 0x1000000) },
+            is32Bit: false);
+
+        // Pointer chain: game.dll+0x100 → read ptr → 0x20000000, add offset 0x30 → 0x20000030
+        // Write a pointer at game.dll+0x100 = 0x10000100 pointing to 0x20000000
+        engine.WriteMemoryDirect((nuint)0x10000100, BitConverter.GetBytes((ulong)0x20000000));
+        // Write the actual value (99) at 0x20000030
+        engine.WriteMemoryDirect((nuint)0x20000030, BitConverter.GetBytes(99));
+
+        // CE stores offsets deepest-first, so offset [30] means: read ptr at base, add 0x30
+        var node = new AddressTableNode("ptr1", "PtrValue", false)
+        {
+            Address = "game.dll+100",
+            DataType = MemoryDataType.Int32,
+            CurrentValue = "0",
+            IsPointer = true,
+            PointerOffsets = new List<long> { 0x30 }  // single-level pointer
+        };
+        sut.Roots.Add(node);
+
+        await sut.RefreshAllAsync(1000);
+
+        Assert.Equal("99", node.CurrentValue);
+        Assert.Equal((nuint)0x20000030, node.ResolvedAddress);
+    }
+
+    [Fact]
+    public async Task RefreshAll_ResolvesMultiLevelPointer()
+    {
+        var engine = new StubEngineFacade();
+        var sut = new AddressTableService(engine);
+        sut.SetProcessContext(
+            new[] { new ModuleDescriptor("game.dll", (nuint)0x10000000, 0x1000000) },
+            is32Bit: false);
+
+        // Two-level pointer chain:
+        // Base: game.dll+0x200 = 0x10000200
+        // Level 1: read ptr at 0x10000200 → 0x30000000, add 0xB8 → 0x300000B8
+        // Level 2: read ptr at 0x300000B8 → 0x40000000, add 0x08 → 0x40000008
+        // Final value at 0x40000008 = 777
+
+        engine.WriteMemoryDirect((nuint)0x10000200, BitConverter.GetBytes((ulong)0x30000000));
+        engine.WriteMemoryDirect((nuint)0x300000B8, BitConverter.GetBytes((ulong)0x40000000));
+        engine.WriteMemoryDirect((nuint)0x40000008, BitConverter.GetBytes(777));
+
+        // CE stores offsets deepest-first: [8, B8]
+        // Resolution reverses: first use B8, then use 8
+        var node = new AddressTableNode("ptr2", "DeepPtr", false)
+        {
+            Address = "game.dll+200",
+            DataType = MemoryDataType.Int32,
+            CurrentValue = "0",
+            IsPointer = true,
+            PointerOffsets = new List<long> { 0x08, 0xB8 }
+        };
+        sut.Roots.Add(node);
+
+        await sut.RefreshAllAsync(1000);
+
+        Assert.Equal("777", node.CurrentValue);
+        Assert.Equal((nuint)0x40000008, node.ResolvedAddress);
+    }
+}
+
+public class CheatTablePointerTests
+{
+    [Fact]
+    public void ParsedCT_PreservesPointerData()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""44"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>1</ID>
+      <Description>""Health""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>""GameAssembly.dll""+02E9EBB0</Address>
+      <Offsets>
+        <Offset>0</Offset>
+        <Offset>B8</Offset>
+      </Offsets>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        Assert.Single(nodes);
+        var node = nodes[0];
+        Assert.True(node.IsPointer);
+        Assert.Equal(2, node.PointerOffsets.Count);
+        Assert.Equal(0x00, node.PointerOffsets[0]); // deepest offset
+        Assert.Equal(0xB8, node.PointerOffsets[1]); // shallowest offset
+        // Address should be the raw base, not concatenated
+        Assert.Contains("GameAssembly.dll", node.Address);
+        Assert.DoesNotContain("+0+", node.Address); // no flattened format
+    }
 }
 
 public class AddressTableExportServiceTests

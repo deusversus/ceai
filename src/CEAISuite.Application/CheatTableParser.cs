@@ -17,7 +17,8 @@ public sealed record CheatTableEntry(
     IReadOnlyList<string> PointerOffsets,
     bool IsGroupHeader,
     string? AssemblerScript,
-    IReadOnlyList<CheatTableEntry> Children);
+    IReadOnlyList<CheatTableEntry> Children,
+    bool ShowAsSigned = true);
 
 /// <summary>
 /// Represents a parsed Cheat Engine .CT file.
@@ -99,7 +100,8 @@ public sealed class CheatTableParser
                     IsPointer = entry.IsPointer,
                     PointerOffsets = entry.PointerOffsets.Select(o => ParseCeOffset(o)).ToList(),
                     IsOffset = entry.Address.TrimStart().StartsWith('+') || entry.Address.TrimStart().StartsWith('-'),
-                    Parent = parent
+                    Parent = parent,
+                    ShowAsSigned = entry.ShowAsSigned
                 };
                 foreach (var child in ConvertToNodes(entry.Children, group))
                     group.Children.Add(child);
@@ -134,7 +136,8 @@ public sealed class CheatTableParser
                 IsOffset = entry.Address.TrimStart().StartsWith('+') || entry.Address.TrimStart().StartsWith('-'),
                 Notes = entry.IsPointer ? $"Pointer: [{string.Join(" → ", entry.PointerOffsets)}]" : null,
                 AssemblerScript = entry.AssemblerScript,
-                Parent = parent
+                Parent = parent,
+                ShowAsSigned = entry.ShowAsSigned
             };
 
             // Import any children
@@ -252,6 +255,9 @@ public sealed class CheatTableParser
 
         var assemblerScript = el.Element("AssemblerScript")?.Value;
 
+        // CE ShowAsSigned: 0 = unsigned display (default in CE is unsigned)
+        var showAsSigned = el.Element("ShowAsSigned")?.Value != "0";
+
         // Parse nested child entries
         var children = new List<CheatTableEntry>();
         var childEntriesEl = el.Element("CheatEntries");
@@ -264,7 +270,7 @@ public sealed class CheatTableParser
 
         return new CheatTableEntry(
             id, description, address, dataType, lastValue,
-            isPointer, offsets, isGroupHeader, assemblerScript, children);
+            isPointer, offsets, isGroupHeader, assemblerScript, children, showAsSigned);
     }
 
     private static MemoryDataType MapVariableType(string ceType) =>

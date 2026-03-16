@@ -94,6 +94,8 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     public bool IsOffset { get; set; }
     /// <summary>Parent node reference for CE-style offset resolution.</summary>
     public AddressTableNode? Parent { get; set; }
+    /// <summary>CE ShowAsSigned flag. false = display as unsigned (default for CE).</summary>
+    public bool ShowAsSigned { get; set; }
 
     private nuint? _resolvedAddress;
     /// <summary>The resolved runtime address (set during RefreshAll).</summary>
@@ -375,7 +377,10 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
 
                 var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, node.DataType, cancellationToken);
                 node.PreviousValue = node.CurrentValue;
-                node.CurrentValue = typed.DisplayValue;
+                // CE's ShowAsSigned flag: when false, display integer types as unsigned
+                node.CurrentValue = (!node.ShowAsSigned && typed.RawBytes is { Count: > 0 })
+                    ? FormatUnsigned(typed.RawBytes, node.DataType) ?? typed.DisplayValue
+                    : typed.DisplayValue;
 
                 if (node.IsLocked && node.LockedValue is not null)
                 {
@@ -428,6 +433,21 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         }
 
         return current;
+    }
+
+    /// <summary>Format raw bytes as unsigned for CE's ShowAsSigned=0.</summary>
+    private static string? FormatUnsigned(IReadOnlyList<byte> raw, MemoryDataType dt)
+    {
+        if (raw.Count == 0) return null;
+        var buf = raw is byte[] arr ? arr : raw.ToArray();
+        return dt switch
+        {
+            MemoryDataType.Byte => buf[0].ToString(),
+            MemoryDataType.Int16 => BitConverter.ToUInt16(buf, 0).ToString(),
+            MemoryDataType.Int32 => BitConverter.ToUInt32(buf, 0).ToString(),
+            MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString(),
+            _ => null // Float/Double/String — no signed/unsigned distinction
+        };
     }
 
     /// <summary>

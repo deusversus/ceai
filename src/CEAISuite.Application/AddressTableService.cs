@@ -363,6 +363,13 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
                     }
                     catch { node.ResolvedAddress = null; }
                 }
+                // If group has a pointer chain but failed to resolve, skip children
+                // (they depend on this group's address and would read garbage)
+                if (node.IsPointer && node.ResolvedAddress is null)
+                {
+                    SetChildrenUnresolved(node);
+                    continue;
+                }
                 await RefreshNodes(node.Children, processId, cancellationToken);
                 continue;
             }
@@ -372,7 +379,12 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
             try
             {
                 var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
-                if (resolvedAddr == nuint.Zero) continue;
+                if (resolvedAddr == nuint.Zero)
+                {
+                    node.ResolvedAddress = null;
+                    node.CurrentValue = "??";
+                    continue;
+                }
                 node.ResolvedAddress = resolvedAddr;
 
                 var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, node.DataType, cancellationToken);
@@ -394,6 +406,24 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
             // Also recurse into any children of this entry
             if (node.Children.Count > 0)
                 await RefreshNodes(node.Children, processId, cancellationToken);
+        }
+    }
+
+    /// <summary>Recursively mark all descendant leaves as unresolved ("??").</summary>
+    private static void SetChildrenUnresolved(AddressTableNode parent)
+    {
+        foreach (var child in parent.Children)
+        {
+            if (child.IsGroup)
+            {
+                child.ResolvedAddress = null;
+                SetChildrenUnresolved(child);
+            }
+            else if (!child.IsScriptEntry)
+            {
+                child.ResolvedAddress = null;
+                child.CurrentValue = "??";
+            }
         }
     }
 
@@ -488,11 +518,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
                 ancestor = ancestor.Parent;
             }
 
-            // Fallback: if no parent resolved, try main module
-            var mainMod = _processModules.FirstOrDefault();
-            if (mainMod is not null)
-                return (nuint)((long)mainMod.BaseAddress + offset);
-
+            // No ancestor resolved — parent pointer chain is broken (e.g. character slot not loaded)
             return nuint.Zero;
         }
 

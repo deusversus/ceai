@@ -9,6 +9,12 @@
     <PackageReference Include="keystoneengine.csharp" Version="0.9.1.1" />
   </ItemGroup>
 
+  <!-- Bundle VC++ 2013 runtime DLLs required by keystone.dll -->
+  <ItemGroup>
+    <None Include="runtimes\win-x64\native\msvcr120.dll" CopyToOutputDirectory="PreserveNewest" Link="x64\msvcr120.dll" />
+    <None Include="runtimes\win-x64\native\msvcp120.dll" CopyToOutputDirectory="PreserveNewest" Link="x64\msvcp120.dll" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

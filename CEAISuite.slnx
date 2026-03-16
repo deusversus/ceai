@@ -7,5 +7,6 @@
     <Project Path="src/CEAISuite.Engine.Abstractions/CEAISuite.Engine.Abstractions.csproj" />
     <Project Path="src/CEAISuite.Engine.Windows/CEAISuite.Engine.Windows.csproj" />
     <Project Path="src/CEAISuite.Persistence.Sqlite/CEAISuite.Persistence.Sqlite.csproj" />
+    <Project Path="src/CEAISuite.Tests/CEAISuite.Tests.csproj" />
   </Folder>
 </Solution>

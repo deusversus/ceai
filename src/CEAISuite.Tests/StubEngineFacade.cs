@@ -49,6 +49,8 @@ public sealed class StubEngineFacade : IEngineFacade
             MemoryDataType.Float => 4,
             MemoryDataType.Double => 8,
             MemoryDataType.Pointer => 8,
+            MemoryDataType.String => 256,
+            MemoryDataType.ByteArray => 64,
             _ => 4
         };
         byte[] raw = new byte[size];

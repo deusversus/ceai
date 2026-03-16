@@ -129,6 +129,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9"),
             MemoryDataType.Double => BitConverter.ToDouble(bytes, 0).ToString("G17"),
             MemoryDataType.Pointer => FormatPointer(bytes),
+            MemoryDataType.String => ExtractNullTerminatedString(bytes),
+            MemoryDataType.ByteArray => Convert.ToHexString(bytes),
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
 
@@ -232,6 +234,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Pointer => string.Equals(TryGetArchitecture(processId), "x86", StringComparison.OrdinalIgnoreCase)
                 ? sizeof(int)
                 : sizeof(long),
+            MemoryDataType.String => 256, // read up to 256 bytes for null-terminated strings
+            MemoryDataType.ByteArray => 64,
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
 
@@ -245,6 +249,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Float => BitConverter.GetBytes(float.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Double => BitConverter.GetBytes(double.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Pointer => ConvertPointerValue(processId, value),
+            MemoryDataType.String => System.Text.Encoding.UTF8.GetBytes(value + '\0'),
+            MemoryDataType.ByteArray => Convert.FromHexString(value.Replace(" ", "")),
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
 
@@ -268,6 +274,13 @@ public sealed class WindowsEngineFacade : IEngineFacade
             8 => $"0x{BitConverter.ToUInt64(bytes.ToArray(), 0):X16}",
             _ => $"0x{Convert.ToHexString(bytes.ToArray())}"
         };
+    }
+
+    private static string ExtractNullTerminatedString(byte[] bytes)
+    {
+        var nullIdx = Array.IndexOf(bytes, (byte)0);
+        var length = nullIdx >= 0 ? nullIdx : bytes.Length;
+        return System.Text.Encoding.UTF8.GetString(bytes, 0, length);
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

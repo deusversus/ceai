@@ -34,6 +34,7 @@ public partial class MainWindow : Window
     private readonly BreakpointService _breakpointService;
     private readonly IAutoAssemblerEngine? _autoAssemblerEngine;
     private readonly IEngineFacade _engineFacade;
+    private readonly GlobalHotkeyService _hotkeyService;
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
     public MainWindow()
@@ -56,6 +57,7 @@ public partial class MainWindow : Window
         _sessionService = new SessionService(new SqliteInvestigationSessionRepository(_databasePath));
         _breakpointService = new BreakpointService(new WindowsBreakpointEngine());
         _autoAssemblerEngine = new WindowsAutoAssemblerEngine();
+        _hotkeyService = new GlobalHotkeyService();
 
         // Wire up AI operator
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService);
@@ -79,7 +81,30 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        // Hook WndProc for global hotkeys
+        var hwnd = new System.Windows.Interop.WindowInteropHelper(this).Handle;
+        _hotkeyService.SetWindowHandle(hwnd);
+        var source = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
+        source?.AddHook(WndProc);
+
         DataContext = await _dashboardService.BuildAsync(_databasePath);
+    }
+
+    private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
+    {
+        const int WM_HOTKEY = 0x0312;
+        if (msg == WM_HOTKEY)
+        {
+            handled = _hotkeyService.HandleHotkeyMessage(wParam.ToInt32());
+        }
+        return IntPtr.Zero;
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        _refreshTimer?.Stop();
+        _hotkeyService.Dispose();
+        base.OnClosed(e);
     }
 
     private async void RefreshProcessList(object sender, RoutedEventArgs e)
@@ -671,16 +696,68 @@ public partial class MainWindow : Window
         };
     }
 
-    private void ActiveCheckBox_Click(object sender, RoutedEventArgs e)
+    private async void ActiveCheckBox_Click(object sender, RoutedEventArgs e)
     {
-        // CheckBox binding already updates IsActive → IsLocked/IsScriptEnabled
-        // Just set LockedValue for freeze
-        if (sender is System.Windows.Controls.CheckBox cb &&
-            cb.DataContext is AddressTableNode node && !node.IsScriptEntry)
+        if (sender is not System.Windows.Controls.CheckBox cb ||
+            cb.DataContext is not AddressTableNode node) return;
+
+        if (node.IsScriptEntry)
         {
+            // Actually execute/disable the script via the AA engine
+            if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
+            {
+                node.IsScriptEnabled = false; // revert — can't run without attached process
+                if (DataContext is WorkspaceDashboard d)
+                    DataContext = d with { StatusMessage = "Attach to a process before toggling scripts." };
+                return;
+            }
+
+            if (_autoAssemblerEngine is null)
+            {
+                node.IsScriptEnabled = false;
+                return;
+            }
+
+            try
+            {
+                if (node.IsScriptEnabled)
+                {
+                    var result = await _autoAssemblerEngine.EnableAsync(
+                        dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
+                    if (!result.Success)
+                    {
+                        node.IsScriptEnabled = false;
+                        node.ScriptStatus = $"FAILED: {result.Error}";
+                    }
+                    else
+                    {
+                        node.ScriptStatus = $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)";
+                    }
+                }
+                else
+                {
+                    var result = await _autoAssemblerEngine.DisableAsync(
+                        dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
+                    node.ScriptStatus = result.Success ? "Disabled" : $"Disable failed: {result.Error}";
+                }
+
+                DataContext = dashboard with
+                {
+                    StatusMessage = $"Script '{node.Label}': {node.ScriptStatus}"
+                };
+            }
+            catch (Exception ex)
+            {
+                node.IsScriptEnabled = false;
+                node.ScriptStatus = $"Error: {ex.Message}";
+                DataContext = dashboard with { StatusMessage = $"Script error: {ex.Message}" };
+            }
+        }
+        else
+        {
+            // Value entry: toggle freeze and capture current value
             node.LockedValue = node.IsLocked ? node.CurrentValue : null;
         }
-        RefreshAddressTableUI();
     }
 
     private void AddressTableTree_MouseDoubleClick(object sender, MouseButtonEventArgs e)
@@ -724,6 +801,60 @@ public partial class MainWindow : Window
         }
 
         RefreshAddressTableUI($"Value changed: {node.Label} = {result}");
+    }
+
+    private void AddressTableTree_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+
+        switch (e.Key)
+        {
+            case System.Windows.Input.Key.Delete:
+                CtxDelete(sender, e);
+                e.Handled = true;
+                break;
+            case System.Windows.Input.Key.Space:
+                CtxToggleActivate(sender, e);
+                e.Handled = true;
+                break;
+            case System.Windows.Input.Key.F2:
+                CtxChangeDescription(sender, e);
+                e.Handled = true;
+                break;
+            case System.Windows.Input.Key.Enter when !node.IsGroup && !node.IsScriptEntry:
+                EditNodeValue(node);
+                e.Handled = true;
+                break;
+            case System.Windows.Input.Key.F5:
+                RefreshAddressTable(sender, e);
+                e.Handled = true;
+                break;
+        }
+
+        // Ctrl shortcuts
+        if (Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            switch (e.Key)
+            {
+                case System.Windows.Input.Key.C:
+                    CtxCopy(sender, e);
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.X:
+                    CtxCut(sender, e);
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.V:
+                    CtxPaste(sender, e);
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.F:
+                    CtxToggleFreeze(sender, e);
+                    e.Handled = true;
+                    break;
+            }
+        }
     }
 
     private void CtxToggleActivate(object sender, RoutedEventArgs e)
@@ -833,16 +964,35 @@ public partial class MainWindow : Window
     {
         var node = GetSelectedNode();
         if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        if (DataContext is WorkspaceDashboard d)
-            DataContext = d with { StatusMessage = $"Browse memory at {node.Address} — use Memory Editor panel" };
+        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
+
+        var addr = node.ResolvedAddress ?? nuint.Zero;
+        if (addr == nuint.Zero)
+        {
+            try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
+        }
+
+        var browser = new MemoryBrowserWindow(
+            _engineFacade,
+            dashboard.CurrentInspection.ProcessId,
+            dashboard.CurrentInspection.ProcessName,
+            addr);
+        browser.Show();
     }
 
     private void CtxDisassemble(object sender, RoutedEventArgs e)
     {
         var node = GetSelectedNode();
         if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        if (DataContext is WorkspaceDashboard d)
-            DataContext = d with { StatusMessage = $"Disassemble at {node.Address} — use Disassembly panel" };
+
+        var addr = node.ResolvedAddress ?? nuint.Zero;
+        if (addr == nuint.Zero)
+        {
+            try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
+        }
+
+        DisasmAddressTextBox.Text = $"0x{addr:X}";
+        DisassembleAtAddress(sender, e);
     }
 
     private void CtxMoveToGroup(object sender, RoutedEventArgs e)
@@ -1308,6 +1458,22 @@ public partial class MainWindow : Window
         {
             DataContext = dashboard with { StatusMessage = $"Load failed: {ex.Message}" };
         }
+    }
+
+    // ── Memory Browser ──
+
+    private void OpenMemoryBrowser(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
+        {
+            System.Windows.MessageBox.Show("Attach to a process first.", "Memory Browser");
+            return;
+        }
+        var browser = new MemoryBrowserWindow(
+            _engineFacade,
+            dashboard.CurrentInspection.ProcessId,
+            dashboard.CurrentInspection.ProcessName);
+        browser.Show();
     }
 
     // ── Breakpoint handlers ──

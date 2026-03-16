@@ -266,8 +266,8 @@ public sealed class CheatTableParser
             "8 bytes" => MemoryDataType.Int64,
             "float" => MemoryDataType.Float,
             "double" => MemoryDataType.Double,
-            "string" => MemoryDataType.Int32,        // Best-effort fallback
-            "array of byte" => MemoryDataType.Int32, // Best-effort fallback
+            "string" => MemoryDataType.String,
+            "array of byte" => MemoryDataType.ByteArray,
             "binary" => MemoryDataType.Int32,
             "auto assembler script" => MemoryDataType.Int32,
             _ => MemoryDataType.Int32

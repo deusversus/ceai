@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -17,33 +19,97 @@ public sealed record AddressTableEntry(
 /// <summary>
 /// A node in the address table tree. Can be a group (has children, no address)
 /// or a leaf entry (has address/value, no children).
+/// Implements INotifyPropertyChanged so WPF bindings update live.
 /// </summary>
-public sealed class AddressTableNode
+public sealed class AddressTableNode : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void Notify([CallerMemberName] string? prop = null)
+    {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(prop));
+    }
+    private void NotifyDisplayProperties()
+    {
+        Notify(nameof(DisplayValue));
+        Notify(nameof(DisplayValueColor));
+        Notify(nameof(DisplayValueWeight));
+        Notify(nameof(DisplayLock));
+        Notify(nameof(DisplayAddress));
+        Notify(nameof(DisplayType));
+        Notify(nameof(DisplayIcon));
+        Notify(nameof(StatusTooltip));
+        Notify(nameof(ValueColor));
+    }
+
     public string Id { get; set; }
-    public string Label { get; set; }
+
+    private string _label = "";
+    public string Label
+    {
+        get => _label;
+        set { if (_label != value) { _label = value; Notify(); } }
+    }
+
     public bool IsGroup { get; set; }
 
     // Leaf fields
-    public string Address { get; set; } = "";
-    public MemoryDataType DataType { get; set; }
-    public string CurrentValue { get; set; } = "";
+    private string _address = "";
+    public string Address
+    {
+        get => _address;
+        set { if (_address != value) { _address = value; Notify(); Notify(nameof(DisplayAddress)); } }
+    }
+
+    private MemoryDataType _dataType;
+    public MemoryDataType DataType
+    {
+        get => _dataType;
+        set { if (_dataType != value) { _dataType = value; Notify(); Notify(nameof(DisplayType)); } }
+    }
+
+    private string _currentValue = "";
+    public string CurrentValue
+    {
+        get => _currentValue;
+        set { if (_currentValue != value) { _currentValue = value; Notify(); NotifyDisplayProperties(); } }
+    }
+
     public string? PreviousValue { get; set; }
     public string? Notes { get; set; }
-    public bool IsLocked { get; set; }
+
+    private bool _isLocked;
+    public bool IsLocked
+    {
+        get => _isLocked;
+        set { if (_isLocked != value) { _isLocked = value; Notify(); Notify(nameof(IsActive)); NotifyDisplayProperties(); } }
+    }
+
     public string? LockedValue { get; set; }
 
     // Pointer chain fields (CE-style multi-level pointer resolution)
     public bool IsPointer { get; set; }
     /// <summary>CE stores offsets deepest-first. Resolution reverses them.</summary>
     public List<long> PointerOffsets { get; set; } = new();
+
+    private nuint? _resolvedAddress;
     /// <summary>The resolved runtime address (set during RefreshAll).</summary>
-    public nuint? ResolvedAddress { get; set; }
+    public nuint? ResolvedAddress
+    {
+        get => _resolvedAddress;
+        set { if (_resolvedAddress != value) { _resolvedAddress = value; Notify(); Notify(nameof(DisplayAddress)); } }
+    }
 
     // Script fields
     public string? AssemblerScript { get; set; }
     public bool IsScriptEntry => AssemblerScript is not null;
-    public bool IsScriptEnabled { get; set; }
+
+    private bool _isScriptEnabled;
+    public bool IsScriptEnabled
+    {
+        get => _isScriptEnabled;
+        set { if (_isScriptEnabled != value) { _isScriptEnabled = value; Notify(); Notify(nameof(IsActive)); NotifyDisplayProperties(); } }
+    }
+
     public string? ScriptStatus { get; set; }
 
     // Active state (checkbox — for scripts = enabled, for values = frozen/locked)
@@ -54,6 +120,7 @@ public sealed class AddressTableNode
         {
             if (IsScriptEntry) IsScriptEnabled = value;
             else IsLocked = value;
+            Notify();
         }
     }
 
@@ -61,22 +128,42 @@ public sealed class AddressTableNode
     public ObservableCollection<AddressTableNode> Children { get; } = new();
     public bool IsExpanded { get; set; } = true;
 
-    // Display helpers
+    // Display helpers (computed — fire from setters above)
     public string DisplayValue => IsGroup ? $"[{Children.Count} items]"
-        : IsScriptEntry ? (IsScriptEnabled ? "✅ Enabled" : "❌ Disabled")
-        : CurrentValue;
-    public string DisplayType => IsGroup ? "Group" : IsScriptEntry ? "Script" : DataType.ToString();
+        : IsScriptEntry ? (IsScriptEnabled ? "[ENABLED]" : "[DISABLED]")
+        : string.IsNullOrEmpty(CurrentValue) ? "??" : (IsLocked ? $"{CurrentValue} 🔒" : CurrentValue);
+    public string DisplayType => IsGroup ? "Group" : IsScriptEntry ? "AA Script" : DataType.ToString();
     public string DisplayLock => IsGroup ? "" : IsScriptEntry ? "" : (IsLocked ? "🔒 Frozen" : "");
     public string DisplayIcon => IsScriptEntry ? "📜" : IsGroup ? "📁" : (IsPointer ? "🔗" : "");
     public string DisplayAddress => IsGroup ? "" : IsScriptEntry ? "(script)"
         : ResolvedAddress.HasValue ? $"0x{ResolvedAddress.Value:X}"
         : Address;
+
+    /// <summary>Color for the Value column: red=frozen, green=script enabled, gray=script disabled, black=normal</summary>
+    public string DisplayValueColor => IsScriptEntry
+        ? (IsScriptEnabled ? "#22AA22" : "#AA2222")
+        : IsLocked ? "#CC4444"
+        : CurrentValue == "???" ? "#999999"
+        : "#000000";
+
+    /// <summary>Bold weight for active scripts and frozen values.</summary>
+    public string DisplayValueWeight => (IsScriptEntry || IsLocked) ? "Bold" : "Normal";
+
+    /// <summary>Tooltip with full status info.</summary>
+    public string StatusTooltip => IsScriptEntry
+        ? $"Script: {Label}\nStatus: {(IsScriptEnabled ? "ENABLED" : "DISABLED")}\n{ScriptStatus ?? ""}\n\nCheck the box or use context menu to toggle."
+        : IsGroup ? $"Group: {Label} ({Children.Count} items)"
+        : $"{Label}\nAddress: {DisplayAddress}\nType: {DataType}\nValue: {CurrentValue}" +
+          (IsLocked ? $"\n🔒 FROZEN at {LockedValue}" : "") +
+          (IsPointer ? $"\nPointer: {PointerOffsets.Count} level(s)" : "") +
+          (!string.IsNullOrEmpty(Notes) ? $"\n\n{Notes}" : "");
+
     public string ValueColor => IsLocked ? "#CC4444" : "#000000";
 
     public AddressTableNode(string id, string label, bool isGroup)
     {
         Id = id;
-        Label = label;
+        _label = label;
         IsGroup = isGroup;
     }
 

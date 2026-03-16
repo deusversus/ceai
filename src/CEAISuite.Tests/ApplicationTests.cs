@@ -605,10 +605,10 @@ public class CheatTableParserTests
 
         Assert.True(node.IsScriptEntry);
         Assert.Equal("📜", node.DisplayIcon);
-        Assert.Equal("Script", node.DisplayType);
-        Assert.Equal("❌ Disabled", node.DisplayValue);
+        Assert.Equal("AA Script", node.DisplayType);
+        Assert.Equal("[DISABLED]", node.DisplayValue);
 
         node.IsScriptEnabled = true;
-        Assert.Equal("✅ Enabled", node.DisplayValue);
+        Assert.Equal("[ENABLED]", node.DisplayValue);
     }
 }

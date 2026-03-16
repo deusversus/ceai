@@ -3,12 +3,16 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:CEAISuite.Desktop"
         mc:Ignorable="d"
         Title="CE AI Suite"
         Height="860"
         Width="1500"
         MinHeight="700"
         MinWidth="1100">
+    <Window.Resources>
+        <local:StringToBrushConverter x:Key="BrushConv" />
+    </Window.Resources>
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
@@ -21,7 +25,8 @@
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                 <Button Padding="10,6" Margin="0,0,8,0" Click="SaveSession" Content="💾 Save Session" />
                 <Button Padding="10,6" Margin="0,0,8,0" Click="LoadSession" Content="📂 Load Session" />
-                <Button Padding="10,6" Click="LoadCheatTable" Content="📋 Load .CT" />
+                <Button Padding="10,6" Margin="0,0,8,0" Click="LoadCheatTable" Content="📋 Load .CT" />
+                <Button Padding="10,6" Click="OpenMemoryBrowser" Content="🔍 Memory Browser" />
             </StackPanel>
             <StackPanel>
                 <TextBlock Text="{Binding ProductName}"
@@ -438,11 +443,29 @@
                                Foreground="#555555"
                                Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
                 </StackPanel>
+                <!-- Column headers matching CE 7.5 -->
+                <Grid DockPanel.Dock="Top" Margin="22,0,0,2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="28" />
+                        <ColumnDefinition Width="24" />
+                        <ColumnDefinition Width="200" />
+                        <ColumnDefinition Width="160" />
+                        <ColumnDefinition Width="70" />
+                        <ColumnDefinition Width="140" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="" FontWeight="Bold" Foreground="#555" />
+                    <TextBlock Grid.Column="1" Text="" FontWeight="Bold" Foreground="#555" />
+                    <TextBlock Grid.Column="2" Text="Description" FontWeight="Bold" Foreground="#555" />
+                    <TextBlock Grid.Column="3" Text="Address" FontWeight="Bold" Foreground="#555" />
+                    <TextBlock Grid.Column="4" Text="Type" FontWeight="Bold" Foreground="#555" />
+                    <TextBlock Grid.Column="5" Text="Value" FontWeight="Bold" Foreground="#555" />
+                </Grid>
                 <TreeView x:Name="AddressTableTree"
                           ItemsSource="{Binding AddressTableNodes}"
                           FontFamily="Consolas"
                           FontSize="12"
-                          MouseDoubleClick="AddressTableTree_MouseDoubleClick">
+                          MouseDoubleClick="AddressTableTree_MouseDoubleClick"
+                          KeyDown="AddressTableTree_KeyDown">
                     <TreeView.Resources>
                         <!-- Context menu matching CE 7.5 address list -->
                         <ContextMenu x:Key="NodeContextMenu">
@@ -479,15 +502,14 @@
                     </TreeView.ItemContainerStyle>
                     <TreeView.ItemTemplate>
                         <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                            <Grid Margin="2" ToolTip="{Binding Notes}">
+                            <Grid Margin="2" ToolTip="{Binding StatusTooltip}">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="28" />
                                     <ColumnDefinition Width="24" />
-                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="200" />
                                     <ColumnDefinition Width="160" />
                                     <ColumnDefinition Width="70" />
-                                    <ColumnDefinition Width="120" />
-                                    <ColumnDefinition Width="90" />
+                                    <ColumnDefinition Width="140" />
                                 </Grid.ColumnDefinitions>
                                 <CheckBox Grid.Column="0"
                                           IsChecked="{Binding IsActive, Mode=TwoWay}"
@@ -497,9 +519,10 @@
                                 <TextBlock Grid.Column="2" Text="{Binding Label}" FontWeight="SemiBold" />
                                 <TextBlock Grid.Column="3" Text="{Binding DisplayAddress}" Foreground="#336699" />
                                 <TextBlock Grid.Column="4" Text="{Binding DisplayType}" Foreground="#555555" />
-                                <TextBlock Grid.Column="5" Text="{Binding DisplayValue}" />
-                                <TextBlock Grid.Column="6" Text="{Binding DisplayLock}"
-                                           Foreground="#CC4444" />
+                                <TextBlock Grid.Column="5"
+                                           Text="{Binding DisplayValue}"
+                                           Foreground="{Binding DisplayValueColor, Converter={StaticResource BrushConv}}"
+                                           FontWeight="{Binding DisplayValueWeight}" />
                             </Grid>
                         </HierarchicalDataTemplate>
                     </TreeView.ItemTemplate>

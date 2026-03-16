@@ -323,6 +323,8 @@ public sealed class WindowsScanEngine : IScanEngine
     private static string FormatValue(byte[] bytes, MemoryDataType dataType) =>
         dataType switch
         {
+            MemoryDataType.Byte => bytes[0].ToString(),
+            MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(),
             MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(),
             MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(),
             MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9"),
@@ -336,6 +338,10 @@ public sealed class WindowsScanEngine : IScanEngine
         {
             return dataType switch
             {
+                MemoryDataType.Byte => byte.Parse(current, CultureInfo.InvariantCulture)
+                    .CompareTo(byte.Parse(previous, CultureInfo.InvariantCulture)),
+                MemoryDataType.Int16 => short.Parse(current, CultureInfo.InvariantCulture)
+                    .CompareTo(short.Parse(previous, CultureInfo.InvariantCulture)),
                 MemoryDataType.Int32 => int.Parse(current, CultureInfo.InvariantCulture)
                     .CompareTo(int.Parse(previous, CultureInfo.InvariantCulture)),
                 MemoryDataType.Int64 => long.Parse(current, CultureInfo.InvariantCulture)
@@ -356,6 +362,8 @@ public sealed class WindowsScanEngine : IScanEngine
     private static int GetValueSize(MemoryDataType dataType) =>
         dataType switch
         {
+            MemoryDataType.Byte => 1,
+            MemoryDataType.Int16 => 2,
             MemoryDataType.Int32 => sizeof(int),
             MemoryDataType.Int64 => sizeof(long),
             MemoryDataType.Float => sizeof(float),

@@ -19,7 +19,9 @@ public enum MemoryDataType
     Int64,
     Float,
     Double,
-    Pointer
+    Pointer,
+    String,
+    ByteArray
 }
 
 public sealed record ProcessDescriptor(int Id, string Name, string Architecture);

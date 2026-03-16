@@ -329,4 +329,93 @@ public sealed class AiToolFunctions(
             $"Errors: {string.Join("; ", result.Errors)}\n" +
             $"Warnings: {string.Join("; ", result.Warnings)}");
     }
+
+    // ── Pointer Scanner tools ──
+
+    [Description("Scan process memory for pointer chains leading to a target address. Returns potential static pointers.")]
+    public async Task<string> ScanForPointers(
+        [Description("Process ID to scan")] int processId,
+        [Description("Target address to find pointers to (hex string like 0x1234ABCD)")] string targetAddress,
+        [Description("Maximum pointer chain depth (1-3, default 2)")] int maxDepth = 2)
+    {
+        var scanner = new PointerScannerService(engineFacade);
+        var addr = AddressTableService.ParseAddress(targetAddress);
+        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth);
+
+        if (paths.Count == 0) return "No pointer paths found to the target address.";
+
+        var lines = paths.Take(50).Select((p, i) => $"{i + 1}. {p.Display}");
+        return $"Found {paths.Count} pointer path(s) to 0x{addr:X}:\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Browse raw memory at an address. Returns hex dump with ASCII.")]
+    public async Task<string> BrowseMemory(
+        [Description("Process ID")] int processId,
+        [Description("Start address (hex string)")] string address,
+        [Description("Number of bytes to read (default 128)")] int length = 128)
+    {
+        var addr = AddressTableService.ParseAddress(address);
+        var result = await engineFacade.ReadMemoryAsync(processId, addr, length);
+        var bytes = result.Bytes.ToArray();
+
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < bytes.Length; i += 16)
+        {
+            var lineAddr = (nuint)((long)addr + i);
+            sb.Append($"{lineAddr:X16}  ");
+            var end = Math.Min(i + 16, bytes.Length);
+            for (var j = i; j < i + 16; j++)
+            {
+                sb.Append(j < end ? $"{bytes[j]:X2} " : "   ");
+                if (j - i == 7) sb.Append(' ');
+            }
+            sb.Append(" │ ");
+            for (var j = i; j < end; j++)
+            {
+                var c = (char)bytes[j];
+                sb.Append(c is >= ' ' and <= '~' ? c : '.');
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString();
+    }
+
+    [Description("Analyze memory at an address and identify probable data types at each offset (structure dissection). Returns fields with type, value, and confidence.")]
+    public async Task<string> DissectStructure(
+        [Description("Process ID")] int processId,
+        [Description("Base address to start analysis (hex string)")] string address,
+        [Description("Region size in bytes (default 256)")] int regionSize = 256)
+    {
+        var dissector = new StructureDissectorService(engineFacade);
+        var addr = AddressTableService.ParseAddress(address);
+        var fields = await dissector.DissectAsync(processId, addr, regionSize);
+
+        if (fields.Count == 0) return "No identifiable fields found in this region.";
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Structure analysis at 0x{addr:X} ({fields.Count} fields):");
+        sb.AppendLine("Offset  | Type     | Value                | Confidence");
+        sb.AppendLine("--------|----------|----------------------|-----------");
+        foreach (var f in fields)
+        {
+            sb.AppendLine($"+0x{f.Offset:X4} | {f.ProbableType,-8} | {f.DisplayValue,-20} | {f.Confidence:P0}");
+        }
+        return sb.ToString();
+    }
+
+    [Description("Register a global hotkey to toggle a specific address table entry's freeze lock. Hotkey works system-wide.")]
+    public Task<string> SetHotkey(
+        [Description("Node ID of the address table entry")] string nodeId,
+        [Description("Hotkey combination like 'Ctrl+F1' or 'Alt+Shift+G'")] string hotkey)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+
+        var (mods, vk) = GlobalHotkeyService.ParseHotkeyString(hotkey);
+        if (vk == 0) return Task.FromResult($"Could not parse hotkey '{hotkey}'. Use format like 'Ctrl+F1' or 'Alt+G'.");
+
+        // Can't register here since we don't have the window handle.
+        // Return the parsed info for the UI to register.
+        return Task.FromResult($"Hotkey parsed: modifiers=0x{mods:X}, vk=0x{vk:X}. Node '{node.Label}' at {node.Address}. The UI should call GlobalHotkeyService.Register() with these values.");
+    }
 }

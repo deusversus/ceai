@@ -20,7 +20,8 @@
         <DockPanel Margin="0,0,0,16">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                 <Button Padding="10,6" Margin="0,0,8,0" Click="SaveSession" Content="💾 Save Session" />
-                <Button Padding="10,6" Click="LoadSession" Content="📂 Load Session" />
+                <Button Padding="10,6" Margin="0,0,8,0" Click="LoadSession" Content="📂 Load Session" />
+                <Button Padding="10,6" Click="LoadCheatTable" Content="📋 Load .CT" />
             </StackPanel>
             <StackPanel>
                 <TextBlock Text="{Binding ProductName}"

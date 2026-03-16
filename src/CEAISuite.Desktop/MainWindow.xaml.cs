@@ -582,6 +582,60 @@ public partial class MainWindow : Window
         }
     }
 
+    // ─── Cheat Table Import ──────────────────────────────────────────
+
+    private void LoadCheatTable(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+        try
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Load Cheat Engine Table",
+                Filter = "Cheat Tables (*.ct;*.CT)|*.ct;*.CT|XML Files (*.xml)|*.xml|All Files (*.*)|*.*",
+                DefaultExt = ".ct"
+            };
+
+            if (dialog.ShowDialog(this) != true) return;
+
+            var parser = new CheatTableParser();
+            var ctFile = parser.ParseFile(dialog.FileName);
+            var entries = parser.ToAddressTableEntries(ctFile);
+
+            foreach (var entry in entries)
+            {
+                _addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
+            }
+
+            var scriptCount = CountScripts(ctFile.Entries);
+            var pointerCount = entries.Count(e2 => e2.Notes?.StartsWith("Pointer") == true);
+
+            DataContext = dashboard with
+            {
+                AddressTableEntries = _addressTableService.Entries.ToArray(),
+                AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
+                StatusMessage = $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries → " +
+                                $"{entries.Count} addresses imported, {pointerCount} pointers, {scriptCount} scripts" +
+                                (ctFile.LuaScript is not null ? " (has Lua script)" : "")
+            };
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with { StatusMessage = $"CT load failed: {ex.Message}" };
+        }
+    }
+
+    private static int CountScripts(IReadOnlyList<CheatTableEntry> entries)
+    {
+        var count = 0;
+        foreach (var entry in entries)
+        {
+            if (entry.AssemblerScript is not null) count++;
+            count += CountScripts(entry.Children);
+        }
+        return count;
+    }
+
     // ─── Session Save / Load ───────────────────────────────────────────
 
     private async void SaveSession(object sender, RoutedEventArgs e)

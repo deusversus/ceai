@@ -213,3 +213,168 @@ public class SessionServiceTests
         try { File.Delete(dbPath); } catch { /* ignore */ }
     }
 }
+
+public class CheatTableParserTests
+{
+    private const string SampleCtXml = """
+        <?xml version="1.0" encoding="utf-8"?>
+        <CheatTable CheatEngineTableVersion="44">
+          <CheatEntries>
+            <CheatEntry>
+              <ID>0</ID>
+              <Description>"Player Stats"</Description>
+              <GroupHeader>1</GroupHeader>
+              <CheatEntries>
+                <CheatEntry>
+                  <ID>1</ID>
+                  <Description>"Health"</Description>
+                  <LastState Value="100" RealAddress="00400000"/>
+                  <VariableType>4 Bytes</VariableType>
+                  <Address>00400000</Address>
+                </CheatEntry>
+                <CheatEntry>
+                  <ID>2</ID>
+                  <Description>"Speed"</Description>
+                  <LastState Value="1.5" RealAddress="00400010"/>
+                  <VariableType>Float</VariableType>
+                  <Address>00400010</Address>
+                </CheatEntry>
+              </CheatEntries>
+            </CheatEntry>
+            <CheatEntry>
+              <ID>3</ID>
+              <Description>"Money"</Description>
+              <VariableType>4 Bytes</VariableType>
+              <Address>game.exe+123456</Address>
+              <Offsets>
+                <Offset>10</Offset>
+                <Offset>1C</Offset>
+              </Offsets>
+            </CheatEntry>
+            <CheatEntry>
+              <ID>4</ID>
+              <Description>"God Mode"</Description>
+              <VariableType>Auto Assembler Script</VariableType>
+              <AssemblerScript><![CDATA[
+              [ENABLE]
+              nop
+              [DISABLE]
+              ]]></AssemblerScript>
+              <Address>0</Address>
+            </CheatEntry>
+          </CheatEntries>
+          <LuaScript>print("hello")</LuaScript>
+        </CheatTable>
+        """;
+
+    [Fact]
+    public void Parse_ReturnsCorrectTableVersion()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml, "test.ct");
+
+        Assert.Equal(44, ct.TableVersion);
+        Assert.Equal("test.ct", ct.FileName);
+    }
+
+    [Fact]
+    public void Parse_ParsesTopLevelAndNestedEntries()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        // 3 top-level entries (group + money + script)
+        Assert.Equal(3, ct.Entries.Count);
+        // Total = group + 2 children + money + script = 5
+        Assert.Equal(5, ct.TotalEntryCount);
+    }
+
+    [Fact]
+    public void Parse_RecognizesGroupHeaders()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        var group = ct.Entries[0];
+        Assert.True(group.IsGroupHeader);
+        Assert.Equal("Player Stats", group.Description);
+        Assert.Equal(2, group.Children.Count);
+    }
+
+    [Fact]
+    public void Parse_ParsesPointerOffsets()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        var money = ct.Entries[1];
+        Assert.True(money.IsPointer);
+        Assert.Equal(2, money.PointerOffsets.Count);
+        Assert.Equal("10", money.PointerOffsets[0]);
+        Assert.Equal("1C", money.PointerOffsets[1]);
+    }
+
+    [Fact]
+    public void Parse_ParsesAssemblerScript()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        var script = ct.Entries[2];
+        Assert.NotNull(script.AssemblerScript);
+        Assert.Contains("[ENABLE]", script.AssemblerScript);
+    }
+
+    [Fact]
+    public void Parse_CapturesLuaScript()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        Assert.NotNull(ct.LuaScript);
+        Assert.Contains("hello", ct.LuaScript);
+    }
+
+    [Fact]
+    public void ToAddressTableEntries_FlattensGroupsAndSkipsScripts()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+        var entries = parser.ToAddressTableEntries(ct);
+
+        // Health, Speed (from group), Money = 3 entries. Script skipped (address=0).
+        Assert.Equal(3, entries.Count);
+
+        // Group children get prefixed labels
+        Assert.Equal("Player Stats/Health", entries[0].Label);
+        Assert.Equal("Player Stats/Speed", entries[1].Label);
+        Assert.Equal(MemoryDataType.Float, entries[1].DataType);
+
+        // Pointer entry has notes
+        Assert.Equal("Money", entries[2].Label);
+        Assert.NotNull(entries[2].Notes);
+        Assert.Contains("Pointer", entries[2].Notes);
+    }
+
+    [Fact]
+    public void Parse_MapsVariableTypesCorrectly()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        var group = ct.Entries[0];
+        Assert.Equal(MemoryDataType.Int32, group.Children[0].DataType); // 4 Bytes
+        Assert.Equal(MemoryDataType.Float, group.Children[1].DataType); // Float
+    }
+
+    [Fact]
+    public void Parse_CleansQuotedDescriptions()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+
+        // Descriptions should not have surrounding quotes
+        Assert.Equal("Player Stats", ct.Entries[0].Description);
+        Assert.Equal("Health", ct.Entries[0].Children[0].Description);
+    }
+}

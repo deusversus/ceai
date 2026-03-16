@@ -186,6 +186,29 @@ public sealed class AiToolFunctions(
                $"{inspection.Modules.Count} modules loaded.";
     }
 
+    [Description("Load a Cheat Engine .CT (Cheat Table) file and import its entries into the address table. Provide the full file path.")]
+    public Task<string> LoadCheatTable([Description("Full file path to the .CT file")] string filePath)
+    {
+        if (!System.IO.File.Exists(filePath))
+            return Task.FromResult($"File not found: {filePath}");
+
+        var parser = new CheatTableParser();
+        var ctFile = parser.ParseFile(filePath);
+        var entries = parser.ToAddressTableEntries(ctFile);
+
+        foreach (var entry in entries)
+        {
+            addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
+        }
+
+        var pointerCount = entries.Count(e => e.Notes?.StartsWith("Pointer") == true);
+        return Task.FromResult(
+            $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries, " +
+            $"{entries.Count} addresses imported ({pointerCount} pointers). " +
+            $"Table version: {ctFile.TableVersion}" +
+            (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : ""));
+    }
+
     // ── Breakpoint tools ──
 
     [Description("Set a breakpoint at a memory address. Types: Software, HardwareExecute, HardwareWrite, HardwareReadWrite. Use to trace code execution or find what accesses/writes an address.")]

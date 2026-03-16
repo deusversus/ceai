@@ -52,6 +52,7 @@ public sealed record WorkspaceDashboard(
     IReadOnlyList<AiChatMessage>? AiChatHistory,
     IReadOnlyList<AiActionLogEntry>? AiActionLog,
     bool AiConfigured,
+    string? BreakpointStatus,
     string DataStorePath,
     string StatusMessage)
 {
@@ -84,6 +85,7 @@ public sealed record WorkspaceDashboard(
             null,
             null,
             false,
+            null,
             string.Empty,
             "Loading workspace services...");
 }

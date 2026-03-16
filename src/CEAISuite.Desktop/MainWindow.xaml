@@ -210,6 +210,59 @@
                             </ListView>
                         </StackPanel>
                     </GroupBox>
+
+                    <GroupBox Header="Breakpoints" Margin="0,8,0,0">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <TextBox x:Name="BpAddressTextBox"
+                                         Width="150"
+                                         Margin="0,0,8,0"
+                                         Text="0x0" />
+                                <ComboBox x:Name="BpTypeComboBox"
+                                          Width="130"
+                                          Margin="0,0,8,0"
+                                          Loaded="OnBpTypeComboBoxLoaded" />
+                                <Button Padding="10,6"
+                                        Click="SetBreakpoint"
+                                        Content="Set BP" />
+                            </StackPanel>
+                            <TextBlock Margin="0,0,0,6"
+                                       Foreground="#555555"
+                                       Text="{Binding BreakpointStatus, TargetNullValue=No breakpoints set. Attach to a process first.}" />
+                            <ListView x:Name="BreakpointListView"
+                                      MaxHeight="180"
+                                      FontFamily="Consolas"
+                                      FontSize="12">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="ID" Width="100"
+                                                        DisplayMemberBinding="{Binding Id}" />
+                                        <GridViewColumn Header="Address" Width="120"
+                                                        DisplayMemberBinding="{Binding Address}" />
+                                        <GridViewColumn Header="Type" Width="90"
+                                                        DisplayMemberBinding="{Binding Type}" />
+                                        <GridViewColumn Header="Hits" Width="50"
+                                                        DisplayMemberBinding="{Binding HitCount}" />
+                                        <GridViewColumn Header="Status" Width="70"
+                                                        DisplayMemberBinding="{Binding Status}" />
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Padding="10,6"
+                                        Margin="0,0,8,0"
+                                        Click="RemoveBreakpoint"
+                                        Content="Remove" />
+                                <Button Padding="10,6"
+                                        Margin="0,0,8,0"
+                                        Click="RefreshBreakpoints"
+                                        Content="Refresh" />
+                                <Button Padding="10,6"
+                                        Click="ViewHitLog"
+                                        Content="View hits" />
+                            </StackPanel>
+                        </StackPanel>
+                    </GroupBox>
                 </StackPanel>
             </ScrollViewer>
 

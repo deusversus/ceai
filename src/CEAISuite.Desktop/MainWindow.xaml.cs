@@ -31,6 +31,7 @@ public partial class MainWindow : Window
     private readonly ScriptGenerationService _scriptGenerationService;
     private readonly AddressTableExportService _addressTableExportService;
     private readonly SessionService _sessionService;
+    private readonly BreakpointService _breakpointService;
 
     public MainWindow()
     {
@@ -49,9 +50,10 @@ public partial class MainWindow : Window
         _scriptGenerationService = new ScriptGenerationService();
         _addressTableExportService = new AddressTableExportService();
         _sessionService = new SessionService(new SqliteInvestigationSessionRepository(_databasePath));
+        _breakpointService = new BreakpointService(null); // Engine injected when available
 
         // Wire up AI operator
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService);
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _breakpointService);
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions);
 
@@ -669,4 +671,111 @@ public partial class MainWindow : Window
             DataContext = dashboard with { StatusMessage = $"Load failed: {ex.Message}" };
         }
     }
+
+    // ── Breakpoint handlers ──
+
+    private void OnBpTypeComboBoxLoaded(object sender, RoutedEventArgs e)
+    {
+        var combo = (System.Windows.Controls.ComboBox)sender;
+        combo.ItemsSource = Enum.GetNames<BreakpointType>();
+        combo.SelectedIndex = 0;
+    }
+
+    private async void SetBreakpoint(object sender, RoutedEventArgs e)
+    {
+        var dashboard = DataContext as WorkspaceDashboard;
+        if (dashboard?.CurrentInspection is null) return;
+        try
+        {
+            var type = Enum.Parse<BreakpointType>(BpTypeComboBox.SelectedItem?.ToString() ?? "Software");
+            var bp = await _breakpointService.SetBreakpointAsync(
+                dashboard.CurrentInspection.ProcessId,
+                BpAddressTextBox.Text,
+                type);
+            await RefreshBreakpointList(dashboard);
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with { StatusMessage = $"Breakpoint error: {ex.Message}" };
+        }
+    }
+
+    private async void RemoveBreakpoint(object sender, RoutedEventArgs e)
+    {
+        var dashboard = DataContext as WorkspaceDashboard;
+        if (dashboard?.CurrentInspection is null) return;
+        if (BreakpointListView.SelectedItem is not BreakpointDisplayItem selected) return;
+        try
+        {
+            await _breakpointService.RemoveBreakpointAsync(dashboard.CurrentInspection.ProcessId, selected.Id);
+            await RefreshBreakpointList(dashboard);
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with { StatusMessage = $"Remove BP error: {ex.Message}" };
+        }
+    }
+
+    private async void RefreshBreakpoints(object sender, RoutedEventArgs e)
+    {
+        var dashboard = DataContext as WorkspaceDashboard;
+        if (dashboard?.CurrentInspection is null) return;
+        try
+        {
+            await RefreshBreakpointList(dashboard);
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with { StatusMessage = $"Refresh BP error: {ex.Message}" };
+        }
+    }
+
+    private async void ViewHitLog(object sender, RoutedEventArgs e)
+    {
+        var dashboard = DataContext as WorkspaceDashboard;
+        if (BreakpointListView.SelectedItem is not BreakpointDisplayItem selected) return;
+        try
+        {
+            var hits = await _breakpointService.GetHitLogAsync(selected.Id);
+            var lines = hits.Select(h =>
+            {
+                var regs = string.Join(", ", h.Registers.Take(6).Select(r => $"{r.Key}={r.Value}"));
+                return $"[{h.Timestamp}] TID={h.ThreadId} @ {h.Address}  {regs}";
+            });
+            System.Windows.MessageBox.Show(
+                hits.Count == 0
+                    ? "No hits recorded for this breakpoint."
+                    : string.Join("\n", lines),
+                $"Hit Log — {selected.Id}",
+                MessageBoxButton.OK);
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show($"Error: {ex.Message}", "Hit Log", MessageBoxButton.OK);
+        }
+    }
+
+    private async Task RefreshBreakpointList(WorkspaceDashboard dashboard)
+    {
+        var bps = await _breakpointService.ListBreakpointsAsync(dashboard.CurrentInspection!.ProcessId);
+        BreakpointListView.ItemsSource = bps.Select(b => new BreakpointDisplayItem
+        {
+            Id = b.Id,
+            Address = b.Address,
+            Type = b.Type,
+            HitCount = b.HitCount,
+            Status = b.IsEnabled ? "Active" : "Disabled"
+        }).ToArray();
+        DataContext = dashboard with { BreakpointStatus = $"{bps.Count} breakpoint(s) active" };
+    }
+}
+
+/// <summary>Display model for breakpoint list items.</summary>
+public sealed class BreakpointDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string Address { get; init; } = "";
+    public string Type { get; init; } = "";
+    public int HitCount { get; init; }
+    public string Status { get; init; } = "";
 }

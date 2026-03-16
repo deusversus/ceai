@@ -50,6 +50,7 @@ public sealed class WorkspaceDashboardService(
             null,
             null,
             false,
+            null,
             dataStorePath,
             $"Loaded {processes.Count} processes and {recentSessions.Count} saved sessions.");
     }

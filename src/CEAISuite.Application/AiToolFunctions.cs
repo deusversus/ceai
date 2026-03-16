@@ -14,7 +14,8 @@ public sealed class AiToolFunctions(
     WorkspaceDashboardService dashboardService,
     ScanService scanService,
     AddressTableService addressTableService,
-    DisassemblyService disassemblyService)
+    DisassemblyService disassemblyService,
+    BreakpointService? breakpointService = null)
 {
     [Description("List running processes on the system. Returns process ID, name, and architecture.")]
     public async Task<string> ListProcesses()
@@ -125,5 +126,57 @@ public sealed class AiToolFunctions(
         var entries = addressTableService.Entries;
         var lines = entries.Select(e => $"  {e.Label}: {e.Address} = {e.CurrentValue} (was {e.PreviousValue})");
         return $"Refreshed {entries.Count} entries:\n{string.Join('\n', lines)}";
+    }
+
+    // ── Breakpoint tools ──
+
+    [Description("Set a breakpoint at a memory address. Types: Software, HardwareExecute, HardwareWrite, HardwareReadWrite. Use to trace code execution or find what accesses/writes an address.")]
+    public async Task<string> SetBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex or decimal)")] string address,
+        [Description("Breakpoint type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
+        [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue")
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
+        var bpAction = Enum.Parse<BreakpointHitAction>(hitAction, ignoreCase: true);
+        var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpAction);
+        return $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, action: {bp.HitAction})";
+    }
+
+    [Description("Remove a breakpoint by its ID.")]
+    public async Task<string> RemoveBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Breakpoint ID to remove")] string breakpointId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var removed = await breakpointService.RemoveBreakpointAsync(processId, breakpointId);
+        return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
+    }
+
+    [Description("List all active breakpoints for a process.")]
+    public async Task<string> ListBreakpoints([Description("Process ID")] int processId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var bps = await breakpointService.ListBreakpointsAsync(processId);
+        if (bps.Count == 0) return "No active breakpoints.";
+        var lines = bps.Select(b => $"  [{b.Id}] {b.Address} ({b.Type}) hits={b.HitCount} {(b.IsEnabled ? "enabled" : "disabled")}");
+        return $"Active breakpoints ({bps.Count}):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Get the hit log for a breakpoint. Shows when it was triggered, register state, and thread info.")]
+    public async Task<string> GetBreakpointHitLog(
+        [Description("Breakpoint ID")] string breakpointId,
+        [Description("Maximum entries to return")] int maxEntries = 20)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var hits = await breakpointService.GetHitLogAsync(breakpointId, maxEntries);
+        if (hits.Count == 0) return $"No hits recorded for breakpoint {breakpointId}.";
+        var lines = hits.Select(h =>
+        {
+            var regs = string.Join(", ", h.Registers.Take(4).Select(r => $"{r.Key}={r.Value}"));
+            return $"  [{h.Timestamp}] thread={h.ThreadId} @ {h.Address} | {regs}";
+        });
+        return $"Hit log ({hits.Count} entries):\n{string.Join('\n', lines)}";
     }
 }

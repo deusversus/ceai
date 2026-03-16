@@ -32,6 +32,7 @@ public partial class MainWindow : Window
     private readonly AddressTableExportService _addressTableExportService;
     private readonly SessionService _sessionService;
     private readonly BreakpointService _breakpointService;
+    private readonly IAutoAssemblerEngine? _autoAssemblerEngine;
 
     public MainWindow()
     {
@@ -51,6 +52,7 @@ public partial class MainWindow : Window
         _addressTableExportService = new AddressTableExportService();
         _sessionService = new SessionService(new SqliteInvestigationSessionRepository(_databasePath));
         _breakpointService = new BreakpointService(new WindowsBreakpointEngine());
+        _autoAssemblerEngine = new WindowsAutoAssemblerEngine();
 
         // Wire up AI operator
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService);
@@ -607,6 +609,353 @@ public partial class MainWindow : Window
         }
     }
 
+    // ─── Address Table Context Menu & Editing (CE 7.5 style) ─────────
+
+    private AddressTableNode? GetSelectedNode()
+        => AddressTableTree.SelectedItem as AddressTableNode;
+
+    private void RefreshAddressTableUI(string? statusMessage = null)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+        DataContext = dashboard with
+        {
+            AddressTableNodes = _addressTableService.Roots,
+            AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
+            StatusMessage = statusMessage ?? dashboard.StatusMessage
+        };
+    }
+
+    private void ActiveCheckBox_Click(object sender, RoutedEventArgs e)
+    {
+        // CheckBox binding already updates IsActive → IsLocked/IsScriptEnabled
+        // Just set LockedValue for freeze
+        if (sender is System.Windows.Controls.CheckBox cb &&
+            cb.DataContext is AddressTableNode node && !node.IsScriptEntry)
+        {
+            node.LockedValue = node.IsLocked ? node.CurrentValue : null;
+        }
+        RefreshAddressTableUI();
+    }
+
+    private void AddressTableTree_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+
+        // Determine which column was clicked via hit-test position
+        // CE behavior: double-click description = edit desc, value = edit value, address = edit addr
+        // For simplicity: non-group, non-script → edit value; script → view script
+        if (node.IsScriptEntry)
+        {
+            ViewSelectedScript(sender, e);
+            return;
+        }
+        if (node.IsGroup) return;
+
+        // Edit value dialog
+        EditNodeValue(node);
+    }
+
+    private void EditNodeValue(AddressTableNode node)
+    {
+        var result = ShowInputDialog("Change Value", "New value:", node.CurrentValue);
+        if (result is null) return;
+
+        node.PreviousValue = node.CurrentValue;
+        node.CurrentValue = result;
+        if (node.IsLocked) node.LockedValue = result;
+
+        // Attempt write if attached
+        if (DataContext is WorkspaceDashboard dashboard && dashboard.CurrentInspection is not null)
+        {
+            try
+            {
+                var addr = AddressTableService.ParseAddress(node.Address);
+                _ = _addressTableService.WriteValueAsync(
+                    dashboard.CurrentInspection.ProcessId, node);
+            }
+            catch { /* best effort */ }
+        }
+
+        RefreshAddressTableUI($"Value changed: {node.Label} = {result}");
+    }
+
+    private void CtxToggleActivate(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+        node.IsActive = !node.IsActive;
+        if (!node.IsScriptEntry)
+            node.LockedValue = node.IsLocked ? node.CurrentValue : null;
+        RefreshAddressTableUI($"{node.Label}: {(node.IsActive ? "Activated" : "Deactivated")}");
+    }
+
+    private void CtxChangeDescription(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+        var result = ShowInputDialog("Change Description", "New description:", node.Label);
+        if (result is not null)
+        {
+            _addressTableService.UpdateLabel(node.Id, result);
+            RefreshAddressTableUI($"Renamed to '{result}'");
+        }
+    }
+
+    private void CtxChangeAddress(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        var result = ShowInputDialog("Change Address", "New address (hex):", node.Address);
+        if (result is not null)
+        {
+            node.Address = result;
+            RefreshAddressTableUI($"Address changed: {node.Label} → {result}");
+        }
+    }
+
+    private void CtxChangeValue(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        EditNodeValue(node);
+    }
+
+    private void CtxChangeType(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+
+        var typeDialog = new System.Windows.Window
+        {
+            Title = "Change Type",
+            Width = 260,
+            Height = 180,
+            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = System.Windows.ResizeMode.NoResize
+        };
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
+        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = "Select data type:" });
+        var combo = new System.Windows.Controls.ComboBox { Margin = new Thickness(0, 6, 0, 8) };
+        foreach (var t in Enum.GetValues<MemoryDataType>())
+            combo.Items.Add(t.ToString());
+        combo.SelectedItem = node.DataType.ToString();
+        panel.Children.Add(combo);
+        var okBtn = new System.Windows.Controls.Button
+        {
+            Content = "OK",
+            Padding = new Thickness(16, 4, 16, 4),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
+        };
+        okBtn.Click += (_, _) => { typeDialog.DialogResult = true; };
+        panel.Children.Add(okBtn);
+        typeDialog.Content = panel;
+
+        if (typeDialog.ShowDialog() == true && combo.SelectedItem is string selected)
+        {
+            node.DataType = Enum.Parse<MemoryDataType>(selected);
+            RefreshAddressTableUI($"Type changed: {node.Label} → {selected}");
+        }
+    }
+
+    private void CtxToggleFreeze(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        _addressTableService.ToggleLock(node.Id);
+        RefreshAddressTableUI($"{node.Label}: {(node.IsLocked ? "Frozen" : "Unfrozen")}");
+    }
+
+    private void CtxShowAsHex(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        // Toggle hex display in notes
+        if (node.Notes?.Contains("[HEX]") == true)
+        {
+            node.Notes = node.Notes.Replace("[HEX] ", "");
+        }
+        else
+        {
+            node.Notes = $"[HEX] {node.Notes ?? ""}".Trim();
+        }
+        RefreshAddressTableUI();
+    }
+
+    private void CtxBrowseMemory(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        if (DataContext is WorkspaceDashboard d)
+            DataContext = d with { StatusMessage = $"Browse memory at {node.Address} — use Memory Editor panel" };
+    }
+
+    private void CtxDisassemble(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        if (DataContext is WorkspaceDashboard d)
+            DataContext = d with { StatusMessage = $"Disassemble at {node.Address} — use Disassembly panel" };
+    }
+
+    private void CtxMoveToGroup(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+
+        var groups = new List<AddressTableNode>();
+        CollectGroups(_addressTableService.Roots, groups);
+
+        if (groups.Count == 0)
+        {
+            if (DataContext is WorkspaceDashboard d)
+                DataContext = d with { StatusMessage = "No groups exist. Create a group first." };
+            return;
+        }
+
+        var dialog = new System.Windows.Window
+        {
+            Title = "Move to Group",
+            Width = 300,
+            Height = 160,
+            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = System.Windows.ResizeMode.NoResize
+        };
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
+        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = "Select target group:" });
+        var combo = new System.Windows.Controls.ComboBox { Margin = new Thickness(0, 6, 0, 8) };
+        combo.Items.Add("(Root level)");
+        foreach (var g in groups) combo.Items.Add(g.Label);
+        combo.SelectedIndex = 0;
+        panel.Children.Add(combo);
+        var okBtn = new System.Windows.Controls.Button
+        {
+            Content = "Move",
+            Padding = new Thickness(16, 4, 16, 4),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
+        };
+        okBtn.Click += (_, _) => { dialog.DialogResult = true; };
+        panel.Children.Add(okBtn);
+        dialog.Content = panel;
+
+        if (dialog.ShowDialog() != true) return;
+
+        var targetGroupId = combo.SelectedIndex == 0 ? null : groups[combo.SelectedIndex - 1].Id;
+        _addressTableService.MoveToGroup(node.Id, targetGroupId);
+        RefreshAddressTableUI($"Moved '{node.Label}' to {(targetGroupId is null ? "root" : combo.SelectedItem)}");
+    }
+
+    private static void CollectGroups(
+        System.Collections.ObjectModel.ObservableCollection<AddressTableNode> nodes,
+        List<AddressTableNode> results)
+    {
+        foreach (var n in nodes)
+        {
+            if (n.IsGroup) results.Add(n);
+            CollectGroups(n.Children, results);
+        }
+    }
+
+    private void CtxDelete(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+        _addressTableService.RemoveEntry(node.Id);
+        RefreshAddressTableUI($"Deleted '{node.Label}'");
+    }
+
+    private AddressTableNode? _clipboard;
+
+    private void CtxCut(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+        _clipboard = node;
+        _addressTableService.RemoveEntry(node.Id);
+        RefreshAddressTableUI($"Cut '{node.Label}'");
+    }
+
+    private void CtxCopy(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null) return;
+        _clipboard = node;
+        if (DataContext is WorkspaceDashboard d)
+            DataContext = d with { StatusMessage = $"Copied '{node.Label}'" };
+    }
+
+    private void CtxPaste(object sender, RoutedEventArgs e)
+    {
+        if (_clipboard is null)
+        {
+            if (DataContext is WorkspaceDashboard d)
+                DataContext = d with { StatusMessage = "Nothing to paste." };
+            return;
+        }
+
+        // Clone the node
+        var clone = new AddressTableNode(
+            Guid.NewGuid().ToString("N")[..8],
+            _clipboard.Label + " (copy)",
+            _clipboard.IsGroup)
+        {
+            Address = _clipboard.Address,
+            DataType = _clipboard.DataType,
+            CurrentValue = _clipboard.CurrentValue,
+            Notes = _clipboard.Notes,
+            AssemblerScript = _clipboard.AssemblerScript
+        };
+
+        var selected = GetSelectedNode();
+        if (selected?.IsGroup == true)
+        {
+            selected.Children.Add(clone);
+        }
+        else
+        {
+            _addressTableService.Roots.Add(clone);
+        }
+
+        RefreshAddressTableUI($"Pasted '{clone.Label}'");
+    }
+
+    private string? ShowInputDialog(string title, string prompt, string defaultValue)
+    {
+        var dialog = new System.Windows.Window
+        {
+            Title = title,
+            Width = 340,
+            Height = 150,
+            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = System.Windows.ResizeMode.NoResize
+        };
+        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
+        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = prompt });
+        var textBox = new System.Windows.Controls.TextBox
+        {
+            Text = defaultValue,
+            Margin = new Thickness(0, 6, 0, 8),
+            SelectionStart = 0,
+            SelectionLength = defaultValue.Length
+        };
+        panel.Children.Add(textBox);
+        var okBtn = new System.Windows.Controls.Button
+        {
+            Content = "OK",
+            Padding = new Thickness(16, 4, 16, 4),
+            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
+        };
+        okBtn.Click += (_, _) => { dialog.DialogResult = true; };
+        panel.Children.Add(okBtn);
+        dialog.Content = panel;
+
+        textBox.Focus();
+        return dialog.ShowDialog() == true ? textBox.Text : null;
+    }
+
     // ─── Address Table Grouping ──────────────────────────────────────
 
     private void CreateAddressGroup(object sender, RoutedEventArgs e)
@@ -641,6 +990,139 @@ public partial class MainWindow : Window
             AddressTableStatus = $"{_addressTableService.Entries.Count} entries in {_addressTableService.Roots.Count} nodes",
             StatusMessage = $"Created group '{textBox.Text.Trim()}'."
         };
+    }
+
+    // ─── Script Viewing & Toggling ──────────────────────────────────
+
+    private void ViewSelectedScript(object sender, RoutedEventArgs e)
+    {
+        var selected = AddressTableTree.SelectedItem as AddressTableNode;
+        if (selected?.AssemblerScript is null)
+        {
+            if (DataContext is WorkspaceDashboard d)
+                DataContext = d with { StatusMessage = "Select a script entry first (marked with 📜)." };
+            return;
+        }
+
+        var viewer = new System.Windows.Window
+        {
+            Title = $"Script: {selected.Label}",
+            Width = 720,
+            Height = 520,
+            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+            Owner = this
+        };
+
+        var panel = new System.Windows.Controls.DockPanel();
+
+        var toolbar = new System.Windows.Controls.StackPanel
+        {
+            Orientation = System.Windows.Controls.Orientation.Horizontal,
+            Margin = new Thickness(8)
+        };
+        System.Windows.Controls.DockPanel.SetDock(toolbar, System.Windows.Controls.Dock.Top);
+
+        var statusText = new System.Windows.Controls.TextBlock
+        {
+            VerticalAlignment = System.Windows.VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+            Text = selected.IsScriptEnabled ? "Status: ✅ Enabled" : "Status: ❌ Disabled",
+            Foreground = selected.IsScriptEnabled
+                ? System.Windows.Media.Brushes.Green
+                : System.Windows.Media.Brushes.Gray
+        };
+        toolbar.Children.Add(statusText);
+
+        if (selected.ScriptStatus is not null)
+        {
+            toolbar.Children.Add(new System.Windows.Controls.TextBlock
+            {
+                VerticalAlignment = System.Windows.VerticalAlignment.Center,
+                Margin = new Thickness(12, 0, 0, 0),
+                Text = selected.ScriptStatus,
+                Foreground = System.Windows.Media.Brushes.OrangeRed
+            });
+        }
+
+        panel.Children.Add(toolbar);
+
+        var scriptBox = new System.Windows.Controls.TextBox
+        {
+            Text = selected.AssemblerScript,
+            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+            FontSize = 13,
+            IsReadOnly = true,
+            AcceptsReturn = true,
+            VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+            Margin = new Thickness(8),
+            Background = new System.Windows.Media.SolidColorBrush(
+                System.Windows.Media.Color.FromRgb(0x1E, 0x1E, 0x2E)),
+            Foreground = System.Windows.Media.Brushes.LightGreen,
+            Padding = new Thickness(8)
+        };
+        panel.Children.Add(scriptBox);
+
+        viewer.Content = panel;
+        viewer.ShowDialog();
+    }
+
+    private async void ToggleSelectedScript(object sender, RoutedEventArgs e)
+    {
+        var selected = AddressTableTree.SelectedItem as AddressTableNode;
+        if (selected?.AssemblerScript is null)
+        {
+            if (DataContext is WorkspaceDashboard d)
+                DataContext = d with { StatusMessage = "Select a script entry first (marked with 📜)." };
+            return;
+        }
+
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+
+        // Check if we have an attached process
+        var processId = dashboard.CurrentInspection?.ProcessId ?? 0;
+        if (processId == 0)
+        {
+            DataContext = dashboard with { StatusMessage = "Attach to a process before toggling scripts." };
+            return;
+        }
+
+        if (_autoAssemblerEngine is null)
+        {
+            DataContext = dashboard with { StatusMessage = "Auto Assembler engine not available." };
+            return;
+        }
+
+        try
+        {
+            if (selected.IsScriptEnabled)
+            {
+                // Disable
+                var result = await _autoAssemblerEngine.DisableAsync(processId, selected.AssemblerScript);
+                selected.IsScriptEnabled = false;
+                selected.ScriptStatus = result.Success ? "Disabled successfully" : $"Disable failed: {result.Error}";
+            }
+            else
+            {
+                // Enable
+                var result = await _autoAssemblerEngine.EnableAsync(processId, selected.AssemblerScript);
+                selected.IsScriptEnabled = result.Success;
+                selected.ScriptStatus = result.Success
+                    ? $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)"
+                    : $"Enable failed: {result.Error}";
+            }
+
+            DataContext = dashboard with
+            {
+                AddressTableNodes = _addressTableService.Roots,
+                StatusMessage = $"Script '{selected.Label}': {selected.ScriptStatus}"
+            };
+        }
+        catch (Exception ex)
+        {
+            selected.ScriptStatus = $"Error: {ex.Message}";
+            DataContext = dashboard with { StatusMessage = $"Script error: {ex.Message}" };
+        }
     }
 
     // ─── Cheat Table Import ──────────────────────────────────────────

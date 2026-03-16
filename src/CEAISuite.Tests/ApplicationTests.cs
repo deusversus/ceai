@@ -383,14 +383,14 @@ public class CheatTableParserTests
     }
 
     [Fact]
-    public void ToAddressTableEntries_FlattensGroupsAndSkipsScripts()
+    public void ToAddressTableEntries_FlattensGroupsAndIncludesScripts()
     {
         var parser = new CheatTableParser();
         var ct = parser.Parse(SampleCtXml);
         var entries = parser.ToAddressTableEntries(ct);
 
-        // Health, Speed (from group), Money = 3 entries. Script skipped (address=0).
-        Assert.Equal(3, entries.Count);
+        // Health, Speed (from group), Money, God Mode script = 4 entries
+        Assert.Equal(4, entries.Count);
 
         // Group children get prefixed labels
         Assert.Equal("Player Stats/Health", entries[0].Label);
@@ -401,6 +401,10 @@ public class CheatTableParserTests
         Assert.Equal("Money", entries[2].Label);
         Assert.NotNull(entries[2].Notes);
         Assert.Contains("Pointer", entries[2].Notes);
+
+        // Script entry is included with placeholder address
+        Assert.Equal("God Mode", entries[3].Label);
+        Assert.Equal("(script)", entries[3].Address);
     }
 
     [Fact]
@@ -423,5 +427,55 @@ public class CheatTableParserTests
         // Descriptions should not have surrounding quotes
         Assert.Equal("Player Stats", ct.Entries[0].Description);
         Assert.Equal("Health", ct.Entries[0].Children[0].Description);
+    }
+
+    [Fact]
+    public void ToAddressTableNodes_PreservesScriptEntries()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        // 3 top-level nodes: group (Player Stats), Money, God Mode script
+        Assert.Equal(3, nodes.Count);
+
+        // God Mode script node
+        var scriptNode = nodes[2];
+        Assert.True(scriptNode.IsScriptEntry);
+        Assert.Equal("(script)", scriptNode.Address);
+        Assert.Contains("[ENABLE]", scriptNode.AssemblerScript);
+        Assert.Equal("God Mode", scriptNode.Label);
+    }
+
+    [Fact]
+    public void ToAddressTableNodes_PreservesGroupHierarchy()
+    {
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(SampleCtXml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        var group = nodes[0];
+        Assert.True(group.IsGroup);
+        Assert.Equal("Player Stats", group.Label);
+        Assert.Equal(2, group.Children.Count);
+        Assert.Equal("Health", group.Children[0].Label);
+        Assert.Equal("Speed", group.Children[1].Label);
+    }
+
+    [Fact]
+    public void ScriptNode_DisplayHelpers_ShowCorrectValues()
+    {
+        var node = new AddressTableNode("s1", "EXP Multiplier", false)
+        {
+            AssemblerScript = "[ENABLE]\nalloc(newmem,1024)\n[DISABLE]\ndealloc(newmem)"
+        };
+
+        Assert.True(node.IsScriptEntry);
+        Assert.Equal("📜", node.DisplayIcon);
+        Assert.Equal("Script", node.DisplayType);
+        Assert.Equal("❌ Disabled", node.DisplayValue);
+
+        node.IsScriptEnabled = true;
+        Assert.Equal("✅ Enabled", node.DisplayValue);
     }
 }

@@ -186,7 +186,7 @@ public sealed class AiToolFunctions(
                $"{inspection.Modules.Count} modules loaded.";
     }
 
-    [Description("Load a Cheat Engine .CT (Cheat Table) file and import its entries into the address table. Provide the full file path.")]
+    [Description("Load a Cheat Engine .CT (Cheat Table) file and import its entries into the address table with hierarchy and scripts preserved. Provide the full file path.")]
     public Task<string> LoadCheatTable([Description("Full file path to the .CT file")] string filePath)
     {
         if (!System.IO.File.Exists(filePath))
@@ -194,19 +194,27 @@ public sealed class AiToolFunctions(
 
         var parser = new CheatTableParser();
         var ctFile = parser.ParseFile(filePath);
-        var entries = parser.ToAddressTableEntries(ctFile);
+        var nodes = parser.ToAddressTableNodes(ctFile);
+        addressTableService.ImportNodes(nodes);
 
-        foreach (var entry in entries)
-        {
-            addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
-        }
-
-        var pointerCount = entries.Count(e => e.Notes?.StartsWith("Pointer") == true);
+        var scriptCount = CountScriptsInNodes(nodes);
+        var leafCount = addressTableService.Entries.Count;
         return Task.FromResult(
-            $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries, " +
-            $"{entries.Count} addresses imported ({pointerCount} pointers). " +
+            $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries imported with hierarchy. " +
+            $"{leafCount} address entries, {scriptCount} scripts, {nodes.Count} top-level nodes. " +
             $"Table version: {ctFile.TableVersion}" +
             (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : ""));
+    }
+
+    private static int CountScriptsInNodes(IEnumerable<AddressTableNode> nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes)
+        {
+            if (node.IsScriptEntry) count++;
+            count += CountScriptsInNodes(node.Children);
+        }
+        return count;
     }
 
     // ── Breakpoint tools ──
@@ -259,5 +267,66 @@ public sealed class AiToolFunctions(
             return $"  [{h.Timestamp}] thread={h.ThreadId} @ {h.Address} | {regs}";
         });
         return $"Hit log ({hits.Count} entries):\n{string.Join('\n', lines)}";
+    }
+
+    // ── Script tools ──
+
+    [Description("List all script entries in the address table. Shows script name, enabled status, and type (Auto Assembler or LuaCall).")]
+    public Task<string> ListScripts()
+    {
+        var scripts = new List<string>();
+        CollectScripts(addressTableService.Roots, scripts, "");
+        if (scripts.Count == 0) return Task.FromResult("No scripts in the address table.");
+        return Task.FromResult($"Found {scripts.Count} scripts:\n{string.Join('\n', scripts)}");
+    }
+
+    private static void CollectScripts(IEnumerable<AddressTableNode> nodes, List<string> results, string prefix)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsScriptEntry)
+            {
+                var status = node.IsScriptEnabled ? "✅ Enabled" : "❌ Disabled";
+                var type = node.AssemblerScript!.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
+                results.Add($"  [{status}] {prefix}{node.Label} (ID: {node.Id}, Type: {type})");
+            }
+            if (node.Children.Count > 0)
+                CollectScripts(node.Children, results, $"{prefix}{node.Label}/");
+        }
+    }
+
+    [Description("View the source code of a script entry by its node ID. Use ListScripts first to find the ID.")]
+    public Task<string> ViewScript([Description("Node ID of the script entry")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
+
+        var type = node.AssemblerScript.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
+        var status = node.IsScriptEnabled ? "✅ Enabled" : "❌ Disabled";
+        return Task.FromResult(
+            $"Script: {node.Label}\nType: {type}\nStatus: {status}\n" +
+            $"──────────────────────\n{node.AssemblerScript}");
+    }
+
+    [Description("Validate a script entry by parsing it. Checks for syntax errors without executing.")]
+    public Task<string> ValidateScript(
+        [Description("Node ID of the script entry")] string nodeId,
+        [Description("Auto Assembler engine instance (injected)")] IAutoAssemblerEngine? aaEngine = null)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
+
+        if (aaEngine is null) return Task.FromResult("Auto Assembler engine not available for validation.");
+
+        var result = aaEngine.Parse(node.AssemblerScript);
+        if (result.IsValid)
+            return Task.FromResult($"Script '{node.Label}' is valid. Has [ENABLE]: {result.EnableSection is not null}, [DISABLE]: {result.DisableSection is not null}");
+
+        return Task.FromResult(
+            $"Script '{node.Label}' has issues:\n" +
+            $"Errors: {string.Join("; ", result.Errors)}\n" +
+            $"Warnings: {string.Join("; ", result.Warnings)}");
     }
 }

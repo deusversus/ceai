@@ -33,14 +33,35 @@ public sealed class AddressTableNode
     public bool IsLocked { get; set; }
     public string? LockedValue { get; set; }
 
+    // Script fields
+    public string? AssemblerScript { get; set; }
+    public bool IsScriptEntry => AssemblerScript is not null;
+    public bool IsScriptEnabled { get; set; }
+    public string? ScriptStatus { get; set; }
+
+    // Active state (checkbox — for scripts = enabled, for values = frozen/locked)
+    public bool IsActive
+    {
+        get => IsScriptEntry ? IsScriptEnabled : IsLocked;
+        set
+        {
+            if (IsScriptEntry) IsScriptEnabled = value;
+            else IsLocked = value;
+        }
+    }
+
     // Tree structure
     public ObservableCollection<AddressTableNode> Children { get; } = new();
     public bool IsExpanded { get; set; } = true;
 
     // Display helpers
-    public string DisplayValue => IsGroup ? $"[{Children.Count} items]" : CurrentValue;
-    public string DisplayType => IsGroup ? "Group" : DataType.ToString();
-    public string DisplayLock => IsGroup ? "" : (IsLocked ? "🔒" : "");
+    public string DisplayValue => IsGroup ? $"[{Children.Count} items]"
+        : IsScriptEntry ? (IsScriptEnabled ? "✅ Enabled" : "❌ Disabled")
+        : CurrentValue;
+    public string DisplayType => IsGroup ? "Group" : IsScriptEntry ? "Script" : DataType.ToString();
+    public string DisplayLock => IsGroup ? "" : IsScriptEntry ? "" : (IsLocked ? "🔒 Frozen" : "");
+    public string DisplayIcon => IsScriptEntry ? "📜" : IsGroup ? "📁" : "";
+    public string ValueColor => IsLocked ? "#CC4444" : "#000000";
 
     public AddressTableNode(string id, string label, bool isGroup)
     {
@@ -248,11 +269,18 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         return false;
     }
 
-    private static nuint ParseAddress(string addressText)
+    public static nuint ParseAddress(string addressText)
     {
         var normalized = addressText.Trim();
         if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             return (nuint)ulong.Parse(normalized[2..], System.Globalization.NumberStyles.HexNumber);
         return (nuint)ulong.Parse(normalized);
+    }
+
+    /// <summary>Write a node's current value to process memory.</summary>
+    public async Task WriteValueAsync(int processId, AddressTableNode node, CancellationToken ct = default)
+    {
+        var addr = ParseAddress(node.Address);
+        await engineFacade.WriteValueAsync(processId, addr, node.DataType, node.CurrentValue, ct);
     }
 }

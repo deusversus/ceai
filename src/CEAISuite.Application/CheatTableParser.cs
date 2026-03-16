@@ -100,9 +100,21 @@ public sealed class CheatTableParser
                 continue;
             }
 
-            // Skip script-only entries with no address
-            if (entry.AssemblerScript is not null && entry.Address == "0")
+            // Script-only entries (address = "0" but has a script)
+            if (entry.AssemblerScript is not null && (entry.Address == "0" || entry.Address == "+0"))
+            {
+                var scriptNode = new AddressTableNode($"ct-{entry.Id}", entry.Description, false)
+                {
+                    Address = "(script)",
+                    AssemblerScript = entry.AssemblerScript,
+                    Notes = entry.AssemblerScript.Contains("LuaCall") ? "LuaCall script (display only)" : "Auto Assembler script"
+                };
+                // Also import any children the script entry may have
+                foreach (var child in ConvertToNodes(entry.Children))
+                    scriptNode.Children.Add(child);
+                nodes.Add(scriptNode);
                 continue;
+            }
 
             var address = entry.IsPointer
                 ? $"{entry.Address}+{string.Join("+", entry.PointerOffsets)}"
@@ -120,8 +132,14 @@ public sealed class CheatTableParser
                 Address = address,
                 DataType = entry.DataType,
                 CurrentValue = entry.LastValue ?? "0",
-                Notes = entry.IsPointer ? $"Pointer: [{string.Join(" -> ", entry.PointerOffsets)}]" : null
+                Notes = entry.IsPointer ? $"Pointer: [{string.Join(" -> ", entry.PointerOffsets)}]" : null,
+                AssemblerScript = entry.AssemblerScript // Entries can have both address + script
             };
+
+            // Import any children
+            foreach (var child in ConvertToNodes(entry.Children))
+                node.Children.Add(child);
+
             nodes.Add(node);
         }
         return nodes;
@@ -143,9 +161,25 @@ public sealed class CheatTableParser
                 continue;
             }
 
-            // Skip script-only entries
-            if (entry.AssemblerScript is not null && entry.Address == "0")
+            // Script-only entries still get imported (with placeholder address)
+            if (entry.AssemblerScript is not null && (entry.Address == "0" || entry.Address == "+0"))
+            {
+                var scriptLabel = groupPrefix is not null
+                    ? $"{groupPrefix}/{entry.Description}"
+                    : entry.Description;
+                result.Add(new AddressTableEntry(
+                    $"ct-{entry.Id}",
+                    scriptLabel,
+                    "(script)",
+                    MemoryDataType.Int32,
+                    "",
+                    null,
+                    "Auto Assembler script",
+                    false,
+                    null));
+                FlattenEntries(entry.Children, result, groupPrefix);
                 continue;
+            }
 
             var label = groupPrefix is not null
                 ? $"{groupPrefix}/{entry.Description}"

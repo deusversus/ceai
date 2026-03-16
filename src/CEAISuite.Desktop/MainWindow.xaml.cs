@@ -77,6 +77,31 @@ public partial class MainWindow : Window
         DataContext = await _dashboardService.BuildAsync(_databasePath);
     }
 
+    private async void RefreshProcessList(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+        try
+        {
+            var updated = await _dashboardService.BuildAsync(_databasePath);
+            DataContext = updated with
+            {
+                CurrentInspection = dashboard.CurrentInspection,
+                ScanResults = dashboard.ScanResults,
+                ScanStatus = dashboard.ScanStatus,
+                ScanDetails = dashboard.ScanDetails,
+                AddressTableEntries = dashboard.AddressTableEntries,
+                AddressTableStatus = dashboard.AddressTableStatus,
+                Disassembly = dashboard.Disassembly,
+                BreakpointStatus = dashboard.BreakpointStatus,
+                StatusMessage = $"Refreshed: {updated.RunningProcesses.Count} processes found."
+            };
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with { StatusMessage = $"Refresh failed: {ex.Message}" };
+        }
+    }
+
     private async void InspectSelectedProcess(object sender, RoutedEventArgs e)
     {
         if (DataContext is not WorkspaceDashboard dashboard)

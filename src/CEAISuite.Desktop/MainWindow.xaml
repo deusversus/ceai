@@ -63,11 +63,15 @@
                         <TextBlock Text="{Binding StatusMessage}"
                                    TextWrapping="Wrap"
                                    Foreground="#555555" />
-                        <Button Margin="0,8,0,0"
-                                Padding="10,6"
-                                HorizontalAlignment="Left"
-                                Click="InspectSelectedProcess"
-                                Content="Inspect selected process" />
+                        <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <Button Padding="10,6"
+                                    Margin="0,0,8,0"
+                                    Click="InspectSelectedProcess"
+                                    Content="Inspect selected process" />
+                            <Button Padding="10,6"
+                                    Click="RefreshProcessList"
+                                    Content="🔄 Refresh" />
+                        </StackPanel>
                     </StackPanel>
                     <ListView x:Name="RunningProcessesList" ItemsSource="{Binding RunningProcesses}">
                         <ListView.ItemTemplate>

@@ -64,8 +64,10 @@ public partial class MainWindow : Window
         var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
-        var model = Environment.GetEnvironmentVariable("CEAI_MODEL") ?? "gpt-4o-mini";
-        return new OpenAIClient(apiKey).GetChatClient(model).AsIChatClient();
+        var model = Environment.GetEnvironmentVariable("CEAI_MODEL") ?? "gpt-5.4";
+        return new OpenAIClient(apiKey)
+            .GetChatClient(model)
+            .AsIChatClient();
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)

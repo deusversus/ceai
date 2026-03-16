@@ -37,7 +37,14 @@ public sealed class AiOperatorService
             .Cast<AITool>()
             .ToList();
 
-        _chatOptions = new ChatOptions { Tools = tools };
+        _chatOptions = new ChatOptions
+        {
+            Tools = tools,
+            AdditionalProperties = new AdditionalPropertiesDictionary
+            {
+                ["reasoning_effort"] = "high"
+            }
+        };
 
         // Wrap the client with function invocation middleware so tool calls
         // are automatically executed and results fed back to the model

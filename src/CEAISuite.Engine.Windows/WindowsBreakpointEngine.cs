@@ -1147,7 +1147,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct EXCEPTION_RECORD
+    private unsafe struct EXCEPTION_RECORD
     {
         public uint ExceptionCode;
         public uint ExceptionFlags;
@@ -1155,8 +1155,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         public IntPtr ExceptionAddress;
         public uint NumberParameters;
 
-        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 15)]
-        public nuint[] ExceptionInformation;
+        public fixed ulong ExceptionInformation[15];
     }
 
     [StructLayout(LayoutKind.Sequential)]

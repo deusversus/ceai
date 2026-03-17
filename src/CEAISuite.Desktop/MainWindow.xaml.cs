@@ -77,6 +77,12 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(() => AiStatusText.Text = status);
         };
 
+        // Refresh chat switcher when chats change
+        _aiOperatorService.ChatListChanged += () =>
+        {
+            Dispatcher.BeginInvoke(RefreshChatSwitcher);
+        };
+
         _appSettingsService.SettingsChanged += () =>
         {
             Dispatcher.Invoke(() =>
@@ -150,6 +156,7 @@ public partial class MainWindow : Window
         source?.AddHook(WndProc);
 
         DataContext = await _dashboardService.BuildAsync(_databasePath);
+        RefreshChatSwitcher();
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -166,6 +173,7 @@ public partial class MainWindow : Window
     {
         _refreshTimer?.Stop();
         _hotkeyService.Dispose();
+        _aiOperatorService.SaveCurrentChat();
         base.OnClosed(e);
     }
 
@@ -614,6 +622,7 @@ public partial class MainWindow : Window
             if (AiStatusText.Text.StartsWith("Thinking") || AiStatusText.Text.StartsWith("Tool:"))
                 AiStatusText.Text = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
             RefreshAiChatDisplay();
+            RefreshChatSwitcher();
             // Also refresh address table in case AI modified it
             if (DataContext is WorkspaceDashboard dashboard)
             {
@@ -639,6 +648,53 @@ public partial class MainWindow : Window
     {
         _aiOperatorService.ClearHistory();
         RefreshAiChatDisplay();
+    }
+
+    private bool _suppressChatSwitch;
+
+    private void RefreshChatSwitcher()
+    {
+        _suppressChatSwitch = true;
+        var chats = _aiOperatorService.ListChats();
+        // Include current unsaved chat if not yet in the list
+        if (!chats.Any(c => c.Id == _aiOperatorService.CurrentChatId))
+        {
+            chats.Insert(0, new AiChatSession
+            {
+                Id = _aiOperatorService.CurrentChatId,
+                Title = _aiOperatorService.CurrentChatTitle
+            });
+        }
+        ChatSwitcher.ItemsSource = chats;
+        ChatSwitcher.SelectedItem = chats.FirstOrDefault(c => c.Id == _aiOperatorService.CurrentChatId);
+        _suppressChatSwitch = false;
+    }
+
+    private void ChatSwitcher_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressChatSwitch) return;
+        if (ChatSwitcher.SelectedItem is AiChatSession selected && selected.Id != _aiOperatorService.CurrentChatId)
+        {
+            _aiOperatorService.SwitchChat(selected.Id);
+            RefreshAiChatDisplay();
+        }
+    }
+
+    private void NewAiChat(object sender, RoutedEventArgs e)
+    {
+        _aiOperatorService.NewChat();
+        RefreshAiChatDisplay();
+        RefreshChatSwitcher();
+    }
+
+    private void DeleteAiChat(object sender, RoutedEventArgs e)
+    {
+        if (ChatSwitcher.SelectedItem is AiChatSession selected)
+        {
+            _aiOperatorService.DeleteChat(selected.Id);
+            RefreshAiChatDisplay();
+            RefreshChatSwitcher();
+        }
     }
 
     private void RefreshAiChatDisplay()

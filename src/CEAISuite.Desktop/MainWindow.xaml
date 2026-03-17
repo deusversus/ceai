@@ -491,6 +491,24 @@
                            Foreground="#808080" Margin="8,8,8,4">
                     <Run Text="AI OPERATOR" /><Run Text="  (drag items here)" FontSize="9" Foreground="#555555" />
                 </TextBlock>
+                <!-- Chat switcher -->
+                <Grid DockPanel.Dock="Top" Margin="8,0,8,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <ComboBox x:Name="ChatSwitcher" Grid.Column="0" FontSize="11"
+                              Background="#3C3C3C" Foreground="#CCCCCC" BorderBrush="#3C3C3C"
+                              SelectionChanged="ChatSwitcher_SelectionChanged"
+                              DisplayMemberPath="Title" />
+                    <Button Grid.Column="1" Content="+" Padding="6,2" Margin="4,0,0,0"
+                            FontSize="11" ToolTip="New Chat" Click="NewAiChat"
+                            Style="{StaticResource ToolbarButton}" />
+                    <Button Grid.Column="2" Content="✕" Padding="6,2" Margin="4,0,0,0"
+                            FontSize="11" ToolTip="Delete Chat" Click="DeleteAiChat"
+                            Style="{StaticResource ToolbarButton}" />
+                </Grid>
                 <StackPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
                     <Grid>
                         <Grid.ColumnDefinitions>

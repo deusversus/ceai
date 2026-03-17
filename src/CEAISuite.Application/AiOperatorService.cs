@@ -20,6 +20,7 @@ public sealed class AiOperatorService
     private readonly ChatOptions _chatOptions;
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
+    private readonly AiChatStore _chatStore = new();
     private static readonly string LogDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
     private static readonly string LogPath = Path.Combine(LogDir, $"ai-agent-{DateTime.Now:yyyy-MM-dd}.log");
@@ -27,9 +28,18 @@ public sealed class AiOperatorService
     /// <summary>Raised when the agent's status changes (tool calls, thinking, errors).</summary>
     public event Action<string>? StatusChanged;
 
+    /// <summary>Raised when the chat list changes (new chat, delete, rename).</summary>
+    public event Action? ChatListChanged;
+
     public IReadOnlyList<AiChatMessage> DisplayHistory => _displayHistory;
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
     public bool IsConfigured { get; }
+
+    /// <summary>Current chat session ID.</summary>
+    public string CurrentChatId { get; private set; } = "";
+
+    /// <summary>Current chat title.</summary>
+    public string CurrentChatTitle { get; private set; } = "New Chat";
 
     public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions, Func<string>? contextProvider = null)
     {
@@ -69,6 +79,9 @@ public sealed class AiOperatorService
 
         var systemPrompt = new ChatMessage(ChatRole.System, SystemPrompt);
         _conversationHistory.Add(systemPrompt);
+
+        // Start with a fresh chat session
+        NewChat();
 
         // Ensure log directory exists
         try { Directory.CreateDirectory(LogDir); } catch { /* best effort */ }
@@ -200,6 +213,7 @@ public sealed class AiOperatorService
             UpdateStatus(summary);
             Log("INFO", $"Assistant: {(assistantText.Length > 300 ? assistantText[..300] + "..." : assistantText)}");
             _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));
+            SaveCurrentChat();
             return assistantText;
         }
         catch (Exception ex)
@@ -220,6 +234,92 @@ public sealed class AiOperatorService
         _conversationHistory.Add(systemPrompt);
         _displayHistory.Clear();
         _actionLog.Clear();
+    }
+
+    /// <summary>Save the current chat to disk.</summary>
+    public void SaveCurrentChat()
+    {
+        if (string.IsNullOrEmpty(CurrentChatId)) return;
+
+        // Auto-title from first user message if still "New Chat"
+        if (CurrentChatTitle == "New Chat" && _displayHistory.Count > 0)
+        {
+            var first = _displayHistory.FirstOrDefault(m => m.Role == "user");
+            if (first is not null)
+            {
+                CurrentChatTitle = first.Content.Length > 50
+                    ? first.Content[..50] + "…"
+                    : first.Content;
+            }
+        }
+
+        _chatStore.Save(new AiChatSession
+        {
+            Id = CurrentChatId,
+            Title = CurrentChatTitle,
+            Messages = _displayHistory.ToList()
+        });
+    }
+
+    /// <summary>Create a new chat, saving the current one first.</summary>
+    public void NewChat()
+    {
+        if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
+            SaveCurrentChat();
+
+        CurrentChatId = $"chat-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}";
+        CurrentChatTitle = "New Chat";
+        ClearHistory();
+        ChatListChanged?.Invoke();
+    }
+
+    /// <summary>Switch to an existing chat by ID.</summary>
+    public void SwitchChat(string chatId)
+    {
+        if (chatId == CurrentChatId) return;
+
+        // Save current
+        if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
+            SaveCurrentChat();
+
+        var session = _chatStore.Load(chatId);
+        if (session is null) return;
+
+        CurrentChatId = session.Id;
+        CurrentChatTitle = session.Title;
+        ClearHistory();
+
+        // Restore display history
+        _displayHistory.AddRange(session.Messages);
+
+        // Rebuild conversation history for the API
+        foreach (var msg in session.Messages)
+        {
+            _conversationHistory.Add(new ChatMessage(
+                msg.Role == "user" ? ChatRole.User : ChatRole.Assistant,
+                msg.Content));
+        }
+
+        ChatListChanged?.Invoke();
+    }
+
+    /// <summary>List all saved chats, most recent first.</summary>
+    public List<AiChatSession> ListChats() => _chatStore.ListAll();
+
+    /// <summary>Delete a chat by ID.</summary>
+    public void DeleteChat(string chatId)
+    {
+        _chatStore.Delete(chatId);
+        if (chatId == CurrentChatId) NewChat();
+        ChatListChanged?.Invoke();
+    }
+
+    /// <summary>Rename a chat.</summary>
+    public void RenameChat(string chatId, string newTitle)
+    {
+        _chatStore.Rename(chatId, newTitle);
+        if (chatId == CurrentChatId) CurrentChatTitle = newTitle;
+        ChatListChanged?.Invoke();
     }
 
     private ChatMessage? BuildContextMessage()

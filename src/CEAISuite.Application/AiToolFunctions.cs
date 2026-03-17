@@ -28,7 +28,8 @@ public sealed class AiToolFunctions(
     MemorySnapshotService? snapshotService = null,
     PointerRescanService? pointerRescanService = null,
     ICallStackEngine? callStackEngine = null,
-    ICodeCaveEngine? codeCaveEngine = null)
+    ICodeCaveEngine? codeCaveEngine = null,
+    ProcessWatchdogService? watchdogService = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -406,15 +407,47 @@ public sealed class AiToolFunctions(
             if (bpMode == BreakpointMode.Stealth && bpType is BreakpointType.HardwareExecute or BreakpointType.Software)
             {
                 if (codeCaveEngine is null) return "Code cave engine not available.";
-                var result = await codeCaveEngine.InstallHookAsync(processId, ParseAddress(address));
+                var stealthAddr = ParseAddress(address);
+                if (watchdogService is not null && watchdogService.IsUnsafe(stealthAddr, "Stealth"))
+                {
+                    // Still allow but warn
+                }
+                var result = await codeCaveEngine.InstallHookAsync(processId, stealthAddr);
                 if (!result.Success) return $"Stealth hook failed: {result.ErrorMessage}";
-                return $"Stealth code cave hook installed at 0x{result.Hook!.OriginalAddress:X} (ID: {result.Hook.Id}, cave at 0x{result.Hook.CaveAddress:X}). No debugger attached — game-safe.";
+                var stealthMsg = $"Stealth code cave hook installed at 0x{result.Hook!.OriginalAddress:X} (ID: {result.Hook.Id}, cave at 0x{result.Hook.CaveAddress:X}). No debugger attached — game-safe.";
+                if (watchdogService is not null)
+                {
+                    var hookId = result.Hook.Id;
+                    watchdogService.StartMonitoring(processId, hookId, stealthAddr, "CodeCaveHook", "Stealth",
+                        async () => await codeCaveEngine.RemoveHookAsync(processId, hookId));
+                    if (watchdogService.IsUnsafe(stealthAddr, "Stealth"))
+                        stealthMsg += "\n⚠️ WARNING: This address+Stealth previously caused a process freeze. Watchdog is monitoring.";
+                    else
+                        stealthMsg += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
+                }
+                return stealthMsg;
             }
 
+            var parsedAddr = ParseAddress(address);
+            var modeStr = bpMode.ToString();
+            if (watchdogService is not null && watchdogService.IsUnsafe(parsedAddr, modeStr))
+            {
+                // Still allow but warn
+            }
             var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit);
             var msg = $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
             if (singleHit) msg += " [SINGLE-HIT: will auto-remove after first trigger]";
             if (wasDowngraded) msg += "\n⚠️ Mode was auto-downgraded from Stealth→PageGuard. Stealth (code cave) only works on executable code, not data write targets.";
+            if (watchdogService is not null)
+            {
+                var bpId = bp.Id;
+                watchdogService.StartMonitoring(processId, bpId, parsedAddr, "Breakpoint", modeStr,
+                    async () => await breakpointService.RemoveBreakpointAsync(processId, bpId));
+                if (watchdogService.IsUnsafe(parsedAddr, modeStr))
+                    msg += $"\n⚠️ WARNING: This address+{modeStr} previously caused a process freeze. Watchdog is monitoring.";
+                else
+                    msg += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
+            }
             return msg;
         }
         catch (Exception ex)
@@ -457,6 +490,120 @@ public sealed class AiToolFunctions(
             return $"  [{h.Timestamp}] thread={h.ThreadId} @ {h.Address} | {regs}";
         });
         return $"Hit log ({hits.Count} entries):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Probe a memory address to assess risk before setting a breakpoint or hook. Returns region type, protection, page info, recommended modes, and risk level. ALWAYS call this before SetBreakpoint on unfamiliar addresses.")]
+    public async Task<string> ProbeTargetRisk(
+        [Description("Process ID")] int processId,
+        [Description("Memory address to probe (hex or decimal)")] string address)
+    {
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+
+            if (memoryProtectionEngine is null) return "Memory protection engine not available.";
+            var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+
+            bool isExecutable = region.IsExecutable;
+            bool isWritable = region.IsWritable;
+            bool isReadable = region.IsReadable;
+
+            // Build a human-readable protection string
+            string protectionStr = (isReadable, isWritable, isExecutable) switch
+            {
+                (true, true, true) => "RWX (Read/Write/Execute)",
+                (true, true, false) => "RW (Read/Write)",
+                (true, false, true) => "RX (Read/Execute)",
+                (true, false, false) => "R (Read-only)",
+                (false, false, true) => "X (Execute-only)",
+                (false, true, _) => "W (Write — unusual)",
+                _ => "NoAccess"
+            };
+
+            // Determine what module (if any) this address belongs to
+            string moduleName = "unknown";
+            string regionKind = "heap/dynamic";
+            try
+            {
+                var attachment = await engineFacade.AttachAsync(processId);
+                foreach (var mod in attachment.Modules)
+                {
+                    if (addr >= mod.BaseAddress && addr < (nuint)((ulong)mod.BaseAddress + (ulong)mod.SizeBytes))
+                    {
+                        moduleName = mod.Name;
+                        regionKind = isExecutable ? "module .text (code)" : "module .data/.rdata";
+                        break;
+                    }
+                }
+            }
+            catch { /* module lookup failed, use defaults */ }
+
+            if (regionKind == "heap/dynamic")
+            {
+                ulong addrVal = (ulong)addr;
+                if (addrVal > 0x7FFE0000_00000000UL) regionKind = "kernel (inaccessible)";
+                else if (!isExecutable && !isWritable) regionKind = "read-only data";
+                else if (isExecutable) regionKind = "dynamic code (JIT/alloc)";
+            }
+
+            // Risk assessment
+            string riskLevel;
+            var recommended = new List<string>();
+            var avoid = new List<string>();
+            var warnings = new List<string>();
+
+            if (isExecutable)
+            {
+                riskLevel = "LOW";
+                recommended.Add("Stealth (code cave — safest, no debugger)");
+                recommended.Add("Software (INT3)");
+                recommended.Add("Hardware (DR register)");
+                avoid.Add("PageGuard on code (may trap unrelated fetches)");
+            }
+            else
+            {
+                riskLevel = "MEDIUM";
+                recommended.Add("PageGuard (least intrusive for data)");
+
+                nuint pageBase = addr & ~(nuint)0xFFF;
+                nuint pageEnd = pageBase + 0x1000;
+                warnings.Add($"Page-guard will trap ALL access to the 4KB page containing this address (0x{pageBase:X}–0x{pageEnd:X})");
+                warnings.Add("Hot data fields (e.g., HP/position/timer) may cause excessive hits — use singleHit=true");
+
+                avoid.Add("Stealth (code cave cannot monitor data writes)");
+                avoid.Add("Software (INT3 cannot monitor data writes)");
+
+                if (!isReadable && !isWritable)
+                {
+                    riskLevel = "HIGH";
+                    warnings.Add("Region is not readable or writable — address may be invalid or protected");
+                }
+            }
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"## Probe: 0x{addr:X}");
+            sb.AppendLine($"Region: {regionKind}");
+            sb.AppendLine($"Module: {moduleName}");
+            sb.AppendLine($"Protection: {protectionStr}");
+            sb.AppendLine($"Executable: {isExecutable} | Writable: {isWritable} | Readable: {isReadable}");
+            sb.AppendLine($"Risk level: {riskLevel}");
+            sb.AppendLine();
+            sb.AppendLine("Recommended modes:");
+            foreach (var r in recommended) sb.AppendLine($"  ✓ {r}");
+            sb.AppendLine("Avoid:");
+            foreach (var a in avoid) sb.AppendLine($"  ✗ {a}");
+            if (warnings.Count > 0)
+            {
+                sb.AppendLine("Warnings:");
+                foreach (var w in warnings) sb.AppendLine($"  ⚠️ {w}");
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"ProbeTargetRisk failed: {ex.Message}";
+        }
     }
 
     // ── Script tools ──
@@ -1582,10 +1729,25 @@ public sealed class AiToolFunctions(
             if (codeCaveEngine is null) return "Code cave engine not available.";
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
+            if (watchdogService is not null && watchdogService.IsUnsafe(addr, "Stealth"))
+            {
+                // Still allow but warn
+            }
             var result = await codeCaveEngine.InstallHookAsync(processId, addr, captureRegisters);
             if (!result.Success) return $"Hook installation failed: {result.ErrorMessage}";
             var h = result.Hook!;
-            return $"Stealth hook installed:\n  ID: {h.Id}\n  Target: 0x{h.OriginalAddress:X}\n  Cave: 0x{h.CaveAddress:X}\n  Stolen bytes: {h.OriginalBytesLength}\n  No debugger attached — completely game-safe.";
+            var hookMsg = $"Stealth hook installed:\n  ID: {h.Id}\n  Target: 0x{h.OriginalAddress:X}\n  Cave: 0x{h.CaveAddress:X}\n  Stolen bytes: {h.OriginalBytesLength}\n  No debugger attached — completely game-safe.";
+            if (watchdogService is not null)
+            {
+                var hookId = h.Id;
+                watchdogService.StartMonitoring(processId, hookId, addr, "CodeCaveHook", "Stealth",
+                    async () => await codeCaveEngine.RemoveHookAsync(processId, hookId));
+                if (watchdogService.IsUnsafe(addr, "Stealth"))
+                    hookMsg += "\n⚠️ WARNING: This address+Stealth previously caused a process freeze. Watchdog is monitoring.";
+                else
+                    hookMsg += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
+            }
+            return hookMsg;
         }
         catch (Exception ex) { return $"InstallCodeCaveHook failed: {ex.Message}"; }
     }
@@ -1649,5 +1811,47 @@ public sealed class AiToolFunctions(
             count += CountNodes(node.Children, predicate);
         }
         return count;
+    }
+
+    // ── Watchdog safety tools ──
+
+    [Description("Check if an address+mode combination has been marked unsafe by the watchdog. Returns safety status and history of prior freeze events.")]
+    public string CheckAddressSafety(
+        [Description("Memory address to check (hex or decimal)")] string address,
+        [Description("Breakpoint mode to check: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto")
+    {
+        if (watchdogService is null) return "Watchdog not available.";
+        var addr = ParseAddress(address);
+        if (watchdogService.IsUnsafe(addr, mode))
+        {
+            var entries = watchdogService.GetUnsafeAddresses()
+                .Where(e => e.Address == addr && e.Mode.Equals(mode, StringComparison.OrdinalIgnoreCase));
+            var details = entries.Select(e =>
+                $"  Frozen: {e.FreezeDetectedUtc:HH:mm:ss} | Type: {e.OperationType} | Rollback: {(e.RollbackSucceeded ? "OK" : "FAILED")}");
+            return $"⚠️ Address 0x{addr:X} + mode {mode} is UNSAFE (caused process freeze previously):\n{string.Join('\n', details)}";
+        }
+        return $"Address 0x{addr:X} + mode {mode}: no known safety issues.";
+    }
+
+    [Description("List all addresses marked unsafe by the watchdog due to prior freeze incidents.")]
+    public string ListUnsafeAddresses()
+    {
+        if (watchdogService is null) return "Watchdog not available.";
+        var entries = watchdogService.GetUnsafeAddresses();
+        if (entries.Count == 0) return "No addresses marked unsafe.";
+        var lines = entries.Select(e =>
+            $"  0x{e.Address:X} | {e.Mode} | {e.OperationType} | frozen: {e.FreezeDetectedUtc:HH:mm:ss} | rollback: {(e.RollbackSucceeded ? "OK" : "FAILED")}");
+        return $"Unsafe addresses ({entries.Count}):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Clear the unsafe flag for an address, allowing breakpoints to be set there again. Use after fixing the underlying issue.")]
+    public string ClearUnsafeAddress(
+        [Description("Memory address (hex or decimal)")] string address,
+        [Description("Mode to clear: Auto, Stealth, PageGuard, Hardware, Software")] string mode)
+    {
+        if (watchdogService is null) return "Watchdog not available.";
+        var addr = ParseAddress(address);
+        watchdogService.ClearUnsafe(addr, mode);
+        return $"Cleared unsafe flag for 0x{addr:X} + {mode}.";
     }
 }

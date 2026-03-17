@@ -44,13 +44,20 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
         BreakpointType type,
         BreakpointMode mode,
         BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        bool singleHit = false,
         CancellationToken cancellationToken = default)
     {
         EnsureAvailable();
         var address = ParseAddress(addressText);
         var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, cancellationToken);
+        if (singleHit)
+            _singleHitBreakpoints.Add(bp.Id);
         return ToOverview(bp);
     }
+
+    /// <summary>IDs of breakpoints that should auto-remove after first hit.</summary>
+    internal HashSet<string> SingleHitBreakpoints => _singleHitBreakpoints;
+    private readonly HashSet<string> _singleHitBreakpoints = new();
 
     public async Task<bool> RemoveBreakpointAsync(
         int processId,

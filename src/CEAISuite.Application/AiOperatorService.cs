@@ -431,6 +431,8 @@ public sealed class AiOperatorService
           Execute → Hardware, Write/ReadWrite → PageGuard, Software → Software.
 
         • Stealth: Code cave JMP detour — NO debugger attached, completely invisible to anti-debug.
+          ⚠️ ONLY WORKS ON EXECUTABLE CODE ADDRESSES. Cannot monitor data writes.
+          If you request Stealth on a write breakpoint, it auto-downgrades to PageGuard.
           Best for: anti-cheat/anti-debug games, long-running monitoring, execution hooks.
           Use InstallCodeCaveHook directly for full control over register capture.
 
@@ -443,12 +445,37 @@ public sealed class AiOperatorService
           WARNING: Suspends all threads — can freeze anti-debug-sensitive games.
 
         • Software: INT3 byte patch. Most intrusive. Best for: specific instruction tracing.
+          Cannot monitor data writes — only executable code.
+
+        ═══ MODE COMPATIBILITY MATRIX ═══
+
+        Stealth   + Execute/Software → ✅ Code cave hook (safest, no debugger)
+        Stealth   + Write/ReadWrite  → ❌ INVALID — auto-downgrades to PageGuard
+        PageGuard + Write/ReadWrite  → ✅ Recommended for data write monitoring
+        PageGuard + Execute          → ✅ Works but unnecessary (use Stealth instead)
+        Hardware  + any              → ✅ Works but intrusive (debugger + thread suspend)
+        Software  + Execute          → ✅ INT3 patching — most intrusive
+        Software  + Write/ReadWrite  → ❌ INVALID — rejected with error
+
+        ═══ SAFETY FEATURES ═══
+
+        • Hit-rate throttle: If a breakpoint fires >200 times/second, it is AUTO-DISABLED to
+          prevent game freezes. The hit log is preserved. Check breakpoint status after setting.
+
+        • Single-hit mode: Pass singleHit=true to SetBreakpoint for risky targets. The BP fires
+          once, captures the data, then auto-removes itself. Ideal for "find what writes this address".
+
+        • When monitoring data writes on HOT addresses (written every frame), ALWAYS use:
+          1. singleHit=true — capture one hit, auto-remove
+          2. OR use mode=PageGuard (not Hardware) to minimize thread suspension
+          3. NEVER use Stealth for data writes — it will be auto-downgraded
 
         ANTI-DEBUG GAMES (freezes, crashes, or detects debugger):
-        1. ALWAYS use mode=Stealth or InstallCodeCaveHook for these targets
+        1. ALWAYS use mode=Stealth or InstallCodeCaveHook for EXECUTION hooks on these targets
         2. Code cave hooks work by JMP redirection — no DebugActiveProcess call at all
         3. If Hardware mode freezes the game, remove the breakpoint and switch to Stealth
         4. Code caves capture register snapshots in a ring buffer you can read with GetCodeCaveHookHits
+        5. For finding what WRITES a data address, use mode=PageGuard with singleHit=true
 
         LOADING A CHEAT TABLE:
         1. LoadCheatTable with full path

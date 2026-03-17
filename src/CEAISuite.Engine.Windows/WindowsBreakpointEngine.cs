@@ -75,6 +75,11 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     {
         var resolvedMode = mode == BreakpointMode.Auto ? ResolveAutoMode(type) : mode;
 
+        // Stealth mode is for code cave hooks (ICodeCaveEngine) — not for the breakpoint engine.
+        // If it reaches here, downgrade to the best available mode for the type.
+        if (resolvedMode == BreakpointMode.Stealth)
+            resolvedMode = ResolveAutoMode(type);
+
         // Page guard breakpoints are handled differently
         if (resolvedMode == BreakpointMode.PageGuard)
             return SetPageGuardBreakpointAsync(processId, address, type, action, cancellationToken);
@@ -639,8 +644,6 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         if (!session.PageGuardBreakpoints.TryGetValue(pageBase, out var breakpoint))
             return;
 
-        Interlocked.Increment(ref breakpoint.HitCount);
-
         // Capture register snapshot
         var threadHandle = session.ThreadHandles.GetValueOrDefault(debugEvent.dwThreadId);
         var registers = new Dictionary<string, string>();
@@ -659,9 +662,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             }
         }
 
-        breakpoint.HitLog.Enqueue(new BreakpointHitEvent(
-            breakpoint.Id, faultAddress, debugEvent.dwThreadId,
-            DateTimeOffset.UtcNow, registers));
+        if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, faultAddress, registers))
+        {
+            // Hit-rate exceeded — auto-disable, don't re-arm the guard
+            breakpoint.IsEnabled = false;
+            return;
+        }
 
         // Single-step then re-arm PAGE_GUARD
         if (threadHandle != IntPtr.Zero)
@@ -891,7 +897,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         var threadHandle = EnsureThreadHandleLocked(session, debugEvent.dwThreadId, IntPtr.Zero);
         var snapshot = CaptureRegisterSnapshot(session, threadHandle, exceptionAddress);
-        LogBreakpointHit(breakpoint, debugEvent.dwThreadId, exceptionAddress, snapshot);
+        if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, exceptionAddress, snapshot))
+        {
+            // Hit-rate exceeded — auto-disable to prevent game freeze
+            breakpoint.IsEnabled = false;
+            return DbgContinue;
+        }
 
         if (session.IsWow64Target)
         {
@@ -964,7 +975,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
             if (breakpoint is not null)
             {
-                LogBreakpointHit(breakpoint, debugEvent.dwThreadId, hitAddress, snapshot);
+                if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, hitAddress, snapshot))
+                {
+                    breakpoint.IsEnabled = false;
+                    breakpoint.HardwareSlot = null;
+                    ApplyHardwareBreakpointsLocked(session);
+                }
             }
         }
 
@@ -1091,7 +1107,14 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return slots;
     }
 
-    private static void LogBreakpointHit(
+    /// <summary>Max hits per second before a breakpoint is auto-disabled to prevent game freezes.</summary>
+    private const int MaxHitsPerSecond = 200;
+
+    /// <summary>
+    /// Log a breakpoint hit and check hit-rate. Returns true if the breakpoint should be
+    /// auto-disabled due to excessive firing (>200 hits/sec).
+    /// </summary>
+    private static bool LogBreakpointHit(
         BreakpointState breakpoint,
         int threadId,
         nuint address,
@@ -1106,6 +1129,30 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 registerSnapshot));
 
         Interlocked.Increment(ref breakpoint.HitCount);
+
+        // Hit-rate throttle: track hits within 1-second windows
+        var now = Environment.TickCount64;
+        var windowStart = Interlocked.Read(ref breakpoint.ThrottleWindowStartTicks);
+        if (now - windowStart > 1000)
+        {
+            // New 1-second window
+            Interlocked.Exchange(ref breakpoint.ThrottleWindowStartTicks, now);
+            Interlocked.Exchange(ref breakpoint.ThrottleWindowHits, 1);
+        }
+        else
+        {
+            var hits = Interlocked.Increment(ref breakpoint.ThrottleWindowHits);
+            if (hits > MaxHitsPerSecond)
+            {
+                breakpoint.ThrottleDisabled = true;
+                System.Diagnostics.Debug.WriteLine(
+                    $"[BreakpointEngine] Auto-disabling BP {breakpoint.Id} at 0x{breakpoint.Address:X}: " +
+                    $"exceeded {MaxHitsPerSecond} hits/sec ({hits} in window). This prevents game freezes.");
+                return true; // caller should disable this BP
+            }
+        }
+
+        return false;
     }
 
     private static IReadOnlyDictionary<string, string> CaptureRegisterSnapshot(
@@ -1315,6 +1362,15 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         /// <summary>For PageGuard mode: the original protection before PAGE_GUARD was applied.</summary>
         public uint? OriginalPageProtection { get; set; }
+
+        /// <summary>Hit-rate throttle: timestamp of when the current window started.</summary>
+        public long ThrottleWindowStartTicks;
+
+        /// <summary>Hit-rate throttle: hits within the current 1-second window.</summary>
+        public int ThrottleWindowHits;
+
+        /// <summary>When true, this BP was auto-disabled due to excessive hit rate.</summary>
+        public bool ThrottleDisabled;
 
         public ConcurrentQueue<BreakpointHitEvent> HitLog { get; } = new();
 

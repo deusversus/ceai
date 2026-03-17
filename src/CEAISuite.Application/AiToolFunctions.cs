@@ -375,7 +375,8 @@ public sealed class AiToolFunctions(
         [Description("Memory address (hex or decimal)")] string address,
         [Description("Breakpoint type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
         [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue",
-        [Description("Intrusiveness mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto")
+        [Description("Intrusiveness mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto",
+        [Description("If true, breakpoint auto-removes after first hit (safer for risky targets)")] bool singleHit = false)
     {
         try
         {
@@ -384,6 +385,22 @@ public sealed class AiToolFunctions(
             var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
             var bpAction = Enum.Parse<BreakpointHitAction>(hitAction, ignoreCase: true);
             var bpMode = Enum.Parse<BreakpointMode>(mode, ignoreCase: true);
+
+            // ── Mode/type safety guard ──
+            // Stealth (code cave JMP detour) only works on executable code — NOT data addresses.
+            // Requesting Stealth on a write/readwrite BP is invalid; auto-downgrade to PageGuard.
+            bool wasDowngraded = false;
+            if (bpMode == BreakpointMode.Stealth && bpType is BreakpointType.HardwareWrite or BreakpointType.HardwareReadWrite)
+            {
+                bpMode = BreakpointMode.PageGuard;
+                wasDowngraded = true;
+            }
+
+            // Software breakpoints (INT3) can't watch data writes — reject
+            if (bpMode == BreakpointMode.Software && bpType is BreakpointType.HardwareWrite or BreakpointType.HardwareReadWrite)
+            {
+                return "Software breakpoints (INT3) cannot monitor data writes. Use mode=PageGuard or mode=Hardware for write breakpoints.";
+            }
 
             // For Stealth mode with execute BPs, redirect to code cave engine
             if (bpMode == BreakpointMode.Stealth && bpType is BreakpointType.HardwareExecute or BreakpointType.Software)
@@ -394,8 +411,11 @@ public sealed class AiToolFunctions(
                 return $"Stealth code cave hook installed at 0x{result.Hook!.OriginalAddress:X} (ID: {result.Hook.Id}, cave at 0x{result.Hook.CaveAddress:X}). No debugger attached — game-safe.";
             }
 
-            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction);
-            return $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
+            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit);
+            var msg = $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
+            if (singleHit) msg += " [SINGLE-HIT: will auto-remove after first trigger]";
+            if (wasDowngraded) msg += "\n⚠️ Mode was auto-downgraded from Stealth→PageGuard. Stealth (code cave) only works on executable code, not data write targets.";
+            return msg;
         }
         catch (Exception ex)
         {

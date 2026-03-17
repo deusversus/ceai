@@ -17,7 +17,18 @@ public sealed class AiChatDisplayItem
 {
     public string RoleLabel { get; init; } = "";
     public string Content { get; init; } = "";
+    public string Timestamp { get; init; } = "";
     public Brush Background { get; init; } = Brushes.Transparent;
+}
+
+/// <summary>Display model for chat history list items.</summary>
+public sealed class ChatHistoryDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string TimeAgo { get; init; } = "";
+    public string Preview { get; init; } = "";
+    public bool IsCurrent { get; init; }
 }
 
 public partial class MainWindow : Window
@@ -157,6 +168,9 @@ public partial class MainWindow : Window
 
         DataContext = await _dashboardService.BuildAsync(_databasePath);
         RefreshChatSwitcher();
+        // Init search box placeholder
+        ChatSearchBox.Text = (string)ChatSearchBox.Tag;
+        ChatSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -651,32 +665,81 @@ public partial class MainWindow : Window
     }
 
     private bool _suppressChatSwitch;
+    private List<ChatHistoryDisplayItem> _allChatItems = new();
+
+    private static string FormatTimeAgo(DateTimeOffset dt)
+    {
+        var diff = DateTimeOffset.UtcNow - dt;
+        if (diff.TotalMinutes < 1) return "just now";
+        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
+        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
+        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
+        return dt.ToLocalTime().ToString("MMM d");
+    }
 
     private void RefreshChatSwitcher()
     {
         _suppressChatSwitch = true;
         var chats = _aiOperatorService.ListChats();
-        // Include current unsaved chat if not yet in the list
-        if (!chats.Any(c => c.Id == _aiOperatorService.CurrentChatId))
+        var currentId = _aiOperatorService.CurrentChatId;
+
+        _allChatItems = chats.Select(c => new ChatHistoryDisplayItem
         {
-            chats.Insert(0, new AiChatSession
+            Id = c.Id,
+            Title = c.Title,
+            TimeAgo = FormatTimeAgo(c.UpdatedAt),
+            Preview = c.Messages.LastOrDefault(m => m.Role == "assistant")?.Content is string last
+                ? (last.Length > 80 ? last[..80] + "…" : last)
+                : c.Messages.Count > 0 ? $"{c.Messages.Count} messages" : "Empty",
+            IsCurrent = c.Id == currentId
+        }).ToList();
+
+        // Insert current unsaved chat at top if not already listed
+        if (!_allChatItems.Any(c => c.Id == currentId))
+        {
+            _allChatItems.Insert(0, new ChatHistoryDisplayItem
             {
-                Id = _aiOperatorService.CurrentChatId,
-                Title = _aiOperatorService.CurrentChatTitle
+                Id = currentId,
+                Title = _aiOperatorService.CurrentChatTitle,
+                TimeAgo = "now",
+                Preview = _aiOperatorService.DisplayHistory.Count > 0
+                    ? $"{_aiOperatorService.DisplayHistory.Count} messages"
+                    : "Active chat",
+                IsCurrent = true
             });
         }
-        ChatSwitcher.ItemsSource = chats;
-        ChatSwitcher.SelectedItem = chats.FirstOrDefault(c => c.Id == _aiOperatorService.CurrentChatId);
+
+        ChatHistoryList.ItemsSource = _allChatItems;
+
+        // Select current
+        var currentItem = _allChatItems.FirstOrDefault(c => c.Id == currentId);
+        if (currentItem is not null)
+            ChatHistoryList.SelectedItem = currentItem;
+
         _suppressChatSwitch = false;
     }
 
-    private void ChatSwitcher_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private void ToggleChatHistory(object sender, RoutedEventArgs e)
+    {
+        bool show = ChatHistoryToggle.IsChecked == true;
+        ChatHistoryPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        if (show) RefreshChatSwitcher();
+    }
+
+    private void ChatHistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // Only switch on explicit double-click or context menu, not on selection change
+    }
+
+    private void ChatHistoryList_DoubleClick(object sender, MouseButtonEventArgs e)
     {
         if (_suppressChatSwitch) return;
-        if (ChatSwitcher.SelectedItem is AiChatSession selected && selected.Id != _aiOperatorService.CurrentChatId)
+        if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected &&
+            selected.Id != _aiOperatorService.CurrentChatId)
         {
             _aiOperatorService.SwitchChat(selected.Id);
             RefreshAiChatDisplay();
+            RefreshChatSwitcher();
         }
     }
 
@@ -689,12 +752,110 @@ public partial class MainWindow : Window
 
     private void DeleteAiChat(object sender, RoutedEventArgs e)
     {
-        if (ChatSwitcher.SelectedItem is AiChatSession selected)
+        if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected)
         {
-            _aiOperatorService.DeleteChat(selected.Id);
+            var result = MessageBox.Show(
+                $"Delete chat \"{selected.Title}\"?",
+                "Delete Chat", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (result == MessageBoxResult.Yes)
+            {
+                _aiOperatorService.DeleteChat(selected.Id);
+                RefreshAiChatDisplay();
+                RefreshChatSwitcher();
+            }
+        }
+    }
+
+    // Context menu handlers for chat history
+    private void ChatCtx_Open(object sender, RoutedEventArgs e)
+    {
+        if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected)
+        {
+            _aiOperatorService.SwitchChat(selected.Id);
             RefreshAiChatDisplay();
             RefreshChatSwitcher();
         }
+    }
+
+    private void ChatCtx_Rename(object sender, RoutedEventArgs e)
+    {
+        if (ChatHistoryList.SelectedItem is not ChatHistoryDisplayItem selected) return;
+
+        // Simple rename dialog
+        var dlg = new Window
+        {
+            Title = "Rename Chat",
+            Width = 380, Height = 140,
+            WindowStartupLocation = WindowStartupLocation.CenterOwner,
+            Owner = this,
+            ResizeMode = ResizeMode.NoResize,
+            Background = new SolidColorBrush(Color.FromRgb(0x25, 0x25, 0x26)),
+        };
+        var sp = new StackPanel { Margin = new Thickness(12) };
+        var tb = new TextBox
+        {
+            Text = selected.Title,
+            FontSize = 13,
+            Padding = new Thickness(6, 4, 6, 4),
+            Background = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C)),
+        };
+        tb.SelectAll();
+        var btn = new Button { Content = "Rename", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
+        btn.Click += (_, _) => { dlg.DialogResult = true; dlg.Close(); };
+        tb.KeyDown += (_, ke) => { if (ke.Key == Key.Enter) { dlg.DialogResult = true; dlg.Close(); } };
+        sp.Children.Add(tb);
+        sp.Children.Add(btn);
+        dlg.Content = sp;
+        tb.Focus();
+
+        if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(tb.Text))
+        {
+            _aiOperatorService.RenameChat(selected.Id, tb.Text.Trim());
+            RefreshAiChatDisplay();
+            RefreshChatSwitcher();
+        }
+    }
+
+    private void ChatCtx_Delete(object sender, RoutedEventArgs e)
+    {
+        DeleteAiChat(sender, e);
+    }
+
+    // Search box placeholder + filtering
+    private void ChatSearchBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        if (ChatSearchBox.Text == (string)ChatSearchBox.Tag)
+        {
+            ChatSearchBox.Text = "";
+            ChatSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC));
+        }
+    }
+
+    private void ChatSearchBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(ChatSearchBox.Text))
+        {
+            ChatSearchBox.Text = (string)ChatSearchBox.Tag;
+            ChatSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));
+        }
+    }
+
+    private void ChatSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        var query = ChatSearchBox.Text?.Trim();
+        if (string.IsNullOrEmpty(query) || query == (string)ChatSearchBox.Tag)
+        {
+            ChatHistoryList.ItemsSource = _allChatItems;
+            return;
+        }
+
+        var filtered = _allChatItems
+            .Where(c => c.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                        c.Preview.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        ChatHistoryList.ItemsSource = filtered;
     }
 
     private void RefreshAiChatDisplay()
@@ -703,6 +864,7 @@ public partial class MainWindow : Window
         {
             RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
             Content = msg.Content,
+            Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt"),
             Background = msg.Role == "user"
                 ? new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30))
                 : new SolidColorBrush(Color.FromRgb(0x1E, 0x3A, 0x5F))
@@ -710,6 +872,7 @@ public partial class MainWindow : Window
 
         AiChatList.ItemsSource = items;
         AiChatScrollViewer.ScrollToEnd();
+        AiChatTitleText.Text = _aiOperatorService.CurrentChatTitle;
     }
 
     // ─── Address Table Export / Import / Trainer ────────────────────────

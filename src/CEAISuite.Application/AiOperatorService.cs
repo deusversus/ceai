@@ -366,6 +366,7 @@ public sealed class AiOperatorService
                         SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
                         FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
         Breakpoints: SetBreakpoint, RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog
+        Call Stack: GetCallStack, GetAllThreadStacks
         Scripts: ListScripts, ViewScript, ValidateScript, EnableScript, DisableScript,
                  EditScript, CreateScriptEntry
         Sessions: SaveSession, ListSessions, LoadSession

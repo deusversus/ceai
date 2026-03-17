@@ -26,7 +26,8 @@ public sealed class AiToolFunctions(
     SignatureGeneratorService? signatureService = null,
     IMemoryProtectionEngine? memoryProtectionEngine = null,
     MemorySnapshotService? snapshotService = null,
-    PointerRescanService? pointerRescanService = null)
+    PointerRescanService? pointerRescanService = null,
+    ICallStackEngine? callStackEngine = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -1390,6 +1391,81 @@ public sealed class AiToolFunctions(
             return $"Found {pointerEntries.Count} pointer-related entries. Use RescanPointerPath on individual paths for validation.";
         }
         catch (Exception ex) { return $"ValidatePointerPaths failed: {ex.Message}"; }
+    }
+
+    // ── Call Stack Tools ──
+
+    [Description("Walk the call stack of a thread in the attached process. Shows function call chain with module offsets.")]
+    public async Task<string> GetCallStack(
+        [Description("Process ID")] int processId,
+        [Description("Thread ID (use 0 for main thread)")] int threadId = 0,
+        [Description("Maximum frames to capture")] int maxFrames = 32)
+    {
+        if (callStackEngine is null) return "Call stack engine not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var attachment = await engineFacade.AttachAsync(processId);
+
+            // If threadId is 0, enumerate threads and pick main
+            if (threadId == 0)
+            {
+                var allStacks = await callStackEngine.WalkAllThreadsAsync(processId, attachment.Modules, maxFrames);
+                if (allStacks.Count == 0) return "No thread stacks could be captured.";
+
+                // Pick the thread with the most frames (likely main)
+                var best = allStacks.OrderByDescending(kv => kv.Value.Count).First();
+                threadId = best.Key;
+                var frames = best.Value;
+                return FormatCallStack(threadId, frames);
+            }
+
+            var stack = await callStackEngine.WalkStackAsync(processId, threadId, attachment.Modules, maxFrames);
+            return FormatCallStack(threadId, stack);
+        }
+        catch (Exception ex) { return $"GetCallStack failed: {ex.Message}"; }
+    }
+
+    [Description("Walk call stacks of all threads in the process. Returns frames per thread with module resolution.")]
+    public async Task<string> GetAllThreadStacks(
+        [Description("Process ID")] int processId,
+        [Description("Maximum frames per thread")] int maxFrames = 16)
+    {
+        if (callStackEngine is null) return "Call stack engine not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var attachment = await engineFacade.AttachAsync(processId);
+            var allStacks = await callStackEngine.WalkAllThreadsAsync(processId, attachment.Modules, maxFrames);
+
+            if (allStacks.Count == 0) return "No thread stacks could be captured.";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Captured stacks for {allStacks.Count} thread(s):");
+            foreach (var (tid, frames) in allStacks.OrderByDescending(kv => kv.Value.Count).Take(8))
+            {
+                sb.AppendLine(FormatCallStack(tid, frames));
+                sb.AppendLine();
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex) { return $"GetAllThreadStacks failed: {ex.Message}"; }
+    }
+
+    private static string FormatCallStack(int threadId, IReadOnlyList<CallStackFrame> frames)
+    {
+        if (frames.Count == 0) return $"Thread {threadId}: no frames captured";
+
+        var lines = frames.Select(f =>
+        {
+            var location = f.ModuleName is not null
+                ? $"{f.ModuleName}+0x{f.ModuleOffset:X}"
+                : $"0x{f.InstructionPointer:X}";
+            return $"  #{f.FrameIndex}: {location} (RSP=0x{f.StackPointer:X})";
+        });
+        return $"Thread {threadId} ({frames.Count} frames):\n{string.Join('\n', lines)}";
     }
 
     // ── Helpers ──

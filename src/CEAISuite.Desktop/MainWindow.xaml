@@ -22,8 +22,8 @@
             <RowDefinition Height="2*" />
         </Grid.RowDefinitions>
 
-        <!-- Menu Bar -->
-        <Menu Grid.Row="0" Background="#F0F0F0" Padding="4,2">
+        <!-- Menu Bar (toggle with Alt) -->
+        <Menu x:Name="MainMenu" Grid.Row="0" Background="#F0F0F0" Padding="4,2">
             <MenuItem Header="_File">
                 <MenuItem Header="_Save Session" Click="SaveSession" InputGestureText="Ctrl+S" />
                 <MenuItem Header="_Load Session" Click="LoadSession" />
@@ -36,6 +36,10 @@
             <MenuItem Header="_Edit">
                 <MenuItem Header="_Undo" Click="MenuUndo" InputGestureText="Ctrl+Z" />
                 <MenuItem Header="_Redo" Click="MenuRedo" InputGestureText="Ctrl+Y" />
+            </MenuItem>
+            <MenuItem Header="_View">
+                <MenuItem x:Name="MenuBarToggleItem" Header="Hide _Menu Bar" Click="ToggleMenuBar" 
+                          InputGestureText="Alt" />
             </MenuItem>
             <MenuItem Header="_Tools">
                 <MenuItem Header="🔍 _Memory Browser" Click="OpenMemoryBrowser" />

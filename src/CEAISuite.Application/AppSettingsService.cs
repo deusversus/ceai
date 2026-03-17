@@ -8,6 +8,7 @@ public sealed class AppSettings
     public string Model { get; set; } = "gpt-5.4";
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
+    public bool MenuBarVisible { get; set; } = true;
 }
 
 public sealed class AppSettingsService

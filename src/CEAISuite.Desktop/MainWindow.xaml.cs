@@ -81,6 +81,11 @@ public partial class MainWindow : Window
 
         DataContext = WorkspaceDashboard.CreateLoading();
         Loaded += OnLoaded;
+        PreviewKeyUp += OnPreviewKeyUp;
+
+        // Apply persisted menu bar visibility
+        if (!_appSettingsService.Settings.MenuBarVisible)
+            MainMenu.Visibility = Visibility.Collapsed;
     }
 
     private IChatClient? CreateChatClient()
@@ -1728,6 +1733,32 @@ public partial class MainWindow : Window
     private void ExitApp(object sender, RoutedEventArgs e)
     {
         Close();
+    }
+
+    private void ToggleMenuBar(object sender, RoutedEventArgs e)
+    {
+        SetMenuBarVisible(MainMenu.Visibility == Visibility.Visible ? false : true);
+    }
+
+    private void OnPreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
+    {
+        // Alt key (without other modifiers) toggles menu bar when hidden
+        if (e.Key == System.Windows.Input.Key.System && e.SystemKey == System.Windows.Input.Key.LeftAlt
+            || e.Key == System.Windows.Input.Key.System && e.SystemKey == System.Windows.Input.Key.RightAlt)
+        {
+            if (MainMenu.Visibility == Visibility.Collapsed)
+            {
+                SetMenuBarVisible(true);
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void SetMenuBarVisible(bool visible)
+    {
+        MainMenu.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
+        _appSettingsService.Settings.MenuBarVisible = visible;
+        _appSettingsService.Save();
     }
 
     private async void MenuUndo(object sender, RoutedEventArgs e)

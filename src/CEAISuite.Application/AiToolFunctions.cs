@@ -169,15 +169,39 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Added to address table: {entry.Label} at {entry.Address} ({entry.DataType})");
     }
 
-    [Description("List all entries currently in the address table.")]
+    [Description("List all entries currently in the address table. Shows ID, label, address, value, type, and lock state.")]
     public Task<string> ListAddressTable()
     {
-        var entries = addressTableService.Entries;
-        if (entries.Count == 0)
+        var roots = addressTableService.Roots;
+        if (roots.Count == 0)
             return Task.FromResult("Address table is empty.");
 
-        var lines = entries.Select(e => $"  {e.Label}: {e.Address} = {e.CurrentValue} ({e.DataType}){(e.IsLocked ? " [LOCKED]" : "")}");
-        return Task.FromResult($"Address table ({entries.Count} entries):\n{string.Join('\n', lines)}");
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Address table ({CountNodes(roots)} entries):");
+        FormatNodes(sb, roots, indent: 0);
+        return Task.FromResult(sb.ToString());
+    }
+
+    private static void FormatNodes(System.Text.StringBuilder sb, IEnumerable<AddressTableNode> nodes, int indent)
+    {
+        var prefix = new string(' ', indent * 2);
+        foreach (var n in nodes)
+        {
+            if (n.IsGroup)
+            {
+                sb.AppendLine($"{prefix}[{n.Id}] 📁 {n.Label} ({n.Children.Count} children)");
+                FormatNodes(sb, n.Children, indent + 1);
+            }
+            else if (n.IsScriptEntry)
+            {
+                sb.AppendLine($"{prefix}[{n.Id}] 📜 {n.Label} ({(n.IsScriptEnabled ? "ENABLED" : "disabled")})");
+            }
+            else
+            {
+                var frozen = n.IsLocked ? " [FROZEN]" : "";
+                sb.AppendLine($"{prefix}[{n.Id}] {n.Label}: {n.Address} = {n.CurrentValue} ({n.DataType}){frozen}");
+            }
+        }
     }
 
     [Description("Refresh all values in the address table by re-reading from process memory.")]
@@ -398,9 +422,9 @@ public sealed class AiToolFunctions(
     }
 
     [Description("View the source code of a script entry by its node ID. Use ListScripts first to find the ID.")]
-    public Task<string> ViewScript([Description("Node ID of the script entry")] string nodeId)
+    public Task<string> ViewScript([Description("Node ID or label of the script entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
 
@@ -413,9 +437,9 @@ public sealed class AiToolFunctions(
 
     [Description("Validate a script entry by parsing it. Checks for syntax errors without executing.")]
     public Task<string> ValidateScript(
-        [Description("Node ID of the script entry")] string nodeId)
+        [Description("Node ID or label of the script entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
 
@@ -506,10 +530,10 @@ public sealed class AiToolFunctions(
 
     [Description("Register a global hotkey to toggle a specific address table entry's freeze lock or script activation. Hotkey works system-wide even when the game is focused.")]
     public Task<string> SetHotkey(
-        [Description("Node ID of the address table entry")] string nodeId,
+        [Description("Node ID or label of the address table entry")] string nodeId,
         [Description("Hotkey combination like 'Ctrl+F1' or 'Alt+Shift+G'")] string hotkey)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
 
         if (hotkeyService is null) return Task.FromResult("Hotkey service not available.");
@@ -639,9 +663,9 @@ public sealed class AiToolFunctions(
     }
 
     [Description("Freeze (lock) an address table entry so its value is continuously written back. The value is frozen at its current reading.")]
-    public Task<string> FreezeAddress([Description("Node ID of the address table entry")] string nodeId)
+    public Task<string> FreezeAddress([Description("Node ID or label of the address table entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (node.IsGroup) return Task.FromResult("Cannot freeze a group.");
         if (node.IsScriptEntry) return Task.FromResult("Use ToggleScript for script entries.");
@@ -653,9 +677,9 @@ public sealed class AiToolFunctions(
     }
 
     [Description("Unfreeze (unlock) an address table entry so it can change naturally again.")]
-    public Task<string> UnfreezeAddress([Description("Node ID of the address table entry")] string nodeId)
+    public Task<string> UnfreezeAddress([Description("Node ID or label of the address table entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (!node.IsLocked) return Task.FromResult($"'{node.Label}' is not frozen.");
 
@@ -666,10 +690,10 @@ public sealed class AiToolFunctions(
 
     [Description("Freeze an address at a specific value (not just its current value). Useful for setting health to 9999, gold to max, etc.")]
     public Task<string> FreezeAddressAtValue(
-        [Description("Node ID of the address table entry")] string nodeId,
+        [Description("Node ID or label of the address table entry")] string nodeId,
         [Description("Value to freeze at")] string value)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (node.IsGroup || node.IsScriptEntry) return Task.FromResult("Can only freeze value entries.");
 
@@ -679,9 +703,9 @@ public sealed class AiToolFunctions(
     }
 
     [Description("Enable or disable a script (Auto Assembler) entry in the address table. Actually executes the AA engine. Returns the execution result.")]
-    public async Task<string> ToggleScript([Description("Node ID of the script entry")] string nodeId)
+    public async Task<string> ToggleScript([Description("Node ID or label of the script entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return $"Node '{nodeId}' not found.";
         if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry. Use FreezeAddress for value entries.";
 
@@ -728,11 +752,11 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Get detailed info about a specific address table node by its ID. Shows address, type, value, pointer chain, locked state, and children.")]
-    public Task<string> GetAddressTableNode([Description("Node ID")] string nodeId)
+    [Description("Get detailed info about a specific address table node by its ID or label. Shows address, type, value, pointer chain, locked state, and children.")]
+    public Task<string> GetAddressTableNode([Description("Node ID or label (case-insensitive label match)")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
-        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        var node = ResolveNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found by ID or label.");
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"ID: {node.Id}");
@@ -840,10 +864,10 @@ public sealed class AiToolFunctions(
 
     [Description("Edit/replace the Auto Assembler script content of an existing script entry. Use this to fix or improve scripts. The script must have [ENABLE] and [DISABLE] sections.")]
     public Task<string> EditScript(
-        [Description("Node ID of the script entry")] string nodeId,
+        [Description("Node ID or label of the script entry")] string nodeId,
         [Description("New complete script content (must include [ENABLE] and [DISABLE] sections)")] string newScript)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (!node.IsScriptEntry) return Task.FromResult($"'{node.Label}' is not a script entry.");
 
@@ -914,9 +938,9 @@ public sealed class AiToolFunctions(
     }
 
     [Description("Enable a script by its node ID. Executes the [ENABLE] section of the Auto Assembler script.")]
-    public async Task<string> EnableScript([Description("Node ID of the script entry")] string nodeId)
+    public async Task<string> EnableScript([Description("Node ID or label of the script entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return $"Node '{nodeId}' not found.";
         if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry.";
         if (node.IsScriptEnabled) return $"Script '{node.Label}' is already enabled.";
@@ -953,9 +977,9 @@ public sealed class AiToolFunctions(
     }
 
     [Description("Disable a script by its node ID. Executes the [DISABLE] section to restore original bytes.")]
-    public async Task<string> DisableScript([Description("Node ID of the script entry")] string nodeId)
+    public async Task<string> DisableScript([Description("Node ID or label of the script entry")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return $"Node '{nodeId}' not found.";
         if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry.";
         if (!node.IsScriptEnabled) return $"Script '{node.Label}' is already disabled.";
@@ -1050,9 +1074,9 @@ public sealed class AiToolFunctions(
     // ── Address table management tools ──
 
     [Description("Remove an entry from the address table by its node ID.")]
-    public Task<string> RemoveFromAddressTable([Description("Node ID to remove")] string nodeId)
+    public Task<string> RemoveFromAddressTable([Description("Node ID or label to remove")] string nodeId)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         var label = node.Label;
         addressTableService.RemoveEntry(nodeId);
@@ -1061,10 +1085,10 @@ public sealed class AiToolFunctions(
 
     [Description("Rename an address table entry's label/description.")]
     public Task<string> RenameAddressTableEntry(
-        [Description("Node ID to rename")] string nodeId,
+        [Description("Node ID or label to rename")] string nodeId,
         [Description("New label/description")] string newLabel)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         var oldLabel = node.Label;
         addressTableService.UpdateLabel(nodeId, newLabel);
@@ -1073,10 +1097,10 @@ public sealed class AiToolFunctions(
 
     [Description("Set or update notes/annotations on an address table entry.")]
     public Task<string> SetEntryNotes(
-        [Description("Node ID")] string nodeId,
+        [Description("Node ID or label")] string nodeId,
         [Description("Notes text (or empty to clear)")] string notes)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         addressTableService.UpdateNotes(nodeId, string.IsNullOrWhiteSpace(notes) ? null : notes);
         return Task.FromResult($"Notes updated for '{node.Label}'.");
@@ -1103,10 +1127,10 @@ public sealed class AiToolFunctions(
 
     [Description("Move an address table entry into a group. Pass null groupId to move to top level.")]
     public Task<string> MoveEntryToGroup(
-        [Description("Node ID of entry to move")] string nodeId,
+        [Description("Node ID or label of entry to move")] string nodeId,
         [Description("Target group ID (or empty for top level)")] string? groupId = null)
     {
-        var node = addressTableService.FindNode(nodeId);
+        var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (!string.IsNullOrWhiteSpace(groupId))
         {
@@ -1539,6 +1563,10 @@ public sealed class AiToolFunctions(
     }
 
     // ── Helpers ──
+
+    /// <summary>Resolve a node by ID first, then by label (case-insensitive).</summary>
+    private AddressTableNode? ResolveNode(string idOrLabel) =>
+        addressTableService.FindNode(idOrLabel) ?? addressTableService.FindNodeByLabel(idOrLabel);
 
     private static nuint ParseAddress(string address)
     {

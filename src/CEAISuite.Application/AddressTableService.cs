@@ -584,6 +584,19 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
 
     public AddressTableNode? FindNode(string id) => FindInCollection(_roots, id);
 
+    public AddressTableNode? FindNodeByLabel(string label) => FindByLabelInCollection(_roots, label);
+
+    private static AddressTableNode? FindByLabelInCollection(ObservableCollection<AddressTableNode> nodes, string label)
+    {
+        foreach (var node in nodes)
+        {
+            if (string.Equals(node.Label, label, StringComparison.OrdinalIgnoreCase)) return node;
+            var found = FindByLabelInCollection(node.Children, label);
+            if (found is not null) return found;
+        }
+        return null;
+    }
+
     private static AddressTableNode? FindInCollection(ObservableCollection<AddressTableNode> nodes, string id)
     {
         foreach (var node in nodes)

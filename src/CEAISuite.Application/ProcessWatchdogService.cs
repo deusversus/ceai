@@ -60,6 +60,64 @@ public sealed class ProcessWatchdogService : IDisposable
     public void ClearUnsafe(nuint address, string mode) =>
         _unsafeAddresses.TryRemove(MakeUnsafeKey(address, mode), out _);
 
+    /// <summary>
+    /// Install a breakpoint/hook with transactional safety. If the process becomes
+    /// unresponsive after install, automatically rolls back.
+    /// </summary>
+    public async Task<TransactionResult> InstallWithTransactionAsync(
+        int processId,
+        string operationId,
+        nuint address,
+        string operationType,
+        string mode,
+        Func<Task> installAction,
+        Func<Task<bool>> rollbackAction,
+        int verifyDelayMs = 1500)
+    {
+        // Step 1: Verify process is responsive before install
+        bool preCheck = IsProcessResponsive(processId);
+        if (!preCheck)
+            return new TransactionResult(false, "Process was already unresponsive before install.", TransactionPhase.PreCheck);
+
+        try
+        {
+            // Step 2: Execute the install
+            await installAction();
+
+            // Step 3: Wait and verify the process is still responsive
+            await Task.Delay(verifyDelayMs);
+
+            bool postCheck = IsProcessResponsive(processId);
+            if (!postCheck)
+            {
+                // Process became unresponsive — rollback
+                bool rollbackOk = false;
+                try { rollbackOk = await rollbackAction(); }
+                catch { /* rollback failed */ }
+
+                // Mark as unsafe
+                var key = MakeUnsafeKey(address, mode);
+                _unsafeAddresses[key] = new UnsafeAddressEntry(address, mode, operationType, DateTimeOffset.UtcNow, rollbackOk);
+
+                OnAutoRollback?.Invoke(new WatchdogRollbackEvent(operationId, processId, address, operationType, mode, rollbackOk, DateTimeOffset.UtcNow));
+
+                return new TransactionResult(false,
+                    $"Process became unresponsive after install. Rollback {(rollbackOk ? "succeeded" : "FAILED")}. Address marked unsafe.",
+                    TransactionPhase.Verify);
+            }
+
+            // Step 4: Committed — start ongoing monitoring
+            StartMonitoring(processId, operationId, address, operationType, mode, rollbackAction);
+
+            return new TransactionResult(true, "Install committed. Watchdog monitoring active.", TransactionPhase.Committed);
+        }
+        catch (Exception ex)
+        {
+            // Install itself failed — no rollback needed
+            return new TransactionResult(false, $"Install failed: {ex.Message}", TransactionPhase.Install);
+        }
+    }
+
     internal void StopMonitoring(string operationId)
     {
         if (_monitors.TryRemove(operationId, out var monitor))
@@ -80,6 +138,9 @@ public sealed class ProcessWatchdogService : IDisposable
         // Remove from active monitors
         _monitors.TryRemove(monitor.OperationId, out _);
 
+        // L2: Write freeze telemetry
+        WriteFreezeTelementry(monitor, rollbackSucceeded);
+
         // Fire event
         OnAutoRollback?.Invoke(new WatchdogRollbackEvent(
             monitor.OperationId,
@@ -89,6 +150,62 @@ public sealed class ProcessWatchdogService : IDisposable
             monitor.Mode,
             rollbackSucceeded,
             DateTimeOffset.UtcNow));
+    }
+
+    private static void WriteFreezeTelementry(WatchdogMonitor monitor, bool rollbackSucceeded)
+    {
+        try
+        {
+            var logDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CEAISuite", "logs");
+            Directory.CreateDirectory(logDir);
+
+            var entry = new
+            {
+                timestamp = DateTimeOffset.UtcNow.ToString("o"),
+                operationId = monitor.OperationId,
+                processId = monitor.ProcessId,
+                address = $"0x{monitor.Address:X}",
+                operationType = monitor.OperationType,
+                mode = monitor.Mode,
+                rollbackSucceeded,
+                diagnostics = new
+                {
+                    description = "Process became unresponsive after breakpoint/hook installation"
+                }
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(entry, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            var fileName = $"freeze-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{monitor.OperationId[..8]}.json";
+            File.WriteAllText(Path.Combine(logDir, fileName), json);
+        }
+        catch
+        {
+            // Telemetry should never throw
+        }
+    }
+
+    /// <summary>
+    /// Check if the target process is responsive.
+    /// Shared between transaction pre/post-checks and WatchdogMonitor polling.
+    /// </summary>
+    internal static bool IsProcessResponsive(int processId)
+    {
+        try
+        {
+            var proc = Process.GetProcessById(processId);
+            if (proc.HasExited) return false;
+            if (proc.MainWindowHandle == IntPtr.Zero)
+            {
+                return !proc.HasExited;
+            }
+            return proc.Responding;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static string MakeUnsafeKey(nuint address, string mode) =>
@@ -119,6 +236,15 @@ public sealed record WatchdogRollbackEvent(
     string Mode,
     bool RollbackSucceeded,
     DateTimeOffset TimestampUtc);
+
+/// <summary>Indicates which phase of a transactional install succeeded or failed.</summary>
+public enum TransactionPhase { PreCheck, Install, Verify, Committed }
+
+/// <summary>Result of <see cref="ProcessWatchdogService.InstallWithTransactionAsync"/>.</summary>
+public sealed record TransactionResult(
+    bool Success,
+    string Message,
+    TransactionPhase Phase);
 
 /// <summary>Dispose to stop monitoring an operation.</summary>
 public sealed class WatchdogGuard(string operationId, ProcessWatchdogService service) : IDisposable
@@ -229,26 +355,10 @@ internal sealed class WatchdogMonitor : IDisposable
 
     /// <summary>
     /// Check if the target process is responsive.
-    /// Uses Process.Responding which internally calls SendMessageTimeout on the main window.
+    /// Delegates to the shared implementation in ProcessWatchdogService.
     /// </summary>
-    private static bool IsProcessResponsive(int processId)
-    {
-        try
-        {
-            var proc = Process.GetProcessById(processId);
-            if (proc.HasExited) return false;
-            if (proc.MainWindowHandle == IntPtr.Zero)
-            {
-                // No main window — process is likely still alive but windowless.
-                return !proc.HasExited;
-            }
-            return proc.Responding;
-        }
-        catch
-        {
-            return false; // Process gone
-        }
-    }
+    private static bool IsProcessResponsive(int processId) =>
+        ProcessWatchdogService.IsProcessResponsive(processId);
 
     public void Dispose()
     {

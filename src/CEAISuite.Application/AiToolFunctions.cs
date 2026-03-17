@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
@@ -35,6 +36,18 @@ public sealed class AiToolFunctions(
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
+
+    // M3: Process liveness / stale-state tracking
+    private int _sessionGeneration;
+    private int _lastAttachedPid;
+
+    private object GetProcessStatusJson(int processId)
+    {
+        bool alive = IsProcessAlive(processId);
+        bool pidChanged = processId != _lastAttachedPid;
+        if (pidChanged) { _sessionGeneration++; _lastAttachedPid = processId; }
+        return new { processAlive = alive, processId, sessionGeneration = _sessionGeneration, pidChanged };
+    }
 
     private static bool IsProcessAlive(int processId)
     {
@@ -156,8 +169,13 @@ public sealed class AiToolFunctions(
         [Description("Memory address to start disassembling")] string address)
     {
         var overview = await disassemblyService.DisassembleAtAsync(processId, address);
-        var lines = overview.Lines.Select(i => $"  {i.Address}  {i.HexBytes,-24}  {i.Mnemonic,-8} {i.Operands}");
-        return $"Disassembly ({overview.Lines.Count} instructions):\n{string.Join('\n', lines)}";
+        return ToJson(new
+        {
+            startAddress = overview.StartAddress,
+            instructions = overview.Lines.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
+            count = overview.Lines.Count,
+            summary = overview.Summary
+        });
     }
 
     [Description("List memory regions of a process. Shows base address, size, and access flags (R/W/X). Use to understand memory layout before scanning or to find executable/writable regions for code injection.")]
@@ -221,12 +239,13 @@ public sealed class AiToolFunctions(
     {
         var roots = addressTableService.Roots;
         if (roots.Count == 0)
-            return Task.FromResult("Address table is empty.");
+            return Task.FromResult(ToJson(new { entries = Array.Empty<object>(), count = 0 }));
 
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Address table ({CountNodes(roots)} entries):");
-        FormatNodes(sb, roots, indent: 0);
-        return Task.FromResult(sb.ToString());
+        return Task.FromResult(ToJson(new
+        {
+            entries = FormatNodesJson(roots),
+            count = CountNodes(roots)
+        }));
     }
 
     private static void FormatNodes(System.Text.StringBuilder sb, IEnumerable<AddressTableNode> nodes, int indent)
@@ -245,8 +264,14 @@ public sealed class AiToolFunctions(
             }
             else
             {
-                var frozen = n.IsLocked ? " [FROZEN]" : "";
-                sb.AppendLine($"{prefix}[{n.Id}] {n.Label}: {n.Address} = {n.CurrentValue} ({n.DataType}){frozen}");
+                var resolved = n.ResolvedAddress.HasValue;
+                var addrDisplay = resolved ? $"addr=0x{n.ResolvedAddress!.Value:X}" : $"addr={n.Address}";
+                var parentInfo = n.IsOffset && n.Parent is not null
+                    ? $" | parent=\"{n.Parent.Label}\"+{n.Address}"
+                    : "";
+                var frozen = n.IsLocked ? " | FROZEN" : "";
+                var pointer = n.IsPointer ? " | ptr" : "";
+                sb.AppendLine($"{prefix}[{n.Id}] \"{n.Label}\" | {addrDisplay}{parentInfo} | value={n.CurrentValue} ({n.DataType}) | resolved={resolved}{pointer}{frozen}");
             }
         }
     }
@@ -436,21 +461,46 @@ public sealed class AiToolFunctions(
             {
                 // Still allow but warn
             }
+
+            // For risky modes (PageGuard, Hardware), use transactional install with rollback
+            if (watchdogService is not null && bpMode is BreakpointMode.PageGuard or BreakpointMode.Hardware)
+            {
+                BreakpointOverview? txBp = null;
+                var txResult = await watchdogService.InstallWithTransactionAsync(
+                    processId, $"bp-{Guid.NewGuid():N}", parsedAddr, "Breakpoint", modeStr,
+                    installAction: async () =>
+                    {
+                        txBp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit);
+                    },
+                    rollbackAction: async () => txBp is not null && await breakpointService.RemoveBreakpointAsync(processId, txBp.Id));
+
+                if (!txResult.Success)
+                    return $"⚠️ Transactional install failed at {txResult.Phase}: {txResult.Message}";
+
+                var msg = $"Breakpoint {txBp!.Id} set at {txBp.Address} (type: {txBp.Type}, mode: {bpMode}, action: {txBp.HitAction})";
+                if (singleHit) msg += " [SINGLE-HIT: will auto-remove after first trigger]";
+                if (wasDowngraded) msg += "\n⚠️ Mode was auto-downgraded from Stealth→PageGuard. Stealth (code cave) only works on executable code, not data write targets.";
+                if (watchdogService.IsUnsafe(parsedAddr, modeStr))
+                    msg += $"\n⚠️ WARNING: This address+{modeStr} previously caused a process freeze. Watchdog is monitoring.";
+                msg += "\n✅ Transaction committed. Watchdog monitoring active.";
+                return msg;
+            }
+
             var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit);
-            var msg = $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
-            if (singleHit) msg += " [SINGLE-HIT: will auto-remove after first trigger]";
-            if (wasDowngraded) msg += "\n⚠️ Mode was auto-downgraded from Stealth→PageGuard. Stealth (code cave) only works on executable code, not data write targets.";
+            var msg2 = $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
+            if (singleHit) msg2 += " [SINGLE-HIT: will auto-remove after first trigger]";
+            if (wasDowngraded) msg2 += "\n⚠️ Mode was auto-downgraded from Stealth→PageGuard. Stealth (code cave) only works on executable code, not data write targets.";
             if (watchdogService is not null)
             {
                 var bpId = bp.Id;
                 watchdogService.StartMonitoring(processId, bpId, parsedAddr, "Breakpoint", modeStr,
                     async () => await breakpointService.RemoveBreakpointAsync(processId, bpId));
                 if (watchdogService.IsUnsafe(parsedAddr, modeStr))
-                    msg += $"\n⚠️ WARNING: This address+{modeStr} previously caused a process freeze. Watchdog is monitoring.";
+                    msg2 += $"\n⚠️ WARNING: This address+{modeStr} previously caused a process freeze. Watchdog is monitoring.";
                 else
-                    msg += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
+                    msg2 += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
             }
-            return msg;
+            return msg2;
         }
         catch (Exception ex)
         {
@@ -473,9 +523,21 @@ public sealed class AiToolFunctions(
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
         var bps = await breakpointService.ListBreakpointsAsync(processId);
-        if (bps.Count == 0) return "No active breakpoints.";
-        var lines = bps.Select(b => $"  [{b.Id}] {b.Address} ({b.Type}) hits={b.HitCount} {(b.IsEnabled ? "enabled" : "disabled")}");
-        return $"Active breakpoints ({bps.Count}):\n{string.Join('\n', lines)}";
+        if (bps.Count == 0) return ToJson(new { breakpoints = Array.Empty<object>(), count = 0 });
+        return ToJson(new
+        {
+            breakpoints = bps.Select(b => new
+            {
+                b.Id,
+                b.Address,
+                b.Type,
+                b.Mode,
+                b.HitCount,
+                b.IsEnabled,
+                lifecycleStatus = breakpointService.GetLifecycleStatus(b.Id).ToString()
+            }),
+            count = bps.Count
+        });
     }
 
     [Description("Get the hit log for a breakpoint. Shows when it was triggered, register state, and thread info.")]
@@ -486,12 +548,28 @@ public sealed class AiToolFunctions(
         if (breakpointService is null) return "Breakpoint engine not available.";
         var hits = await breakpointService.GetHitLogAsync(breakpointId, maxEntries);
         if (hits.Count == 0) return $"No hits recorded for breakpoint {breakpointId}.";
-        var lines = hits.Select(h =>
+        return ToJson(new
         {
-            var regs = string.Join(", ", h.Registers.Take(4).Select(r => $"{r.Key}={r.Value}"));
-            return $"  [{h.Timestamp}] thread={h.ThreadId} @ {h.Address} | {regs}";
+            breakpointId,
+            hits = hits.Select(h => new { h.BreakpointId, h.Address, h.ThreadId, h.Timestamp, h.Registers }),
+            count = hits.Count
         });
-        return $"Hit log ({hits.Count} entries):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Get capability matrix for all breakpoint modes. Shows which modes support execute hooks vs data write watches, which require debugger attachment, and stability ratings.")]
+    public string GetBreakpointModeCapabilities()
+    {
+        var caps = BreakpointService.GetModeCapabilities();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("## Breakpoint Mode Capabilities");
+        foreach (var c in caps)
+        {
+            sb.AppendLine($"\n### {c.Mode} [{c.StabilityTier}]");
+            sb.AppendLine($"  {c.Description}");
+            sb.AppendLine($"  Execute hooks: {(c.SupportsExecuteHook ? "✓" : "✗")} | Data write watch: {(c.SupportsDataWriteWatch ? "✓" : "✗")}");
+            sb.AppendLine($"  Debugger: {(c.RequiresDebugger ? "required" : "none")} | Page protection: {(c.UsesPageProtection ? "yes" : "no")} | Thread suspend: {(c.UsesThreadSuspend ? "yes" : "no")}");
+        }
+        return sb.ToString();
     }
 
     [Description("Probe a memory address to assess risk before setting a breakpoint or hook. Returns region type, protection, page info, recommended modes, and risk level. ALWAYS call this before SetBreakpoint on unfamiliar addresses.")]
@@ -555,23 +633,33 @@ public sealed class AiToolFunctions(
             var avoid = new List<string>();
             var warnings = new List<string>();
 
+            var capabilityMap = BreakpointService.GetModeCapabilities()
+                .ToDictionary(c => c.Mode, c => c.StabilityTier);
+
             if (isExecutable)
             {
                 riskLevel = "LOW";
-                recommended.Add("Stealth (code cave — safest, no debugger)");
-                recommended.Add("Software (INT3)");
-                recommended.Add("Hardware (DR register)");
+                recommended.Add($"Stealth (code cave — safest, no debugger) [{capabilityMap.GetValueOrDefault(BreakpointMode.Stealth, "?")}]");
+                recommended.Add($"Software (INT3) [{capabilityMap.GetValueOrDefault(BreakpointMode.Software, "?")}]");
+                recommended.Add($"Hardware (DR register) [{capabilityMap.GetValueOrDefault(BreakpointMode.Hardware, "?")}]");
                 avoid.Add("PageGuard on code (may trap unrelated fetches)");
             }
             else
             {
                 riskLevel = "MEDIUM";
-                recommended.Add("PageGuard (least intrusive for data)");
+                recommended.Add($"PageGuard (least intrusive for data) [{capabilityMap.GetValueOrDefault(BreakpointMode.PageGuard, "?")}]");
 
                 nuint pageBase = addr & ~(nuint)0xFFF;
                 nuint pageEnd = pageBase + 0x1000;
                 warnings.Add($"Page-guard will trap ALL access to the 4KB page containing this address (0x{pageBase:X}–0x{pageEnd:X})");
                 warnings.Add("Hot data fields (e.g., HP/position/timer) may cause excessive hits — use singleHit=true");
+
+                // M5: Page co-tenancy — scan address table for other entries on the same 4KB page
+                int coTenants = 0;
+                foreach (var root in addressTableService.Roots)
+                    CountCoTenants(root, pageBase, addr, ref coTenants);
+                if (coTenants > 0)
+                    warnings.Add($"Page co-tenancy: {coTenants} other address table entries share this 4KB page — PageGuard will affect all of them");
 
                 avoid.Add("Stealth (code cave cannot monitor data writes)");
                 avoid.Add("Software (INT3 cannot monitor data writes)");
@@ -666,6 +754,211 @@ public sealed class AiToolFunctions(
             $"Script '{node.Label}' has issues:\n" +
             $"Errors: {string.Join("; ", result.Errors)}\n" +
             $"Warnings: {string.Join("; ", result.Warnings)}");
+    }
+
+    [Description("Deep semantic validation of a script against live process state. Verifies assert bytes match live memory, hook targets are executable, detour space is sufficient, and [DISABLE] restores all [ENABLE] patches. Use this before enabling any script on a live target.")]
+    public async Task<string> ValidateScriptDeep(
+        [Description("Node ID or label of the script entry")] string nodeId,
+        [Description("Process ID to validate against")] int processId)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return $"Node '{nodeId}' not found.";
+        if (node.AssemblerScript is null) return $"Node '{nodeId}' is not a script entry.";
+        if (autoAssemblerEngine is null) return "Auto Assembler engine not available.";
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Deep Validation: {node.Label}");
+
+        int passed = 0, failed = 0, warnings = 0;
+
+        // Step 1: Parse validation
+        var parseResult = autoAssemblerEngine.Parse(node.AssemblerScript);
+        if (!parseResult.IsValid)
+        {
+            sb.AppendLine($"❌ PARSE FAILED: {string.Join("; ", parseResult.Errors)}");
+            return sb.ToString();
+        }
+        sb.AppendLine("✅ Parse: valid syntax");
+        passed++;
+
+        var script = node.AssemblerScript;
+
+        // Step 2: Extract and verify assert directives
+        // Format: "assert(address,bytehex)" e.g. "assert(GameAssembly.dll+9A18E8,48 8B 44 24 38)"
+        var assertPattern = new Regex(
+            @"assert\s*\(\s*([^,]+)\s*,\s*([0-9A-Fa-f\s]+)\s*\)",
+            RegexOptions.IgnoreCase);
+
+        var assertMatches = assertPattern.Matches(script);
+        if (assertMatches.Count == 0)
+        {
+            sb.AppendLine("⚠️ No assert directives found — cannot verify hook compatibility");
+            warnings++;
+        }
+        else
+        {
+            foreach (Match match in assertMatches)
+            {
+                var addrStr = match.Groups[1].Value.Trim();
+                var expectedHex = match.Groups[2].Value.Trim();
+
+                try
+                {
+                    nuint assertAddr;
+                    if (addrStr.Contains('+'))
+                    {
+                        var parts = addrStr.Split('+', 2);
+                        var modName = parts[0].Trim();
+                        var offsetStr = parts[1].Trim();
+
+                        var attachment = await engineFacade.AttachAsync(processId);
+                        var mod = attachment.Modules.FirstOrDefault(m =>
+                            m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
+
+                        if (mod is null)
+                        {
+                            sb.AppendLine($"❌ Assert at {addrStr}: module '{modName}' not found");
+                            failed++;
+                            continue;
+                        }
+
+                        var offsetVal = ulong.Parse(offsetStr, NumberStyles.HexNumber);
+                        assertAddr = (nuint)((ulong)mod.BaseAddress + offsetVal);
+                    }
+                    else
+                    {
+                        assertAddr = ParseAddress(addrStr);
+                    }
+
+                    var expectedBytes = expectedHex.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(b => byte.Parse(b, NumberStyles.HexNumber))
+                        .ToArray();
+
+                    var liveRead = await engineFacade.ReadMemoryAsync(processId, assertAddr, expectedBytes.Length);
+                    var liveBytes = liveRead.Bytes.ToArray();
+
+                    if (liveBytes.SequenceEqual(expectedBytes))
+                    {
+                        sb.AppendLine($"✅ Assert 0x{assertAddr:X}: live bytes match ({expectedHex})");
+                        passed++;
+                    }
+                    else
+                    {
+                        var liveHex = string.Join(" ", liveBytes.Select(b => b.ToString("X2")));
+                        sb.AppendLine($"❌ Assert 0x{assertAddr:X}: MISMATCH");
+                        sb.AppendLine($"   Expected: {expectedHex}");
+                        sb.AppendLine($"   Live:     {liveHex}");
+                        sb.AppendLine($"   ⚠️ Script may be incompatible with current game version");
+                        failed++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine($"❌ Assert {addrStr}: verification failed ({ex.Message})");
+                    failed++;
+                }
+            }
+        }
+
+        // Step 3: Check hook target executability
+        if (memoryProtectionEngine is not null)
+        {
+            var addressPattern = new Regex(
+                @"^\s*(?:(\w+\.dll)\+([0-9A-Fa-f]+)|0x([0-9A-Fa-f]+))\s*:",
+                RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+            var enableSection = parseResult.EnableSection ?? script;
+            var addrMatches = addressPattern.Matches(enableSection);
+
+            foreach (Match match in addrMatches)
+            {
+                try
+                {
+                    nuint hookAddr;
+                    if (match.Groups[1].Success)
+                    {
+                        var modName = match.Groups[1].Value;
+                        var offsetStr = match.Groups[2].Value;
+                        var attachment = await engineFacade.AttachAsync(processId);
+                        var mod = attachment.Modules.FirstOrDefault(m =>
+                            m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
+                        if (mod is null) continue;
+                        hookAddr = (nuint)((ulong)mod.BaseAddress + ulong.Parse(offsetStr, NumberStyles.HexNumber));
+                    }
+                    else
+                    {
+                        hookAddr = ParseAddress(match.Groups[3].Value);
+                    }
+
+                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, hookAddr);
+                    if (region.IsExecutable)
+                    {
+                        sb.AppendLine($"✅ Hook target 0x{hookAddr:X}: executable ({(region.IsWritable ? "RWX" : "RX")})");
+                        passed++;
+                    }
+                    else
+                    {
+                        sb.AppendLine($"⚠️ Hook target 0x{hookAddr:X}: NOT executable — hook may fail or crash");
+                        warnings++;
+                    }
+                }
+                catch { /* skip unresolvable addresses */ }
+            }
+        }
+
+        // Step 4: Check [DISABLE] has restore logic
+        bool hasEnable = parseResult.EnableSection is not null;
+        bool hasDisable = parseResult.DisableSection is not null;
+
+        if (hasEnable && !hasDisable)
+        {
+            sb.AppendLine("❌ Script has [ENABLE] but no [DISABLE] — cannot be safely reversed");
+            failed++;
+        }
+        else if (hasEnable && hasDisable)
+        {
+            bool hasRestoreBytes = parseResult.DisableSection!.Contains("db ", StringComparison.OrdinalIgnoreCase)
+                || parseResult.DisableSection.Contains("readmem", StringComparison.OrdinalIgnoreCase);
+            bool hasDealloc = parseResult.DisableSection.Contains("dealloc", StringComparison.OrdinalIgnoreCase);
+
+            if (hasRestoreBytes)
+            {
+                sb.AppendLine("✅ [DISABLE] contains byte restoration directives");
+                passed++;
+            }
+            else
+            {
+                sb.AppendLine("⚠️ [DISABLE] section exists but has no visible byte restoration (db/readmem)");
+                warnings++;
+            }
+
+            if (parseResult.EnableSection!.Contains("alloc", StringComparison.OrdinalIgnoreCase))
+            {
+                if (hasDealloc)
+                {
+                    sb.AppendLine("✅ [DISABLE] deallocates memory allocated in [ENABLE]");
+                    passed++;
+                }
+                else
+                {
+                    sb.AppendLine("⚠️ [ENABLE] allocates memory but [DISABLE] has no dealloc — potential memory leak");
+                    warnings++;
+                }
+            }
+        }
+
+        // Summary
+        sb.AppendLine();
+        sb.AppendLine($"## Summary: {passed} passed, {failed} failed, {warnings} warnings");
+        if (failed > 0)
+            sb.AppendLine("🛑 DO NOT ENABLE — script has critical issues that may crash or corrupt the game");
+        else if (warnings > 0)
+            sb.AppendLine("⚠️ Script may work but has potential issues — proceed with caution");
+        else
+            sb.AppendLine("✅ All checks passed — script appears safe to enable");
+
+        return sb.ToString();
     }
 
     // ── Pointer Scanner tools ──
@@ -975,9 +1268,17 @@ public sealed class AiToolFunctions(
         sb.AppendLine($"ID: {node.Id}");
         sb.AppendLine($"Label: {node.Label}");
         sb.AppendLine($"Type: {(node.IsGroup ? "Group" : node.IsScriptEntry ? "Script" : node.DataType.ToString())}");
-        sb.AppendLine($"Address: {node.Address}");
+        sb.AppendLine($"symbolicAddress: {node.Address}");
         if (node.ResolvedAddress.HasValue)
-            sb.AppendLine($"Resolved: 0x{node.ResolvedAddress.Value:X}");
+            sb.AppendLine($"resolvedAddress: 0x{node.ResolvedAddress.Value:X}");
+        else
+            sb.AppendLine("resolvedAddress: (unresolved)");
+        sb.AppendLine($"isResolved: {node.ResolvedAddress.HasValue}");
+        if (node.IsOffset && node.Parent is not null)
+        {
+            sb.AppendLine($"parentBase: \"{node.Parent.Label}\" ({node.Parent.Id})");
+            sb.AppendLine($"offset: {node.Address}");
+        }
         sb.AppendLine($"Value: {node.CurrentValue}");
         if (node.IsLocked) sb.AppendLine($"FROZEN at: {node.LockedValue}");
         if (node.IsPointer)
@@ -1003,53 +1304,74 @@ public sealed class AiToolFunctions(
 
         var results = scanService.LastScanResults;
         var count = results.Results.Count;
-        var lines = results.Results.Take(maxResults)
-            .Select(r => $"  0x{r.Address:X} = {r.CurrentValue} (was {r.PreviousValue})");
-        return Task.FromResult(
-            $"Scan: {count:N0} results ({results.Constraints.DataType})\n{string.Join('\n', lines)}" +
-            (count > maxResults ? $"\n  ... {count - maxResults:N0} more" : ""));
+        return Task.FromResult(ToJson(new
+        {
+            dataType = results.Constraints.DataType.ToString(),
+            totalCount = count,
+            results = results.Results.Take(maxResults).Select(r => new
+            {
+                address = $"0x{r.Address:X}",
+                value = r.CurrentValue,
+                previousValue = r.PreviousValue
+            }),
+            returnedCount = Math.Min(maxResults, count),
+            hasMore = count > maxResults
+        }));
     }
 
     [Description("Get current context: attached process, address table summary, scan state. Use this to orient yourself before taking action.")]
     public Task<string> GetCurrentContext()
     {
-        var sb = new System.Text.StringBuilder();
-
-        // Process
         var dashboard = dashboardService.CurrentDashboard;
-        if (dashboard?.CurrentInspection is not null)
-        {
-            var p = dashboard.CurrentInspection;
-            sb.AppendLine($"Attached: {p.ProcessName} (PID {p.ProcessId}, {p.Architecture})");
-            sb.AppendLine($"Modules: {p.Modules.Count}");
-        }
-        else
-        {
-            sb.AppendLine("No process attached.");
-        }
-
-        // Address table
         var roots = addressTableService.Roots;
+
+        var processInfo = dashboard?.CurrentInspection is { } p
+            ? new { attached = true, processId = p.ProcessId, processName = p.ProcessName, architecture = p.Architecture.ToString(), moduleCount = p.Modules.Count }
+            : null;
+
         var totalEntries = CountNodes(roots);
         var frozenCount = CountNodes(roots, n => n.IsLocked);
         var scriptCount = CountNodes(roots, n => n.IsScriptEntry);
-        sb.AppendLine($"Address table: {totalEntries} entries, {frozenCount} frozen, {scriptCount} scripts");
 
-        // Scan
-        if (scanService.LastScanResults is not null)
-        {
-            var s = scanService.LastScanResults;
-            sb.AppendLine($"Active scan: {s.Results.Count:N0} results ({s.Constraints.DataType})");
-        }
-        else
-        {
-            sb.AppendLine("No active scan.");
-        }
+        var scanInfo = scanService.LastScanResults is { } s
+            ? new { active = true, resultCount = s.Results.Count, dataType = s.Constraints.DataType.ToString() }
+            : null;
 
-        return Task.FromResult(sb.ToString());
+        var pid = processInfo?.processId ?? 0;
+        var processStatus = pid > 0 ? GetProcessStatusJson(pid) : null;
+
+        return Task.FromResult(ToJson(new
+        {
+            process = processInfo != null
+                ? (object)new { processInfo.attached, processInfo.processId, processInfo.processName, processInfo.architecture, processInfo.moduleCount }
+                : new { attached = false, processId = 0, processName = (string?)null, architecture = (string?)null, moduleCount = 0 },
+            processStatus,
+            addressTable = new { totalEntries, frozenCount, scriptCount },
+            scan = scanInfo != null
+                ? (object)new { scanInfo.active, scanInfo.resultCount, scanInfo.dataType }
+                : new { active = false, resultCount = 0, dataType = (string?)null }
+        }));
     }
 
-    [Description("Read memory at an address as multiple data types at once. Useful when you don't know the type — shows Int32, UInt32, Float, Int64, Double interpretations.")]
+    [Description("Check if attached process is still alive and if session state may be stale. Returns process status, session generation, and staleness indicators.")]
+    public string CheckProcessLiveness([Description("Process ID")] int processId)
+    {
+        bool alive = IsProcessAlive(processId);
+        bool pidChanged = processId != _lastAttachedPid;
+        if (pidChanged && alive) { _sessionGeneration++; _lastAttachedPid = processId; }
+
+        return ToJson(new
+        {
+            processAlive = alive,
+            processId,
+            sessionGeneration = _sessionGeneration,
+            pidChanged,
+            warning = pidChanged ? "Process changed — cached addresses, scans, and node resolutions may be stale. Re-resolve before using." : null,
+            recommendation = !alive ? "Process exited. Re-attach to continue." : pidChanged ? "Refresh address table and re-resolve nodes." : "Session is current."
+        });
+    }
+
+    [Description("Read memory at an address as multiple data types at once.Useful when you don't know the type — shows Int32, UInt32, Float, Int64, Double interpretations.")]
     public async Task<string> ProbeAddress(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex string)")] string address)
@@ -1493,19 +1815,27 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"FreeMemory failed: {ex.Message}"; }
     }
 
-    [Description("Query memory page protection for an address.")]
+    [Description("Query the memory protection state of an address. Returns base address, region size, and protection flags. Useful before and after applying hooks to verify protection hasn't been corrupted.")]
     public async Task<string> QueryMemoryProtection(
         [Description("Process ID")] int processId,
-        [Description("Memory address as hex")] string address)
+        [Description("Memory address to query (hex)")] string address)
     {
         if (memoryProtectionEngine is null) return "Memory protection engine not available.";
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
-            var info = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
-            return $"Region at 0x{info.BaseAddress:X}: {info.RegionSize} bytes | " +
-                   $"R={info.IsReadable} W={info.IsWritable} X={info.IsExecutable}";
+            var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+            return ToJson(new
+            {
+                address = $"0x{addr:X}",
+                regionBase = $"0x{region.BaseAddress:X}",
+                regionSize = region.RegionSize,
+                isReadable = region.IsReadable,
+                isWritable = region.IsWritable,
+                isExecutable = region.IsExecutable,
+                pageBase = $"0x{(addr & ~(nuint)0xFFF):X}"
+            });
         }
         catch (Exception ex) { return $"QueryMemoryProtection failed: {ex.Message}"; }
     }
@@ -1769,25 +2099,218 @@ public sealed class AiToolFunctions(
     {
         if (codeCaveEngine is null) return "Code cave engine not available.";
         var hooks = await codeCaveEngine.ListHooksAsync(processId);
-        if (hooks.Count == 0) return "No active code cave hooks.";
-        var lines = hooks.Select(h => $"  [{h.Id}] 0x{h.OriginalAddress:X} → 0x{h.CaveAddress:X} ({h.OriginalBytesLength}B stolen, hits={h.HitCount})");
-        return $"Active stealth hooks ({hooks.Count}):\n{string.Join('\n', lines)}";
+        if (hooks.Count == 0) return ToJson(new { hooks = Array.Empty<object>(), count = 0 });
+        return ToJson(new
+        {
+            hooks = hooks.Select(h => new { h.Id, originalAddress = $"0x{h.OriginalAddress:X}", caveAddress = $"0x{h.CaveAddress:X}", h.OriginalBytesLength, h.HitCount }),
+            count = hooks.Count
+        });
     }
 
-    [Description("Get register snapshots captured by a code cave hook. Returns the most recent captures with RAX, RBX, RCX, RDX, RSI, RDI, RSP values.")]
+    [Description("Get register snapshots captured by a code cave hook. Returns detailed captures with registers, thread IDs, timestamps, and optional pointer dereferences.")]
     public async Task<string> GetCodeCaveHookHits(
         [Description("Hook ID")] string hookId,
-        [Description("Maximum entries to return")] int maxEntries = 20)
+        [Description("Maximum entries to return")] int maxEntries = 20,
+        [Description("Process ID for register pointer dereferences (optional)")] int processId = 0)
     {
         if (codeCaveEngine is null) return "Code cave engine not available.";
         var hits = await codeCaveEngine.GetHookHitsAsync(hookId, maxEntries);
         if (hits.Count == 0) return $"No hits recorded for hook {hookId}.";
-        var lines = hits.Select(h =>
+
+        var hitResults = new List<object>();
+        foreach (var h in hits)
         {
-            var regs = string.Join(", ", h.RegisterSnapshot.Take(4).Select(r => $"{r.Key}={r.Value}"));
-            return $"  @ 0x{h.Address:X} | {regs}";
+            Dictionary<string, string>? dereferences = null;
+            if (processId > 0 && h.RegisterSnapshot.Count > 0)
+            {
+                dereferences = await DereferenceRegistersAsync(processId, h.RegisterSnapshot);
+            }
+
+            hitResults.Add(new
+            {
+                address = $"0x{h.Address:X}",
+                threadId = h.ThreadId,
+                timestamp = h.TimestampUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                registers = h.RegisterSnapshot,
+                hasRegisterSnapshot = h.RegisterSnapshot.Count > 0,
+                dereferences
+            });
+        }
+
+        return ToJson(new
+        {
+            hookId,
+            hits = hitResults,
+            count = hits.Count
         });
-        return $"Hook hits ({hits.Count} entries):\n{string.Join('\n', lines)}";
+    }
+
+    private async Task<Dictionary<string, string>> DereferenceRegistersAsync(
+        int processId, IReadOnlyDictionary<string, string> registers)
+    {
+        var result = new Dictionary<string, string>();
+        foreach (var (regName, regValue) in registers)
+        {
+            if (!ulong.TryParse(regValue.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? regValue[2..] : regValue,
+                    NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var addr))
+                continue;
+
+            if (addr <= 0x10000) continue;
+
+            try
+            {
+                var mem = await engineFacade.ReadMemoryAsync(processId, (nuint)addr, 8);
+                if (mem.Bytes.Count == 8)
+                {
+                    var pointed = BitConverter.ToUInt64(mem.Bytes.ToArray(), 0);
+                    result[regName] = $"0x{addr:X} (points to 0x{pointed:X})";
+                }
+            }
+            catch
+            {
+                // Address not readable — skip dereference
+            }
+        }
+        return result;
+    }
+
+    [Description("Preview a code cave hook installation WITHOUT actually patching. Shows bytes that would be overwritten, instructions that would be relocated, RIP-relative fixup needs, trampoline size, and a safety assessment. Use before InstallCodeCaveHook for high-confidence installs.")]
+    public async Task<string> DryRunHookInstall(
+        [Description("Process ID")] int processId,
+        [Description("Memory address to analyze for hook installation (hex)")] string address)
+    {
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"## Dry-Run Hook Preview: 0x{addr:X}");
+
+            bool canHook = true;
+
+            // 1. Check executability
+            if (memoryProtectionEngine is not null)
+            {
+                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+                if (!region.IsExecutable)
+                {
+                    sb.AppendLine("❌ Address is NOT executable — cannot install code cave hook");
+                    canHook = false;
+                }
+                else
+                {
+                    string prot = region.IsWritable ? "RWX" : "RX";
+                    sb.AppendLine($"✅ Region is executable ({prot})");
+                }
+            }
+
+            // 2. Disassemble at the target to determine stolen bytes
+            var disasm = await disassemblyService.DisassembleAtAsync(processId, $"0x{addr:X}", 10);
+
+            // We need at least 14 bytes for a 64-bit JMP (FF 25 00 00 00 00 + 8-byte address)
+            const int minJmpSize = 14;
+            int stolenBytes = 0;
+            var stolenInstructions = new List<DisassemblyLineOverview>();
+            bool hasRipRelative = false;
+            var ripRelativeInstructions = new List<string>();
+
+            foreach (var line in disasm.Lines)
+            {
+                stolenInstructions.Add(line);
+                var byteCount = line.HexBytes.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+                stolenBytes += byteCount;
+
+                if (line.Operands.Contains("[rip", StringComparison.OrdinalIgnoreCase))
+                {
+                    hasRipRelative = true;
+                    ripRelativeInstructions.Add($"  {line.Address}: {line.Mnemonic} {line.Operands}");
+                }
+
+                if (stolenBytes >= minJmpSize) break;
+            }
+
+            sb.AppendLine();
+            sb.AppendLine($"### Stolen Bytes: {stolenBytes} (minimum required: {minJmpSize})");
+            if (stolenBytes < minJmpSize)
+            {
+                sb.AppendLine("❌ Insufficient bytes — cannot fit JMP detour");
+                canHook = false;
+            }
+            else
+            {
+                sb.AppendLine("✅ Sufficient space for JMP detour");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("### Instructions to be relocated:");
+            foreach (var instr in stolenInstructions)
+            {
+                sb.AppendLine($"  {instr.Address}: [{instr.HexBytes}] {instr.Mnemonic} {instr.Operands}");
+            }
+
+            // 3. RIP-relative analysis
+            sb.AppendLine();
+            if (hasRipRelative)
+            {
+                sb.AppendLine("### RIP-Relative Instructions (will be auto-relocated by BlockEncoder):");
+                foreach (var rip in ripRelativeInstructions)
+                    sb.AppendLine(rip);
+                sb.AppendLine("⚠️ These instructions reference memory relative to RIP and will need displacement adjustment in the trampoline");
+            }
+            else
+            {
+                sb.AppendLine("✅ No RIP-relative instructions — relocation is straightforward");
+            }
+
+            // 4. Read the actual bytes that would be overwritten
+            var liveRead = await engineFacade.ReadMemoryAsync(processId, addr, stolenBytes);
+            var hexDump = string.Join(" ", liveRead.Bytes.Take(stolenBytes).Select(b => b.ToString("X2")));
+            sb.AppendLine();
+            sb.AppendLine($"### Bytes to be overwritten:");
+            sb.AppendLine($"  {hexDump}");
+
+            // 5. Trampoline layout estimate
+            int trampolineSize =
+                17 +          // push all registers (~17 bytes overhead for a minimal snapshot)
+                stolenBytes + // relocated original instructions
+                14;           // JMP back to original code
+            int withCapture = trampolineSize + 128; // conservative estimate for full register capture
+
+            sb.AppendLine();
+            sb.AppendLine($"### Estimated Trampoline Size:");
+            sb.AppendLine($"  Without register capture: ~{trampolineSize} bytes");
+            sb.AppendLine($"  With register capture: ~{withCapture} bytes");
+
+            // 6. Verify stolen bytes end on a clean instruction boundary
+            bool cleanBoundary = stolenBytes == stolenInstructions.Sum(i => i.HexBytes.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+            if (cleanBoundary)
+            {
+                sb.AppendLine();
+                sb.AppendLine("✅ Stolen bytes end on clean instruction boundary");
+            }
+
+            // 7. Final verdict
+            sb.AppendLine();
+            if (canHook)
+            {
+                sb.AppendLine("### Verdict: ✅ SAFE TO HOOK");
+                sb.AppendLine($"  {stolenInstructions.Count} instruction(s) will be relocated ({stolenBytes} bytes)");
+                if (hasRipRelative)
+                    sb.AppendLine("  RIP-relative fixups will be applied automatically");
+            }
+            else
+            {
+                sb.AppendLine("### Verdict: ❌ DO NOT HOOK — see issues above");
+            }
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"DryRunHookInstall failed: {ex.Message}";
+        }
     }
 
     // ── Static Analysis Tools ──
@@ -2124,6 +2647,19 @@ public sealed class AiToolFunctions(
         return count;
     }
 
+    /// <summary>Recursively count address table nodes sharing the same 4KB page as the target address.</summary>
+    private static void CountCoTenants(AddressTableNode node, nuint pageBase, nuint excludeAddr, ref int count)
+    {
+        if (node.ResolvedAddress.HasValue)
+        {
+            var entryPage = node.ResolvedAddress.Value & ~(nuint)0xFFF;
+            if (entryPage == pageBase && node.ResolvedAddress.Value != excludeAddr)
+                count++;
+        }
+        foreach (var child in node.Children)
+            CountCoTenants(child, pageBase, excludeAddr, ref count);
+    }
+
     // ── Watchdog safety tools ──
 
     [Description("Check if an address+mode combination has been marked unsafe by the watchdog. Returns safety status and history of prior freeze events.")]
@@ -2164,5 +2700,62 @@ public sealed class AiToolFunctions(
         var addr = ParseAddress(address);
         watchdogService.ClearUnsafe(addr, mode);
         return $"Cleared unsafe flag for 0x{addr:X} + {mode}.";
+    }
+
+    // ── JSON serialization helpers ──
+
+    private static readonly JsonSerializerOptions _jsonOpts = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private static string ToJson<T>(T obj) => JsonSerializer.Serialize(obj, _jsonOpts);
+
+    private static List<object> FormatNodesJson(IEnumerable<AddressTableNode> nodes)
+    {
+        var result = new List<object>();
+        foreach (var n in nodes)
+        {
+            if (n.IsGroup)
+            {
+                result.Add(new
+                {
+                    n.Id,
+                    n.Label,
+                    type = "group",
+                    children = FormatNodesJson(n.Children),
+                    childCount = n.Children.Count
+                });
+            }
+            else if (n.IsScriptEntry)
+            {
+                result.Add(new
+                {
+                    n.Id,
+                    n.Label,
+                    type = "script",
+                    isEnabled = n.IsScriptEnabled
+                });
+            }
+            else
+            {
+                result.Add(new
+                {
+                    n.Id,
+                    n.Label,
+                    type = "address",
+                    address = n.Address,
+                    resolvedAddress = n.ResolvedAddress.HasValue ? $"0x{n.ResolvedAddress.Value:X}" : null,
+                    value = n.CurrentValue,
+                    dataType = n.DataType.ToString(),
+                    isResolved = n.ResolvedAddress.HasValue,
+                    isPointer = n.IsPointer,
+                    isFrozen = n.IsLocked,
+                    isOffset = n.IsOffset
+                });
+            }
+        }
+        return result;
     }
 }

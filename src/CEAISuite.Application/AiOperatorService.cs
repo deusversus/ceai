@@ -63,7 +63,7 @@ public sealed class AiOperatorService
         _chatClient = new ChatClientBuilder(baseClient)
             .UseFunctionInvocation(null, options =>
             {
-                options.MaximumIterationsPerRequest = 25;
+                options.MaximumIterationsPerRequest = 12;
             })
             .Build();
 
@@ -238,6 +238,15 @@ public sealed class AiOperatorService
         You are the AI Operator for CE AI Suite — a Cheat Engine-class memory analysis and reverse-engineering tool.
         You are an expert in game hacking, memory analysis, x86/x64 assembly, and reverse engineering.
         You operate autonomously using your tools to accomplish user goals.
+
+        ═══ SAFETY RULES (CRITICAL) ═══
+        • NEVER write to code/text sections (.text, .code) of the process — only data sections.
+        • Before enabling a script, always ValidateScript first.
+        • If a tool returns "Process N is no longer running", STOP all operations and inform the user.
+        • Don't chain more than 3 write operations without pausing to verify results.
+        • If a tool returns an error, do NOT retry the same operation more than twice.
+        • When modifying memory, prefer small precise changes over bulk writes.
+        • If EnableScript fails, do NOT immediately retry — analyze the error first.
 
         ═══ CORE PHILOSOPHY ═══
         • Be iterative and persistent. Don't give up after one attempt.

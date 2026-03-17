@@ -25,6 +25,13 @@ public sealed class AiToolFunctions(
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
+
+    private static bool IsProcessAlive(int processId)
+    {
+        try { return !System.Diagnostics.Process.GetProcessById(processId).HasExited; }
+        catch { return false; }
+    }
+
     [Description("List running processes on the system. Returns process ID, name, and architecture.")]
     public async Task<string> ListProcesses()
     {
@@ -49,9 +56,17 @@ public sealed class AiToolFunctions(
         [Description("Memory address as hex (e.g. 0x7FF6A000) or decimal")] string address,
         [Description("Data type: Int32, Int64, Float, Double, or Pointer")] string dataType)
     {
-        var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
-        var probe = await dashboardService.ReadAddressAsync(processId, address, dt);
-        return $"Read {dt} at {probe.Address}: {probe.DisplayValue}";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
+            var probe = await dashboardService.ReadAddressAsync(processId, address, dt);
+            return $"Read {dt} at {probe.Address}: {probe.DisplayValue}";
+        }
+        catch (Exception ex)
+        {
+            return $"ReadMemory failed: {ex.Message}";
+        }
     }
 
     [Description("Write a value to process memory. Records original value for undo (Ctrl+Z). CAUTION: This modifies the target process.")]
@@ -61,17 +76,25 @@ public sealed class AiToolFunctions(
         [Description("Data type: Int32, Int64, Float, Double")] string dataType,
         [Description("Value to write")] string value)
     {
-        var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
-        if (patchUndoService is not null)
+        try
         {
-            var addr = AddressTableService.ParseAddress(address);
-            var result = await patchUndoService.WriteWithUndoAsync(processId, addr, dt, value);
-            return result.BytesWritten > 0
-                ? $"Wrote '{value}' ({dt}) to 0x{addr:X}. {patchUndoService.UndoCount} patches in undo stack."
-                : $"Write failed at 0x{addr:X}.";
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
+            if (patchUndoService is not null)
+            {
+                var addr = AddressTableService.ParseAddress(address);
+                var result = await patchUndoService.WriteWithUndoAsync(processId, addr, dt, value);
+                return result.BytesWritten > 0
+                    ? $"Wrote '{value}' ({dt}) to 0x{addr:X}. {patchUndoService.UndoCount} patches in undo stack."
+                    : $"Write failed at 0x{addr:X}.";
+            }
+            var message = await dashboardService.WriteAddressAsync(processId, address, dt, value);
+            return message;
         }
-        var message = await dashboardService.WriteAddressAsync(processId, address, dt, value);
-        return message;
+        catch (Exception ex)
+        {
+            return $"WriteMemory failed: {ex.Message}";
+        }
     }
 
     [Description("Start a new memory scan for a value in a process. Returns number of results found.")]
@@ -81,13 +104,21 @@ public sealed class AiToolFunctions(
         [Description("Scan type: ExactValue, UnknownInitialValue, ArrayOfBytes")] string scanType,
         [Description("Value to search for. For ArrayOfBytes use hex pattern like '48 8B 05 ?? ?? ?? ??' where ?? is wildcard")] string? value)
     {
-        var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
-        var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
-        scanService.ResetScan();
-        var overview = await scanService.StartScanAsync(processId, dt, st, value ?? "");
-        var topResults = overview.Results.Take(10)
-            .Select(r => $"  {r.Address} = {r.CurrentValue}");
-        return $"Scan complete: {overview.ResultCount:N0} results found.\n{string.Join('\n', topResults)}";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
+            var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
+            scanService.ResetScan();
+            var overview = await scanService.StartScanAsync(processId, dt, st, value ?? "");
+            var topResults = overview.Results.Take(10)
+                .Select(r => $"  {r.Address} = {r.CurrentValue}");
+            return $"Scan complete: {overview.ResultCount:N0} results found.\n{string.Join('\n', topResults)}";
+        }
+        catch (Exception ex)
+        {
+            return $"StartScan failed: {ex.Message}";
+        }
     }
 
     [Description("Refine the previous scan with a new constraint (e.g. value changed, increased, decreased, or new exact value).")]
@@ -95,11 +126,18 @@ public sealed class AiToolFunctions(
         [Description("Scan type: ExactValue, Increased, Decreased, Changed, Unchanged")] string scanType,
         [Description("Value to match (for ExactValue) or empty")] string? value)
     {
-        var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
-        var overview = await scanService.RefineScanAsync(st, value ?? "");
-        var topResults = overview.Results.Take(10)
-            .Select(r => $"  {r.Address} = {r.CurrentValue} (was {r.PreviousValue})");
-        return $"Refinement complete: {overview.ResultCount:N0} results remaining.\n{string.Join('\n', topResults)}";
+        try
+        {
+            var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
+            var overview = await scanService.RefineScanAsync(st, value ?? "");
+            var topResults = overview.Results.Take(10)
+                .Select(r => $"  {r.Address} = {r.CurrentValue} (was {r.PreviousValue})");
+            return $"Refinement complete: {overview.ResultCount:N0} results remaining.\n{string.Join('\n', topResults)}";
+        }
+        catch (Exception ex)
+        {
+            return $"RefineScan failed: {ex.Message}";
+        }
     }
 
     [Description("Disassemble machine code at an address in a process. Shows assembly instructions.")]
@@ -263,11 +301,19 @@ public sealed class AiToolFunctions(
         [Description("Breakpoint type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
         [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue")
     {
-        if (breakpointService is null) return "Breakpoint engine not available.";
-        var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
-        var bpAction = Enum.Parse<BreakpointHitAction>(hitAction, ignoreCase: true);
-        var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpAction);
-        return $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, action: {bp.HitAction})";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            if (breakpointService is null) return "Breakpoint engine not available.";
+            var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
+            var bpAction = Enum.Parse<BreakpointHitAction>(hitAction, ignoreCase: true);
+            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpAction);
+            return $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, action: {bp.HitAction})";
+        }
+        catch (Exception ex)
+        {
+            return $"SetBreakpoint failed: {ex.Message}";
+        }
     }
 
     [Description("Remove a breakpoint by its ID.")]
@@ -862,10 +908,12 @@ public sealed class AiToolFunctions(
         if (dashboard?.CurrentInspection is null)
             return "No process attached. Attach first.";
 
+        int pid = dashboard.CurrentInspection.ProcessId;
+        if (!IsProcessAlive(pid)) return $"Process {pid} is no longer running.";
+
         try
         {
-            var result = await autoAssemblerEngine.EnableAsync(
-                dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
+            var result = await autoAssemblerEngine.EnableAsync(pid, node.AssemblerScript!);
             if (result.Success)
             {
                 node.IsScriptEnabled = true;
@@ -881,7 +929,7 @@ public sealed class AiToolFunctions(
         catch (Exception ex)
         {
             node.ScriptStatus = $"Error: {ex.Message}";
-            return $"Script error: {ex.Message}";
+            return $"EnableScript failed (game may have crashed): {ex.Message}";
         }
     }
 
@@ -897,6 +945,14 @@ public sealed class AiToolFunctions(
 
         var dashboard = dashboardService.CurrentDashboard;
         if (dashboard?.CurrentInspection is null) return "No process attached.";
+
+        int pid = dashboard.CurrentInspection.ProcessId;
+        if (!IsProcessAlive(pid)) 
+        {
+            node.IsScriptEnabled = false;
+            node.ScriptStatus = "Process exited";
+            return $"Process {pid} is no longer running. Script marked as disabled.";
+        }
 
         try
         {

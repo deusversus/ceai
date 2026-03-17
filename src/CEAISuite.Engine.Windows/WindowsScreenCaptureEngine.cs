@@ -8,8 +8,9 @@ using CEAISuite.Engine.Abstractions;
 namespace CEAISuite.Engine.Windows;
 
 /// <summary>
-/// Captures screenshots of process windows using Win32 GDI (PrintWindow).
-/// Falls back to BitBlt screen capture if PrintWindow fails.
+/// Captures screenshots of process windows using Win32 GDI.
+/// Enumerates all top-level windows belonging to the process to find the game window,
+/// since Process.MainWindowHandle is unreliable for many games.
 /// </summary>
 [SupportedOSPlatform("windows")]
 public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
@@ -18,8 +19,7 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
     {
         try
         {
-            var process = Process.GetProcessById(processId);
-            var hwnd = process.MainWindowHandle;
+            var hwnd = FindBestWindow(processId);
             if (hwnd == IntPtr.Zero)
                 return Task.FromResult<ScreenCaptureResult?>(null);
 
@@ -31,7 +31,6 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
             if (width <= 0 || height <= 0)
                 return Task.FromResult<ScreenCaptureResult?>(null);
 
-            // Cap dimensions to avoid huge allocations
             const int maxDim = 3840;
             if (width > maxDim) width = maxDim;
             if (height > maxDim) height = maxDim;
@@ -61,12 +60,15 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
                     new Size(width, height), CopyPixelOperation.SourceCopy);
             }
 
-            // Convert to PNG bytes
             using var ms = new MemoryStream();
             bmp.Save(ms, ImageFormat.Png);
             var pngBytes = ms.ToArray();
 
-            string title = process.MainWindowTitle ?? process.ProcessName;
+            // Get window title
+            var titleBuf = new char[256];
+            int titleLen = GetWindowText(hwnd, titleBuf, titleBuf.Length);
+            string title = titleLen > 0 ? new string(titleBuf, 0, titleLen) : $"PID {processId}";
+
             return Task.FromResult<ScreenCaptureResult?>(
                 new ScreenCaptureResult(pngBytes, width, height, title));
         }
@@ -76,7 +78,78 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
         }
     }
 
+    /// <summary>
+    /// Find the best (largest visible) window belonging to a process.
+    /// Process.MainWindowHandle is unreliable for games — this enumerates
+    /// all top-level windows and picks the largest visible, non-minimized one.
+    /// </summary>
+    private static IntPtr FindBestWindow(int processId)
+    {
+        IntPtr best = IntPtr.Zero;
+        long bestArea = 0;
+
+        EnumWindows((hwnd, _) =>
+        {
+            GetWindowThreadProcessId(hwnd, out uint pid);
+            if (pid != (uint)processId) return true; // continue
+
+            // Skip invisible and minimized windows
+            if (!IsWindowVisible(hwnd)) return true;
+            if (IsIconic(hwnd)) return true;
+
+            // Skip tool windows (tooltips, floating palettes)
+            long exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+            if ((exStyle & WS_EX_TOOLWINDOW) != 0) return true;
+
+            if (GetWindowRect(hwnd, out var rect))
+            {
+                long area = (long)(rect.Right - rect.Left) * (rect.Bottom - rect.Top);
+                if (area > bestArea)
+                {
+                    bestArea = area;
+                    best = hwnd;
+                }
+            }
+
+            return true; // continue enumeration
+        }, IntPtr.Zero);
+
+        // Fallback to .NET MainWindowHandle if enumeration found nothing
+        if (best == IntPtr.Zero)
+        {
+            try
+            {
+                best = Process.GetProcessById(processId).MainWindowHandle;
+            }
+            catch { /* process gone */ }
+        }
+
+        return best;
+    }
+
     private const uint PW_RENDERFULLCONTENT = 2;
+    private const int GWL_EXSTYLE = -20;
+    private const long WS_EX_TOOLWINDOW = 0x00000080;
+
+    private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWindowVisible(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int nIndex);
 
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -85,6 +158,9 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
     [DllImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool PrintWindow(IntPtr hwnd, IntPtr hdc, uint nFlags);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    private static extern int GetWindowText(IntPtr hwnd, char[] lpString, int nMaxCount);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT

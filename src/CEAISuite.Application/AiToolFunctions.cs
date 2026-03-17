@@ -157,6 +157,50 @@ public sealed class AiToolFunctions(
         return $"Disassembly ({overview.Lines.Count} instructions):\n{string.Join('\n', lines)}";
     }
 
+    [Description("List memory regions of a process. Shows base address, size, and access flags (R/W/X). Use to understand memory layout before scanning or to find executable/writable regions for code injection.")]
+    public async Task<string> ListMemoryRegions(
+        [Description("Process ID")] int processId,
+        [Description("Filter: 'all', 'readable', 'writable', 'executable' (default: readable)")] string filter = "readable")
+    {
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var regions = await scanService.EnumerateRegionsAsync(processId);
+
+            var filtered = filter.ToLowerInvariant() switch
+            {
+                "writable" => regions.Where(r => r.IsWritable).ToList(),
+                "executable" => regions.Where(r => r.IsExecutable).ToList(),
+                "all" => regions.ToList(),
+                _ => regions.Where(r => r.IsReadable).ToList()
+            };
+
+            if (filtered.Count == 0) return $"No {filter} memory regions found.";
+
+            var totalSize = filtered.Sum(r => r.RegionSize);
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Memory regions ({filtered.Count} {filter}, {FormatBytes(totalSize)} total):");
+            foreach (var r in filtered.Take(100))
+            {
+                var flags = $"{(r.IsReadable ? "R" : "-")}{(r.IsWritable ? "W" : "-")}{(r.IsExecutable ? "X" : "-")}";
+                sb.AppendLine($"  0x{r.BaseAddress:X} [{FormatBytes(r.RegionSize),-10}] {flags}");
+            }
+            if (filtered.Count > 100)
+                sb.AppendLine($"  ... and {filtered.Count - 100} more regions");
+            return sb.ToString();
+        }
+        catch (Exception ex) { return $"ListMemoryRegions failed: {ex.Message}"; }
+    }
+
+    private static string FormatBytes(long bytes) =>
+        bytes switch
+        {
+            >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
+            >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
+            >= 1024 => $"{bytes / 1024.0:F1} KB",
+            _ => $"{bytes} B"
+        };
+
     [Description("Add a memory address to the address table for tracking.")]
     public Task<string> AddToAddressTable(
         [Description("Memory address")] string address,

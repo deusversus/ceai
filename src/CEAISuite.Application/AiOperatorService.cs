@@ -360,7 +360,7 @@ public sealed class AiOperatorService
         ═══ YOUR TOOLS ═══
         Process: ListProcesses, InspectProcess, AttachProcess, FindProcess
         Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
-        Scanning: StartScan, RefineScan, GetScanResults
+        Scanning: StartScan, RefineScan, GetScanResults, ListMemoryRegions
         Analysis: Disassemble, DissectStructure, ScanForPointers, GenerateSignature, TestSignatureUniqueness
         Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,
                         SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,

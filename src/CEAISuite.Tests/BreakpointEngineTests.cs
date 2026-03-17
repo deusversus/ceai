@@ -153,3 +153,105 @@ public class CodeCaveHookContractTests
         Assert.Equal("Unable to allocate memory", result.ErrorMessage);
     }
 }
+
+public class RipRelativeRelocationTests
+{
+    [Fact]
+    public void EmptyBytes_ReturnsEmpty()
+    {
+        var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
+            [], (nuint)0x140001000, (nuint)0x7FF600000000);
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void NonRipRelative_ReturnsOriginalBytes()
+    {
+        // push rbp; mov rbp, rsp (common prologue — no RIP-relative)
+        byte[] prologue = [0x55, 0x48, 0x89, 0xE5];
+        var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
+            prologue, (nuint)0x140001000, (nuint)0x7FF600000000);
+        Assert.Equal(prologue, result);
+    }
+
+    [Fact]
+    public void RipRelativeMov_GetsRelocated()
+    {
+        // mov rax, [rip+0x1000] at 0x140001000 → rip after instr = 0x140001007
+        // Target = 0x140001007 + 0x1000 = 0x140002007
+        // Encoded as: 48 8B 05 00100000
+        byte[] movRipRel = [0x48, 0x8B, 0x05, 0x00, 0x10, 0x00, 0x00];
+        var originalAddr = (nuint)0x140001000;
+        // Use a new address within ±2GB so displacement still fits int32
+        var newAddr = (nuint)0x140010000;
+
+        var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
+            movRipRel, originalAddr, newAddr);
+
+        Assert.Equal(7, result.Length);
+        Assert.Equal(0x48, result[0]);
+        Assert.Equal(0x8B, result[1]);
+        Assert.Equal(0x05, result[2]);
+
+        // Original target: 0x140001007 + 0x1000 = 0x140002007
+        // New RIP after: 0x140010007
+        // Expected disp: 0x140002007 - 0x140010007 = -0xE000
+        var newDisp = BitConverter.ToInt32(result, 3);
+        int expectedDisp = (int)(0x140002007L - 0x140010007L);
+        Assert.Equal(expectedDisp, newDisp);
+    }
+
+    [Fact]
+    public void LeaRipRelative_GetsRelocated()
+    {
+        // lea rcx, [rip+0x500] at 0x140001000
+        // Encoded as: 48 8D 0D 00050000
+        byte[] leaRipRel = [0x48, 0x8D, 0x0D, 0x00, 0x05, 0x00, 0x00];
+        var originalAddr = (nuint)0x140001000;
+        // Put new address close enough for displacement to still fit in int32
+        var newAddr = (nuint)0x140002000;
+
+        var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
+            leaRipRel, originalAddr, newAddr);
+
+        Assert.Equal(7, result.Length);
+        Assert.Equal(0x48, result[0]);
+        Assert.Equal(0x8D, result[1]);
+        Assert.Equal(0x0D, result[2]);
+
+        // Original target: 0x140001007 + 0x500 = 0x140001507
+        // New RIP after: 0x140002007
+        // New disp: 0x140001507 - 0x140002007 = -0xB00 = FFFFF500
+        var newDisp = BitConverter.ToInt32(result, 3);
+        long expectedTarget = 0x140001000 + 7 + 0x500; // = 0x140001507
+        long newRipAfter = 0x140002000 + 7; // = 0x140002007
+        int expectedDisp = (int)(expectedTarget - newRipAfter);
+        Assert.Equal(expectedDisp, newDisp);
+    }
+
+    [Fact]
+    public void MixedInstructions_OnlyRelocatesRipRelative()
+    {
+        // push rbp (55) + mov rax,[rip+0x100] (48 8B 05 00010000) = 8 bytes total
+        byte[] mixed = [0x55, 0x48, 0x8B, 0x05, 0x00, 0x01, 0x00, 0x00];
+        var originalAddr = (nuint)0x140001000;
+        var newAddr = (nuint)0x140005000;
+
+        var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
+            mixed, originalAddr, newAddr);
+
+        // push rbp should be unchanged
+        Assert.Equal(0x55, result[0]);
+        // mov instruction should be relocated
+        Assert.Equal(0x48, result[1]);
+        Assert.Equal(0x8B, result[2]);
+        Assert.Equal(0x05, result[3]);
+        // Displacement should be adjusted
+        var newDisp = BitConverter.ToInt32(result, 4);
+        // Original target: 0x140001008 + 0x100 = 0x140001108
+        // New RIP after mov: 0x140005008
+        // Expected disp: 0x140001108 - 0x140005008 = -0x3F00
+        int expectedDisp = (int)(0x140001108L - 0x140005008L);
+        Assert.Equal(expectedDisp, newDisp);
+    }
+}

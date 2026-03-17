@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
+using Iced.Intel;
 
 namespace CEAISuite.Engine.Windows;
 
@@ -365,11 +366,10 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine
         code.Add(0x58); // pop rax
         code.Add(0x9D); // popfq
 
-        // ── Execute stolen original bytes ──
-        // Note: if stolen bytes contain RIP-relative instructions, they need relocation.
-        // For now we handle the common case where stolen bytes are register/memory ops.
-        // TODO: Add RIP-relative instruction relocation for complete coverage.
-        code.AddRange(stolenBytes);
+        // ── Execute stolen original bytes (with RIP-relative relocation) ──
+        var relocatedStolen = RelocateRipRelativeInstructions(
+            stolenBytes, originalAddr, codeAddr + (nuint)code.Count);
+        code.AddRange(relocatedStolen);
 
         // ── JMP back to original + stealLength ──
         var returnAddr = originalAddr + stealLength;
@@ -389,6 +389,72 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine
         // jmp[2..5] = 00 00 00 00 (RIP-relative offset to the 8-byte address that follows)
         BitConverter.GetBytes((ulong)targetAddress).CopyTo(jmp, 6);
         return jmp;
+    }
+
+    /// <summary>
+    /// Relocate RIP-relative instructions in stolen bytes so they reference the correct
+    /// absolute addresses when executed from the code cave instead of the original location.
+    /// Uses Iced x86 decoder + BlockEncoder for accurate instruction relocation.
+    /// </summary>
+    internal static byte[] RelocateRipRelativeInstructions(
+        byte[] stolenBytes, nuint originalAddress, nuint newAddress)
+    {
+        if (stolenBytes.Length == 0) return stolenBytes;
+
+        // Decode instructions at original address
+        var reader = new ByteArrayCodeReader(stolenBytes);
+        var decoder = Decoder.Create(64, reader, (ulong)originalAddress);
+
+        var instructions = new List<Instruction>();
+        while (decoder.IP < (ulong)originalAddress + (ulong)stolenBytes.Length)
+        {
+            decoder.Decode(out var instr);
+            if (instr.IsInvalid) break;
+            instructions.Add(instr);
+        }
+
+        if (instructions.Count == 0) return stolenBytes;
+
+        // Check if any instruction has a RIP-relative operand — skip encoder if not
+        bool hasRipRelative = false;
+        foreach (var instr in instructions)
+        {
+            if (instr.IsIPRelativeMemoryOperand)
+            {
+                hasRipRelative = true;
+                break;
+            }
+            // Also check for relative branch targets (Jcc, CALL rel32, JMP rel32)
+            if (instr.FlowControl is FlowControl.ConditionalBranch
+                or FlowControl.UnconditionalBranch
+                or FlowControl.Call)
+            {
+                hasRipRelative = true;
+                break;
+            }
+        }
+        if (!hasRipRelative) return stolenBytes;
+
+        // Use Iced BlockEncoder to re-encode at the new address with automatic relocation
+        var codeWriter = new CodeWriterImpl();
+        var block = new InstructionBlock(codeWriter, instructions, (ulong)newAddress);
+
+        if (!BlockEncoder.TryEncode(64, block, out var errorMessage, out _, BlockEncoderOptions.None))
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[CodeCave] RIP-relocation failed, using raw stolen bytes: {errorMessage}");
+            return stolenBytes;
+        }
+
+        return codeWriter.ToArray();
+    }
+
+    /// <summary>Minimal ICodeWriter for BlockEncoder that writes to a byte array.</summary>
+    private sealed class CodeWriterImpl : CodeWriter
+    {
+        private readonly List<byte> _bytes = new();
+        public override void WriteByte(byte value) => _bytes.Add(value);
+        public byte[] ToArray() => _bytes.ToArray();
     }
 
     /// <summary>

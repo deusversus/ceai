@@ -60,6 +60,11 @@ public sealed class ScanService(IScanEngine scanEngine)
         _lastScanResults = null;
     }
 
+    public Task<IReadOnlyList<MemoryRegionDescriptor>> EnumerateRegionsAsync(
+        int processId,
+        CancellationToken cancellationToken = default) =>
+        scanEngine.EnumerateRegionsAsync(processId, cancellationToken);
+
     private static ScanSessionOverview ToOverview(ScanResultSet resultSet) =>
         new(
             resultSet.ScanId,

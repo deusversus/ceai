@@ -661,3 +661,217 @@ public class CheatTableParserTests
         Assert.Equal("[ENABLED]", node.DisplayValue);
     }
 }
+
+public class CheatTableExporterTests
+{
+    [Fact]
+    public void RoundTrip_PreservesGroupHierarchy()
+    {
+        // Arrange: build a group with two children
+        var group = new AddressTableNode("g1", "Player Stats", true);
+        var health = new AddressTableNode("h1", "Health", false)
+        {
+            Address = "00400000",
+            DataType = Engine.Abstractions.MemoryDataType.Int32,
+            CurrentValue = "100"
+        };
+        var speed = new AddressTableNode("s1", "Speed", false)
+        {
+            Address = "00400010",
+            DataType = Engine.Abstractions.MemoryDataType.Float,
+            CurrentValue = "1.5"
+        };
+        group.Children.Add(health);
+        group.Children.Add(speed);
+
+        // Act: export → re-import
+        var exporter = new CheatTableExporter();
+        var xml = exporter.ExportToXml(new[] { group });
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        // Assert
+        Assert.Single(nodes);
+        var importedGroup = nodes[0];
+        Assert.True(importedGroup.IsGroup);
+        Assert.Equal("Player Stats", importedGroup.Label);
+        Assert.Equal(2, importedGroup.Children.Count);
+        Assert.Equal("Health", importedGroup.Children[0].Label);
+        Assert.Equal(Engine.Abstractions.MemoryDataType.Int32, importedGroup.Children[0].DataType);
+        Assert.Equal("Speed", importedGroup.Children[1].Label);
+        Assert.Equal(Engine.Abstractions.MemoryDataType.Float, importedGroup.Children[1].DataType);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesPointerEntry()
+    {
+        var node = new AddressTableNode("p1", "Money", false)
+        {
+            Address = "game.exe+123456",
+            DataType = Engine.Abstractions.MemoryDataType.Int32,
+            IsPointer = true,
+            PointerOffsets = new List<long> { 0x10, 0x1C }
+        };
+
+        var exporter = new CheatTableExporter();
+        var xml = exporter.ExportToXml(new[] { node });
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        Assert.Single(nodes);
+        var imported = nodes[0];
+        Assert.Equal("Money", imported.Label);
+        Assert.Equal("game.exe+123456", imported.Address);
+        Assert.True(imported.IsPointer);
+        Assert.Equal(2, imported.PointerOffsets.Count);
+        Assert.Equal(0x10, imported.PointerOffsets[0]);
+        Assert.Equal(0x1C, imported.PointerOffsets[1]);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesScriptEntry()
+    {
+        var node = new AddressTableNode("sc1", "God Mode", false)
+        {
+            AssemblerScript = "[ENABLE]\nnop\n[DISABLE]\ndb 90"
+        };
+
+        var exporter = new CheatTableExporter();
+        var xml = exporter.ExportToXml(new[] { node });
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        Assert.Single(nodes);
+        var imported = nodes[0];
+        Assert.Equal("God Mode", imported.Label);
+        Assert.True(imported.IsScriptEntry);
+        Assert.Contains("[ENABLE]", imported.AssemblerScript);
+        Assert.Contains("[DISABLE]", imported.AssemblerScript);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesShowAsSigned()
+    {
+        var node = new AddressTableNode("u1", "Unsigned Val", false)
+        {
+            Address = "00500000",
+            DataType = Engine.Abstractions.MemoryDataType.Int32,
+            ShowAsSigned = false
+        };
+
+        var exporter = new CheatTableExporter();
+        var xml = exporter.ExportToXml(new[] { node });
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        Assert.Single(nodes);
+        Assert.False(nodes[0].ShowAsSigned);
+    }
+
+    [Fact]
+    public void RoundTrip_PreservesDataTypes()
+    {
+        var types = new (Engine.Abstractions.MemoryDataType Type, string Label)[]
+        {
+            (Engine.Abstractions.MemoryDataType.Byte, "ByteVal"),
+            (Engine.Abstractions.MemoryDataType.Int16, "ShortVal"),
+            (Engine.Abstractions.MemoryDataType.Int32, "IntVal"),
+            (Engine.Abstractions.MemoryDataType.Int64, "LongVal"),
+            (Engine.Abstractions.MemoryDataType.Float, "FloatVal"),
+            (Engine.Abstractions.MemoryDataType.Double, "DoubleVal"),
+            (Engine.Abstractions.MemoryDataType.String, "StringVal"),
+        };
+
+        var roots = types.Select((t, i) => new AddressTableNode($"dt{i}", t.Label, false)
+        {
+            Address = $"0040000{i}",
+            DataType = t.Type
+        }).ToArray();
+
+        var exporter = new CheatTableExporter();
+        var xml = exporter.ExportToXml(roots);
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var nodes = parser.ToAddressTableNodes(ct);
+
+        Assert.Equal(types.Length, nodes.Count);
+        for (int i = 0; i < types.Length; i++)
+        {
+            Assert.Equal(types[i].Type, nodes[i].DataType);
+            Assert.Equal(types[i].Label, nodes[i].Label);
+        }
+    }
+
+    [Fact]
+    public void RoundTrip_FullTable_PreservesStructure()
+    {
+        // Build a complex table: group with children, pointer entry, script entry
+        var group = new AddressTableNode("g1", "Stats", true);
+        group.Children.Add(new AddressTableNode("c1", "HP", false)
+        {
+            Address = "00400000",
+            DataType = Engine.Abstractions.MemoryDataType.Int32,
+            CurrentValue = "100"
+        });
+        group.Children.Add(new AddressTableNode("c2", "MP", false)
+        {
+            Address = "00400004",
+            DataType = Engine.Abstractions.MemoryDataType.Float,
+            CurrentValue = "50.5"
+        });
+
+        var pointer = new AddressTableNode("p1", "Gold", false)
+        {
+            Address = "GameAssembly.dll+ABC000",
+            DataType = Engine.Abstractions.MemoryDataType.Int64,
+            IsPointer = true,
+            PointerOffsets = new List<long> { 0xB8, 0x20, 0x0 }
+        };
+
+        var script = new AddressTableNode("s1", "Inf Health", false)
+        {
+            AssemblerScript = "[ENABLE]\naobscanmodule(health_aob,game.exe,89 50 04)\n[DISABLE]\nhealth_aob:\ndb 89 50 04"
+        };
+
+        var roots = new[] { group, pointer, script };
+
+        var exporter = new CheatTableExporter();
+        var xml = exporter.ExportToXml(roots);
+
+        var parser = new CheatTableParser();
+        var ct = parser.Parse(xml);
+        var reimported = parser.ToAddressTableNodes(ct);
+
+        // Verify structure
+        Assert.Equal(3, reimported.Count);
+
+        // Group
+        Assert.True(reimported[0].IsGroup);
+        Assert.Equal("Stats", reimported[0].Label);
+        Assert.Equal(2, reimported[0].Children.Count);
+        Assert.Equal("HP", reimported[0].Children[0].Label);
+        Assert.Equal("MP", reimported[0].Children[1].Label);
+
+        // Pointer
+        Assert.Equal("Gold", reimported[1].Label);
+        Assert.True(reimported[1].IsPointer);
+        Assert.Equal(3, reimported[1].PointerOffsets.Count);
+        Assert.Equal(0xB8, reimported[1].PointerOffsets[0]);
+        Assert.Equal(0x20, reimported[1].PointerOffsets[1]);
+        Assert.Equal(0x0, reimported[1].PointerOffsets[2]);
+
+        // Script
+        Assert.True(reimported[2].IsScriptEntry);
+        Assert.Equal("Inf Health", reimported[2].Label);
+        Assert.Contains("[ENABLE]", reimported[2].AssemblerScript);
+    }
+}

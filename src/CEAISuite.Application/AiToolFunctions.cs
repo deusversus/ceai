@@ -19,7 +19,9 @@ public sealed class AiToolFunctions(
     ScriptGenerationService scriptGenerationService,
     BreakpointService? breakpointService = null,
     IAutoAssemblerEngine? autoAssemblerEngine = null,
-    IScreenCaptureEngine? screenCaptureEngine = null)
+    IScreenCaptureEngine? screenCaptureEngine = null,
+    GlobalHotkeyService? hotkeyService = null,
+    PatchUndoService? patchUndoService = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -52,7 +54,7 @@ public sealed class AiToolFunctions(
         return $"Read {dt} at {probe.Address}: {probe.DisplayValue}";
     }
 
-    [Description("Write a value to process memory. CAUTION: This modifies the target process.")]
+    [Description("Write a value to process memory. Records original value for undo (Ctrl+Z). CAUTION: This modifies the target process.")]
     public async Task<string> WriteMemory(
         [Description("Process ID")] int processId,
         [Description("Memory address")] string address,
@@ -60,6 +62,14 @@ public sealed class AiToolFunctions(
         [Description("Value to write")] string value)
     {
         var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
+        if (patchUndoService is not null)
+        {
+            var addr = AddressTableService.ParseAddress(address);
+            var result = await patchUndoService.WriteWithUndoAsync(processId, addr, dt, value);
+            return result.BytesWritten > 0
+                ? $"Wrote '{value}' ({dt}) to 0x{addr:X}. {patchUndoService.UndoCount} patches in undo stack."
+                : $"Write failed at 0x{addr:X}.";
+        }
         var message = await dashboardService.WriteAddressAsync(processId, address, dt, value);
         return message;
     }
@@ -209,6 +219,28 @@ public sealed class AiToolFunctions(
             $"{leafCount} address entries, {scriptCount} scripts, {nodes.Count} top-level nodes. " +
             $"Table version: {ctFile.TableVersion}" +
             (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : ""));
+    }
+
+    [Description("Save the current address table as a Cheat Engine .CT file.")]
+    public Task<string> SaveCheatTable([Description("File path to save to")] string filePath)
+    {
+        var roots = addressTableService.Roots;
+        if (roots.Count == 0)
+            return Task.FromResult("Address table is empty. Nothing to save.");
+
+        try
+        {
+            var exporter = new CheatTableExporter();
+            exporter.SaveToFile(roots, filePath);
+            var totalCount = CountNodes(roots);
+            var scriptCount = CountScriptsInNodes(roots);
+            return Task.FromResult(
+                $"Saved {totalCount} entries ({scriptCount} scripts) to {filePath}");
+        }
+        catch (Exception ex)
+        {
+            return Task.FromResult($"Failed to save CT file: {ex.Message}");
+        }
     }
 
     private static int CountScriptsInNodes(IEnumerable<AddressTableNode> nodes)
@@ -407,7 +439,7 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
-    [Description("Register a global hotkey to toggle a specific address table entry's freeze lock. Hotkey works system-wide.")]
+    [Description("Register a global hotkey to toggle a specific address table entry's freeze lock or script activation. Hotkey works system-wide even when the game is focused.")]
     public Task<string> SetHotkey(
         [Description("Node ID of the address table entry")] string nodeId,
         [Description("Hotkey combination like 'Ctrl+F1' or 'Alt+Shift+G'")] string hotkey)
@@ -415,10 +447,115 @@ public sealed class AiToolFunctions(
         var node = addressTableService.FindNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
 
+        if (hotkeyService is null) return Task.FromResult("Hotkey service not available.");
+
         var (mods, vk) = GlobalHotkeyService.ParseHotkeyString(hotkey);
         if (vk == 0) return Task.FromResult($"Could not parse hotkey '{hotkey}'. Use format like 'Ctrl+F1' or 'Alt+G'.");
 
-        return Task.FromResult($"Hotkey parsed: modifiers=0x{mods:X}, vk=0x{vk:X}. Node '{node.Label}' at {node.Address}. The UI should call GlobalHotkeyService.Register() with these values.");
+        // Register the hotkey with a callback that toggles the node's active state
+        var desc = $"{hotkey} → {node.Label}";
+        var bindingId = hotkeyService.Register(mods, vk, desc, () =>
+        {
+            if (node.IsScriptEntry)
+            {
+                // For scripts, toggle via the AA engine if available
+                if (autoAssemblerEngine is not null)
+                {
+                    var dashboard = dashboardService.CurrentDashboard;
+                    if (dashboard?.CurrentInspection is not null)
+                    {
+                        var pid = dashboard.CurrentInspection.ProcessId;
+                        if (node.IsScriptEnabled)
+                        {
+                            _ = autoAssemblerEngine.DisableAsync(pid, node.AssemblerScript!);
+                            node.IsScriptEnabled = false;
+                            node.ScriptStatus = "Disabled (hotkey)";
+                        }
+                        else
+                        {
+                            _ = autoAssemblerEngine.EnableAsync(pid, node.AssemblerScript!).ContinueWith(t =>
+                            {
+                                if (t.Result.Success)
+                                {
+                                    node.IsScriptEnabled = true;
+                                    node.ScriptStatus = $"Enabled (hotkey, {t.Result.Patches.Count} patches)";
+                                }
+                                else
+                                {
+                                    node.ScriptStatus = $"FAILED: {t.Result.Error}";
+                                }
+                            });
+                        }
+                    }
+                }
+                else
+                {
+                    node.IsScriptEnabled = !node.IsScriptEnabled;
+                }
+            }
+            else
+            {
+                // For value entries, toggle freeze
+                node.IsLocked = !node.IsLocked;
+                if (node.IsLocked)
+                    node.LockedValue = node.CurrentValue;
+                else
+                    node.LockedValue = null;
+            }
+        });
+
+        if (bindingId < 0)
+            return Task.FromResult($"Failed to register hotkey '{hotkey}'. It may already be in use by another application.");
+
+        return Task.FromResult($"Hotkey '{hotkey}' registered for '{node.Label}'. Press {hotkey} to toggle {(node.IsScriptEntry ? "script" : "freeze")}.");
+    }
+
+    [Description("List all registered global hotkeys and their bound actions.")]
+    public Task<string> ListHotkeys()
+    {
+        if (hotkeyService is null) return Task.FromResult("Hotkey service not available.");
+        var bindings = hotkeyService.Bindings;
+        if (bindings.Count == 0) return Task.FromResult("No hotkeys registered.");
+        var sb = new System.Text.StringBuilder();
+        foreach (var b in bindings)
+            sb.AppendLine($"ID {b.Id}: {b.Description}");
+        return Task.FromResult(sb.ToString().TrimEnd());
+    }
+
+    [Description("Remove a registered global hotkey by its binding ID (from ListHotkeys).")]
+    public Task<string> RemoveHotkey([Description("Binding ID to remove")] int bindingId)
+    {
+        if (hotkeyService is null) return Task.FromResult("Hotkey service not available.");
+        return Task.FromResult(hotkeyService.Unregister(bindingId)
+            ? $"Hotkey binding {bindingId} removed."
+            : $"Binding {bindingId} not found.");
+    }
+
+    [Description("Undo the last memory write operation, restoring original bytes.")]
+    public async Task<string> UndoWrite()
+    {
+        if (patchUndoService is null) return "Undo service not available.";
+        return await patchUndoService.UndoAsync();
+    }
+
+    [Description("Redo the last undone memory write operation.")]
+    public async Task<string> RedoWrite()
+    {
+        if (patchUndoService is null) return "Undo service not available.";
+        return await patchUndoService.RedoAsync();
+    }
+
+    [Description("Show recent memory write history for undo/redo review.")]
+    public Task<string> PatchHistory([Description("Number of recent patches to show (default 10)")] int count = 10)
+    {
+        if (patchUndoService is null) return Task.FromResult("Undo service not available.");
+        var patches = patchUndoService.GetHistory(count);
+        if (patches.Count == 0) return Task.FromResult("No patches recorded.");
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Undo: {patchUndoService.UndoCount} | Redo: {patchUndoService.RedoCount}");
+        foreach (var p in patches)
+            sb.AppendLine($"  0x{p.Address:X} [{p.DataType}] = '{p.NewValue}' @ {p.Timestamp:HH:mm:ss}");
+        return Task.FromResult(sb.ToString().TrimEnd());
     }
 
     // ── State & control tools (agent needs these to act autonomously) ──

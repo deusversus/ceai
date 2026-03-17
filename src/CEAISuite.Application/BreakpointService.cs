@@ -38,6 +38,20 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
         return ToOverview(bp);
     }
 
+    public async Task<BreakpointOverview> SetBreakpointAsync(
+        int processId,
+        string addressText,
+        BreakpointType type,
+        BreakpointMode mode,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        var address = ParseAddress(addressText);
+        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, cancellationToken);
+        return ToOverview(bp);
+    }
+
     public async Task<bool> RemoveBreakpointAsync(
         int processId,
         string breakpointId,

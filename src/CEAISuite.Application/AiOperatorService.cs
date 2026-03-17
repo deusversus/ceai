@@ -365,7 +365,8 @@ public sealed class AiOperatorService
         Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,
                         SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
                         FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
-        Breakpoints: SetBreakpoint, RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog
+        Breakpoints: SetBreakpoint (with mode: Auto/Stealth/PageGuard/Hardware/Software), RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog
+        Code Cave Hooks: InstallCodeCaveHook, RemoveCodeCaveHook, ListCodeCaveHooks, GetCodeCaveHookHits
         Call Stack: GetCallStack, GetAllThreadStacks
         Scripts: ListScripts, ViewScript, ValidateScript, EnableScript, DisableScript,
                  EditScript, CreateScriptEntry
@@ -392,11 +393,38 @@ public sealed class AiOperatorService
         TIP: For "unknown initial value", start with UnknownInitialValue, then use Increased/Decreased.
 
         ANALYZING CODE / "WHAT WRITES TO THIS ADDRESS":
-        1. SetBreakpoint with HardwareWrite on the address
+        1. SetBreakpoint with HardwareWrite on the address (mode=Auto will pick the best approach)
         2. Wait for hits, then GetBreakpointHitLog
         3. Disassemble at the instruction address from the hit log
         4. Analyze the assembly to understand the write pattern
         5. Explain findings to user in plain language
+
+        ═══ BREAKPOINT MODES (IMPORTANT) ═══
+
+        You have FIVE breakpoint intrusiveness levels — pick the right one:
+
+        • Auto (default): Engine picks the least intrusive mode that works for the breakpoint type.
+          Execute → Hardware, Write/ReadWrite → PageGuard, Software → Software.
+
+        • Stealth: Code cave JMP detour — NO debugger attached, completely invisible to anti-debug.
+          Best for: anti-cheat/anti-debug games, long-running monitoring, execution hooks.
+          Use InstallCodeCaveHook directly for full control over register capture.
+
+        • PageGuard: Uses PAGE_GUARD memory protection. Less intrusive than hardware BPs for
+          monitoring memory writes/reads. Still requires debugger. Good for data breakpoints on
+          pages with frequent access.
+
+        • Hardware: DR0-DR3 debug registers. Requires thread suspension to write CONTEXT.
+          Best for: single-shot analysis (find what writes/reads an address). Limited to 4 active.
+          WARNING: Suspends all threads — can freeze anti-debug-sensitive games.
+
+        • Software: INT3 byte patch. Most intrusive. Best for: specific instruction tracing.
+
+        ANTI-DEBUG GAMES (freezes, crashes, or detects debugger):
+        1. ALWAYS use mode=Stealth or InstallCodeCaveHook for these targets
+        2. Code cave hooks work by JMP redirection — no DebugActiveProcess call at all
+        3. If Hardware mode freezes the game, remove the breakpoint and switch to Stealth
+        4. Code caves capture register snapshots in a ring buffer you can read with GetCodeCaveHookHits
 
         LOADING A CHEAT TABLE:
         1. LoadCheatTable with full path
@@ -420,9 +448,10 @@ public sealed class AiOperatorService
         4. Check if the hook point makes sense (is it too late? too early? wrong register?)
 
         FINDING A BETTER HOOK POINT:
-        1. SetBreakpoint (HardwareWrite or HardwareExecute) on the relevant address
+        1. SetBreakpoint (HardwareWrite or HardwareExecute, mode=Auto) on the relevant address
+           — If the game is anti-debug-sensitive, use mode=Stealth or InstallCodeCaveHook instead
         2. Ask user to trigger the game event (fight a battle, gain EXP, etc.)
-        3. GetBreakpointHitLog to see which instruction wrote the value
+        3. GetBreakpointHitLog (or GetCodeCaveHookHits for stealth hooks) to see which instruction wrote the value
         4. Disassemble the hit instruction and surrounding code
         5. Trace backward to find where the value is CALCULATED (not just stored)
         6. The best hook is where the value is computed BEFORE it's written

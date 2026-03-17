@@ -27,7 +27,8 @@ public sealed class AiToolFunctions(
     IMemoryProtectionEngine? memoryProtectionEngine = null,
     MemorySnapshotService? snapshotService = null,
     PointerRescanService? pointerRescanService = null,
-    ICallStackEngine? callStackEngine = null)
+    ICallStackEngine? callStackEngine = null,
+    ICodeCaveEngine? codeCaveEngine = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -300,12 +301,13 @@ public sealed class AiToolFunctions(
 
     // ── Breakpoint tools ──
 
-    [Description("Set a breakpoint at a memory address. Types: Software, HardwareExecute, HardwareWrite, HardwareReadWrite. Use to trace code execution or find what accesses/writes an address.")]
+    [Description("Set a breakpoint at a memory address. Supports multiple intrusiveness modes: Auto (engine picks), Stealth (code cave, no debugger), PageGuard (less intrusive), Hardware (DR registers), Software (INT3). Use Stealth or Auto for anti-debug-sensitive targets.")]
     public async Task<string> SetBreakpoint(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex or decimal)")] string address,
         [Description("Breakpoint type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
-        [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue")
+        [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue",
+        [Description("Intrusiveness mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto")
     {
         try
         {
@@ -313,8 +315,19 @@ public sealed class AiToolFunctions(
             if (breakpointService is null) return "Breakpoint engine not available.";
             var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
             var bpAction = Enum.Parse<BreakpointHitAction>(hitAction, ignoreCase: true);
-            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpAction);
-            return $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, action: {bp.HitAction})";
+            var bpMode = Enum.Parse<BreakpointMode>(mode, ignoreCase: true);
+
+            // For Stealth mode with execute BPs, redirect to code cave engine
+            if (bpMode == BreakpointMode.Stealth && bpType is BreakpointType.HardwareExecute or BreakpointType.Software)
+            {
+                if (codeCaveEngine is null) return "Code cave engine not available.";
+                var result = await codeCaveEngine.InstallHookAsync(processId, ParseAddress(address));
+                if (!result.Success) return $"Stealth hook failed: {result.ErrorMessage}";
+                return $"Stealth code cave hook installed at 0x{result.Hook!.OriginalAddress:X} (ID: {result.Hook.Id}, cave at 0x{result.Hook.CaveAddress:X}). No debugger attached — game-safe.";
+            }
+
+            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction);
+            return $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
         }
         catch (Exception ex)
         {
@@ -1466,6 +1479,63 @@ public sealed class AiToolFunctions(
             return $"  #{f.FrameIndex}: {location} (RSP=0x{f.StackPointer:X})";
         });
         return $"Thread {threadId} ({frames.Count} frames):\n{string.Join('\n', lines)}";
+    }
+
+    // ─── Code Cave (Stealth Hook) Tools ─────────────────────────────────
+
+    [Description("Install a stealth code cave hook at an address. No debugger attachment — game-safe. Redirects execution through an allocated trampoline that captures registers and counts hits. Use this for anti-debug-sensitive targets.")]
+    public async Task<string> InstallCodeCaveHook(
+        [Description("Process ID")] int processId,
+        [Description("Memory address to hook (hex or decimal)")] string address,
+        [Description("Capture register snapshots (RAX-RDI, RSP) on each hit")] bool captureRegisters = true)
+    {
+        try
+        {
+            if (codeCaveEngine is null) return "Code cave engine not available.";
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+            var result = await codeCaveEngine.InstallHookAsync(processId, addr, captureRegisters);
+            if (!result.Success) return $"Hook installation failed: {result.ErrorMessage}";
+            var h = result.Hook!;
+            return $"Stealth hook installed:\n  ID: {h.Id}\n  Target: 0x{h.OriginalAddress:X}\n  Cave: 0x{h.CaveAddress:X}\n  Stolen bytes: {h.OriginalBytesLength}\n  No debugger attached — completely game-safe.";
+        }
+        catch (Exception ex) { return $"InstallCodeCaveHook failed: {ex.Message}"; }
+    }
+
+    [Description("Remove a stealth code cave hook, restoring original bytes.")]
+    public async Task<string> RemoveCodeCaveHook(
+        [Description("Process ID")] int processId,
+        [Description("Hook ID to remove")] string hookId)
+    {
+        if (codeCaveEngine is null) return "Code cave engine not available.";
+        var removed = await codeCaveEngine.RemoveHookAsync(processId, hookId);
+        return removed ? $"Hook {hookId} removed, original bytes restored." : $"Hook {hookId} not found.";
+    }
+
+    [Description("List all active stealth code cave hooks for a process.")]
+    public async Task<string> ListCodeCaveHooks([Description("Process ID")] int processId)
+    {
+        if (codeCaveEngine is null) return "Code cave engine not available.";
+        var hooks = await codeCaveEngine.ListHooksAsync(processId);
+        if (hooks.Count == 0) return "No active code cave hooks.";
+        var lines = hooks.Select(h => $"  [{h.Id}] 0x{h.OriginalAddress:X} → 0x{h.CaveAddress:X} ({h.OriginalBytesLength}B stolen, hits={h.HitCount})");
+        return $"Active stealth hooks ({hooks.Count}):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Get register snapshots captured by a code cave hook. Returns the most recent captures with RAX, RBX, RCX, RDX, RSI, RDI, RSP values.")]
+    public async Task<string> GetCodeCaveHookHits(
+        [Description("Hook ID")] string hookId,
+        [Description("Maximum entries to return")] int maxEntries = 20)
+    {
+        if (codeCaveEngine is null) return "Code cave engine not available.";
+        var hits = await codeCaveEngine.GetHookHitsAsync(hookId, maxEntries);
+        if (hits.Count == 0) return $"No hits recorded for hook {hookId}.";
+        var lines = hits.Select(h =>
+        {
+            var regs = string.Join(", ", h.RegisterSnapshot.Take(4).Select(r => $"{r.Key}={r.Value}"));
+            return $"  @ 0x{h.Address:X} | {regs}";
+        });
+        return $"Hook hits ({hits.Count} entries):\n{string.Join('\n', lines)}";
     }
 
     // ── Helpers ──

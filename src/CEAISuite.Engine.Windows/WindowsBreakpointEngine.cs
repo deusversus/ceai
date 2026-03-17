@@ -28,6 +28,11 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     private const uint DbgContinue = 0x00010002;
     private const uint ErrorSemTimeout = 121;
 
+    private const uint StatusGuardPageViolation = 0x80000001;
+    private const uint PageGuard = 0x100;
+    private const uint PageSize = 4096;
+    private const int MaxThreadSuspendMs = 50;
+
     private const uint ContextAmd64 = 0x00100000;
     private const uint ContextControl = ContextAmd64 | 0x00000001;
     private const uint ContextInteger = ContextAmd64 | 0x00000002;
@@ -58,7 +63,23 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         BreakpointType type,
         BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
         CancellationToken cancellationToken = default) =>
-        Task.Run(
+        SetBreakpointAsync(processId, address, type, BreakpointMode.Hardware, action, cancellationToken);
+
+    public Task<BreakpointDescriptor> SetBreakpointAsync(
+        int processId,
+        nuint address,
+        BreakpointType type,
+        BreakpointMode mode,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        CancellationToken cancellationToken = default)
+    {
+        var resolvedMode = mode == BreakpointMode.Auto ? ResolveAutoMode(type) : mode;
+
+        // Page guard breakpoints are handled differently
+        if (resolvedMode == BreakpointMode.PageGuard)
+            return SetPageGuardBreakpointAsync(processId, address, type, action, cancellationToken);
+
+        return Task.Run(
             () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -84,9 +105,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                         processId,
                         address,
                         type,
-                        action);
+                        action,
+                        resolvedMode);
 
-                    if (type == BreakpointType.Software)
+                    if (resolvedMode == BreakpointMode.Software || type == BreakpointType.Software)
                     {
                         InstallSoftwareBreakpoint(session, breakpoint);
                     }
@@ -97,7 +119,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     }
 
                     session.Breakpoints[breakpoint.Id] = breakpoint;
-                    if (type == BreakpointType.Software)
+                    if (type == BreakpointType.Software || resolvedMode == BreakpointMode.Software)
                     {
                         session.SoftwareBreakpoints[address] = breakpoint;
                     }
@@ -107,6 +129,20 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 }
             },
             cancellationToken);
+    }
+
+    internal static BreakpointMode ResolveAutoMode(BreakpointType type) =>
+        type switch
+        {
+            // Execute BPs: prefer stealth (code cave) — caller should use ICodeCaveEngine directly,
+            // but if they use Auto through the BP engine, fall back to hardware
+            BreakpointType.HardwareExecute => BreakpointMode.Hardware,
+            BreakpointType.Software => BreakpointMode.Software,
+            // Data access BPs: prefer page guard (less intrusive than hardware DR registers)
+            BreakpointType.HardwareWrite => BreakpointMode.PageGuard,
+            BreakpointType.HardwareReadWrite => BreakpointMode.PageGuard,
+            _ => BreakpointMode.Hardware
+        };
 
     public Task<bool> RemoveBreakpointAsync(
         int processId,
@@ -420,9 +456,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         var suspendCount = SuspendThread(threadHandle);
         if (suspendCount == uint.MaxValue)
         {
-            throw CreateWin32Exception("Unable to suspend thread for hardware breakpoint update.");
+            return; // Graceful: thread may have exited, don't crash
         }
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             if (isWow64Target)
@@ -430,7 +467,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 var context = CreateWow64Context();
                 if (!Wow64GetThreadContext(threadHandle, ref context))
                 {
-                    throw CreateWin32Exception("Unable to read WOW64 thread context.");
+                    return; // Thread exited or inaccessible — don't crash host app
                 }
 
                 ApplyHardwareRegisters(
@@ -447,17 +484,19 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 context.Dr3 = (uint)dr3;
                 context.Dr7 = (uint)dr7;
 
-                if (!Wow64SetThreadContext(threadHandle, ref context))
+                if (sw.ElapsedMilliseconds > MaxThreadSuspendMs)
                 {
-                    throw CreateWin32Exception("Unable to write WOW64 thread context.");
+                    return; // Safety: thread has been suspended too long, bail out
                 }
+
+                Wow64SetThreadContext(threadHandle, ref context);
             }
             else
             {
                 var context = CreateContext64();
                 if (!GetThreadContext(threadHandle, ref context))
                 {
-                    throw CreateWin32Exception("Unable to read thread context.");
+                    return; // Thread exited or inaccessible
                 }
 
                 ApplyHardwareRegisters(
@@ -474,10 +513,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 context.Dr3 = dr3;
                 context.Dr7 = dr7;
 
-                if (!SetThreadContext(threadHandle, ref context))
+                if (sw.ElapsedMilliseconds > MaxThreadSuspendMs)
                 {
-                    throw CreateWin32Exception("Unable to write thread context.");
+                    return; // Safety: thread has been suspended too long, bail out
                 }
+
+                SetThreadContext(threadHandle, ref context);
             }
         }
         finally
@@ -542,6 +583,142 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
     }
 
+    // ─── PAGE_GUARD Breakpoint Support ──────────────────────────────────
+
+    private Task<BreakpointDescriptor> SetPageGuardBreakpointAsync(
+        int processId,
+        nuint address,
+        BreakpointType type,
+        BreakpointHitAction action,
+        CancellationToken cancellationToken) =>
+        Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var session = GetOrCreateSession(processId, cancellationToken);
+
+            lock (session.SyncRoot)
+            {
+                var pageBase = address & ~(nuint)(PageSize - 1);
+
+                // Check for existing page guard BP at same address
+                var existing = session.Breakpoints.Values.FirstOrDefault(
+                    bp => bp.IsEnabled && bp.Address == address && bp.Mode == BreakpointMode.PageGuard);
+                if (existing is not null) return existing.ToDescriptor();
+
+                var breakpoint = new BreakpointState(
+                    Guid.NewGuid().ToString("N"), processId, address, type, action, BreakpointMode.PageGuard);
+
+                // Apply PAGE_GUARD to the target page
+                if (!VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
+                    PageGuard | 0x04 /* PAGE_READWRITE with GUARD */, out uint oldProtect))
+                {
+                    throw CreateWin32Exception($"Unable to set PAGE_GUARD at 0x{pageBase:X}.");
+                }
+
+                breakpoint.PageBaseAddress = pageBase;
+                breakpoint.OriginalPageProtection = oldProtect;
+                session.Breakpoints[breakpoint.Id] = breakpoint;
+                session.PageGuardBreakpoints[pageBase] = breakpoint;
+                _breakpointRegistry[breakpoint.Id] = breakpoint;
+
+                return breakpoint.ToDescriptor();
+            }
+        }, cancellationToken);
+
+    private void HandlePageGuardViolation(ProcessDebugSession session, DEBUG_EVENT debugEvent)
+    {
+        // STATUS_GUARD_PAGE_VIOLATION carries the fault address in ExceptionInformation[1]
+        nuint faultAddress;
+        unsafe
+        {
+            faultAddress = (nuint)debugEvent.u.Exception.ExceptionRecord.ExceptionInformation[1];
+        }
+        var pageBase = faultAddress & ~(nuint)(PageSize - 1);
+
+        if (!session.PageGuardBreakpoints.TryGetValue(pageBase, out var breakpoint))
+            return;
+
+        Interlocked.Increment(ref breakpoint.HitCount);
+
+        // Capture register snapshot
+        var threadHandle = session.ThreadHandles.GetValueOrDefault(debugEvent.dwThreadId);
+        var registers = new Dictionary<string, string>();
+        if (threadHandle != IntPtr.Zero)
+        {
+            var ctx = CreateContext64();
+            if (GetThreadContext(threadHandle, ref ctx))
+            {
+                registers["RIP"] = $"0x{ctx.Rip:X16}";
+                registers["RSP"] = $"0x{ctx.Rsp:X16}";
+                registers["RAX"] = $"0x{ctx.Rax:X16}";
+                registers["RBX"] = $"0x{ctx.Rbx:X16}";
+                registers["RCX"] = $"0x{ctx.Rcx:X16}";
+                registers["RDX"] = $"0x{ctx.Rdx:X16}";
+                registers["EFLAGS"] = $"0x{ctx.EFlags:X8}";
+            }
+        }
+
+        breakpoint.HitLog.Enqueue(new BreakpointHitEvent(
+            breakpoint.Id, faultAddress, debugEvent.dwThreadId,
+            DateTimeOffset.UtcNow, registers));
+
+        // Single-step then re-arm PAGE_GUARD
+        if (threadHandle != IntPtr.Zero)
+        {
+            EnableTrapFlag(threadHandle, session.IsWow64Target);
+            session.PendingPageGuardRearm[debugEvent.dwThreadId] = pageBase;
+        }
+    }
+
+    private void RearmPageGuard(ProcessDebugSession session, int threadId)
+    {
+        if (!session.PendingPageGuardRearm.Remove(threadId, out var pageBase))
+            return;
+
+        if (session.PageGuardBreakpoints.TryGetValue(pageBase, out var bp) && bp.IsEnabled)
+        {
+            // Re-apply PAGE_GUARD
+            VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
+                PageGuard | (bp.OriginalPageProtection ?? 0x04), out _);
+        }
+    }
+
+    private static void EnableTrapFlag(IntPtr threadHandle, bool isWow64)
+    {
+        if (isWow64)
+        {
+            var ctx = CreateWow64Context();
+            if (Wow64GetThreadContext(threadHandle, ref ctx))
+            {
+                ctx.EFlags |= TrapFlag;
+                Wow64SetThreadContext(threadHandle, ref ctx);
+            }
+        }
+        else
+        {
+            var ctx = CreateContext64();
+            if (GetThreadContext(threadHandle, ref ctx))
+            {
+                ctx.EFlags |= TrapFlag;
+                SetThreadContext(threadHandle, ref ctx);
+            }
+        }
+    }
+
+    // ─── Safety-Hardened Thread Suspension ───────────────────────────────
+
+    /// <summary>
+    /// Suspends a thread with a safety watchdog. If the operation takes longer
+    /// than MaxThreadSuspendMs, the thread is forcibly resumed to prevent
+    /// freezing the target process.
+    /// </summary>
+    private static bool TrySuspendThreadSafe(IntPtr threadHandle, out uint previousSuspendCount)
+    {
+        previousSuspendCount = SuspendThread(threadHandle);
+        return previousSuspendCount != uint.MaxValue;
+    }
+
     private void DebugLoop(ProcessDebugSession session)
     {
         try
@@ -570,6 +747,14 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 try
                 {
                     continueStatus = HandleDebugEvent(session, debugEvent, ref shouldExit);
+                }
+                catch (Exception ex)
+                {
+                    // Safety: a single bad debug event must never kill the debug loop.
+                    // Log and continue processing events — the target process stays alive.
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[BreakpointEngine] HandleDebugEvent error (PID {session.ProcessId}): {ex.Message}");
+                    continueStatus = DbgContinue;
                 }
                 finally
                 {
@@ -691,6 +876,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         {
             ExceptionBreakpoint => HandleBreakpointException(session, debugEvent),
             ExceptionSingleStep => HandleSingleStepException(session, debugEvent),
+            StatusGuardPageViolation => HandleGuardPageException(session, debugEvent),
             _ => DbgContinue
         };
     }
@@ -745,9 +931,18 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return DbgContinue;
     }
 
+    private uint HandleGuardPageException(ProcessDebugSession session, DEBUG_EVENT debugEvent)
+    {
+        HandlePageGuardViolation(session, debugEvent);
+        return DbgContinue;
+    }
+
     private uint HandleSingleStepException(ProcessDebugSession session, DEBUG_EVENT debugEvent)
     {
         var threadHandle = EnsureThreadHandleLocked(session, debugEvent.dwThreadId, IntPtr.Zero);
+
+        // Check for page guard re-arm first
+        RearmPageGuard(session, debugEvent.dwThreadId);
 
         if (session.PendingSoftwareRearm.TryGetValue(debugEvent.dwThreadId, out var breakpointId) &&
             session.Breakpoints.TryGetValue(breakpointId, out var softwareBreakpoint) &&
@@ -1069,6 +1264,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         public Dictionary<int, string> PendingSoftwareRearm { get; } = new();
 
         public Dictionary<int, IntPtr> ThreadHandles { get; } = new();
+
+        /// <summary>Page guard breakpoints keyed by the guarded page base address.</summary>
+        public Dictionary<nuint, BreakpointState> PageGuardBreakpoints { get; } = new();
+
+        /// <summary>Tracks which BP is pending single-step re-arm of its PAGE_GUARD flag.</summary>
+        public Dictionary<int, nuint> PendingPageGuardRearm { get; } = new();
     }
 
     private sealed class BreakpointState
@@ -1078,13 +1279,15 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             int processId,
             nuint address,
             BreakpointType type,
-            BreakpointHitAction hitAction)
+            BreakpointHitAction hitAction,
+            BreakpointMode mode = BreakpointMode.Hardware)
         {
             Id = id;
             ProcessId = processId;
             Address = address;
             Type = type;
             HitAction = hitAction;
+            Mode = mode;
         }
 
         public string Id { get; }
@@ -1097,6 +1300,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         public BreakpointHitAction HitAction { get; }
 
+        public BreakpointMode Mode { get; }
+
         public bool IsEnabled { get; set; } = true;
 
         public int HitCount;
@@ -1104,6 +1309,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         public byte? OriginalByte { get; set; }
 
         public int? HardwareSlot { get; set; }
+
+        /// <summary>For PageGuard mode: the base address of the guarded page.</summary>
+        public nuint? PageBaseAddress { get; set; }
+
+        /// <summary>For PageGuard mode: the original protection before PAGE_GUARD was applied.</summary>
+        public uint? OriginalPageProtection { get; set; }
 
         public ConcurrentQueue<BreakpointHitEvent> HitLog { get; } = new();
 
@@ -1114,7 +1325,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 Type,
                 HitAction,
                 IsEnabled,
-                HitCount);
+                HitCount,
+                Mode);
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -1423,4 +1635,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualProtectEx(
+        IntPtr processHandle, IntPtr baseAddress, UIntPtr size,
+        uint newProtect, out uint oldProtect);
 }

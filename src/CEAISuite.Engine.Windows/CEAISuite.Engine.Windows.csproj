@@ -23,4 +23,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CEAISuite.Tests" />
+  </ItemGroup>
+
 </Project>

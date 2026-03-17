@@ -246,7 +246,14 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
                 if (!DebugActiveProcess(processId))
                 {
-                    throw CreateWin32Exception($"Unable to attach debugger to process {processId}.");
+                    // If attach fails, the process may still be marked as debugged
+                    // from a prior session that crashed without proper cleanup.
+                    // Try detaching first, then re-attaching.
+                    DebugActiveProcessStop(processId);
+                    if (!DebugActiveProcess(processId))
+                    {
+                        throw CreateWin32Exception($"Unable to attach debugger to process {processId}.");
+                    }
                 }
 
                 session.IsDebuggerAttached = true;
@@ -581,7 +588,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
         finally
         {
-            StopSession(session, detachFromProcess: false);
+            // Always detach from the process when the loop exits unexpectedly
+            // to avoid leaving the process in an orphaned "being debugged" state.
+            StopSession(session, detachFromProcess: session.IsDebuggerAttached);
         }
     }
 

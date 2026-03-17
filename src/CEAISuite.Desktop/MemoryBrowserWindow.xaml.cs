@@ -9,6 +9,9 @@ namespace CEAISuite.Desktop;
 
 public partial class MemoryBrowserWindow : Window
 {
+    private static Brush ThemeBrush(string key) =>
+        System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
+
     private readonly IEngineFacade _engine;
     private readonly int _processId;
     private readonly string _processName;
@@ -120,7 +123,7 @@ public partial class MemoryBrowserWindow : Window
             // Address column
             HexDisplay.Inlines.Add(new Run($"{lineAddr:X16}  ")
             {
-                Foreground = new SolidColorBrush(Color.FromRgb(0x56, 0x9C, 0xD6))
+                Foreground = ThemeBrush("HexAddressForeground")
             });
 
             // Hex bytes
@@ -132,10 +135,10 @@ public partial class MemoryBrowserWindow : Window
                     var b = bytes[i];
                     var changed = _previousBytes is not null && i < _previousBytes.Length && _previousBytes[i] != b;
                     var fg = changed
-                        ? new SolidColorBrush(Color.FromRgb(0xFF, 0x44, 0x44))
+                        ? ThemeBrush("HexChangedForeground")
                         : b == 0
-                            ? new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55))
-                            : new SolidColorBrush(Color.FromRgb(0xDC, 0xDC, 0xDC));
+                            ? ThemeBrush("HexZeroForeground")
+                            : ThemeBrush("HexNormalForeground");
 
                     HexDisplay.Inlines.Add(new Run($"{b:X2} ") { Foreground = fg });
                 }
@@ -151,7 +154,7 @@ public partial class MemoryBrowserWindow : Window
             // ASCII column
             HexDisplay.Inlines.Add(new Run(" │ ")
             {
-                Foreground = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55))
+                Foreground = ThemeBrush("HexSeparatorForeground")
             });
 
             var sb = new StringBuilder(bytesPerLine);
@@ -162,7 +165,7 @@ public partial class MemoryBrowserWindow : Window
             }
             HexDisplay.Inlines.Add(new Run(sb.ToString())
             {
-                Foreground = new SolidColorBrush(Color.FromRgb(0xCE, 0x91, 0x78))
+                Foreground = ThemeBrush("HexAsciiForeground")
             });
 
             HexDisplay.Inlines.Add(new Run("\n"));

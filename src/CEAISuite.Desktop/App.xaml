@@ -3,11 +3,18 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              StartupUri="MainWindow.xaml">
     <Application.Resources>
-        <Style TargetType="GroupBox">
-            <Setter Property="Margin" Value="0,0,0,12" />
-            <Setter Property="Padding" Value="10" />
-            <Setter Property="Foreground" Value="#CCCCCC" />
-            <Setter Property="BorderBrush" Value="#3C3C3C" />
-        </Style>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <!-- Default theme loaded at startup; ThemeManager swaps at runtime -->
+                <ResourceDictionary Source="Themes/DarkTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style TargetType="GroupBox">
+                <Setter Property="Margin" Value="0,0,0,12" />
+                <Setter Property="Padding" Value="10" />
+                <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+            </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

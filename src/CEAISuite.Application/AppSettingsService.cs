@@ -22,6 +22,7 @@ public sealed class AppSettings
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
     public bool MenuBarVisible { get; set; } = true;
+    public string Theme { get; set; } = "System";
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]

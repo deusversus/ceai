@@ -6,7 +6,7 @@
         Width="1000"
         MinHeight="400"
         MinWidth="700"
-        Background="#1E1E1E"
+        Background="{DynamicResource WindowBackground}"
         FontFamily="Consolas"
         FontSize="13">
     <Grid Margin="8">
@@ -18,15 +18,15 @@
 
         <!-- Toolbar -->
         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-            <TextBlock Text="Address:" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <TextBlock Text="Address:" Foreground="{DynamicResource PrimaryForeground}" VerticalAlignment="Center" Margin="0,0,6,0" />
             <TextBox x:Name="AddressBox" Width="180" FontFamily="Consolas"
-                     Background="#2D2D30" Foreground="#DCDCDC" BorderBrush="#3F3F46"
+                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}" BorderBrush="{DynamicResource InputBorder}"
                      Text="0x00400000" Margin="0,0,8,0" />
             <Button Content="Go" Padding="12,4" Click="GoToAddress"
-                    Background="#007ACC" Foreground="White" BorderBrush="#005A9E" />
-            <TextBlock Text="  Bytes:" Foreground="#CCCCCC" VerticalAlignment="Center" Margin="8,0,6,0" />
+                    Background="{DynamicResource ButtonBackground}" Foreground="{DynamicResource ButtonForeground}" BorderBrush="{DynamicResource ButtonBackground}" />
+            <TextBlock Text="  Bytes:" Foreground="{DynamicResource PrimaryForeground}" VerticalAlignment="Center" Margin="8,0,6,0" />
             <ComboBox x:Name="ByteCountCombo" Width="80" SelectedIndex="2"
-                      Background="#2D2D30" Foreground="#DCDCDC">
+                      Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}">
                 <ComboBoxItem Content="64" />
                 <ComboBoxItem Content="128" />
                 <ComboBoxItem Content="256" />
@@ -34,28 +34,28 @@
                 <ComboBoxItem Content="1024" />
             </ComboBox>
             <Button Content="◀ Prev" Padding="10,4" Margin="16,0,4,0" Click="PagePrev"
-                    Background="#3F3F46" Foreground="#DCDCDC" BorderBrush="#555555" />
+                    Background="{DynamicResource ToolbarButtonBackground}" Foreground="{DynamicResource ToolbarButtonForeground}" BorderBrush="{DynamicResource BorderBrush}" />
             <Button Content="Next ▶" Padding="10,4" Click="PageNext"
-                    Background="#3F3F46" Foreground="#DCDCDC" BorderBrush="#555555" />
+                    Background="{DynamicResource ToolbarButtonBackground}" Foreground="{DynamicResource ToolbarButtonForeground}" BorderBrush="{DynamicResource BorderBrush}" />
             <Button Content="🔄 Refresh" Padding="10,4" Margin="16,0,0,0" Click="RefreshView"
-                    Background="#3F3F46" Foreground="#DCDCDC" BorderBrush="#555555" />
-            <CheckBox x:Name="AutoRefreshCheckBox" Content="Auto" Foreground="#CCCCCC"
+                    Background="{DynamicResource ToolbarButtonBackground}" Foreground="{DynamicResource ToolbarButtonForeground}" BorderBrush="{DynamicResource BorderBrush}" />
+            <CheckBox x:Name="AutoRefreshCheckBox" Content="Auto" Foreground="{DynamicResource PrimaryForeground}"
                       VerticalAlignment="Center" Margin="12,0,0,0"
                       Checked="AutoRefreshToggled" Unchecked="AutoRefreshToggled" />
         </StackPanel>
 
         <!-- Hex dump display -->
-        <Border Grid.Row="1" Background="#1E1E1E" BorderBrush="#3F3F46" BorderThickness="1">
+        <Border Grid.Row="1" Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
             <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
                 <TextBlock x:Name="HexDisplay" FontFamily="Consolas" FontSize="13"
-                           Foreground="#DCDCDC" Padding="8"
+                           Foreground="{DynamicResource HexNormalForeground}" Padding="8"
                            TextWrapping="NoWrap" />
             </ScrollViewer>
         </Border>
 
         <!-- Status bar -->
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,6,0,0">
-            <TextBlock x:Name="StatusText" Foreground="#999999" Text="Ready. Enter an address and click Go." />
+            <TextBlock x:Name="StatusText" Foreground="{DynamicResource SecondaryForeground}" Text="Ready. Enter an address and click Go." />
         </StackPanel>
     </Grid>
 </Window>

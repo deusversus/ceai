@@ -1,0 +1,96 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ═══ LIGHT THEME — Clean, modern ═══ -->
+
+    <!-- Window / Shell -->
+    <SolidColorBrush x:Key="WindowBackground"         Color="#F3F3F3" />
+    <SolidColorBrush x:Key="SidebarBackground"        Color="#FFFFFF" />
+    <SolidColorBrush x:Key="PanelBackground"          Color="#FFFFFF" />
+    <SolidColorBrush x:Key="MenuBarBackground"        Color="#EAEAEA" />
+    <SolidColorBrush x:Key="StatusBarBackground"      Color="#007ACC" />
+
+    <!-- Text -->
+    <SolidColorBrush x:Key="PrimaryForeground"        Color="#1E1E1E" />
+    <SolidColorBrush x:Key="SecondaryForeground"      Color="#6E6E6E" />
+    <SolidColorBrush x:Key="TertiaryForeground"       Color="#999999" />
+    <SolidColorBrush x:Key="AccentForeground"         Color="#0451A5" />
+    <SolidColorBrush x:Key="WarningForeground"        Color="#795E26" />
+    <SolidColorBrush x:Key="SuccessForeground"        Color="#008000" />
+
+    <!-- Borders -->
+    <SolidColorBrush x:Key="BorderBrush"              Color="#D4D4D4" />
+    <SolidColorBrush x:Key="BorderBrushLight"         Color="#CCCCCC" />
+    <SolidColorBrush x:Key="SplitterBrush"            Color="#D4D4D4" />
+    <SolidColorBrush x:Key="SplitterHoverBrush"       Color="#007ACC" />
+
+    <!-- Input Controls -->
+    <SolidColorBrush x:Key="InputBackground"          Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputForeground"          Color="#1E1E1E" />
+    <SolidColorBrush x:Key="InputBorder"              Color="#CCCCCC" />
+    <SolidColorBrush x:Key="InputCaret"               Color="#1E1E1E" />
+
+    <!-- Buttons -->
+    <SolidColorBrush x:Key="ButtonBackground"         Color="#0E639C" />
+    <SolidColorBrush x:Key="ButtonForeground"         Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ButtonHoverBackground"    Color="#1177BB" />
+    <SolidColorBrush x:Key="ButtonPressedBackground"  Color="#094771" />
+    <SolidColorBrush x:Key="ButtonDisabledBackground" Color="#E0E0E0" />
+    <SolidColorBrush x:Key="ButtonDisabledForeground" Color="#A0A0A0" />
+
+    <!-- Toolbar / secondary buttons -->
+    <SolidColorBrush x:Key="ToolbarButtonBackground"       Color="#E8E8E8" />
+    <SolidColorBrush x:Key="ToolbarButtonForeground"       Color="#1E1E1E" />
+    <SolidColorBrush x:Key="ToolbarButtonHoverBackground"  Color="#D0D0D0" />
+    <SolidColorBrush x:Key="ToolbarButtonPressedBackground" Color="#C0C0C0" />
+
+    <!-- Lists / Trees -->
+    <SolidColorBrush x:Key="ListBackground"           Color="#FFFFFF" />
+    <SolidColorBrush x:Key="ListForeground"           Color="#1E1E1E" />
+    <SolidColorBrush x:Key="ListBorder"               Color="#D4D4D4" />
+    <SolidColorBrush x:Key="ListItemHoverBackground"  Color="#E8E8E8" />
+    <SolidColorBrush x:Key="ListItemSelectedBackground" Color="#CCE5FF" />
+    <SolidColorBrush x:Key="ListItemSelectedForeground" Color="#1E1E1E" />
+
+    <!-- Selection / Highlight -->
+    <SolidColorBrush x:Key="SelectionHighlight"       Color="#CCE5FF" />
+    <SolidColorBrush x:Key="SelectionHighlightText"   Color="#1E1E1E" />
+
+    <!-- Column Headers -->
+    <SolidColorBrush x:Key="HeaderBackground"         Color="#EAEAEA" />
+    <SolidColorBrush x:Key="HeaderForeground"         Color="#6E6E6E" />
+    <SolidColorBrush x:Key="HeaderBorder"             Color="#D4D4D4" />
+
+    <!-- Context Menu -->
+    <SolidColorBrush x:Key="ContextMenuBackground"    Color="#F5F5F5" />
+    <SolidColorBrush x:Key="ContextMenuForeground"    Color="#1E1E1E" />
+    <SolidColorBrush x:Key="ContextMenuBorder"        Color="#D4D4D4" />
+
+    <!-- Tabs -->
+    <SolidColorBrush x:Key="TabBackground"            Color="#EAEAEA" />
+    <SolidColorBrush x:Key="TabForeground"            Color="#1E1E1E" />
+    <SolidColorBrush x:Key="TabControlBackground"     Color="#FFFFFF" />
+
+    <!-- Chat bubbles -->
+    <SolidColorBrush x:Key="ChatUserBubble"           Color="#E8E8E8" />
+    <SolidColorBrush x:Key="ChatAiBubble"             Color="#D6EBFF" />
+
+    <!-- Menu -->
+    <SolidColorBrush x:Key="MenuBackground"           Color="#F5F5F5" />
+    <SolidColorBrush x:Key="MenuForeground"           Color="#1E1E1E" />
+    <SolidColorBrush x:Key="MenuItemHoverBackground"  Color="#CCE5FF" />
+
+    <!-- Toggle button -->
+    <SolidColorBrush x:Key="ToggleBackground"         Color="#E8E8E8" />
+    <SolidColorBrush x:Key="ToggleForeground"         Color="#1E1E1E" />
+
+    <!-- Hex viewer -->
+    <SolidColorBrush x:Key="HexAddressForeground"     Color="#0000FF" />
+    <SolidColorBrush x:Key="HexChangedForeground"     Color="#CC0000" />
+    <SolidColorBrush x:Key="HexZeroForeground"        Color="#AAAAAA" />
+    <SolidColorBrush x:Key="HexNormalForeground"      Color="#333333" />
+    <SolidColorBrush x:Key="HexSeparatorForeground"   Color="#AAAAAA" />
+    <SolidColorBrush x:Key="HexAsciiForeground"       Color="#A31515" />
+    <SolidColorBrush x:Key="ErrorForeground"          Color="#CC0000" />
+
+</ResourceDictionary>

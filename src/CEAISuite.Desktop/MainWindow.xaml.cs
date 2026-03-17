@@ -82,6 +82,11 @@ public partial class MainWindow : Window
         _appSettingsService = new AppSettingsService();
         _appSettingsService.Load();
 
+        // Apply saved theme
+        var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)
+            ? theme : AppTheme.System;
+        ThemeManager.ApplyTheme(savedTheme);
+
         // Wire up AI operator with dynamic context injection
         var signatureService = new SignatureGeneratorService(engineFacade);
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine());
@@ -176,7 +181,7 @@ public partial class MainWindow : Window
         RefreshChatSwitcher();
         // Init search box placeholder
         ChatSearchBox.Text = (string)ChatSearchBox.Tag;
-        ChatSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));
+        ChatSearchBox.Foreground = FindThemeBrush("SecondaryForeground");
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -795,7 +800,7 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
-            Background = new SolidColorBrush(Color.FromRgb(0x25, 0x25, 0x26)),
+            Background = FindThemeBrush("SidebarBackground"),
         };
         var sp = new StackPanel { Margin = new Thickness(12) };
         var tb = new TextBox
@@ -803,9 +808,6 @@ public partial class MainWindow : Window
             Text = selected.Title,
             FontSize = 13,
             Padding = new Thickness(6, 4, 6, 4),
-            Background = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x3C, 0x3C, 0x3C)),
         };
         tb.SelectAll();
         var btn = new Button { Content = "Rename", Padding = new Thickness(16, 4, 16, 4), Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Right };
@@ -835,7 +837,7 @@ public partial class MainWindow : Window
         if (ChatSearchBox.Text == (string)ChatSearchBox.Tag)
         {
             ChatSearchBox.Text = "";
-            ChatSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC));
+            ChatSearchBox.Foreground = FindThemeBrush("PrimaryForeground");
         }
     }
 
@@ -844,7 +846,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(ChatSearchBox.Text))
         {
             ChatSearchBox.Text = (string)ChatSearchBox.Tag;
-            ChatSearchBox.Foreground = new SolidColorBrush(Color.FromRgb(0x80, 0x80, 0x80));
+            ChatSearchBox.Foreground = FindThemeBrush("SecondaryForeground");
         }
     }
 
@@ -864,16 +866,20 @@ public partial class MainWindow : Window
         ChatHistoryList.ItemsSource = filtered;
     }
 
+    private static Brush FindThemeBrush(string key) =>
+        System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
+
     private void RefreshAiChatDisplay()
     {
+        var userBrush = FindThemeBrush("ChatUserBubble");
+        var aiBrush = FindThemeBrush("ChatAiBubble");
+
         var items = _aiOperatorService.DisplayHistory.Select(msg => new AiChatDisplayItem
         {
             RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
             Content = msg.Content,
             Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt"),
-            Background = msg.Role == "user"
-                ? new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30))
-                : new SolidColorBrush(Color.FromRgb(0x1E, 0x3A, 0x5F))
+            Background = msg.Role == "user" ? userBrush : aiBrush
         }).ToList();
 
         AiChatList.ItemsSource = items;
@@ -1669,8 +1675,8 @@ public partial class MainWindow : Window
             Margin = new Thickness(8, 0, 0, 0),
             Text = selected.IsScriptEnabled ? "Status: ✅ Enabled" : "Status: ❌ Disabled",
             Foreground = selected.IsScriptEnabled
-                ? System.Windows.Media.Brushes.Green
-                : System.Windows.Media.Brushes.Gray
+                ? FindThemeBrush("SuccessForeground")
+                : FindThemeBrush("SecondaryForeground")
         };
         toolbar.Children.Add(statusText);
 
@@ -1681,7 +1687,7 @@ public partial class MainWindow : Window
                 VerticalAlignment = System.Windows.VerticalAlignment.Center,
                 Margin = new Thickness(12, 0, 0, 0),
                 Text = selected.ScriptStatus,
-                Foreground = System.Windows.Media.Brushes.OrangeRed
+                Foreground = FindThemeBrush("ErrorForeground")
             });
         }
 
@@ -1697,9 +1703,8 @@ public partial class MainWindow : Window
             VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
             HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
             Margin = new Thickness(8),
-            Background = new System.Windows.Media.SolidColorBrush(
-                System.Windows.Media.Color.FromRgb(0x1E, 0x1E, 0x2E)),
-            Foreground = System.Windows.Media.Brushes.LightGreen,
+            Background = FindThemeBrush("InputBackground"),
+            Foreground = FindThemeBrush("SuccessForeground"),
             Padding = new Thickness(8)
         };
         panel.Children.Add(scriptBox);

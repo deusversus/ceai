@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.ComponentModel;
 using System.Globalization;
+using System.Text.RegularExpressions;
 using CEAISuite.Engine.Abstractions;
+using Iced.Intel;
 using Microsoft.Extensions.AI;
 
 namespace CEAISuite.Application;
@@ -1788,7 +1790,316 @@ public sealed class AiToolFunctions(
         return $"Hook hits ({hits.Count} entries):\n{string.Join('\n', lines)}";
     }
 
+    // ── Static Analysis Tools ──
+
+    [Description("Search a module's code for instructions that write to a specific offset (e.g., [reg+0x38]). Returns all MOV/ADD/SUB/XOR/INC/DEC/IMUL instructions targeting [any_register + offset]. Essential for finding what code writes to a known data field.")]
+    public async Task<string> FindWritersToOffset(
+        [Description("Process ID")] int processId,
+        [Description("Module name (e.g., 'GameAssembly.dll') or 'all' to scan loaded modules")] string moduleName,
+        [Description("The displacement/offset to search for (hex), e.g., '0x38' or '38'")] string offset,
+        [Description("Max results to return")] int maxResults = 30)
+    {
+        var dispValue = (long)(ulong)ParseAddress(offset);
+        var attachment = await engineFacade.AttachAsync(processId);
+        var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? attachment.Modules.ToList()
+            : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (targetModules.Count == 0) return $"Module '{moduleName}' not found.";
+
+        var results = new List<string>();
+        var formatter = new MasmFormatter();
+        var output = new StringOutput();
+
+        foreach (var mod in targetModules)
+        {
+            if (results.Count >= maxResults) break;
+
+            const int chunkSize = 0x10000;
+            for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
+            {
+                var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
+                var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
+
+                MemoryReadResult memResult;
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                catch { continue; }
+
+                var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                if (bytes.Length == 0) continue;
+
+                var reader = new ByteArrayCodeReader(bytes);
+                var decoder = Decoder.Create(64, reader, (ulong)readAddr);
+
+                while (decoder.IP < (ulong)readAddr + (ulong)bytes.Length)
+                {
+                    var instr = decoder.Decode();
+                    if (instr.IsInvalid) continue;
+
+                    for (int opIdx = 0; opIdx < instr.OpCount; opIdx++)
+                    {
+                        if (instr.GetOpKind(opIdx) == OpKind.Memory &&
+                            (long)instr.MemoryDisplacement64 == dispValue &&
+                            instr.MemoryBase != Register.None)
+                        {
+                            bool isWrite = opIdx == 0 && IsWriteInstruction(instr);
+                            if (isWrite)
+                            {
+                                formatter.Format(instr, output);
+                                results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | base={instr.MemoryBase} | in {mod.Name}");
+                                if (results.Count >= maxResults) break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return results.Count > 0
+            ? $"Writers to offset 0x{(ulong)(nuint)ParseAddress(offset):X} ({results.Count} found):\n{string.Join('\n', results)}"
+            : $"No instructions writing to offset 0x{(ulong)(nuint)ParseAddress(offset):X} found in {moduleName}.";
+    }
+
+    [Description("Find function boundaries around a given address by scanning for prologue/epilogue patterns (push rbp, sub rsp, ret). Returns the likely function start, end, and size.")]
+    public async Task<string> FindFunctionBoundaries(
+        [Description("Process ID")] int processId,
+        [Description("Address inside the function (hex)")] string address,
+        [Description("How far to search backward/forward (bytes)")] int searchRange = 4096)
+    {
+        var targetAddr = (ulong)ParseAddress(address);
+        var startAddr = targetAddr > (ulong)searchRange ? targetAddr - (ulong)searchRange : 0UL;
+        var totalLen = (int)Math.Min((ulong)searchRange * 2, ulong.MaxValue);
+
+        MemoryReadResult memResult;
+        try { memResult = await engineFacade.ReadMemoryAsync(processId, (nuint)startAddr, totalLen); }
+        catch (Exception ex) { return $"Failed to read memory around 0x{targetAddr:X}: {ex.Message}"; }
+
+        var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+        if (bytes.Length == 0) return "No bytes read.";
+
+        var reader = new ByteArrayCodeReader(bytes);
+        var decoder = Decoder.Create(64, reader, startAddr);
+
+        var instructions = new List<Iced.Intel.Instruction>();
+        while (decoder.IP < startAddr + (ulong)bytes.Length)
+        {
+            var instr = decoder.Decode();
+            if (instr.IsInvalid) break;
+            instructions.Add(instr);
+        }
+
+        // Scan backward from target for prologue patterns
+        ulong funcStart = 0;
+        bool foundStart = false;
+        for (int i = instructions.Count - 1; i >= 0; i--)
+        {
+            if (instructions[i].IP > targetAddr) continue;
+
+            var instr = instructions[i];
+            // push rbp / push rsp patterns
+            if (instr.Mnemonic == Mnemonic.Push && instr.Op0Register == Register.RBP)
+            {
+                funcStart = instr.IP;
+                foundStart = true;
+                break;
+            }
+            // sub rsp, imm (common prologue without push rbp)
+            if (instr.Mnemonic == Mnemonic.Sub && instr.Op0Register == Register.RSP &&
+                instr.GetOpKind(1) == OpKind.Immediate8 || instr.GetOpKind(1) == OpKind.Immediate32)
+            {
+                // Check if previous instruction is not part of another function
+                if (i > 0 && instructions[i - 1].Mnemonic == Mnemonic.Ret)
+                {
+                    funcStart = instr.IP;
+                    foundStart = true;
+                    break;
+                }
+                // Also accept if preceded by int3 padding
+                if (i > 0 && instructions[i - 1].Mnemonic == Mnemonic.Int3)
+                {
+                    funcStart = instr.IP;
+                    foundStart = true;
+                    break;
+                }
+                // Accept push rbp right before sub rsp
+                if (i > 0 && instructions[i - 1].Mnemonic == Mnemonic.Push &&
+                    instructions[i - 1].Op0Register == Register.RBP)
+                {
+                    funcStart = instructions[i - 1].IP;
+                    foundStart = true;
+                    break;
+                }
+            }
+            // int3 boundary followed by real code
+            if (instr.Mnemonic == Mnemonic.Int3 && i + 1 < instructions.Count && instructions[i + 1].IP <= targetAddr)
+            {
+                funcStart = instructions[i + 1].IP;
+                foundStart = true;
+                break;
+            }
+        }
+
+        // Scan forward from target for epilogue
+        ulong funcEnd = 0;
+        bool foundEnd = false;
+        foreach (var instr in instructions)
+        {
+            if (instr.IP < targetAddr) continue;
+
+            if (instr.Mnemonic == Mnemonic.Ret || instr.Mnemonic == Mnemonic.Int3)
+            {
+                funcEnd = instr.IP + (ulong)instr.Length;
+                foundEnd = true;
+                break;
+            }
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Function boundary analysis around 0x{targetAddr:X}:");
+        sb.AppendLine($"  Start: {(foundStart ? $"0x{funcStart:X}" : "not found (searched {searchRange} bytes back)")}");
+        sb.AppendLine($"  End:   {(foundEnd ? $"0x{funcEnd:X}" : "not found (searched {searchRange} bytes forward)")}");
+        if (foundStart && foundEnd)
+            sb.AppendLine($"  Size:  {funcEnd - funcStart} bytes (0x{funcEnd - funcStart:X})");
+        return sb.ToString().TrimEnd();
+    }
+
+    [Description("Find all CALL instructions that target a specific function address. Scans module code for direct calls (call 0xABCD) and returns caller addresses. Useful for tracing who calls a known function.")]
+    public async Task<string> GetCallerGraph(
+        [Description("Process ID")] int processId,
+        [Description("Target function address (hex)")] string targetAddress,
+        [Description("Module to scan (or 'all')")] string moduleName,
+        [Description("Max results")] int maxResults = 30)
+    {
+        var target = (ulong)ParseAddress(targetAddress);
+        var attachment = await engineFacade.AttachAsync(processId);
+        var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? attachment.Modules.ToList()
+            : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (targetModules.Count == 0) return $"Module '{moduleName}' not found.";
+
+        var results = new List<string>();
+        var formatter = new MasmFormatter();
+        var output = new StringOutput();
+
+        foreach (var mod in targetModules)
+        {
+            if (results.Count >= maxResults) break;
+
+            const int chunkSize = 0x10000;
+            for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
+            {
+                var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
+                var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
+
+                MemoryReadResult memResult;
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                catch { continue; }
+
+                var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                if (bytes.Length == 0) continue;
+
+                var reader = new ByteArrayCodeReader(bytes);
+                var decoder = Decoder.Create(64, reader, (ulong)readAddr);
+
+                while (decoder.IP < (ulong)readAddr + (ulong)bytes.Length)
+                {
+                    var instr = decoder.Decode();
+                    if (instr.IsInvalid) continue;
+
+                    if (instr.Mnemonic == Mnemonic.Call && instr.NearBranchTarget == target)
+                    {
+                        formatter.Format(instr, output);
+                        results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | in {mod.Name}");
+                        if (results.Count >= maxResults) break;
+                    }
+                }
+            }
+        }
+
+        return results.Count > 0
+            ? $"Callers of 0x{target:X} ({results.Count} found):\n{string.Join('\n', results)}"
+            : $"No direct CALL instructions targeting 0x{target:X} found in {moduleName}.";
+    }
+
+    [Description("Search for instruction patterns in a module. Find specific mnemonics, register usage, or memory access patterns. Examples: 'mov.*\\\\[rsi\\\\+0x38\\\\]', 'call.*GameAssembly', 'imul.*ebx'.")]
+    public async Task<string> SearchInstructionPattern(
+        [Description("Process ID")] int processId,
+        [Description("Module name (or 'all')")] string moduleName,
+        [Description("Regex pattern to match against formatted instruction text (MASM syntax)")] string pattern,
+        [Description("Max results")] int maxResults = 30)
+    {
+        Regex regex;
+        try { regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(5)); }
+        catch (ArgumentException ex) { return $"Invalid regex pattern: {ex.Message}"; }
+
+        var attachment = await engineFacade.AttachAsync(processId);
+        var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? attachment.Modules.ToList()
+            : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (targetModules.Count == 0) return $"Module '{moduleName}' not found.";
+
+        var results = new List<string>();
+        var formatter = new MasmFormatter();
+        var output = new StringOutput();
+
+        foreach (var mod in targetModules)
+        {
+            if (results.Count >= maxResults) break;
+
+            const int chunkSize = 0x10000;
+            for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
+            {
+                var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
+                var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
+
+                MemoryReadResult memResult;
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                catch { continue; }
+
+                var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                if (bytes.Length == 0) continue;
+
+                var reader = new ByteArrayCodeReader(bytes);
+                var decoder = Decoder.Create(64, reader, (ulong)readAddr);
+
+                while (decoder.IP < (ulong)readAddr + (ulong)bytes.Length)
+                {
+                    var instr = decoder.Decode();
+                    if (instr.IsInvalid) continue;
+
+                    formatter.Format(instr, output);
+                    var text = output.ToStringAndReset();
+
+                    if (regex.IsMatch(text))
+                    {
+                        results.Add($"  0x{instr.IP:X} | {text} | in {mod.Name}");
+                        if (results.Count >= maxResults) break;
+                    }
+                }
+            }
+        }
+
+        return results.Count > 0
+            ? $"Pattern matches for '{pattern}' ({results.Count} found):\n{string.Join('\n', results)}"
+            : $"No instructions matching '{pattern}' found in {moduleName}.";
+    }
+
     // ── Helpers ──
+
+    private static bool IsWriteInstruction(Iced.Intel.Instruction instr)
+    {
+        var m = instr.Mnemonic;
+        return m is Mnemonic.Mov or Mnemonic.Add or Mnemonic.Sub or Mnemonic.Xor
+            or Mnemonic.And or Mnemonic.Or or Mnemonic.Inc or Mnemonic.Dec
+            or Mnemonic.Imul or Mnemonic.Shl or Mnemonic.Shr or Mnemonic.Sar
+            or Mnemonic.Movss or Mnemonic.Movsd or Mnemonic.Movaps or Mnemonic.Movups
+            or Mnemonic.Addss or Mnemonic.Addsd or Mnemonic.Mulss or Mnemonic.Mulsd
+            or Mnemonic.Subss or Mnemonic.Subsd or Mnemonic.Divss or Mnemonic.Divsd
+            or Mnemonic.Cvtsi2ss or Mnemonic.Cvtsi2sd
+            or Mnemonic.Movdqu or Mnemonic.Movdqa or Mnemonic.Movq;
+    }
 
     /// <summary>Resolve a node by ID first, then by label (case-insensitive).</summary>
     private AddressTableNode? ResolveNode(string idOrLabel) =>

@@ -382,18 +382,24 @@ public sealed class AiOperatorService
           and report back. Frame these clearly: "Please do X in-game and tell me what happens."
 
         ═══ YOUR TOOLS ═══
-        Process: ListProcesses, InspectProcess, AttachProcess, FindProcess
+        Process: ListProcesses, InspectProcess, AttachProcess, FindProcess, CheckProcessLiveness
         Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
         Scanning: StartScan, RefineScan, GetScanResults, ListMemoryRegions
         Analysis: Disassemble, DissectStructure, ScanForPointers, GenerateSignature, TestSignatureUniqueness
+        Static Analysis: FindWritersToOffset, FindFunctionBoundaries, GetCallerGraph, SearchInstructionPattern
         Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,
                         SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
                         FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
-        Breakpoints: SetBreakpoint (with mode: Auto/Stealth/PageGuard/Hardware/Software), RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog
-        Code Cave Hooks: InstallCodeCaveHook, RemoveCodeCaveHook, ListCodeCaveHooks, GetCodeCaveHookHits
+        Breakpoints: SetBreakpoint (with mode: Auto/Stealth/PageGuard/Hardware/Software), RemoveBreakpoint,
+                     ListBreakpoints, GetBreakpointHitLog, GetBreakpointModeCapabilities
+        Code Cave Hooks: InstallCodeCaveHook, RemoveCodeCaveHook, ListCodeCaveHooks, GetCodeCaveHookHits,
+                         DryRunHookInstall
+        Safety: ProbeTargetRisk, CheckAddressSafety, ListUnsafeAddresses, ClearUnsafeAddress,
+                CheckHookConflicts, SampledWriteTrace
+        Transactions: BeginTransaction, RollbackTransaction, ListJournalEntries
+        Validation: ValidateScript, ValidateScriptDeep
         Call Stack: GetCallStack, GetAllThreadStacks
-        Scripts: ListScripts, ViewScript, ValidateScript, EnableScript, DisableScript,
-                 EditScript, CreateScriptEntry
+        Scripts: ListScripts, ViewScript, EnableScript, DisableScript, EditScript, CreateScriptEntry
         Sessions: SaveSession, ListSessions, LoadSession
         Vision: CaptureProcessWindow (captures game window screenshot for visual analysis)
         Memory Protection: ChangeMemoryProtection, AllocateMemory, FreeMemory, QueryMemoryProtection
@@ -417,11 +423,17 @@ public sealed class AiOperatorService
         TIP: For "unknown initial value", start with UnknownInitialValue, then use Increased/Decreased.
 
         ANALYZING CODE / "WHAT WRITES TO THIS ADDRESS":
-        1. SetBreakpoint with HardwareWrite on the address (mode=Auto will pick the best approach)
-        2. Wait for hits, then GetBreakpointHitLog
-        3. Disassemble at the instruction address from the hit log
-        4. Analyze the assembly to understand the write pattern
-        5. Explain findings to user in plain language
+        1. ProbeTargetRisk first to assess the address (executable vs data, risk level)
+        2. If data address: use FindWritersToOffset to statically find writer instructions
+        3. If code address: DryRunHookInstall to preview hook safety
+        4. CheckHookConflicts to verify no overlapping patches
+        5. SetBreakpoint with recommended mode (use singleHit=true for risky targets)
+        6. Wait for hits, then GetBreakpointHitLog
+        7. Disassemble at the instruction address from the hit log
+        8. Analyze the assembly to understand the write pattern
+        9. Explain findings to user in plain language
+        SAFE ALTERNATIVE (no debugger): Use SampledWriteTrace to check if address is hot,
+        then FindWritersToOffset + FindFunctionBoundaries for static analysis.
 
         ═══ BREAKPOINT MODES (IMPORTANT) ═══
 
@@ -476,6 +488,24 @@ public sealed class AiOperatorService
         3. If Hardware mode freezes the game, remove the breakpoint and switch to Stealth
         4. Code caves capture register snapshots in a ring buffer you can read with GetCodeCaveHookHits
         5. For finding what WRITES a data address, use mode=PageGuard with singleHit=true
+
+        SAFE HOOK WORKFLOW (NEW — always prefer this):
+        1. ProbeTargetRisk → assess address risk and recommended modes
+        2. CheckAddressSafety → verify no prior freeze history at this address
+        3. CheckHookConflicts → ensure no overlapping hooks/patches
+        4. DryRunHookInstall → preview what bytes will be overwritten
+        5. ValidateScriptDeep → if enabling a script, verify assert bytes first
+        6. BeginTransaction → group operations for atomic rollback
+        7. SetBreakpoint or InstallCodeCaveHook → install with watchdog monitoring
+        8. Verify via GetBreakpointHitLog or GetCodeCaveHookHits
+        9. If issues: RollbackTransaction to undo all changes
+
+        STATIC ANALYSIS (NO DEBUGGER NEEDED):
+        1. FindWritersToOffset → find all instructions writing to [reg+offset]
+        2. FindFunctionBoundaries → detect function start/end around an address
+        3. GetCallerGraph → find all CALL instructions targeting a function
+        4. SearchInstructionPattern → regex search module code for instruction patterns
+        Use these when debugger-based tracing is too risky or when the game detects debugging.
 
         LOADING A CHEAT TABLE:
         1. LoadCheatTable with full path

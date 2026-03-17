@@ -42,6 +42,19 @@ public enum BreakpointMode
     Software
 }
 
+// ─── Capability Flags ────────────────────────────────────────────────
+
+/// <summary>Capability flags for a breakpoint mode.</summary>
+public sealed record BreakpointModeCapabilities(
+    BreakpointMode Mode,
+    bool SupportsExecuteHook,
+    bool SupportsDataWriteWatch,
+    bool RequiresDebugger,
+    bool UsesPageProtection,
+    bool UsesThreadSuspend,
+    string StabilityTier,
+    string Description);
+
 // ─── Descriptors ─────────────────────────────────────────────────────
 
 public sealed record BreakpointDescriptor(
@@ -66,6 +79,19 @@ public sealed record AccessTraceEntry(
     string AccessType,
     int ThreadId,
     DateTimeOffset TimestampUtc);
+
+// ─── Breakpoint Lifecycle ─────────────────────────────────────────────
+
+public enum BreakpointLifecycleStatus
+{
+    Armed,
+    Active,
+    Downgraded,
+    ThrottleDisabled,
+    SingleHitRemoved,
+    Faulted,
+    ManuallyDisabled
+}
 
 // ─── Code Cave Types ─────────────────────────────────────────────────
 
@@ -106,6 +132,7 @@ public interface IBreakpointEngine
         BreakpointType type,
         BreakpointMode mode,
         BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        bool singleHit = false,
         CancellationToken cancellationToken = default);
 
     Task<bool> RemoveBreakpointAsync(

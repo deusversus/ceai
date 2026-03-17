@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 
@@ -9,7 +10,8 @@ public sealed record BreakpointOverview(
     string Type,
     string HitAction,
     bool IsEnabled,
-    int HitCount);
+    int HitCount,
+    string Mode = "Hardware");
 
 public sealed record BreakpointHitOverview(
     string BreakpointId,
@@ -24,6 +26,38 @@ public sealed record BreakpointHitOverview(
 public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
 {
     private bool IsAvailable => breakpointEngine is not null;
+
+    private readonly ConcurrentDictionary<string, BreakpointLifecycleStatus> _lifecycleStatuses = new();
+
+    public void UpdateLifecycleStatus(string bpId, BreakpointLifecycleStatus status)
+        => _lifecycleStatuses[bpId] = status;
+
+    public BreakpointLifecycleStatus GetLifecycleStatus(string bpId)
+        => _lifecycleStatuses.TryGetValue(bpId, out var status) ? status : BreakpointLifecycleStatus.Armed;
+
+    public static IReadOnlyList<BreakpointModeCapabilities> GetModeCapabilities()=> new[]
+    {
+        new BreakpointModeCapabilities(BreakpointMode.Stealth,
+            SupportsExecuteHook: true, SupportsDataWriteWatch: false,
+            RequiresDebugger: false, UsesPageProtection: false, UsesThreadSuspend: false,
+            StabilityTier: "Stable", Description: "Code cave JMP detour — no debugger, safest for execute hooks"),
+        new BreakpointModeCapabilities(BreakpointMode.PageGuard,
+            SupportsExecuteHook: true, SupportsDataWriteWatch: true,
+            RequiresDebugger: true, UsesPageProtection: true, UsesThreadSuspend: false,
+            StabilityTier: "Medium", Description: "PAGE_GUARD flag — catches memory access via guard page faults"),
+        new BreakpointModeCapabilities(BreakpointMode.Hardware,
+            SupportsExecuteHook: true, SupportsDataWriteWatch: true,
+            RequiresDebugger: true, UsesPageProtection: false, UsesThreadSuspend: true,
+            StabilityTier: "Medium", Description: "DR0-DR3 hardware debug registers — limited to 4 simultaneous"),
+        new BreakpointModeCapabilities(BreakpointMode.Software,
+            SupportsExecuteHook: true, SupportsDataWriteWatch: false,
+            RequiresDebugger: true, UsesPageProtection: false, UsesThreadSuspend: false,
+            StabilityTier: "Stable", Description: "INT3 byte patch — most compatible for code execution monitoring"),
+        new BreakpointModeCapabilities(BreakpointMode.Auto,
+            SupportsExecuteHook: true, SupportsDataWriteWatch: true,
+            RequiresDebugger: true, UsesPageProtection: false, UsesThreadSuspend: true,
+            StabilityTier: "Medium", Description: "Engine picks least intrusive mode for the request"),
+    };
 
     public async Task<BreakpointOverview> SetBreakpointAsync(
         int processId,
@@ -49,7 +83,7 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
     {
         EnsureAvailable();
         var address = ParseAddress(addressText);
-        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, cancellationToken);
+        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, singleHit, cancellationToken);
         if (singleHit)
             _singleHitBreakpoints.Add(bp.Id);
         return ToOverview(bp);
@@ -100,7 +134,7 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
     }
 
     private static BreakpointOverview ToOverview(BreakpointDescriptor bp) =>
-        new(bp.Id, $"0x{bp.Address:X}", bp.Type.ToString(), bp.HitAction.ToString(), bp.IsEnabled, bp.HitCount);
+        new(bp.Id, $"0x{bp.Address:X}", bp.Type.ToString(), bp.HitAction.ToString(), bp.IsEnabled, bp.HitCount, bp.Mode.ToString());
 
     private static nuint ParseAddress(string addressText)
     {

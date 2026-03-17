@@ -63,7 +63,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         BreakpointType type,
         BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
         CancellationToken cancellationToken = default) =>
-        SetBreakpointAsync(processId, address, type, BreakpointMode.Hardware, action, cancellationToken);
+        SetBreakpointAsync(processId, address, type, BreakpointMode.Hardware, action, singleHit: false, cancellationToken);
 
     public Task<BreakpointDescriptor> SetBreakpointAsync(
         int processId,
@@ -71,6 +71,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         BreakpointType type,
         BreakpointMode mode,
         BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        bool singleHit = false,
         CancellationToken cancellationToken = default)
     {
         var resolvedMode = mode == BreakpointMode.Auto ? ResolveAutoMode(type) : mode;
@@ -82,7 +83,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         // Page guard breakpoints are handled differently
         if (resolvedMode == BreakpointMode.PageGuard)
-            return SetPageGuardBreakpointAsync(processId, address, type, action, cancellationToken);
+            return SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
 
         return Task.Run(
             () =>
@@ -111,7 +112,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                         address,
                         type,
                         action,
-                        resolvedMode);
+                        resolvedMode,
+                        singleHit);
 
                     if (resolvedMode == BreakpointMode.Software || type == BreakpointType.Software)
                     {
@@ -595,6 +597,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         nuint address,
         BreakpointType type,
         BreakpointHitAction action,
+        bool singleHit,
         CancellationToken cancellationToken) =>
         Task.Run(() =>
         {
@@ -612,7 +615,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 if (existing is not null) return existing.ToDescriptor();
 
                 var breakpoint = new BreakpointState(
-                    Guid.NewGuid().ToString("N"), processId, address, type, action, BreakpointMode.PageGuard);
+                    Guid.NewGuid().ToString("N"), processId, address, type, action, BreakpointMode.PageGuard, singleHit);
 
                 // Apply PAGE_GUARD to the target page
                 if (!VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
@@ -1130,6 +1133,15 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         Interlocked.Increment(ref breakpoint.HitCount);
 
+        // Single-hit enforcement: disable immediately after first hit
+        if (breakpoint.SingleHit && breakpoint.HitCount >= 1)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[BreakpointEngine] Single-hit BP {breakpoint.Id} at 0x{breakpoint.Address:X}: " +
+                $"auto-disabling after first hit.");
+            return true;
+        }
+
         // Hit-rate throttle: track hits within 1-second windows
         var now = Environment.TickCount64;
         var windowStart = Interlocked.Read(ref breakpoint.ThrottleWindowStartTicks);
@@ -1327,7 +1339,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             nuint address,
             BreakpointType type,
             BreakpointHitAction hitAction,
-            BreakpointMode mode = BreakpointMode.Hardware)
+            BreakpointMode mode = BreakpointMode.Hardware,
+            bool singleHit = false)
         {
             Id = id;
             ProcessId = processId;
@@ -1335,6 +1348,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             Type = type;
             HitAction = hitAction;
             Mode = mode;
+            SingleHit = singleHit;
         }
 
         public string Id { get; }
@@ -1350,6 +1364,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         public BreakpointMode Mode { get; }
 
         public bool IsEnabled { get; set; } = true;
+
+        /// <summary>When true, this BP auto-disables after the first hit.</summary>
+        public bool SingleHit { get; }
 
         public int HitCount;
 

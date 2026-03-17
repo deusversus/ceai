@@ -261,15 +261,18 @@ public sealed class AiOperatorService
         Process: ListProcesses, InspectProcess, AttachProcess, FindProcess
         Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
         Scanning: StartScan, RefineScan, GetScanResults
-        Analysis: Disassemble, DissectStructure, ScanForPointers
-        Address Table: ListAddressTable, AddToAddressTable, RefreshAddressTable,
-                        FreezeAddress, UnfreezeAddress, ToggleScript, GetAddressTableNode
+        Analysis: Disassemble, DissectStructure, ScanForPointers, GenerateSignature, TestSignatureUniqueness
+        Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,
+                        SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
+                        FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
         Breakpoints: SetBreakpoint, RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog
         Scripts: ListScripts, ViewScript, ValidateScript, EnableScript, DisableScript,
                  EditScript, CreateScriptEntry
+        Sessions: SaveSession, ListSessions, LoadSession
         Vision: CaptureProcessWindow (captures game window screenshot for visual analysis)
-        Artifacts: GenerateTrainerScript, GenerateAutoAssemblerScript, GenerateLuaScript
-        Other: SummarizeInvestigation, SetHotkey, GetCurrentContext, LoadCheatTable
+        Artifacts: GenerateTrainerScript, GenerateAutoAssemblerScript, GenerateLuaScript, SaveCheatTable
+        Other: SummarizeInvestigation, SetHotkey, ListHotkeys, RemoveHotkey, GetCurrentContext,
+               UndoWrite, RedoWrite, PatchHistory, LoadCheatTable
 
         ═══ KEY WORKFLOWS ═══
 

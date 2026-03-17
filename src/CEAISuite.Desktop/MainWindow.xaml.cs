@@ -66,7 +66,8 @@ public partial class MainWindow : Window
         _appSettingsService.Load();
 
         // Wire up AI operator with dynamic context injection
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService);
+        var signatureService = new SignatureGeneratorService(engineFacade);
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService);
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 
@@ -1883,6 +1884,104 @@ public partial class MainWindow : Window
             Status = b.IsEnabled ? "Active" : "Disabled"
         }).ToArray();
         DataContext = dashboard with { BreakpointStatus = $"{bps.Count} breakpoint(s) active" };
+    }
+
+    // ── Drag and Drop: Sources ──
+
+    private Point _dragStartPoint;
+
+    private void ProcessList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _dragStartPoint = e.GetPosition(null);
+
+    private void ProcessList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        var diff = _dragStartPoint - e.GetPosition(null);
+        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        if (RunningProcessesList.SelectedItem is RunningProcessOverview proc)
+        {
+            var data = new DataObject("CEAIContext",
+                $"[Process] {proc.Name} (PID {proc.Id}, {proc.Architecture})");
+            DragDrop.DoDragDrop(RunningProcessesList, data, DragDropEffects.Copy);
+        }
+    }
+
+    private void ModuleList_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _dragStartPoint = e.GetPosition(null);
+
+    private void ModuleList_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        var diff = _dragStartPoint - e.GetPosition(null);
+        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        if (sender is ListView lv && lv.SelectedItem is ModuleOverview mod)
+        {
+            var data = new DataObject("CEAIContext",
+                $"[Module] {mod.Name} @ {mod.BaseAddress} (size: {mod.Size})");
+            DragDrop.DoDragDrop(lv, data, DragDropEffects.Copy);
+        }
+    }
+
+    private void AddressTable_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _dragStartPoint = e.GetPosition(null);
+
+    private void AddressTable_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        var diff = _dragStartPoint - e.GetPosition(null);
+        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        if (AddressTableTree.SelectedItem is AddressTableNode node)
+        {
+            string context;
+            if (node.IsGroup)
+            {
+                var childCount = node.Children.Count;
+                context = $"[Group] \"{node.Label}\" ({childCount} entries)";
+            }
+            else if (node.IsScriptEntry)
+            {
+                var status = node.IsScriptEnabled ? "ENABLED" : "disabled";
+                context = $"[Script] \"{node.Label}\" — {status} (ID: {node.Id})";
+            }
+            else
+            {
+                var frozen = node.IsLocked ? " [FROZEN]" : "";
+                context = $"[Address] \"{node.Label}\" @ {node.DisplayAddress} = {node.DisplayValue} ({node.DisplayType}){frozen} (ID: {node.Id})";
+            }
+
+            var data = new DataObject("CEAIContext", context);
+            DragDrop.DoDragDrop(AddressTableTree, data, DragDropEffects.Copy);
+        }
+    }
+
+    // ── Drag and Drop: AI Panel Target ──
+
+    private void AiPanel_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = e.Data.GetDataPresent("CEAIContext") ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void AiPanel_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent("CEAIContext")) return;
+        var context = e.Data.GetData("CEAIContext") as string;
+        if (string.IsNullOrWhiteSpace(context)) return;
+
+        // Prepend context to the chat input
+        var existing = AiChatInputTextBox.Text?.Trim();
+        AiChatInputTextBox.Text = string.IsNullOrEmpty(existing)
+            ? context + " "
+            : context + " " + existing;
+        AiChatInputTextBox.Focus();
+        AiChatInputTextBox.CaretIndex = AiChatInputTextBox.Text.Length;
+        e.Handled = true;
     }
 }
 

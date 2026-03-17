@@ -243,7 +243,9 @@
                             FontSize="11" Style="{StaticResource ToolbarButton}" />
                 </StackPanel>
                 <ListView x:Name="RunningProcessesList" ItemsSource="{Binding RunningProcesses}"
-                          Background="#252526" BorderThickness="0">
+                          Background="#252526" BorderThickness="0"
+                          PreviewMouseLeftButtonDown="ProcessList_PreviewMouseLeftButtonDown"
+                          PreviewMouseMove="ProcessList_PreviewMouseMove">
                     <ListView.ItemTemplate>
                         <DataTemplate>
                             <Grid Margin="0,2,0,2">
@@ -336,8 +338,10 @@
                         <!-- Modules -->
                         <TextBlock Text="MODULES" FontSize="11" FontWeight="SemiBold"
                                    Foreground="#808080" Margin="0,6,0,6" />
-                        <ListView ItemsSource="{Binding CurrentInspection.Modules}" MaxHeight="160"
-                                  Background="#252526" BorderThickness="0" FontSize="12">
+                        <ListView x:Name="ModulesList" ItemsSource="{Binding CurrentInspection.Modules}" MaxHeight="160"
+                                  Background="#252526" BorderThickness="0" FontSize="12"
+                                  PreviewMouseLeftButtonDown="ModuleList_PreviewMouseLeftButtonDown"
+                                  PreviewMouseMove="ModuleList_PreviewMouseMove">
                             <ListView.ItemTemplate>
                                 <DataTemplate>
                                     <StackPanel Margin="0,0,0,6">
@@ -481,9 +485,12 @@
                           VerticalAlignment="Stretch" ResizeDirection="Columns" />
 
             <!-- RIGHT SIDEBAR: AI Operator -->
-            <DockPanel Grid.Column="4" Background="#252526">
-                <TextBlock DockPanel.Dock="Top" Text="AI OPERATOR" FontSize="11" FontWeight="SemiBold"
-                           Foreground="#808080" Margin="8,8,8,4" />
+            <DockPanel Grid.Column="4" Background="#252526"
+                       AllowDrop="True" Drop="AiPanel_Drop" DragOver="AiPanel_DragOver">
+                <TextBlock DockPanel.Dock="Top" FontSize="11" FontWeight="SemiBold"
+                           Foreground="#808080" Margin="8,8,8,4">
+                    <Run Text="AI OPERATOR" /><Run Text="  (drag items here)" FontSize="9" Foreground="#555555" />
+                </TextBlock>
                 <StackPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
                     <Grid>
                         <Grid.ColumnDefinitions>
@@ -564,7 +571,9 @@
                       FontFamily="Consolas" FontSize="12"
                       Background="#1E1E1E" BorderThickness="0"
                       MouseDoubleClick="AddressTableTree_MouseDoubleClick"
-                      KeyDown="AddressTableTree_KeyDown">
+                      KeyDown="AddressTableTree_KeyDown"
+                      PreviewMouseLeftButtonDown="AddressTable_PreviewMouseLeftButtonDown"
+                      PreviewMouseMove="AddressTable_PreviewMouseMove">
                 <TreeView.Resources>
                     <ContextMenu x:Key="NodeContextMenu" Background="#2D2D2D" Foreground="#CCCCCC" BorderBrush="#3C3C3C">
                         <MenuItem Header="Toggle Activate" Click="CtxToggleActivate" InputGestureText="Space" />

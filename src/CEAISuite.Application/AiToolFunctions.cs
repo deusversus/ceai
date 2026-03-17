@@ -21,7 +21,9 @@ public sealed class AiToolFunctions(
     IAutoAssemblerEngine? autoAssemblerEngine = null,
     IScreenCaptureEngine? screenCaptureEngine = null,
     GlobalHotkeyService? hotkeyService = null,
-    PatchUndoService? patchUndoService = null)
+    PatchUndoService? patchUndoService = null,
+    SessionService? sessionService = null,
+    SignatureGeneratorService? signatureService = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -1026,6 +1028,159 @@ public sealed class AiToolFunctions(
             sb.AppendLine();
         }
         return sb.ToString();
+    }
+
+    // ── Address table management tools ──
+
+    [Description("Remove an entry from the address table by its node ID.")]
+    public Task<string> RemoveFromAddressTable([Description("Node ID to remove")] string nodeId)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        var label = node.Label;
+        addressTableService.RemoveEntry(nodeId);
+        return Task.FromResult($"Removed '{label}' (ID: {nodeId}) from address table.");
+    }
+
+    [Description("Rename an address table entry's label/description.")]
+    public Task<string> RenameAddressTableEntry(
+        [Description("Node ID to rename")] string nodeId,
+        [Description("New label/description")] string newLabel)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        var oldLabel = node.Label;
+        addressTableService.UpdateLabel(nodeId, newLabel);
+        return Task.FromResult($"Renamed '{oldLabel}' → '{newLabel}'.");
+    }
+
+    [Description("Set or update notes/annotations on an address table entry.")]
+    public Task<string> SetEntryNotes(
+        [Description("Node ID")] string nodeId,
+        [Description("Notes text (or empty to clear)")] string notes)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        addressTableService.UpdateNotes(nodeId, string.IsNullOrWhiteSpace(notes) ? null : notes);
+        return Task.FromResult($"Notes updated for '{node.Label}'.");
+    }
+
+    [Description("Create a group (folder) in the address table to organize entries.")]
+    public Task<string> CreateAddressGroup(
+        [Description("Group label")] string label,
+        [Description("Optional parent group ID for nesting (omit for top-level)")] string? parentGroupId = null)
+    {
+        AddressTableNode group;
+        if (!string.IsNullOrWhiteSpace(parentGroupId))
+        {
+            var parent = addressTableService.FindNode(parentGroupId);
+            if (parent is null) return Task.FromResult($"Parent group '{parentGroupId}' not found.");
+            group = addressTableService.CreateSubGroup(parentGroupId, label);
+        }
+        else
+        {
+            group = addressTableService.CreateGroup(label);
+        }
+        return Task.FromResult($"Group '{label}' created (ID: {group.Id}).");
+    }
+
+    [Description("Move an address table entry into a group. Pass null groupId to move to top level.")]
+    public Task<string> MoveEntryToGroup(
+        [Description("Node ID of entry to move")] string nodeId,
+        [Description("Target group ID (or empty for top level)")] string? groupId = null)
+    {
+        var node = addressTableService.FindNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (!string.IsNullOrWhiteSpace(groupId))
+        {
+            var group = addressTableService.FindNode(groupId);
+            if (group is null) return Task.FromResult($"Group '{groupId}' not found.");
+        }
+        addressTableService.MoveToGroup(nodeId, string.IsNullOrWhiteSpace(groupId) ? null : groupId);
+        return Task.FromResult($"Moved '{node.Label}' to {(string.IsNullOrWhiteSpace(groupId) ? "top level" : $"group '{groupId}'")}.");
+    }
+
+    // ── Session management tools ──
+
+    [Description("Save the current investigation session (address table + action log) to disk for later retrieval.")]
+    public async Task<string> SaveSession()
+    {
+        if (sessionService is null) return "Session service not available.";
+        var dashboard = dashboardService.CurrentDashboard;
+        var sessionId = await sessionService.SaveSessionAsync(
+            dashboard?.CurrentInspection?.ProcessName,
+            dashboard?.CurrentInspection?.ProcessId,
+            addressTableService.Entries,
+            new List<AiActionLogEntry>());
+        return $"Session saved: {sessionId}";
+    }
+
+    [Description("List recent investigation sessions.")]
+    public async Task<string> ListSessions([Description("Max sessions to list")] int limit = 10)
+    {
+        if (sessionService is null) return "Session service not available.";
+        var sessions = await sessionService.ListSessionsAsync(limit);
+        if (sessions.Count == 0) return "No saved sessions.";
+        var lines = sessions.Select(s => $"  [{s.Id}] {s.ProcessName} — {s.CreatedAtUtc:g} ({s.AddressEntryCount} entries)");
+        return $"Sessions ({sessions.Count}):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Load a saved investigation session by ID, restoring the address table.")]
+    public async Task<string> LoadSession([Description("Session ID to load")] string sessionId)
+    {
+        if (sessionService is null) return "Session service not available.";
+        var result = await sessionService.LoadSessionAsync(sessionId);
+        if (result is null) return $"Session '{sessionId}' not found.";
+        var (entries, processName, processId) = result.Value;
+        addressTableService.ImportFlat(entries);
+        return $"Loaded session '{sessionId}': {processName} (PID {processId}), {entries.Count} entries restored.";
+    }
+
+    // ── Signature / AOB tools ──
+
+    [Description("Generate an AOB (Array of Bytes) signature at a code address. Useful for creating patterns that survive game updates. Automatically wildcards relocatable offsets.")]
+    public async Task<string> GenerateSignature(
+        [Description("Process ID")] int processId,
+        [Description("Address to generate signature at")] string address,
+        [Description("Number of bytes (default 32)")] int length = 32)
+    {
+        if (signatureService is null) return "Signature generator not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+            var sig = await signatureService.GenerateAsync(processId, addr, length);
+            return $"Signature at 0x{addr:X} ({sig.Length} bytes):\n{sig.Pattern}\n\nUse this pattern with ArrayOfBytes scan type to find this code in future sessions.";
+        }
+        catch (Exception ex)
+        {
+            return $"GenerateSignature failed: {ex.Message}";
+        }
+    }
+
+    [Description("Test if an AOB signature uniquely matches within a module. Returns match count — should be exactly 1 for a good signature.")]
+    public async Task<string> TestSignatureUniqueness(
+        [Description("Process ID")] int processId,
+        [Description("Module name to search (e.g. GameAssembly.dll)")] string moduleName,
+        [Description("AOB pattern (e.g. '48 8B 05 ?? ?? ?? ?? 48 85 C0')")] string pattern)
+    {
+        if (signatureService is null) return "Signature generator not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var count = await signatureService.TestUniquenessAsync(processId, moduleName, pattern);
+            if (count < 0) return $"Module '{moduleName}' not found.";
+            return count switch
+            {
+                0 => $"No matches found for pattern in {moduleName}. Pattern may be too specific or module is wrong.",
+                1 => $"✓ Pattern is unique in {moduleName} — exactly 1 match. Good signature!",
+                _ => $"⚠ Pattern matches {count} locations in {moduleName}. Needs more bytes or different hook point."
+            };
+        }
+        catch (Exception ex)
+        {
+            return $"TestSignatureUniqueness failed: {ex.Message}";
+        }
     }
 
     // ── Helpers ──

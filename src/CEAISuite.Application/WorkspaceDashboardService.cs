@@ -100,7 +100,7 @@ public sealed class WorkspaceDashboardService(
             }
         }
 
-        return new ProcessInspectionOverview(
+        var overview = new ProcessInspectionOverview(
             inspection.ProcessId,
             inspection.ProcessName,
             process.Architecture,
@@ -109,6 +109,14 @@ public sealed class WorkspaceDashboardService(
             null,
             null,
             statusMessage);
+
+        // Keep CurrentDashboard in sync so AI tools see the attached process
+        if (CurrentDashboard is not null)
+        {
+            CurrentDashboard = CurrentDashboard with { CurrentInspection = overview };
+        }
+
+        return overview;
     }
 
     public async Task<ManualMemoryProbeOverview> ReadAddressAsync(

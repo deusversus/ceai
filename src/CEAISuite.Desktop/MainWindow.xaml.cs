@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     private readonly IEngineFacade _engineFacade;
     private readonly GlobalHotkeyService _hotkeyService;
     private readonly PatchUndoService _patchUndoService;
+    private readonly AppSettingsService _appSettingsService;
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
     public MainWindow()
@@ -61,21 +62,33 @@ public partial class MainWindow : Window
         _hotkeyService = new GlobalHotkeyService();
         _patchUndoService = new PatchUndoService(engineFacade);
 
+        _appSettingsService = new AppSettingsService();
+        _appSettingsService.Load();
+
         // Wire up AI operator with dynamic context injection
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService);
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 
+        _appSettingsService.SettingsChanged += () =>
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (_refreshTimer is not null)
+                    _refreshTimer.Interval = TimeSpan.FromMilliseconds(_appSettingsService.Settings.RefreshIntervalMs);
+            });
+        };
+
         DataContext = WorkspaceDashboard.CreateLoading();
         Loaded += OnLoaded;
     }
 
-    private static IChatClient? CreateChatClient()
+    private IChatClient? CreateChatClient()
     {
-        var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var apiKey = _appSettingsService.Settings.OpenAiApiKey;
         if (string.IsNullOrWhiteSpace(apiKey)) return null;
 
-        var model = Environment.GetEnvironmentVariable("CEAI_MODEL") ?? "gpt-5.4";
+        var model = _appSettingsService.Settings.Model;
         return new OpenAIClient(apiKey)
             .GetChatClient(model)
             .AsIChatClient();
@@ -1701,6 +1714,39 @@ public partial class MainWindow : Window
             dashboard.CurrentInspection.ProcessId,
             dashboard.CurrentInspection.ProcessName);
         browser.Show();
+    }
+
+    // ── Menu bar handlers ──
+
+    private void OpenSettings(object sender, RoutedEventArgs e)
+    {
+        var settingsWindow = new SettingsWindow(_appSettingsService);
+        settingsWindow.Owner = this;
+        settingsWindow.ShowDialog();
+    }
+
+    private void ExitApp(object sender, RoutedEventArgs e)
+    {
+        Close();
+    }
+
+    private async void MenuUndo(object sender, RoutedEventArgs e)
+    {
+        await PerformUndoAsync();
+    }
+
+    private async void MenuRedo(object sender, RoutedEventArgs e)
+    {
+        await PerformRedoAsync();
+    }
+
+    private void ShowAbout(object sender, RoutedEventArgs e)
+    {
+        MessageBox.Show(
+            "CE AI Suite\nA Cheat Engine-class desktop application with integrated AI operator.\n\nVersion 0.1.0-alpha",
+            "About CE AI Suite",
+            MessageBoxButton.OK,
+            MessageBoxImage.Information);
     }
 
     // ── Breakpoint handlers ──

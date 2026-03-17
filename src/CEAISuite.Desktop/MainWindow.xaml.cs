@@ -70,6 +70,12 @@ public partial class MainWindow : Window
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 
+        // Live status updates from AI agent
+        _aiOperatorService.StatusChanged += status =>
+        {
+            Dispatcher.BeginInvoke(() => AiStatusText.Text = status);
+        };
+
         _appSettingsService.SettingsChanged += () =>
         {
             Dispatcher.Invoke(() =>
@@ -590,7 +596,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrEmpty(message)) return;
 
         AiChatInputTextBox.Text = "";
-        AiStatusText.Text = "Thinking...";
+        // Status is now driven by AiOperatorService.StatusChanged events
 
         try
         {
@@ -603,7 +609,9 @@ public partial class MainWindow : Window
         }
         finally
         {
-            AiStatusText.Text = _aiOperatorService.IsConfigured ? "Ready" : "Not configured (set OPENAI_API_KEY)";
+            // Final status is already set by StatusChanged, but ensure fallback
+            if (AiStatusText.Text.StartsWith("Thinking") || AiStatusText.Text.StartsWith("Tool:"))
+                AiStatusText.Text = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
             RefreshAiChatDisplay();
             // Also refresh address table in case AI modified it
             if (DataContext is WorkspaceDashboard dashboard)

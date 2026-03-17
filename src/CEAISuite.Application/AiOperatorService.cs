@@ -20,6 +20,12 @@ public sealed class AiOperatorService
     private readonly ChatOptions _chatOptions;
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
+    private static readonly string LogDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
+    private static readonly string LogPath = Path.Combine(LogDir, $"ai-agent-{DateTime.Now:yyyy-MM-dd}.log");
+
+    /// <summary>Raised when the agent's status changes (tool calls, thinking, errors).</summary>
+    public event Action<string>? StatusChanged;
 
     public IReadOnlyList<AiChatMessage> DisplayHistory => _displayHistory;
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
@@ -63,10 +69,27 @@ public sealed class AiOperatorService
 
         var systemPrompt = new ChatMessage(ChatRole.System, SystemPrompt);
         _conversationHistory.Add(systemPrompt);
+
+        // Ensure log directory exists
+        try { Directory.CreateDirectory(LogDir); } catch { /* best effort */ }
+    }
+
+    private void Log(string level, string message)
+    {
+        var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level}] {message}";
+        try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch { /* best effort */ }
+    }
+
+    private void UpdateStatus(string status)
+    {
+        Log("INFO", status);
+        StatusChanged?.Invoke(status);
     }
 
     public async Task<string> SendMessageAsync(string userMessage, CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        Log("INFO", $"User: {userMessage}");
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
 
         // Inject dynamic context so the agent knows the current state
@@ -78,6 +101,7 @@ public sealed class AiOperatorService
 
         try
         {
+            UpdateStatus("Thinking...");
             var response = await _chatClient.GetResponseAsync(
                 _conversationHistory,
                 _chatOptions,
@@ -85,6 +109,7 @@ public sealed class AiOperatorService
 
             // Extract tool calls and final text from all response messages
             var assistantText = "";
+            int toolCallCount = 0;
             foreach (var message in response.Messages)
             {
                 foreach (var content in message.Contents)
@@ -95,9 +120,12 @@ public sealed class AiOperatorService
                     }
                     else if (content is FunctionCallContent functionCall)
                     {
+                        toolCallCount++;
                         var argsStr = functionCall.Arguments is not null
                             ? string.Join(", ", functionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
                             : "";
+                        UpdateStatus($"Tool: {functionCall.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
+                        Log("TOOL", $"Call: {functionCall.Name}({argsStr})");
                         _actionLog.Add(new AiActionLogEntry(
                             functionCall.Name ?? "unknown",
                             argsStr,
@@ -108,6 +136,7 @@ public sealed class AiOperatorService
                     {
                         var resultStr = functionResult.Result?.ToString() ?? "";
                         var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
+                        Log("TOOL", $"Result: {truncated}");
                         // Update the matching action log entry with result
                         for (int i = _actionLog.Count - 1; i >= 0; i--)
                         {
@@ -132,6 +161,7 @@ public sealed class AiOperatorService
             {
                 while (_toolFunctions.PendingImages.TryDequeue(out var img))
                 {
+                    UpdateStatus("Analyzing screenshot...");
                     var imageContent = new List<AIContent>
                     {
                         new TextContent($"[Screenshot: {img.Description}]"),
@@ -163,12 +193,21 @@ public sealed class AiOperatorService
                 assistantText = "(Tool calls executed — see action log for details)";
             }
 
+            sw.Stop();
+            var summary = toolCallCount > 0
+                ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s)"
+                : $"Done ({sw.Elapsed.TotalSeconds:F1}s)";
+            UpdateStatus(summary);
+            Log("INFO", $"Assistant: {(assistantText.Length > 300 ? assistantText[..300] + "..." : assistantText)}");
             _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));
             return assistantText;
         }
         catch (Exception ex)
         {
+            sw.Stop();
             var errorMessage = $"AI error: {ex.Message}";
+            Log("ERROR", $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            UpdateStatus($"Error ({sw.Elapsed.TotalSeconds:F1}s)");
             _displayHistory.Add(new AiChatMessage("assistant", errorMessage, DateTimeOffset.UtcNow));
             return errorMessage;
         }

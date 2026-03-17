@@ -47,6 +47,9 @@ public partial class MainWindow : Window
     private readonly IEngineFacade _engineFacade;
     private readonly GlobalHotkeyService _hotkeyService;
     private readonly PatchUndoService _patchUndoService;
+    private readonly IMemoryProtectionEngine _memoryProtectionEngine;
+    private readonly MemorySnapshotService _snapshotService;
+    private readonly PointerRescanService _pointerRescanService;
     private readonly AppSettingsService _appSettingsService;
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
@@ -72,13 +75,16 @@ public partial class MainWindow : Window
         _autoAssemblerEngine = new WindowsAutoAssemblerEngine();
         _hotkeyService = new GlobalHotkeyService();
         _patchUndoService = new PatchUndoService(engineFacade);
+        _memoryProtectionEngine = new WindowsMemoryProtectionEngine();
+        _snapshotService = new MemorySnapshotService(engineFacade);
+        _pointerRescanService = new PointerRescanService(engineFacade);
 
         _appSettingsService = new AppSettingsService();
         _appSettingsService.Load();
 
         // Wire up AI operator with dynamic context injection
         var signatureService = new SignatureGeneratorService(engineFacade);
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService);
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService);
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 

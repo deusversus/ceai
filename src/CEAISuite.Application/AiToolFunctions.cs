@@ -23,7 +23,10 @@ public sealed class AiToolFunctions(
     GlobalHotkeyService? hotkeyService = null,
     PatchUndoService? patchUndoService = null,
     SessionService? sessionService = null,
-    SignatureGeneratorService? signatureService = null)
+    SignatureGeneratorService? signatureService = null,
+    IMemoryProtectionEngine? memoryProtectionEngine = null,
+    MemorySnapshotService? snapshotService = null,
+    PointerRescanService? pointerRescanService = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -1181,6 +1184,212 @@ public sealed class AiToolFunctions(
         {
             return $"TestSignatureUniqueness failed: {ex.Message}";
         }
+    }
+
+    // ── Memory Protection Tools ──
+
+    [Description("Change memory page protection for a region in the target process. Used for making code pages writable or allocating executable memory.")]
+    public async Task<string> ChangeMemoryProtection(
+        [Description("Process ID")] int processId,
+        [Description("Memory address as hex (e.g. 0x7FF6A000)")] string address,
+        [Description("Region size in bytes")] int size,
+        [Description("New protection: ReadWrite, ExecuteReadWrite, ReadOnly, Execute, ExecuteRead")] string protection)
+    {
+        if (memoryProtectionEngine is null) return "Memory protection engine not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+            var prot = Enum.Parse<MemoryProtection>(protection, ignoreCase: true);
+            var result = await memoryProtectionEngine.ChangeProtectionAsync(processId, addr, size, prot);
+            return $"Protection changed at 0x{result.Address:X}: {result.OldProtection} → {result.NewProtection} ({result.Size} bytes)";
+        }
+        catch (Exception ex) { return $"ChangeMemoryProtection failed: {ex.Message}"; }
+    }
+
+    [Description("Allocate memory in the target process. Useful for code caves and injected scripts.")]
+    public async Task<string> AllocateMemory(
+        [Description("Process ID")] int processId,
+        [Description("Size in bytes to allocate")] int size,
+        [Description("Protection: ExecuteReadWrite (default), ReadWrite, etc.")] string protection = "ExecuteReadWrite",
+        [Description("Preferred address as hex, or 0 for any")] string preferredAddress = "0")
+    {
+        if (memoryProtectionEngine is null) return "Memory protection engine not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var prot = Enum.Parse<MemoryProtection>(protection, ignoreCase: true);
+            var preferred = ParseAddress(preferredAddress);
+            var result = await memoryProtectionEngine.AllocateAsync(processId, size, prot, preferred);
+            return $"Allocated {result.Size} bytes at 0x{result.BaseAddress:X} with {result.Protection}";
+        }
+        catch (Exception ex) { return $"AllocateMemory failed: {ex.Message}"; }
+    }
+
+    [Description("Free previously allocated memory in the target process.")]
+    public async Task<string> FreeMemory(
+        [Description("Process ID")] int processId,
+        [Description("Address of allocated block as hex")] string address)
+    {
+        if (memoryProtectionEngine is null) return "Memory protection engine not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+            var success = await memoryProtectionEngine.FreeAsync(processId, addr);
+            return success ? $"Memory freed at 0x{addr:X}" : $"Failed to free memory at 0x{addr:X}";
+        }
+        catch (Exception ex) { return $"FreeMemory failed: {ex.Message}"; }
+    }
+
+    [Description("Query memory page protection for an address.")]
+    public async Task<string> QueryMemoryProtection(
+        [Description("Process ID")] int processId,
+        [Description("Memory address as hex")] string address)
+    {
+        if (memoryProtectionEngine is null) return "Memory protection engine not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+            var info = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+            return $"Region at 0x{info.BaseAddress:X}: {info.RegionSize} bytes | " +
+                   $"R={info.IsReadable} W={info.IsWritable} X={info.IsExecutable}";
+        }
+        catch (Exception ex) { return $"QueryMemoryProtection failed: {ex.Message}"; }
+    }
+
+    // ── Memory Snapshot Tools ──
+
+    [Description("Capture a memory snapshot for later comparison. Stores a copy of the bytes at the given address range.")]
+    public async Task<string> CaptureSnapshot(
+        [Description("Process ID")] int processId,
+        [Description("Start address as hex")] string address,
+        [Description("Number of bytes to capture")] int length,
+        [Description("Optional label for this snapshot")] string? label = null)
+    {
+        if (snapshotService is null) return "Snapshot service not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+            var snap = await snapshotService.CaptureAsync(processId, addr, length, label);
+            return $"Snapshot '{snap.Label}' captured: {snap.Data.Length} bytes at 0x{snap.BaseAddress:X} (ID: {snap.Id})";
+        }
+        catch (Exception ex) { return $"CaptureSnapshot failed: {ex.Message}"; }
+    }
+
+    [Description("Compare two snapshots and show what changed between them. Useful for before/after analysis.")]
+    public string CompareSnapshots(
+        [Description("First snapshot ID")] string snapshotIdA,
+        [Description("Second snapshot ID")] string snapshotIdB)
+    {
+        if (snapshotService is null) return "Snapshot service not available.";
+        try
+        {
+            var diff = snapshotService.Compare(snapshotIdA, snapshotIdB);
+            if (diff.Changes.Count == 0)
+                return $"No differences found ({diff.TotalBytesCompared} bytes compared).";
+
+            var lines = diff.Changes.Take(30).Select(c =>
+                $"  +0x{c.Offset:X4}: {BitConverter.ToString(c.OldBytes).Replace("-", " ")} → " +
+                $"{BitConverter.ToString(c.NewBytes).Replace("-", " ")} ({c.Interpretation})");
+            return $"Found {diff.Changes.Count} change(s), {diff.ChangedByteCount} byte(s) modified:\n{string.Join('\n', lines)}";
+        }
+        catch (Exception ex) { return $"CompareSnapshots failed: {ex.Message}"; }
+    }
+
+    [Description("Compare a previous snapshot with the current live memory state.")]
+    public async Task<string> CompareSnapshotWithLive(
+        [Description("Snapshot ID to compare against live memory")] string snapshotId)
+    {
+        if (snapshotService is null) return "Snapshot service not available.";
+        try
+        {
+            var diff = await snapshotService.CompareWithLiveAsync(snapshotId);
+            if (diff.Changes.Count == 0)
+                return $"Memory unchanged since snapshot ({diff.TotalBytesCompared} bytes compared).";
+
+            var lines = diff.Changes.Take(30).Select(c =>
+                $"  +0x{c.Offset:X4}: {BitConverter.ToString(c.OldBytes).Replace("-", " ")} → " +
+                $"{BitConverter.ToString(c.NewBytes).Replace("-", " ")} ({c.Interpretation})");
+            return $"Found {diff.Changes.Count} change(s) since snapshot:\n{string.Join('\n', lines)}";
+        }
+        catch (Exception ex) { return $"CompareSnapshotWithLive failed: {ex.Message}"; }
+    }
+
+    [Description("List all captured memory snapshots.")]
+    public string ListSnapshots()
+    {
+        if (snapshotService is null) return "Snapshot service not available.";
+        var snaps = snapshotService.ListSnapshots();
+        if (snaps.Count == 0) return "No snapshots captured.";
+
+        var lines = snaps.Select(s =>
+            $"  {s.Id}: \"{s.Label}\" — {s.Data.Length} bytes @ 0x{s.BaseAddress:X} ({s.CapturedAt.ToLocalTime():g})");
+        return $"{snaps.Count} snapshot(s):\n{string.Join('\n', lines)}";
+    }
+
+    [Description("Delete a memory snapshot by ID.")]
+    public string DeleteSnapshot(
+        [Description("Snapshot ID to delete")] string snapshotId)
+    {
+        if (snapshotService is null) return "Snapshot service not available.";
+        return snapshotService.DeleteSnapshot(snapshotId) ? $"Snapshot '{snapshotId}' deleted." : $"Snapshot '{snapshotId}' not found.";
+    }
+
+    // ── Pointer Rescan Tools ──
+
+    [Description("Re-resolve a pointer path to verify it still works after game restart/update. Walks the chain from module base through offsets.")]
+    public async Task<string> RescanPointerPath(
+        [Description("Process ID")] int processId,
+        [Description("Module name (e.g. GameAssembly.dll)")] string moduleName,
+        [Description("Module offset as hex (e.g. 0x1A2B3C)")] string moduleOffset,
+        [Description("Comma-separated offsets as hex (e.g. 0x10,0x30,0x8)")] string offsets,
+        [Description("Optional: expected target address as hex")] string? expectedAddress = null)
+    {
+        if (pointerRescanService is null) return "Pointer rescan service not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var modOffset = (long)ParseAddress(moduleOffset);
+            var offsetList = offsets.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(o => (long)ParseAddress(o)).ToList();
+
+            var path = new PointerPath(moduleName, 0, modOffset, offsetList, 0);
+            nuint? expected = expectedAddress is not null ? ParseAddress(expectedAddress) : null;
+            var result = await pointerRescanService.RescanPathAsync(processId, path, expected);
+
+            return $"Pointer path {path.Display}\n" +
+                   $"  Status: {result.Status}\n" +
+                   $"  Resolved: {(result.NewResolvedAddress.HasValue ? $"0x{result.NewResolvedAddress.Value:X}" : "N/A")}\n" +
+                   $"  Valid: {result.IsValid} | Stability: {result.StabilityScore:P0}";
+        }
+        catch (Exception ex) { return $"RescanPointerPath failed: {ex.Message}"; }
+    }
+
+    [Description("Validate multiple pointer paths and rank by stability. Returns which paths still work and which need fresh scanning.")]
+    public async Task<string> ValidatePointerPaths(
+        [Description("Process ID")] int processId,
+        [Description("Original target address as hex")] string targetAddress)
+    {
+        if (pointerRescanService is null) return "Pointer rescan service not available.";
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            // Get pointer paths from the address table entries that have pointer chains
+            var entries = addressTableService.Entries;
+            var pointerEntries = entries.Where(e => e.Label.Contains("→") || e.Label.Contains("ptr", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            var target = ParseAddress(targetAddress);
+            if (pointerEntries.Count == 0)
+                return "No pointer path entries found in the address table. Use ScanForPointers first.";
+
+            return $"Found {pointerEntries.Count} pointer-related entries. Use RescanPointerPath on individual paths for validation.";
+        }
+        catch (Exception ex) { return $"ValidatePointerPaths failed: {ex.Message}"; }
     }
 
     // ── Helpers ──

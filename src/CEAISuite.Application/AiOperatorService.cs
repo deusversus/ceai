@@ -370,6 +370,9 @@ public sealed class AiOperatorService
                  EditScript, CreateScriptEntry
         Sessions: SaveSession, ListSessions, LoadSession
         Vision: CaptureProcessWindow (captures game window screenshot for visual analysis)
+        Memory Protection: ChangeMemoryProtection, AllocateMemory, FreeMemory, QueryMemoryProtection
+        Snapshots: CaptureSnapshot, CompareSnapshots, CompareSnapshotWithLive, ListSnapshots, DeleteSnapshot
+        Pointer Rescan: RescanPointerPath, ValidatePointerPaths
         Artifacts: GenerateTrainerScript, GenerateAutoAssemblerScript, GenerateLuaScript, SaveCheatTable
         Other: SummarizeInvestigation, SetHotkey, ListHotkeys, RemoveHotkey, GetCurrentContext,
                UndoWrite, RedoWrite, PatchHistory, LoadCheatTable

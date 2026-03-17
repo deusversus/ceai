@@ -24,6 +24,7 @@ public sealed class AppSettings
     public bool MenuBarVisible { get; set; } = true;
 }
 
+[System.Runtime.Versioning.SupportedOSPlatform("windows")]
 public sealed class AppSettingsService
 {
     private static readonly string SettingsDir = Path.Combine(
@@ -84,6 +85,7 @@ public sealed class AppSettingsService
     }
 
     /// <summary>Encrypt a string using Windows DPAPI (CurrentUser scope).</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static string EncryptString(string plaintext)
     {
         var bytes = Encoding.UTF8.GetBytes(plaintext);
@@ -92,6 +94,7 @@ public sealed class AppSettingsService
     }
 
     /// <summary>Decrypt a DPAPI-protected Base64 string.</summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static string DecryptString(string encrypted)
     {
         var bytes = Convert.FromBase64String(encrypted);

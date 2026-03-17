@@ -149,6 +149,9 @@ public sealed class WindowsScanEngine : IScanEngine
                             ScanType.Changed => !string.Equals(currentValue, previous.CurrentValue, StringComparison.OrdinalIgnoreCase),
                             ScanType.Unchanged => string.Equals(currentValue, previous.CurrentValue, StringComparison.OrdinalIgnoreCase),
                             ScanType.UnknownInitialValue => true,
+                            ScanType.BiggerThan => CompareValues(currentValue, refinement.Value ?? "0", refinement.DataType) > 0,
+                            ScanType.SmallerThan => CompareValues(currentValue, refinement.Value ?? "0", refinement.DataType) < 0,
+                            ScanType.ValueBetween => IsValueBetween(currentValue, refinement.Value, refinement.DataType),
                             _ => false
                         };
 
@@ -263,6 +266,9 @@ public sealed class WindowsScanEngine : IScanEngine
             {
                 ScanType.ExactValue => string.Equals(currentValue, constraints.Value, StringComparison.OrdinalIgnoreCase),
                 ScanType.UnknownInitialValue => true,
+                ScanType.BiggerThan => CompareValues(currentValue, constraints.Value ?? "0", constraints.DataType) > 0,
+                ScanType.SmallerThan => CompareValues(currentValue, constraints.Value ?? "0", constraints.DataType) < 0,
+                ScanType.ValueBetween => IsValueBetween(currentValue, constraints.Value, constraints.DataType),
                 _ => false
             };
 
@@ -356,6 +362,26 @@ public sealed class WindowsScanEngine : IScanEngine
         catch
         {
             return 0;
+        }
+    }
+
+    private static bool IsValueBetween(string current, string? bounds, MemoryDataType dataType)
+    {
+        if (string.IsNullOrWhiteSpace(bounds) || !bounds.Contains(';'))
+            return false;
+
+        var parts = bounds.Split(';', 2);
+        if (parts.Length != 2)
+            return false;
+
+        try
+        {
+            return CompareValues(current, parts[0].Trim(), dataType) >= 0
+                && CompareValues(current, parts[1].Trim(), dataType) <= 0;
+        }
+        catch
+        {
+            return false;
         }
     }
 

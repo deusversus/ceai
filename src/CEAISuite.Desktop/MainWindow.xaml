@@ -26,6 +26,7 @@
                 <Button Padding="10,6" Margin="0,0,8,0" Click="SaveSession" Content="💾 Save Session" />
                 <Button Padding="10,6" Margin="0,0,8,0" Click="LoadSession" Content="📂 Load Session" />
                 <Button Padding="10,6" Margin="0,0,8,0" Click="LoadCheatTable" Content="📋 Load .CT" />
+                <Button Padding="10,6" Margin="0,0,8,0" Click="SaveCheatTable" Content="💾 Save .CT" />
                 <Button Padding="10,6" Click="OpenMemoryBrowser" Content="🔍 Memory Browser" />
             </StackPanel>
             <StackPanel>
@@ -484,6 +485,8 @@
                             <Separator />
                             <MenuItem Header="Browse Memory Region" Click="CtxBrowseMemory" />
                             <MenuItem Header="Disassemble Here" Click="CtxDisassemble" />
+                            <MenuItem Header="🔍 Find What Writes to This Address" Click="CtxFindWhatWrites" />
+                            <MenuItem Header="📋 View Write Log" Click="CtxViewWriteLog" />
                             <Separator />
                             <MenuItem Header="Create Group" Click="CreateAddressGroup" />
                             <MenuItem Header="Move to Group..." Click="CtxMoveToGroup" />

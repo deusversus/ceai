@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private readonly IAutoAssemblerEngine? _autoAssemblerEngine;
     private readonly IEngineFacade _engineFacade;
     private readonly GlobalHotkeyService _hotkeyService;
+    private readonly PatchUndoService _patchUndoService;
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
     public MainWindow()
@@ -58,9 +59,10 @@ public partial class MainWindow : Window
         _breakpointService = new BreakpointService(new WindowsBreakpointEngine());
         _autoAssemblerEngine = new WindowsAutoAssemblerEngine();
         _hotkeyService = new GlobalHotkeyService();
+        _patchUndoService = new PatchUndoService(engineFacade);
 
         // Wire up AI operator with dynamic context injection
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine());
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService);
         IChatClient? chatClient = CreateChatClient();
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 
@@ -888,6 +890,14 @@ public partial class MainWindow : Window
                     CtxToggleFreeze(sender, e);
                     e.Handled = true;
                     break;
+                case System.Windows.Input.Key.Z:
+                    _ = PerformUndoAsync();
+                    e.Handled = true;
+                    break;
+                case System.Windows.Input.Key.Y:
+                    _ = PerformRedoAsync();
+                    e.Handled = true;
+                    break;
             }
         }
     }
@@ -912,6 +922,18 @@ public partial class MainWindow : Window
             _addressTableService.UpdateLabel(node.Id, result);
             RefreshAddressTableUI($"Renamed to '{result}'");
         }
+    }
+
+    private async Task PerformUndoAsync()
+    {
+        var msg = await _patchUndoService.UndoAsync();
+        RefreshAddressTableUI(msg);
+    }
+
+    private async Task PerformRedoAsync()
+    {
+        var msg = await _patchUndoService.RedoAsync();
+        RefreshAddressTableUI(msg);
     }
 
     private void CtxChangeAddress(object sender, RoutedEventArgs e)
@@ -1030,6 +1052,141 @@ public partial class MainWindow : Window
         DisassembleAtAddress(sender, e);
     }
 
+    private async void CtxFindWhatWrites(object sender, RoutedEventArgs e)
+    {
+        var node = GetSelectedNode();
+        if (node is null || node.IsGroup || node.IsScriptEntry) return;
+        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
+
+        var addr = node.ResolvedAddress ?? nuint.Zero;
+        if (addr == nuint.Zero)
+        {
+            try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
+        }
+
+        if (addr == nuint.Zero) return;
+
+        var pid = dashboard.CurrentInspection.ProcessId;
+
+        try
+        {
+            var bp = await _breakpointService.SetBreakpointAsync(
+                pid,
+                $"0x{addr:X}",
+                BreakpointType.HardwareWrite,
+                BreakpointHitAction.LogAndContinue);
+
+            _lastWriteBreakpointId = bp.Id;
+
+            DataContext = dashboard with
+            {
+                StatusMessage = $"Breakpoint set on {node.Label} (0x{addr:X}). Trigger a write in-game, then right-click → 'View Write Log'."
+            };
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with
+            {
+                StatusMessage = $"Failed to set write breakpoint: {ex.Message}"
+            };
+        }
+    }
+
+    private async void CtxViewWriteLog(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
+
+        if (string.IsNullOrEmpty(_lastWriteBreakpointId))
+        {
+            DataContext = dashboard with
+            {
+                StatusMessage = "No write breakpoint active. Use 'Find What Writes to This Address' first."
+            };
+            return;
+        }
+
+        try
+        {
+            var hits = await _breakpointService.GetHitLogAsync(_lastWriteBreakpointId);
+
+            if (hits.Count == 0)
+            {
+                DataContext = dashboard with
+                {
+                    StatusMessage = "No writes detected yet. Trigger a write in-game and try again."
+                };
+                return;
+            }
+
+            var pid = dashboard.CurrentInspection.ProcessId;
+            var lines = new List<string>();
+
+            foreach (var hit in hits)
+            {
+                lines.Add($"[{hit.Timestamp}] Thread {hit.ThreadId} — Instruction at {hit.Address}");
+
+                // Try to disassemble the instruction that caused the write
+                try
+                {
+                    var disasm = await _disassemblyService.DisassembleAtAsync(pid, hit.Address, 1);
+                    if (disasm.Lines.Count > 0)
+                    {
+                        var instr = disasm.Lines[0];
+                        lines.Add($"  {instr.Address}: {instr.Mnemonic} {instr.Operands}");
+                    }
+                }
+                catch
+                {
+                    lines.Add("  (disassembly unavailable)");
+                }
+
+                // Show register snapshot
+                if (hit.Registers.Count > 0)
+                {
+                    var regs = string.Join("  ", hit.Registers.Select(r => $"{r.Key}={r.Value}"));
+                    lines.Add($"  Registers: {regs}");
+                }
+
+                lines.Add("");
+            }
+
+            var logWindow = new System.Windows.Window
+            {
+                Title = $"Write Log — Breakpoint {_lastWriteBreakpointId}",
+                Width = 700,
+                Height = 450,
+                WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
+                Owner = this
+            };
+
+            var textBox = new System.Windows.Controls.TextBox
+            {
+                Text = string.Join(Environment.NewLine, lines),
+                IsReadOnly = true,
+                FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                FontSize = 12,
+                VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
+                TextWrapping = System.Windows.TextWrapping.NoWrap
+            };
+
+            logWindow.Content = textBox;
+            logWindow.Show();
+
+            DataContext = dashboard with
+            {
+                StatusMessage = $"Showing {hits.Count} write hit(s) for breakpoint {_lastWriteBreakpointId}."
+            };
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with
+            {
+                StatusMessage = $"Failed to retrieve write log: {ex.Message}"
+            };
+        }
+    }
+
     private void CtxMoveToGroup(object sender, RoutedEventArgs e)
     {
         var node = GetSelectedNode();
@@ -1098,6 +1255,7 @@ public partial class MainWindow : Window
     }
 
     private AddressTableNode? _clipboard;
+    private string? _lastWriteBreakpointId;
 
     private void CtxCut(object sender, RoutedEventArgs e)
     {
@@ -1357,6 +1515,40 @@ public partial class MainWindow : Window
     }
 
     // ─── Cheat Table Import ──────────────────────────────────────────
+
+    private void SaveCheatTable(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+        try
+        {
+            if (_addressTableService.Roots.Count == 0)
+            {
+                DataContext = dashboard with { StatusMessage = "Address table is empty. Nothing to save." };
+                return;
+            }
+
+            var dialog = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Save Cheat Engine Table",
+                Filter = "Cheat Tables (*.ct)|*.ct|All Files (*.*)|*.*",
+                DefaultExt = ".ct"
+            };
+
+            if (dialog.ShowDialog(this) != true) return;
+
+            var exporter = new CheatTableExporter();
+            exporter.SaveToFile(_addressTableService.Roots, dialog.FileName);
+
+            DataContext = dashboard with
+            {
+                StatusMessage = $"Saved {_addressTableService.Roots.Count} top-level entries to {System.IO.Path.GetFileName(dialog.FileName)}"
+            };
+        }
+        catch (Exception ex)
+        {
+            DataContext = dashboard with { StatusMessage = $"CT save failed: {ex.Message}" };
+        }
+    }
 
     private void LoadCheatTable(object sender, RoutedEventArgs e)
     {

@@ -8,7 +8,10 @@ public enum ScanType
     Decreased,
     Changed,
     Unchanged,
-    ArrayOfBytes
+    ArrayOfBytes,
+    BiggerThan,
+    SmallerThan,
+    ValueBetween
 }
 
 public sealed record MemoryRegionDescriptor(

@@ -480,3 +480,12 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# CE AI Suite – sensitive user data
+# Settings may contain encrypted API keys; never commit
+**/CEAISuite/settings.json
+**/appsettings*.json
+!**/appsettings.Development.json.template
+*.key
+*.pem
+*.env.local

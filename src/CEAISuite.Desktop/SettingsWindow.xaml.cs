@@ -25,13 +25,13 @@ public partial class SettingsWindow : Window
         {
             ApiKeyBox.Password = s.OpenAiApiKey;
             ApiKeyTextBox.Text = s.OpenAiApiKey;
-            ApiKeyStatus.Text = "✅ API key is configured";
-            ApiKeyStatus.Foreground = System.Windows.Media.Brushes.Green;
+            ApiKeyStatus.Text = "API key is configured";
+            ApiKeyStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0x4E, 0xC9, 0xB0));
         }
         else
         {
-            ApiKeyStatus.Text = "⚠ No API key configured — AI operator is disabled";
-            ApiKeyStatus.Foreground = System.Windows.Media.Brushes.OrangeRed;
+            ApiKeyStatus.Text = "No API key configured — AI operator is disabled";
+            ApiKeyStatus.Foreground = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(0xDC, 0xDC, 0xAA));
         }
 
         // Model
@@ -51,14 +51,14 @@ public partial class SettingsWindow : Window
             ApiKeyTextBox.Text = ApiKeyBox.Password;
             ApiKeyTextBox.Visibility = Visibility.Visible;
             ApiKeyBox.Visibility = Visibility.Collapsed;
-            ShowKeyBtn.Content = "🙈 Hide";
+            ShowKeyBtn.Content = "Hide";
         }
         else
         {
             ApiKeyBox.Password = ApiKeyTextBox.Text;
             ApiKeyBox.Visibility = Visibility.Visible;
             ApiKeyTextBox.Visibility = Visibility.Collapsed;
-            ShowKeyBtn.Content = "👁 Show";
+            ShowKeyBtn.Content = "Show";
         }
     }
 

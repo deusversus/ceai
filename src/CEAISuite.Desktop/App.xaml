@@ -6,6 +6,8 @@
         <Style TargetType="GroupBox">
             <Setter Property="Margin" Value="0,0,0,12" />
             <Setter Property="Padding" Value="10" />
+            <Setter Property="Foreground" Value="#CCCCCC" />
+            <Setter Property="BorderBrush" Value="#3C3C3C" />
         </Style>
     </Application.Resources>
 </Application>

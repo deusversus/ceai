@@ -639,8 +639,8 @@ public partial class MainWindow : Window
             RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
             Content = msg.Content,
             Background = msg.Role == "user"
-                ? new SolidColorBrush(Color.FromRgb(0xE8, 0xF0, 0xFE))
-                : new SolidColorBrush(Color.FromRgb(0xF0, 0xF4, 0xF8))
+                ? new SolidColorBrush(Color.FromRgb(0x2D, 0x2D, 0x30))
+                : new SolidColorBrush(Color.FromRgb(0x1E, 0x3A, 0x5F))
         }).ToList();
 
         AiChatList.ItemsSource = items;

@@ -11,20 +11,22 @@ public sealed class StringToBrushConverter : IValueConverter
 {
     private static readonly BrushConverter Converter = new();
 
+    private static readonly Brush DefaultBrush = new SolidColorBrush(Color.FromRgb(0xCC, 0xCC, 0xCC));
+
     public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture)
     {
         if (value is string colorStr && !string.IsNullOrEmpty(colorStr))
         {
             try
             {
-                return Converter.ConvertFromString(colorStr) ?? Brushes.Black;
+                return Converter.ConvertFromString(colorStr) ?? DefaultBrush;
             }
             catch
             {
-                return Brushes.Black;
+                return DefaultBrush;
             }
         }
-        return Brushes.Black;
+        return DefaultBrush;
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture)

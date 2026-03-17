@@ -322,6 +322,30 @@ public sealed class AiOperatorService
         ChatListChanged?.Invoke();
     }
 
+    /// <summary>Export current chat as a Markdown string.</summary>
+    public string ExportChatToMarkdown()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"# {CurrentChatTitle}");
+        sb.AppendLine();
+        sb.AppendLine($"*Exported {DateTimeOffset.Now:yyyy-MM-dd HH:mm}*");
+        sb.AppendLine();
+        sb.AppendLine("---");
+        sb.AppendLine();
+
+        foreach (var msg in _displayHistory)
+        {
+            var role = msg.Role == "user" ? "**You**" : "**AI Operator**";
+            var time = msg.Timestamp.ToLocalTime().ToString("h:mm tt");
+            sb.AppendLine($"### {role} — {time}");
+            sb.AppendLine();
+            sb.AppendLine(msg.Content);
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
     private ChatMessage? BuildContextMessage()
     {
         if (_contextProvider is null) return null;

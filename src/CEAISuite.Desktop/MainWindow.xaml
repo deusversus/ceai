@@ -607,14 +607,17 @@
                     <Grid Margin="0,6,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="Auto" />
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" Padding="6,2" Margin="0,0,6,0" Click="ClearAiChat" Content="Clear"
                                 FontSize="10" Style="{StaticResource ToolbarButton}" />
-                        <TextBlock x:Name="AiStatusText" Grid.Column="1" VerticalAlignment="Center"
+                        <Button Grid.Column="1" Padding="6,2" Margin="0,0,6,0" Click="ExportAiChat" Content="Export"
+                                FontSize="10" ToolTip="Export chat to Markdown file" Style="{StaticResource ToolbarButton}" />
+                        <TextBlock x:Name="AiStatusText" Grid.Column="2" VerticalAlignment="Center"
                                    Foreground="{DynamicResource SecondaryForeground}" Text="Ready" FontSize="11" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="AiChatTitleText" Grid.Column="2" VerticalAlignment="Center"
+                        <TextBlock x:Name="AiChatTitleText" Grid.Column="3" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TertiaryForeground}" FontSize="10" TextTrimming="CharacterEllipsis"
                                    MaxWidth="120" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </Grid>
@@ -627,6 +630,11 @@
                             <DataTemplate>
                                 <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
                                         Background="{Binding Background}">
+                                    <Border.ContextMenu>
+                                        <ContextMenu>
+                                            <MenuItem Header="Copy Message" Click="CopyAiMessage" />
+                                        </ContextMenu>
+                                    </Border.ContextMenu>
                                     <StackPanel>
                                         <Grid>
                                             <Grid.ColumnDefinitions>
@@ -638,7 +646,11 @@
                                             <TextBlock Grid.Column="1" FontSize="9" Foreground="{DynamicResource TertiaryForeground}"
                                                        Text="{Binding Timestamp}" VerticalAlignment="Center" />
                                         </Grid>
-                                        <TextBlock TextWrapping="Wrap" Text="{Binding Content}" FontSize="12" />
+                                        <TextBox Text="{Binding Content, Mode=OneWay}" FontSize="12"
+                                                 IsReadOnly="True" TextWrapping="Wrap"
+                                                 Background="Transparent" BorderThickness="0" Padding="0"
+                                                 Foreground="{DynamicResource PrimaryForeground}"
+                                                 Cursor="IBeam" IsTabStop="False" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

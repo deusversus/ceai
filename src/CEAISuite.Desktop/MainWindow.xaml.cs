@@ -675,6 +675,43 @@ public partial class MainWindow : Window
         RefreshAiChatDisplay();
     }
 
+    private void CopyAiMessage(object sender, RoutedEventArgs e)
+    {
+        // ContextMenu is in a separate visual tree — get DataContext from PlacementTarget
+        if (sender is MenuItem mi
+            && mi.Parent is ContextMenu ctx
+            && ctx.PlacementTarget is FrameworkElement fe
+            && fe.DataContext is AiChatDisplayItem item)
+        {
+            try { Clipboard.SetText(item.Content); }
+            catch { /* clipboard locked */ }
+        }
+    }
+
+    private void ExportAiChat(object sender, RoutedEventArgs e)
+    {
+        var markdown = _aiOperatorService.ExportChatToMarkdown();
+        if (string.IsNullOrWhiteSpace(markdown) || markdown.Split('\n').Length <= 5)
+        {
+            MessageBox.Show("No messages to export.", "Export Chat", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export Chat History",
+            Filter = "Markdown (*.md)|*.md|Text (*.txt)|*.txt",
+            DefaultExt = ".md",
+            FileName = $"{_aiOperatorService.CurrentChatTitle.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd}"
+        };
+
+        if (dlg.ShowDialog() == true)
+        {
+            File.WriteAllText(dlg.FileName, markdown);
+            AiStatusText.Text = $"Exported to {Path.GetFileName(dlg.FileName)}";
+        }
+    }
+
     private bool _suppressChatSwitch;
     private List<ChatHistoryDisplayItem> _allChatItems = new();
 

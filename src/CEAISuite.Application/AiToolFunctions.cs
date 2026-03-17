@@ -32,7 +32,8 @@ public sealed class AiToolFunctions(
     PointerRescanService? pointerRescanService = null,
     ICallStackEngine? callStackEngine = null,
     ICodeCaveEngine? codeCaveEngine = null,
-    ProcessWatchdogService? watchdogService = null)
+    ProcessWatchdogService? watchdogService = null,
+    OperationJournal? operationJournal = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -452,6 +453,9 @@ public sealed class AiToolFunctions(
                     else
                         stealthMsg += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
                 }
+                operationJournal?.RecordOperation(
+                    result.Hook.Id, "CodeCaveHook", stealthAddr, "Stealth", groupId: null,
+                    async () => await codeCaveEngine.RemoveHookAsync(processId, result.Hook.Id));
                 return stealthMsg;
             }
 
@@ -483,6 +487,9 @@ public sealed class AiToolFunctions(
                 if (watchdogService.IsUnsafe(parsedAddr, modeStr))
                     msg += $"\n⚠️ WARNING: This address+{modeStr} previously caused a process freeze. Watchdog is monitoring.";
                 msg += "\n✅ Transaction committed. Watchdog monitoring active.";
+                operationJournal?.RecordOperation(
+                    txBp!.Id, "Breakpoint", parsedAddr, modeStr, groupId: null,
+                    async () => await breakpointService.RemoveBreakpointAsync(processId, txBp.Id));
                 return msg;
             }
 
@@ -500,6 +507,9 @@ public sealed class AiToolFunctions(
                 else
                     msg2 += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
             }
+            operationJournal?.RecordOperation(
+                bp.Id, "Breakpoint", parsedAddr, modeStr, groupId: null,
+                async () => await breakpointService.RemoveBreakpointAsync(processId, bp.Id));
             return msg2;
         }
         catch (Exception ex)
@@ -2079,6 +2089,9 @@ public sealed class AiToolFunctions(
                 else
                     hookMsg += "\n🛡️ Watchdog monitoring active — will auto-rollback if process becomes unresponsive.";
             }
+            operationJournal?.RecordOperation(
+                h.Id, "CodeCaveHook", addr, "Stealth", groupId: null,
+                async () => await codeCaveEngine.RemoveHookAsync(processId, h.Id));
             return hookMsg;
         }
         catch (Exception ex) { return $"InstallCodeCaveHook failed: {ex.Message}"; }
@@ -2658,6 +2671,157 @@ public sealed class AiToolFunctions(
         }
         foreach (var child in node.Children)
             CountCoTenants(child, pageBase, excludeAddr, ref count);
+    }
+
+    // ── Non-debugger write tracing (M2) ──
+
+    [Description("Trace writes to a data address using sampled memory snapshots (no debugger attachment). Takes multiple snapshots with a delay and reports if the value changed. Safer than breakpoints for anti-debug targets.")]
+    public async Task<string> SampledWriteTrace(
+        [Description("Process ID")] int processId,
+        [Description("Memory address to watch (hex)")] string address,
+        [Description("Number of bytes to watch (4 for Int32, 8 for Int64/Pointer)")] int byteCount = 4,
+        [Description("Delay between samples in milliseconds")] int sampleDelayMs = 2000,
+        [Description("Number of samples to take")] int sampleCount = 5)
+    {
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var addr = ParseAddress(address);
+
+            var snapshots = new List<object>();
+            byte[]? prevBytes = null;
+
+            for (int i = 0; i < sampleCount; i++)
+            {
+                var read = await engineFacade.ReadMemoryAsync(processId, addr, byteCount);
+                var bytes = read.Bytes.ToArray();
+                var hex = string.Join(" ", bytes.Select(b => b.ToString("X2")));
+
+                bool changed = prevBytes is not null && !bytes.SequenceEqual(prevBytes);
+                string? prevHex = prevBytes is not null ? string.Join(" ", prevBytes.Select(b => b.ToString("X2"))) : null;
+
+                snapshots.Add(new
+                {
+                    sample = i + 1,
+                    timestamp = DateTimeOffset.UtcNow.ToString("HH:mm:ss.fff"),
+                    hex,
+                    changed,
+                    previousHex = changed ? prevHex : null,
+                    int32Value = byteCount >= 4 ? BitConverter.ToInt32(bytes.Take(4).ToArray()) : (int?)null,
+                    floatValue = byteCount >= 4 ? BitConverter.ToSingle(bytes.Take(4).ToArray()) : (float?)null
+                });
+
+                prevBytes = bytes;
+
+                if (i < sampleCount - 1)
+                    await Task.Delay(sampleDelayMs);
+            }
+
+            int changeCount = snapshots.Cast<dynamic>().Count(s => (bool)((dynamic)s).changed);
+
+            return JsonSerializer.Serialize(new
+            {
+                address = $"0x{addr:X}",
+                byteCount,
+                sampleCount,
+                sampleDelayMs,
+                changeCount,
+                hotness = changeCount > sampleCount / 2 ? "HOT" : changeCount > 0 ? "WARM" : "COLD",
+                snapshots,
+                recommendation = changeCount > sampleCount / 2
+                    ? "Address is frequently written — avoid PageGuard (will cause excessive traps). Use FindWritersToOffset with static analysis instead."
+                    : changeCount > 0
+                    ? "Address changes occasionally. PageGuard with singleHit=true may work, but prefer static analysis."
+                    : "No writes detected during sampling. Value may change during specific game events only. Try again during the relevant event."
+            }, _jsonOpts);
+        }
+        catch (Exception ex) { return $"SampledWriteTrace failed: {ex.Message}"; }
+    }
+
+    // ── Operation journaling (M4) ──
+
+    [Description("Begin a named transaction group for compound breakpoint/hook operations. All operations in the group can be rolled back together. Returns the group ID.")]
+    public string BeginTransaction([Description("Name for this transaction group")] string name = "auto")
+    {
+        var groupId = $"txn-{name}-{Guid.NewGuid():N}"[..24];
+        return JsonSerializer.Serialize(new { groupId, status = "open", message = $"Transaction group '{groupId}' created. Pass this groupId to subsequent BP/hook operations." }, _jsonOpts);
+    }
+
+    [Description("Rollback all operations in a transaction group, restoring original state in reverse order.")]
+    public async Task<string> RollbackTransaction([Description("Transaction group ID")] string groupId)
+    {
+        if (operationJournal is null) return "Operation journal not available.";
+        var result = await operationJournal.RollbackGroupAsync(groupId);
+        return JsonSerializer.Serialize(new { result.Success, result.TotalOperations, result.SucceededRollbacks, result.Message }, _jsonOpts);
+    }
+
+    [Description("List all recorded operations in the journal. Shows operation type, address, mode, status, and group membership.")]
+    public string ListJournalEntries()
+    {
+        if (operationJournal is null) return "Operation journal not available.";
+        var entries = operationJournal.GetEntries();
+        return JsonSerializer.Serialize(new
+        {
+            entries = entries.Select(e => new
+            {
+                e.OperationId, e.OperationType, address = $"0x{e.Address:X}",
+                e.Mode, e.GroupId, status = e.Status.ToString(), timestamp = e.Timestamp.ToString("HH:mm:ss")
+            }),
+            count = entries.Count
+        }, _jsonOpts);
+    }
+
+    // ── Hook/script coexistence (L4) ──
+
+    [Description("Check for hook/patch conflicts at an address. Detects if existing code cave hooks, breakpoints, or scripts already modify the target bytes. Use before installing new hooks to avoid conflicts.")]
+    public async Task<string> CheckHookConflicts(
+        [Description("Process ID")] int processId,
+        [Description("Target address to check (hex)")] string address,
+        [Description("Number of bytes to check (14 for standard JMP detour)")] int byteCount = 14)
+    {
+        try
+        {
+            var addr = ParseAddress(address);
+            var conflicts = new List<object>();
+
+            // Check code cave hooks
+            if (codeCaveEngine is not null)
+            {
+                var hooks = await codeCaveEngine.ListHooksAsync(processId);
+                foreach (var hook in hooks)
+                {
+                    if (hook.OriginalAddress >= addr && hook.OriginalAddress < (nuint)((ulong)addr + (ulong)byteCount))
+                        conflicts.Add(new { type = "CodeCaveHook", id = hook.Id, address = $"0x{hook.OriginalAddress:X}", stolenBytes = hook.OriginalBytesLength });
+                    else if (addr >= hook.OriginalAddress && addr < (nuint)((ulong)hook.OriginalAddress + (ulong)hook.OriginalBytesLength))
+                        conflicts.Add(new { type = "CodeCaveHook", id = hook.Id, address = $"0x{hook.OriginalAddress:X}", stolenBytes = hook.OriginalBytesLength });
+                }
+            }
+
+            // Check breakpoints
+            if (breakpointService is not null)
+            {
+                var bps = await breakpointService.ListBreakpointsAsync(processId);
+                foreach (var bp in bps)
+                {
+                    var bpAddr = AddressTableService.ParseAddress(bp.Address);
+                    if (bpAddr >= addr && bpAddr < (nuint)((ulong)addr + (ulong)byteCount))
+                        conflicts.Add(new { type = "Breakpoint", id = bp.Id, address = bp.Address, bpType = bp.Type });
+                }
+            }
+
+            return JsonSerializer.Serialize(new
+            {
+                targetAddress = $"0x{addr:X}",
+                byteRange = byteCount,
+                conflicts,
+                conflictCount = conflicts.Count,
+                safe = conflicts.Count == 0,
+                recommendation = conflicts.Count > 0
+                    ? "Conflicts detected — remove existing hooks/breakpoints before installing a new one at this address."
+                    : "No conflicts — safe to install."
+            }, _jsonOpts);
+        }
+        catch (Exception ex) { return $"CheckHookConflicts failed: {ex.Message}"; }
     }
 
     // ── Watchdog safety tools ──

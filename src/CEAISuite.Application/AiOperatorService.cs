@@ -112,15 +112,19 @@ public sealed class AiOperatorService
             .ToList();
 
         // Build the MAF compaction pipeline (gentle → aggressive):
-        // 1. Collapse old tool-call groups into short summaries
-        // 2. LLM-powered summarization of older conversation spans
-        // 3. Sliding window: keep most recent N user turns
-        // 4. Emergency truncation backstop
+        // 1. Collapse old tool-call groups into summaries (cheap, no API call)
+        // 2. LLM-powered summarization when context gets large (costs an API call!)
+        // 3. Sliding window: keep most recent N user turns (cheap)
+        // 4. Emergency truncation backstop (cheap)
+        //
+        // IMPORTANT: Summarization makes an LLM call, so the trigger must be high
+        // enough that it doesn't fire on every request. System prompt alone is ~5K
+        // tokens, so we trigger summarization only when total context hits 48K.
         var compactionPipeline = new PipelineCompactionStrategy(
-            new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(15)),
-            new SummarizationCompactionStrategy(baseClient, CompactionTriggers.TokensExceed(0x500)),
-            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(20)),
-            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(0x8000)));
+            new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(20)),
+            new SummarizationCompactionStrategy(baseClient, CompactionTriggers.TokensExceed(48_000)),
+            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(30)),
+            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(96_000)));
 
         // Build the MAF agent with compaction, tools, and system prompt
         _agent = baseClient

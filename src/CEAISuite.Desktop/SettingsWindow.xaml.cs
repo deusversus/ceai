@@ -29,17 +29,9 @@ public partial class SettingsWindow : Window
         new("claude-haiku-4-5",  "Claude Haiku 4.5",  "Fast & cheap"),
     ];
 
-    private static readonly ModelInfo[] CopilotModels =
-    [
-        new("gpt-5.4",           "GPT-5.4",           "Latest flagship"),
-        new("gpt-4.1",           "GPT-4.1",           "Fast & affordable"),
-        new("claude-sonnet-4-6", "Claude Sonnet 4.6", "Best balance"),
-        new("claude-sonnet-4.5", "Claude Sonnet 4.5", "Previous gen"),
-        new("o3",                "o3",                 "Deep reasoning"),
-        new("o4-mini",           "o4-mini",            "Fast reasoning"),
-        new("gpt-4o",            "GPT-4o",             "Multimodal"),
-        new("gpt-4o-mini",       "GPT-4o mini",        "Cheapest"),
-    ];
+    private static readonly ModelInfo[] CopilotModels = []; // populated dynamically from API
+
+    private bool _copilotModelsLoading;
 
     public SettingsWindow(AppSettingsService settingsService)
     {
@@ -149,15 +141,100 @@ public partial class SettingsWindow : Window
         _suppressModelListChange = true;
         ModelList.Items.Clear();
 
+        if (provider == "copilot")
+        {
+            // Async fetch from API — show loading placeholder
+            var currentModel = _settingsService.Settings.Model;
+            var loadingItem = new ListBoxItem
+            {
+                Content = new TextBlock { Text = "Loading models from Copilot API…", FontStyle = FontStyles.Italic },
+                IsEnabled = false,
+            };
+            loadingItem.SetResourceReference(ListBoxItem.ForegroundProperty, "TertiaryForeground");
+            ModelList.Items.Add(loadingItem);
+            _suppressModelListChange = false;
+
+            // Show current model in custom box while loading
+            if (CustomModelBox is not null && !string.IsNullOrWhiteSpace(currentModel))
+                CustomModelBox.Text = currentModel;
+
+            _ = FetchAndPopulateCopilotModelsAsync(currentModel);
+            return;
+        }
+
         var models = provider switch
         {
             "anthropic" => AnthropicModels,
-            "copilot" => CopilotModels,
             "openai-compatible" => Array.Empty<ModelInfo>(),
             _ => OpenAIModels,
         };
 
-        var currentModel = _settingsService.Settings.Model;
+        PopulateModelListItems(models, _settingsService.Settings.Model);
+    }
+
+    private async Task FetchAndPopulateCopilotModelsAsync(string currentModel)
+    {
+        if (_copilotModelsLoading) return;
+        _copilotModelsLoading = true;
+
+        try
+        {
+            var githubToken = _settingsService.Settings.GitHubToken;
+            if (string.IsNullOrWhiteSpace(githubToken))
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    ModelList.Items.Clear();
+                    var noToken = new ListBoxItem
+                    {
+                        Content = new TextBlock { Text = "Enter a GitHub token first", FontStyle = FontStyles.Italic },
+                        IsEnabled = false,
+                    };
+                    noToken.SetResourceReference(ListBoxItem.ForegroundProperty, "WarningForeground");
+                    ModelList.Items.Add(noToken);
+                });
+                return;
+            }
+
+            var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(githubToken);
+
+            var modelInfos = copilotModels
+                .Select(m => new ModelInfo(m.Id, m.Name, m.Vendor))
+                .ToArray();
+
+            Dispatcher.Invoke(() =>
+            {
+                ModelList.Items.Clear();
+                PopulateModelListItems(modelInfos, currentModel);
+            });
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                ModelList.Items.Clear();
+                var errItem = new ListBoxItem
+                {
+                    Content = new TextBlock { Text = $"Failed to load: {ex.Message}", FontStyle = FontStyles.Italic, TextWrapping = TextWrapping.Wrap },
+                    IsEnabled = false,
+                };
+                errItem.SetResourceReference(ListBoxItem.ForegroundProperty, "ErrorForeground");
+                ModelList.Items.Add(errItem);
+
+                // Still allow custom model entry
+                if (CustomModelBox is not null && !string.IsNullOrWhiteSpace(currentModel))
+                    CustomModelBox.Text = currentModel;
+            });
+        }
+        finally
+        {
+            _copilotModelsLoading = false;
+        }
+    }
+
+    private void PopulateModelListItems(ModelInfo[] models, string currentModel)
+    {
+        _suppressModelListChange = true;
 
         foreach (var model in models)
         {

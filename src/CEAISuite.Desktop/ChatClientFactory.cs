@@ -14,6 +14,11 @@ internal static class ChatClientFactory
 {
     private static CopilotTokenService? _copilotTokenService;
 
+    internal static CopilotTokenService CopilotService
+    {
+        get => _copilotTokenService ??= new CopilotTokenService();
+    }
+
     public static IChatClient? Create(AppSettings settings)
     {
         if (settings.Provider.Equals("copilot", StringComparison.OrdinalIgnoreCase))
@@ -61,47 +66,57 @@ internal static class ChatClientFactory
 
     private static IChatClient CreateCopilot(string githubToken, string model)
     {
-        _copilotTokenService ??= new CopilotTokenService();
-
-        // Exchange GitHub OAuth token for a Copilot session token (blocking for init)
-        var sessionToken = _copilotTokenService
-            .GetSessionTokenAsync(githubToken)
-            .GetAwaiter().GetResult();
-
-        // Copilot API is OpenAI-compatible — use OpenAI client pointed at Copilot endpoint
+        // No blocking network call — use a placeholder API key.
+        // The CopilotAuthPolicy lazily exchanges the GitHub token for a session
+        // token on the first actual API request.
         var options = new OpenAIClientOptions { Endpoint = CopilotTokenService.BaseUrl };
+        options.AddPolicy(
+            new CopilotAuthPolicy(CopilotService, githubToken),
+            System.ClientModel.Primitives.PipelinePosition.PerCall);
 
-        // Add required Copilot headers via pipeline policy
-        options.AddPolicy(new CopilotHeaderPolicy(), System.ClientModel.Primitives.PipelinePosition.PerCall);
-
-        return new OpenAIClient(new System.ClientModel.ApiKeyCredential(sessionToken), options)
+        return new OpenAIClient(new System.ClientModel.ApiKeyCredential("copilot-pending"), options)
             .GetChatClient(model)
             .AsIChatClient();
     }
 
-    /// <summary>Pipeline policy that adds Copilot-required headers to every request.</summary>
-    private sealed class CopilotHeaderPolicy : System.ClientModel.Primitives.PipelinePolicy
+    /// <summary>
+    /// Pipeline policy that lazily exchanges the GitHub token for a Copilot session token
+    /// and injects it + required headers on every request. No blocking constructor call.
+    /// </summary>
+    private sealed class CopilotAuthPolicy : System.ClientModel.Primitives.PipelinePolicy
     {
+        private readonly CopilotTokenService _tokenService;
+        private readonly string _githubToken;
+
+        public CopilotAuthPolicy(CopilotTokenService tokenService, string githubToken)
+        {
+            _tokenService = tokenService;
+            _githubToken = githubToken;
+        }
+
         public override void Process(
             System.ClientModel.Primitives.PipelineMessage message,
             IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline,
             int currentIndex)
         {
-            SetHeaders(message);
+            var token = _tokenService.GetSessionTokenAsync(_githubToken).GetAwaiter().GetResult();
+            ApplyHeaders(message, token);
             ProcessNext(message, pipeline, currentIndex);
         }
 
-        public override ValueTask ProcessAsync(
+        public override async ValueTask ProcessAsync(
             System.ClientModel.Primitives.PipelineMessage message,
             IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline,
             int currentIndex)
         {
-            SetHeaders(message);
-            return ProcessNextAsync(message, pipeline, currentIndex);
+            var token = await _tokenService.GetSessionTokenAsync(_githubToken);
+            ApplyHeaders(message, token);
+            await ProcessNextAsync(message, pipeline, currentIndex);
         }
 
-        private static void SetHeaders(System.ClientModel.Primitives.PipelineMessage message)
+        private static void ApplyHeaders(System.ClientModel.Primitives.PipelineMessage message, string sessionToken)
         {
+            message.Request.Headers.Set("Authorization", $"Bearer {sessionToken}");
             foreach (var (key, value) in CopilotTokenService.RequiredHeaders)
                 message.Request.Headers.Set(key, value);
         }

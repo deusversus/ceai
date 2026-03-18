@@ -92,7 +92,16 @@ public partial class MainWindow : Window
         var processWatchdog = new ProcessWatchdogService();
         var operationJournal = new OperationJournal();
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), new WindowsCodeCaveEngine(), processWatchdog, operationJournal);
-        IChatClient? chatClient = CreateChatClient();
+        IChatClient? chatClient = null;
+        try
+        {
+            chatClient = CreateChatClient();
+        }
+        catch (Exception ex)
+        {
+            // AI provider init failed — app still starts, just without AI
+            System.Diagnostics.Debug.WriteLine($"AI provider init failed: {ex.Message}");
+        }
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
 
         // Live status updates from AI agent

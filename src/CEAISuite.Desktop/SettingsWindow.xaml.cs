@@ -8,10 +8,26 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettingsService _settingsService;
     private bool _keyVisible;
-    private bool _suppressProviderChanged;
+    private bool _suppressModelListChange;
 
-    private static readonly string[] OpenAIModels = ["gpt-5.4", "gpt-4.1", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"];
-    private static readonly string[] AnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"];
+    private record ModelInfo(string Id, string Name, string Description);
+
+    private static readonly ModelInfo[] OpenAIModels =
+    [
+        new("gpt-5.4",    "GPT-5.4",    "Latest flagship"),
+        new("gpt-4.1",    "GPT-4.1",    "Fast & affordable"),
+        new("o3",         "o3",          "Deep reasoning"),
+        new("o4-mini",    "o4-mini",     "Fast reasoning"),
+        new("gpt-4o",     "GPT-4o",      "Multimodal"),
+        new("gpt-4o-mini","GPT-4o mini", "Cheapest"),
+    ];
+
+    private static readonly ModelInfo[] AnthropicModels =
+    [
+        new("claude-sonnet-4-6", "Claude Sonnet 4.6", "Best balance"),
+        new("claude-opus-4-6",   "Claude Opus 4.6",   "Most capable"),
+        new("claude-haiku-4-5",  "Claude Haiku 4.5",  "Fast & cheap"),
+    ];
 
     public SettingsWindow(AppSettingsService settingsService)
     {
@@ -23,20 +39,16 @@ public partial class SettingsWindow : Window
     private void LoadCurrentSettings()
     {
         var s = _settingsService.Settings;
-
-        // Provider (set before API key so subtitle updates)
-        _suppressProviderChanged = true;
         var provider = (s.Provider ?? "openai").ToLowerInvariant();
-        foreach (ComboBoxItem item in ProviderCombo.Items)
+
+        // Select provider card
+        var providerRadio = provider switch
         {
-            if ((string)item.Tag == provider)
-            {
-                ProviderCombo.SelectedItem = item;
-                break;
-            }
-        }
-        _suppressProviderChanged = false;
-        ApplyProviderUI(provider);
+            "anthropic" => ProviderAnthropic,
+            "openai-compatible" => ProviderCompatible,
+            _ => ProviderOpenAI,
+        };
+        providerRadio.IsChecked = true;
 
         // Custom endpoint
         if (!string.IsNullOrWhiteSpace(s.CustomEndpoint))
@@ -47,17 +59,14 @@ public partial class SettingsWindow : Window
         {
             ApiKeyBox.Password = s.OpenAiApiKey;
             ApiKeyTextBox.Text = s.OpenAiApiKey;
-            ApiKeyStatus.Text = "API key is configured";
+            ApiKeyStatus.Text = "✓ API key configured";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
         }
         else
         {
-            ApiKeyStatus.Text = "No API key configured — AI operator is disabled";
+            ApiKeyStatus.Text = "No API key — AI operator disabled";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
         }
-
-        // Model
-        ModelCombo.Text = s.Model;
 
         // General
         RefreshIntervalBox.Text = s.RefreshIntervalMs.ToString();
@@ -71,23 +80,20 @@ public partial class SettingsWindow : Window
         ThemeLight.IsChecked = theme == AppTheme.Light;
     }
 
-    private void ProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    private string GetSelectedProvider()
     {
-        if (_suppressProviderChanged) return;
-        if (ProviderCombo.SelectedItem is ComboBoxItem item)
-        {
-            var provider = (string)item.Tag;
-            ApplyProviderUI(provider);
-        }
+        if (ProviderAnthropic.IsChecked == true) return "anthropic";
+        if (ProviderCompatible.IsChecked == true) return "openai-compatible";
+        return "openai";
     }
 
-    private void ApplyProviderUI(string provider)
+    private void ProviderCard_Checked(object sender, RoutedEventArgs e)
     {
-        // Show/hide custom endpoint panel
+        var provider = GetSelectedProvider();
+
         if (CustomEndpointPanel is not null)
             CustomEndpointPanel.Visibility = provider == "openai-compatible" ? Visibility.Visible : Visibility.Collapsed;
 
-        // Update subtitle text
         if (ApiKeySubtitle is not null)
         {
             ApiKeySubtitle.Text = provider switch
@@ -98,23 +104,104 @@ public partial class SettingsWindow : Window
             };
         }
 
-        // Populate model suggestions (preserve current text if user typed something custom)
-        if (ModelCombo is null) return;
-        var currentModel = ModelCombo.Text;
-        ModelCombo.Items.Clear();
+        PopulateModelList(provider);
+    }
+
+    private void PopulateModelList(string provider)
+    {
+        if (ModelList is null) return;
+
+        _suppressModelListChange = true;
+        ModelList.Items.Clear();
 
         var models = provider switch
         {
             "anthropic" => AnthropicModels,
-            "openai-compatible" => Array.Empty<string>(),
+            "openai-compatible" => Array.Empty<ModelInfo>(),
             _ => OpenAIModels,
         };
 
-        foreach (var model in models)
-            ModelCombo.Items.Add(new ComboBoxItem { Content = model });
+        var currentModel = _settingsService.Settings.Model;
 
-        // Restore model text (or set default for new provider)
-        ModelCombo.Text = currentModel;
+        foreach (var model in models)
+        {
+            var panel = new DockPanel { Margin = new Thickness(0) };
+            var name = new TextBlock
+            {
+                Text = model.Name,
+                FontFamily = new System.Windows.Media.FontFamily("Consolas"),
+                FontSize = 13,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            name.SetResourceReference(TextBlock.ForegroundProperty, "PrimaryForeground");
+
+            var desc = new TextBlock
+            {
+                Text = model.Description,
+                FontSize = 11,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                Margin = new Thickness(12, 0, 0, 0),
+            };
+            desc.SetResourceReference(TextBlock.ForegroundProperty, "TertiaryForeground");
+
+            DockPanel.SetDock(desc, Dock.Right);
+            panel.Children.Add(desc);
+            panel.Children.Add(name);
+
+            ModelList.Items.Add(new ListBoxItem { Content = panel, Tag = model.Id });
+        }
+
+        // Select the current model, or first available
+        int selectedIdx = -1;
+        for (int i = 0; i < ModelList.Items.Count; i++)
+        {
+            if (ModelList.Items[i] is ListBoxItem item && (string)item.Tag == currentModel)
+            {
+                selectedIdx = i;
+                break;
+            }
+        }
+
+        if (selectedIdx >= 0)
+            ModelList.SelectedIndex = selectedIdx;
+        else if (models.Length == 0 && CustomModelBox is not null)
+            CustomModelBox.Text = currentModel;
+        else if (ModelList.Items.Count > 0)
+            ModelList.SelectedIndex = 0;
+
+        _suppressModelListChange = false;
+    }
+
+    private void ModelList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressModelListChange) return;
+        if (ModelList.SelectedItem is ListBoxItem item && CustomModelBox is not null)
+            CustomModelBox.Text = ""; // clear custom when selecting from list
+    }
+
+    private void CustomModelBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // When user types a custom model, deselect the list
+        if (!string.IsNullOrWhiteSpace(CustomModelBox?.Text))
+        {
+            _suppressModelListChange = true;
+            ModelList.SelectedIndex = -1;
+            _suppressModelListChange = false;
+        }
+    }
+
+    private string GetSelectedModel()
+    {
+        // Custom model takes priority if typed
+        if (!string.IsNullOrWhiteSpace(CustomModelBox?.Text))
+            return CustomModelBox.Text.Trim();
+
+        // Otherwise use list selection
+        if (ModelList.SelectedItem is ListBoxItem item)
+            return (string)item.Tag;
+
+        return _settingsService.Settings.Model;
     }
 
     private void ThemeRadio_Checked(object sender, RoutedEventArgs e)
@@ -154,30 +241,23 @@ public partial class SettingsWindow : Window
     {
         var s = _settingsService.Settings;
 
-        // Provider
-        if (ProviderCombo.SelectedItem is ComboBoxItem providerItem)
-            s.Provider = (string)providerItem.Tag;
-
-        // Custom endpoint
+        s.Provider = GetSelectedProvider();
         s.CustomEndpoint = s.Provider == "openai-compatible" ? EndpointBox.Text : null;
-
-        // Get the key from whichever control is visible
         s.OpenAiApiKey = _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password;
-        s.Model = ModelCombo.Text;
+        s.Model = GetSelectedModel();
 
         if (int.TryParse(RefreshIntervalBox.Text, out var interval) && interval >= 100)
             s.RefreshIntervalMs = interval;
 
         s.ShowUnresolvedAsQuestionMarks = ShowUnresolvedCheck.IsChecked == true;
 
-        // Theme
         s.Theme = ThemeLight.IsChecked == true ? "Light"
                 : ThemeDark.IsChecked == true ? "Dark"
                 : "System";
 
         _settingsService.Save();
 
-        MessageBox.Show("Settings saved. API key, model, and provider changes require an app restart.",
+        MessageBox.Show("Settings saved. Provider and model changes take effect on next message.",
             "Settings Saved", MessageBoxButton.OK, MessageBoxImage.Information);
         DialogResult = true;
         Close();
@@ -185,7 +265,6 @@ public partial class SettingsWindow : Window
 
     private void CancelSettings(object sender, RoutedEventArgs e)
     {
-        // Revert theme preview if user cancels
         var savedTheme = Enum.TryParse<AppTheme>(_settingsService.Settings.Theme, true, out var t) ? t : AppTheme.System;
         ThemeManager.ApplyTheme(savedTheme);
 

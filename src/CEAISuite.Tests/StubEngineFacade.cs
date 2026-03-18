@@ -16,6 +16,10 @@ public sealed class StubEngineFacade : IEngineFacade
 
     public void WriteMemoryDirect(nuint address, byte[] data) => _memory[address] = data;
 
+    /// <summary>Modules returned by AttachAsync. Tests can override to match their address layout.</summary>
+    public ModuleDescriptor[] AttachModules { get; set; } =
+        new[] { new ModuleDescriptor("main.exe", (nuint)0x400000, 4096) };
+
     public Task<IReadOnlyList<ProcessDescriptor>> ListProcessesAsync(CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<ProcessDescriptor>>(new ProcessDescriptor[]
         {
@@ -25,10 +29,7 @@ public sealed class StubEngineFacade : IEngineFacade
         });
 
     public Task<EngineAttachment> AttachAsync(int processId, CancellationToken ct = default) =>
-        Task.FromResult(new EngineAttachment(
-            processId,
-            "TestGame.exe",
-            new[] { new ModuleDescriptor("main.exe", (nuint)0x400000, 4096) }));
+        Task.FromResult(new EngineAttachment(processId, "TestGame.exe", AttachModules));
 
     public Task<MemoryReadResult> ReadMemoryAsync(int processId, nuint address, int length, CancellationToken ct = default)
     {

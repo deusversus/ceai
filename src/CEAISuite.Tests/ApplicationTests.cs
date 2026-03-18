@@ -162,6 +162,7 @@ public class AddressTableServiceTests
     public async Task RefreshAll_ResolvesPointerChain()
     {
         var engine = new StubEngineFacade();
+        engine.AttachModules = new[] { new ModuleDescriptor("game.dll", (nuint)0x10000000, 0x1000000) };
         var sut = new AddressTableService(engine);
         sut.SetProcessContext(
             new[] { new ModuleDescriptor("game.dll", (nuint)0x10000000, 0x1000000) },
@@ -194,6 +195,7 @@ public class AddressTableServiceTests
     public async Task RefreshAll_ResolvesMultiLevelPointer()
     {
         var engine = new StubEngineFacade();
+        engine.AttachModules = new[] { new ModuleDescriptor("game.dll", (nuint)0x10000000, 0x1000000) };
         var sut = new AddressTableService(engine);
         sut.SetProcessContext(
             new[] { new ModuleDescriptor("game.dll", (nuint)0x10000000, 0x1000000) },

@@ -21,6 +21,24 @@ public sealed class AiOperatorService
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore = new();
+
+    // Token usage tracking
+    private long _totalPromptTokens;
+    private long _totalCompletionTokens;
+    private long _totalCachedTokens;
+    private int _totalRequests;
+
+    /// <summary>Cumulative input tokens sent across all requests in this session.</summary>
+    public long TotalPromptTokens => _totalPromptTokens;
+    /// <summary>Cumulative output tokens received across all requests in this session.</summary>
+    public long TotalCompletionTokens => _totalCompletionTokens;
+    /// <summary>Cumulative cached input tokens (prompt cache hits) across all requests.</summary>
+    public long TotalCachedTokens => _totalCachedTokens;
+    /// <summary>Total number of API requests made in this session.</summary>
+    public int TotalRequests => _totalRequests;
+
+    /// <summary>Maximum number of conversation messages (excluding system prompt) to send to the API.</summary>
+    public int MaxConversationMessages { get; set; } = 40;
     private static readonly string LogDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
     private static readonly string LogPath = Path.Combine(LogDir, $"ai-agent-{DateTime.Now:yyyy-MM-dd}.log");
@@ -105,12 +123,16 @@ public sealed class AiOperatorService
         Log("INFO", $"User: {userMessage}");
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
 
-        // Inject dynamic context so the agent knows the current state
-        var contextMsg = BuildContextMessage();
-        if (contextMsg is not null)
-            _conversationHistory.Add(contextMsg);
+        // Build the user message with dynamic context appended (keeps system prompt prefix stable for cache hits)
+        var contextSuffix = BuildContextSuffix();
+        var fullUserMessage = contextSuffix is not null
+            ? $"{userMessage}\n\n{contextSuffix}"
+            : userMessage;
 
-        _conversationHistory.Add(new ChatMessage(ChatRole.User, userMessage));
+        _conversationHistory.Add(new ChatMessage(ChatRole.User, fullUserMessage));
+
+        // Trim history to sliding window before sending
+        TrimHistory();
 
         try
         {
@@ -119,6 +141,8 @@ public sealed class AiOperatorService
                 _conversationHistory,
                 _chatOptions,
                 cancellationToken);
+
+            TrackUsage(response);
 
             // Extract tool calls and final text from all response messages
             var assistantText = "";
@@ -189,6 +213,8 @@ public sealed class AiOperatorService
                         _chatOptions,
                         cancellationToken);
 
+                    TrackUsage(imageResponse);
+
                     foreach (var msg in imageResponse.Messages)
                     {
                         foreach (var content in msg.Contents)
@@ -207,9 +233,12 @@ public sealed class AiOperatorService
             }
 
             sw.Stop();
+            var usagePart = _totalRequests > 0
+                ? $", tokens: {_totalPromptTokens}↑ {_totalCompletionTokens}↓ {_totalCachedTokens}⚡"
+                : "";
             var summary = toolCallCount > 0
-                ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s)"
-                : $"Done ({sw.Elapsed.TotalSeconds:F1}s)";
+                ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s{usagePart})"
+                : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart})";
             UpdateStatus(summary);
             Log("INFO", $"Assistant: {(assistantText.Length > 300 ? assistantText[..300] + "..." : assistantText)}");
             _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));
@@ -225,6 +254,57 @@ public sealed class AiOperatorService
             _displayHistory.Add(new AiChatMessage("assistant", errorMessage, DateTimeOffset.UtcNow));
             return errorMessage;
         }
+    }
+
+    /// <summary>
+    /// Trim conversation history to a sliding window, keeping the system prompt
+    /// at index 0 and the most recent <see cref="MaxConversationMessages"/> messages.
+    /// Also prunes old tool result content to reduce token bloat (inspired by OpenCode's
+    /// compaction pattern — preserve recent tool output, truncate old results).
+    /// </summary>
+    private void TrimHistory()
+    {
+        // Phase 1: Prune old tool results to reduce token waste.
+        // Keep full results for the last ToolResultProtectCount messages; truncate older ones.
+        const int ToolResultProtectCount = 10;
+        const int ToolResultMaxChars = 300;
+        int protectStart = Math.Max(1, _conversationHistory.Count - ToolResultProtectCount);
+        for (int i = 1; i < protectStart; i++)
+        {
+            var msg = _conversationHistory[i];
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionResultContent frc && frc.Result is string s && s.Length > ToolResultMaxChars)
+                    frc.Result = s[..ToolResultMaxChars] + "… [truncated]";
+            }
+        }
+
+        // Phase 2: Sliding window — drop oldest messages beyond the limit.
+        if (MaxConversationMessages <= 0) return;
+        int maxTotal = MaxConversationMessages + 1; // +1 for system prompt at index 0
+        if (_conversationHistory.Count <= maxTotal) return;
+
+        int removeCount = _conversationHistory.Count - maxTotal;
+        Log("INFO", $"Trimming conversation history: removing {removeCount} old messages (keeping {MaxConversationMessages} + system prompt)");
+        _conversationHistory.RemoveRange(1, removeCount);
+    }
+
+    /// <summary>Extract token usage from a response and update cumulative counters.</summary>
+    private void TrackUsage(ChatResponse response)
+    {
+        if (response.Usage is not { } usage) return;
+
+        _totalPromptTokens += usage.InputTokenCount ?? 0;
+        _totalCompletionTokens += usage.OutputTokenCount ?? 0;
+        _totalCachedTokens += usage.CachedInputTokenCount ?? 0;
+        _totalRequests++;
+
+        Log("USAGE",
+            $"Prompt: {usage.InputTokenCount}, Completion: {usage.OutputTokenCount}, " +
+            $"Cached: {usage.CachedInputTokenCount}, " +
+            $"Total requests: {_totalRequests}, " +
+            $"Cumulative prompt: {_totalPromptTokens}, Cumulative completion: {_totalCompletionTokens}, " +
+            $"Cumulative cached: {_totalCachedTokens}");
     }
 
     public void ClearHistory()
@@ -346,14 +426,18 @@ public sealed class AiOperatorService
         return sb.ToString();
     }
 
-    private ChatMessage? BuildContextMessage()
+    /// <summary>
+    /// Build the dynamic context string to append to the user message.
+    /// Returns null if no context is available.
+    /// </summary>
+    private string? BuildContextSuffix()
     {
         if (_contextProvider is null) return null;
         try
         {
             var ctx = _contextProvider();
             if (string.IsNullOrWhiteSpace(ctx)) return null;
-            return new ChatMessage(ChatRole.System, $"[CURRENT STATE]\n{ctx}");
+            return $"[CURRENT STATE]\n{ctx}";
         }
         catch { return null; }
     }
@@ -643,7 +727,7 @@ public sealed class AiOperatorService
           "Please fight a battle and tell me the EXP you received" NOT "try it out"
 
         ═══ CONTEXT ═══
-        A [CURRENT STATE] system message is injected before each user message with:
+        A [CURRENT STATE] block is appended to each user message with:
         - Attached process info (name, PID, modules)
         - Address table summary (entries, locked count, scripts)
         - Active scan info (result count, data type)

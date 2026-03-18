@@ -23,6 +23,9 @@ public sealed class AppSettings
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
     public bool MenuBarVisible { get; set; } = true;
     public string Theme { get; set; } = "System";
+
+    /// <summary>Maximum conversation messages (excluding system prompt) sent to the API. 0 = unlimited.</summary>
+    public int MaxConversationMessages { get; set; } = 40;
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]

@@ -81,6 +81,10 @@ public sealed class AiOperatorService
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
     public bool IsConfigured { get; }
 
+    /// <summary>Number of messages in the MAF session history (post-compaction). Useful for monitoring.</summary>
+    public int SessionMessageCount =>
+        _session?.TryGetInMemoryChatHistory(out var h) == true ? h.Count : 0;
+
     /// <summary>Current chat session ID.</summary>
     public string CurrentChatId { get; private set; } = "";
 
@@ -125,6 +129,7 @@ public sealed class AiOperatorService
             .BuildAIAgent(new ChatClientAgentOptions
             {
                 Name = "CEAIOperator",
+                ChatHistoryProvider = new InMemoryChatHistoryProvider(),
                 ChatOptions = new ChatOptions
                 {
                     Instructions = SystemPrompt,
@@ -303,9 +308,10 @@ public sealed class AiOperatorService
             var usagePart = _totalRequests > 0
                 ? $", tokens: {_totalPromptTokens}↑ {_totalCompletionTokens}↓ {_totalCachedTokens}⚡"
                 : "";
+            var historyPart = $", {SessionMessageCount} msgs in context";
             var summary = toolCallCount > 0
-                ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s{usagePart})"
-                : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart})";
+                ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})"
+                : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})";
             UpdateStatus(summary);
             Log("INFO", $"Assistant: {(assistantText.Length > 300 ? assistantText[..300] + "..." : assistantText)}");
             _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));

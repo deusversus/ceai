@@ -386,7 +386,8 @@ public sealed class AiOperatorService
         Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
         Scanning: StartScan, RefineScan, GetScanResults, ListMemoryRegions
         Analysis: Disassemble (warns on non-executable memory), DissectStructure (with typeHint: auto/int32/float/pointers),
-                  ScanForPointers, GenerateSignature, TestSignatureUniqueness
+                  ScanForPointers, GenerateSignature, TestSignatureUniqueness,
+                  ResolveSymbol (converts 'Module.dll+offset' to live address — use before analysis tools)
         Static Analysis: FindWritersToOffset (with includeReads), FindByMemoryOperand (structured operand search),
                          FindFunctionBoundaries, GetCallerGraph, SearchInstructionPattern, TraceFieldWriters
         Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,

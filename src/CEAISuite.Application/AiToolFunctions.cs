@@ -164,6 +164,63 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [Description("Resolve a symbolic expression like 'ModuleName.dll+offset' to a live virtual address. " +
+        "Useful for converting script define() addresses, CE-style module+offset notation, or any symbolic " +
+        "address into the current live address. Returns the resolved address, module base, and offset.")]
+    public async Task<string> ResolveSymbol(
+        [Description("Process ID")] int processId,
+        [Description("Symbolic expression to resolve, e.g., 'GameAssembly.dll+9A18E8', 'kernel32.dll+1234', or a raw hex address '0x7FF8...'")] string expression)
+    {
+        var normalized = expression.Trim();
+
+        // Check for module+offset pattern
+        var plusIdx = normalized.IndexOf('+');
+        if (plusIdx > 0)
+        {
+            var modulePart = normalized[..plusIdx].Trim();
+            var offsetPart = normalized[(plusIdx + 1)..].Trim();
+            if (offsetPart.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                offsetPart = offsetPart[2..];
+
+            if (!ulong.TryParse(offsetPart, System.Globalization.NumberStyles.HexNumber, null, out var offset))
+                return $"Cannot parse offset '{offsetPart}' as hex.";
+
+            var attachment = await engineFacade.AttachAsync(processId);
+            var mod = attachment.Modules.FirstOrDefault(m =>
+                m.Name.Equals(modulePart, StringComparison.OrdinalIgnoreCase));
+
+            if (mod is null)
+                return $"Module '{modulePart}' not found. Use InspectProcess to see loaded modules.";
+
+            var resolvedAddr = (ulong)mod.BaseAddress + offset;
+            bool inRange = offset < (ulong)mod.SizeBytes;
+
+            return ToJson(new
+            {
+                expression = normalized,
+                resolvedAddress = $"0x{resolvedAddr:X}",
+                module = mod.Name,
+                moduleBase = $"0x{(ulong)mod.BaseAddress:X}",
+                offset = $"0x{offset:X}",
+                isResolved = true,
+                inModuleRange = inRange,
+                warning = inRange ? (string?)null : $"Offset 0x{offset:X} exceeds module size (0x{mod.SizeBytes:X})"
+            });
+        }
+
+        // Raw address — just validate and return
+        var addr = ParseAddress(normalized);
+        return ToJson(new
+        {
+            expression = normalized,
+            resolvedAddress = $"0x{(ulong)addr:X}",
+            module = (string?)null,
+            moduleBase = (string?)null,
+            offset = (string?)null,
+            isResolved = true
+        });
+    }
+
     [Description("Disassemble machine code at an address in a process. Shows assembly instructions.")]
     public async Task<string> Disassemble(
         [Description("Process ID")] int processId,
@@ -2461,14 +2518,26 @@ public sealed class AiToolFunctions(
     {
         var targetAddr = (ulong)ParseAddress(address);
         var startAddr = targetAddr > (ulong)searchRange ? targetAddr - (ulong)searchRange : 0UL;
-        var totalLen = (int)Math.Min((ulong)searchRange * 2, ulong.MaxValue);
+        var totalLen = (long)Math.Min((ulong)searchRange * 2, 0x100000UL); // cap at 1MB
 
-        MemoryReadResult memResult;
-        try { memResult = await engineFacade.ReadMemoryAsync(processId, (nuint)startAddr, totalLen); }
-        catch (Exception ex) { return $"Failed to read memory around 0x{targetAddr:X}: {ex.Message}"; }
+        // Read in chunks (engine limits per-call reads)
+        const int chunkSize = 0x10000;
+        var allBytes = new List<byte>();
+        for (long off = 0; off < totalLen; off += chunkSize)
+        {
+            var readAddr = (nuint)(startAddr + (ulong)off);
+            var readLen = (int)Math.Min(chunkSize, totalLen - off);
+            try
+            {
+                var memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen);
+                var chunk = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                allBytes.AddRange(chunk);
+            }
+            catch { break; }
+        }
 
-        var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
-        if (bytes.Length == 0) return "No bytes read.";
+        var bytes = allBytes.ToArray();
+        if (bytes.Length == 0) return $"Failed to read memory around 0x{targetAddr:X}.";
 
         var reader = new ByteArrayCodeReader(bytes);
         var decoder = Decoder.Create(64, reader, startAddr);

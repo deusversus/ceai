@@ -81,9 +81,9 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 cancellationToken.ThrowIfCancellationRequested();
 
                 ArgumentOutOfRangeException.ThrowIfNegativeOrZero(length);
-                if (length > 4096)
+                if (length > 0x10000)
                 {
-                    throw new ArgumentOutOfRangeException(nameof(length), "Initial reads are limited to 4096 bytes.");
+                    throw new ArgumentOutOfRangeException(nameof(length), "Reads are limited to 65536 bytes per call.");
                 }
 
                 var handle = OpenProcess(ProcessQueryLimitedInformation | ProcessVmRead, false, processId);

@@ -9,7 +9,8 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
     <PackageReference Include="Iced" Version="1.21.0" />
-    <PackageReference Include="Microsoft.Extensions.AI" Version="10.4.0" />
+    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc4" />
+    <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.5" />
   </ItemGroup>
 

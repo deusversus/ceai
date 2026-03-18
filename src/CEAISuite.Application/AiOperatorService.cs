@@ -1,5 +1,10 @@
 using System.Reflection;
+using Microsoft.Agents.AI;
+using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
+
+#pragma warning disable MAAI001 // MAF compaction APIs are experimental in RC4
+#pragma warning disable MEAI001 // M.E.AI approval APIs are experimental
 
 namespace CEAISuite.Application;
 
@@ -11,14 +16,30 @@ public sealed record AiActionLogEntry(
     string Result,
     DateTimeOffset Timestamp);
 
+/// <summary>
+/// Names of tools that require user approval before execution.
+/// These are wrapped with <see cref="ApprovalRequiredAIFunction"/> in MAF.
+/// </summary>
+internal static class DangerousTools
+{
+    public static readonly HashSet<string> Names = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "WriteMemory",
+        "SetBreakpoint",
+        "InstallCodeCaveHook",
+        "EnableScript",
+        "ForceDetachAndCleanup",
+        "ChangeMemoryProtection",
+    };
+}
+
 public sealed class AiOperatorService
 {
-    private readonly IChatClient _chatClient;
+    private readonly AIAgent _agent;
     private readonly IChatClient _baseChatClient;
-    private readonly List<ChatMessage> _conversationHistory = new();
+    private AgentSession _session = null!;
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
-    private readonly ChatOptions _chatOptions;
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore = new();
@@ -50,6 +71,12 @@ public sealed class AiOperatorService
     /// <summary>Raised when the chat list changes (new chat, delete, rename).</summary>
     public event Action? ChatListChanged;
 
+    /// <summary>
+    /// Raised when the agent wants to execute a dangerous tool and needs user approval.
+    /// The handler should return true to approve, false to deny.
+    /// </summary>
+    public event Func<string, string, Task<bool>>? ApprovalRequested;
+
     public IReadOnlyList<AiChatMessage> DisplayHistory => _displayHistory;
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
     public bool IsConfigured { get; }
@@ -68,37 +95,47 @@ public sealed class AiOperatorService
         var baseClient = chatClient ?? new StubChatClient();
         _baseChatClient = baseClient;
 
-        // Build AIFunction list from the tool functions instance using reflection
+        // Build AIFunction list from the tool functions instance using reflection.
+        // Dangerous tools are wrapped with ApprovalRequiredAIFunction.
         var methods = typeof(AiToolFunctions).GetMethods(
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         var tools = methods
             .Where(m => !m.IsSpecialName)
             .Select(m => AIFunctionFactory.Create(m, toolFunctions))
-            .Cast<AITool>()
+            .Select(fn => DangerousTools.Names.Contains(fn.Name)
+                ? (AITool)new ApprovalRequiredAIFunction(fn)
+                : fn)
             .ToList();
 
-        _chatOptions = new ChatOptions
-        {
-            Tools = tools,
-            Temperature = 0.3f,
-            AdditionalProperties = new AdditionalPropertiesDictionary
-            {
-                ["reasoning_effort"] = "high"
-            }
-        };
+        // Build the MAF compaction pipeline (gentle → aggressive):
+        // 1. Collapse old tool-call groups into short summaries
+        // 2. LLM-powered summarization of older conversation spans
+        // 3. Sliding window: keep most recent N user turns
+        // 4. Emergency truncation backstop
+        var compactionPipeline = new PipelineCompactionStrategy(
+            new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(15)),
+            new SummarizationCompactionStrategy(baseClient, CompactionTriggers.TokensExceed(0x500)),
+            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(20)),
+            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(0x8000)));
 
-        // Wrap the client with function invocation middleware so tool calls
-        // are automatically executed and results fed back to the model.
-        // MaximumIterationsPerRequest caps the auto-loop so it doesn't spin forever.
-        _chatClient = new ChatClientBuilder(baseClient)
-            .UseFunctionInvocation(null, options =>
+        // Build the MAF agent with compaction, tools, and system prompt
+        _agent = baseClient
+            .AsBuilder()
+            .UseAIContextProviders(new CompactionProvider(compactionPipeline))
+            .BuildAIAgent(new ChatClientAgentOptions
             {
-                options.MaximumIterationsPerRequest = 12;
-            })
-            .Build();
-
-        var systemPrompt = new ChatMessage(ChatRole.System, SystemPrompt);
-        _conversationHistory.Add(systemPrompt);
+                Name = "CEAIOperator",
+                ChatOptions = new ChatOptions
+                {
+                    Instructions = SystemPrompt,
+                    Tools = tools,
+                    Temperature = 0.3f,
+                    AdditionalProperties = new AdditionalPropertiesDictionary
+                    {
+                        ["reasoning_effort"] = "high"
+                    }
+                },
+            });
 
         // Start with a fresh chat session
         NewChat();
@@ -125,24 +162,19 @@ public sealed class AiOperatorService
         Log("INFO", $"User: {userMessage}");
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
 
-        // Build the user message with dynamic context appended (keeps system prompt prefix stable for cache hits)
+        // Append dynamic context to the user message (keeps system prompt prefix stable for cache hits)
         var contextSuffix = BuildContextSuffix();
         var fullUserMessage = contextSuffix is not null
             ? $"{userMessage}\n\n{contextSuffix}"
             : userMessage;
 
-        _conversationHistory.Add(new ChatMessage(ChatRole.User, fullUserMessage));
-
-        // Trim history to sliding window before sending
-        await TrimHistoryAsync(cancellationToken);
-
         try
         {
             UpdateStatus("Thinking...");
-            var response = await _chatClient.GetResponseAsync(
-                _conversationHistory,
-                _chatOptions,
-                cancellationToken);
+
+            // Run the agent using MAF's structured agent loop.
+            // This handles tool invocation, compaction, and history automatically.
+            var response = await _agent.RunAsync(fullUserMessage, _session, cancellationToken: cancellationToken);
 
             TrackUsage(response);
 
@@ -176,7 +208,6 @@ public sealed class AiOperatorService
                         var resultStr = functionResult.Result?.ToString() ?? "";
                         var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
                         Log("TOOL", $"Result: {truncated}");
-                        // Update the matching action log entry with result
                         for (int i = _actionLog.Count - 1; i >= 0; i--)
                         {
                             if (_actionLog[i].Result == "invoked")
@@ -186,13 +217,59 @@ public sealed class AiOperatorService
                             }
                         }
                     }
-                }
-            }
+                    else if (content is FunctionApprovalRequestContent approvalRequest)
+                    {
+                        // Handle dangerous tool approval via MAF's approval flow
+                        var approved = await HandleApprovalRequestAsync(approvalRequest);
+                        if (approved)
+                        {
+                            // Re-run agent with approval response
+                            var approvalMsg = new ChatMessage(ChatRole.User, [approvalRequest.CreateResponse(true)]);
+                            response = await _agent.RunAsync([approvalMsg], _session, cancellationToken: cancellationToken);
+                            TrackUsage(response);
 
-            // Add all response messages to conversation history
-            foreach (var message in response.Messages)
-            {
-                _conversationHistory.Add(message);
+                            // Process additional response messages
+                            foreach (var msg in response.Messages)
+                            {
+                                foreach (var c in msg.Contents)
+                                {
+                                    if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
+                                        assistantText = tc.Text;
+                                    else if (c is FunctionCallContent fc2)
+                                    {
+                                        toolCallCount++;
+                                        var a = fc2.Arguments is not null
+                                            ? string.Join(", ", fc2.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
+                                            : "";
+                                        UpdateStatus($"Tool: {fc2.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
+                                        Log("TOOL", $"Call: {fc2.Name}({a})");
+                                        _actionLog.Add(new AiActionLogEntry(fc2.Name ?? "unknown", a, "invoked", DateTimeOffset.UtcNow));
+                                    }
+                                    else if (c is FunctionResultContent fr2)
+                                    {
+                                        var r = fr2.Result?.ToString() ?? "";
+                                        var t = r.Length > 200 ? r[..200] + "..." : r;
+                                        Log("TOOL", $"Result: {t}");
+                                        for (int i = _actionLog.Count - 1; i >= 0; i--)
+                                        {
+                                            if (_actionLog[i].Result == "invoked") { _actionLog[i] = _actionLog[i] with { Result = t }; break; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        else
+                        {
+                            var denialMsg = new ChatMessage(ChatRole.User, [approvalRequest.CreateResponse(false)]);
+                            response = await _agent.RunAsync([denialMsg], _session, cancellationToken: cancellationToken);
+                            TrackUsage(response);
+                            foreach (var msg in response.Messages)
+                                foreach (var c in msg.Contents)
+                                    if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
+                                        assistantText = tc.Text;
+                        }
+                    }
+                }
             }
 
             // Inject any pending screenshots as image content for future turns
@@ -201,31 +278,19 @@ public sealed class AiOperatorService
                 while (_toolFunctions.PendingImages.TryDequeue(out var img))
                 {
                     UpdateStatus("Analyzing screenshot...");
-                    var imageContent = new List<AIContent>
+                    var imageMsg = new ChatMessage(ChatRole.User, new List<AIContent>
                     {
                         new TextContent($"[Screenshot: {img.Description}]"),
                         new DataContent(img.PngData, "image/png")
-                    };
-                    var imageMsg = new ChatMessage(ChatRole.User, imageContent);
-                    _conversationHistory.Add(imageMsg);
+                    });
 
-                    // Re-invoke the model so it can analyze the screenshot
-                    var imageResponse = await _chatClient.GetResponseAsync(
-                        _conversationHistory,
-                        _chatOptions,
-                        cancellationToken);
-
+                    var imageResponse = await _agent.RunAsync([imageMsg], _session, cancellationToken: cancellationToken);
                     TrackUsage(imageResponse);
 
                     foreach (var msg in imageResponse.Messages)
-                    {
-                        foreach (var content in msg.Contents)
-                        {
-                            if (content is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
+                        foreach (var c in msg.Contents)
+                            if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
                                 assistantText += "\n" + tc.Text;
-                        }
-                        _conversationHistory.Add(msg);
-                    }
                 }
             }
 
@@ -258,161 +323,55 @@ public sealed class AiOperatorService
         }
     }
 
-    /// <summary>
-    /// Trim conversation history to a sliding window, keeping the system prompt
-    /// at index 0 and the most recent <see cref="MaxConversationMessages"/> messages.
-    /// When enough messages are being dropped, uses AI-powered compaction to preserve
-    /// context as a summary (inspired by OpenCode's compaction agent pattern).
-    /// </summary>
-    private async Task TrimHistoryAsync(CancellationToken ct)
+    /// <summary>Handle an approval request for a dangerous tool call.</summary>
+    private async Task<bool> HandleApprovalRequestAsync(FunctionApprovalRequestContent request)
     {
-        // Phase 1: Prune old tool results to reduce token waste.
-        // Keep full results for the last ToolResultProtectCount messages; truncate older ones.
-        const int ToolResultProtectCount = 10;
-        const int ToolResultMaxChars = 300;
-        int protectStart = Math.Max(1, _conversationHistory.Count - ToolResultProtectCount);
-        for (int i = 1; i < protectStart; i++)
+        var toolName = request.FunctionCall.Name ?? "unknown";
+        var argsStr = request.FunctionCall.Arguments is not null
+            ? string.Join(", ", request.FunctionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
+            : "";
+
+        Log("APPROVAL", $"Approval requested for {toolName}({argsStr})");
+
+        if (ApprovalRequested is not null)
         {
-            var msg = _conversationHistory[i];
-            foreach (var content in msg.Contents)
-            {
-                if (content is FunctionResultContent frc && frc.Result is string s && s.Length > ToolResultMaxChars)
-                    frc.Result = s[..ToolResultMaxChars] + "… [truncated]";
-            }
+            return await ApprovalRequested(toolName, argsStr);
         }
 
-        // Phase 2: Sliding window with compaction — drop oldest messages beyond the limit.
-        if (MaxConversationMessages <= 0) return;
-        int maxTotal = MaxConversationMessages + 1; // +1 for system prompt at index 0
-        if (_conversationHistory.Count <= maxTotal) return;
-
-        int removeCount = _conversationHistory.Count - maxTotal;
-        Log("INFO", $"History exceeds limit: {_conversationHistory.Count} messages, need to remove {removeCount}");
-
-        await CompactHistoryAsync(removeCount, ct);
+        // Default: auto-approve if no handler is registered (preserves existing behavior)
+        Log("APPROVAL", $"Auto-approved {toolName} (no approval handler registered)");
+        return true;
     }
 
-    /// <summary>
-    /// Compact old conversation history into a summary, preserving context while reducing tokens.
-    /// Uses the base (unwrapped) chat client so tool auto-invocation doesn't interfere.
-    /// </summary>
-    private async Task CompactHistoryAsync(int removeCount, CancellationToken ct)
+    /// <summary>Extract token usage from an agent response and update cumulative counters.</summary>
+    private void TrackUsage(AgentResponse response)
     {
-        // Only compact if we're dropping enough messages to justify the API cost
-        if (removeCount < 6)
+        foreach (var message in response.Messages)
         {
-            Log("INFO", $"Trimming {removeCount} messages (below compaction threshold)");
-            _conversationHistory.RemoveRange(1, removeCount);
-            return;
-        }
-
-        // Extract the messages we're about to remove (skip system prompt at index 0)
-        var oldMessages = _conversationHistory.GetRange(1, removeCount);
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine("Summarize this conversation history concisely for context continuity. Focus on:");
-        sb.AppendLine("- What the user is trying to accomplish");
-        sb.AppendLine("- Key discoveries, addresses, values found");
-        sb.AppendLine("- What actions were taken and their results");
-        sb.AppendLine("- What's currently in progress");
-        sb.AppendLine("Keep it under 500 words. Use bullet points.");
-        sb.AppendLine();
-        sb.AppendLine("--- CONVERSATION TO SUMMARIZE ---");
-
-        foreach (var msg in oldMessages)
-        {
-            var role = msg.Role == ChatRole.User ? "User"
-                     : msg.Role == ChatRole.Assistant ? "Assistant"
-                     : "System";
-            foreach (var content in msg.Contents)
+            if (message.AdditionalProperties?.TryGetValue("Usage", out var usageObj) == true
+                && usageObj is UsageContent usage)
             {
-                if (content is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
-                {
-                    var text = tc.Text.Length > 500 ? tc.Text[..500] + "..." : tc.Text;
-                    sb.AppendLine($"[{role}]: {text}");
-                }
-                else if (content is FunctionCallContent fc)
-                {
-                    sb.AppendLine($"[Tool Call]: {fc.Name}");
-                }
-                else if (content is FunctionResultContent fr)
-                {
-                    var result = fr.Result?.ToString() ?? "";
-                    var truncated = result.Length > 200 ? result[..200] + "..." : result;
-                    sb.AppendLine($"[Tool Result]: {truncated}");
-                }
+                _totalPromptTokens += usage.Details?.InputTokenCount ?? 0;
+                _totalCompletionTokens += usage.Details?.OutputTokenCount ?? 0;
+                _totalCachedTokens += usage.Details?.AdditionalCounts?.GetValueOrDefault("CachedInputTokenCount") ?? 0;
+                _totalRequests++;
             }
         }
 
-        try
+        // Also check the response-level usage if available from the underlying ChatResponse
+        if (response.Messages.Count > 0)
         {
-            Log("INFO", $"Compacting {removeCount} messages into summary...");
-            UpdateStatus("Compacting history...");
-
-            var compactMessages = new List<ChatMessage>
+            var lastMsg = response.Messages[^1];
+            if (lastMsg.AdditionalProperties?.TryGetValue("usage", out var rawUsage) == true)
             {
-                new(ChatRole.System, "You are a conversation summarizer. Produce a concise summary of the conversation."),
-                new(ChatRole.User, sb.ToString())
-            };
-
-            // Use the base client (no function invocation middleware) with low temperature
-            var compactOptions = new ChatOptions { Temperature = 0.1f };
-            var response = await _baseChatClient.GetResponseAsync(compactMessages, compactOptions, ct);
-            TrackUsage(response);
-
-            var summaryText = "";
-            foreach (var msg in response.Messages)
-                foreach (var content in msg.Contents)
-                    if (content is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
-                        summaryText = tc.Text;
-
-            if (!string.IsNullOrWhiteSpace(summaryText))
-            {
-                _conversationHistory.RemoveRange(1, removeCount);
-
-                // Insert compacted summary right after system prompt
-                _conversationHistory.Insert(1, new ChatMessage(ChatRole.System,
-                    $"[CONVERSATION SUMMARY — earlier context compacted]\n{summaryText}"));
-
-                Log("INFO", $"Compacted {removeCount} messages into {summaryText.Length} char summary");
+                Log("USAGE", $"Cumulative prompt: {_totalPromptTokens}, completion: {_totalCompletionTokens}, cached: {_totalCachedTokens}, requests: {_totalRequests}");
             }
-            else
-            {
-                // Fallback: just trim without summary
-                _conversationHistory.RemoveRange(1, removeCount);
-                Log("WARN", "Compaction produced empty summary, falling back to trim");
-            }
-        }
-        catch (Exception ex)
-        {
-            Log("WARN", $"Compaction failed ({ex.Message}), falling back to trim");
-            _conversationHistory.RemoveRange(1, removeCount);
         }
     }
 
-    /// <summary>Extract token usage from a response and update cumulative counters.</summary>
-    private void TrackUsage(ChatResponse response)
+    public async void ClearHistory()
     {
-        if (response.Usage is not { } usage) return;
-
-        _totalPromptTokens += usage.InputTokenCount ?? 0;
-        _totalCompletionTokens += usage.OutputTokenCount ?? 0;
-        _totalCachedTokens += usage.CachedInputTokenCount ?? 0;
-        _totalRequests++;
-
-        Log("USAGE",
-            $"Prompt: {usage.InputTokenCount}, Completion: {usage.OutputTokenCount}, " +
-            $"Cached: {usage.CachedInputTokenCount}, " +
-            $"Total requests: {_totalRequests}, " +
-            $"Cumulative prompt: {_totalPromptTokens}, Cumulative completion: {_totalCompletionTokens}, " +
-            $"Cumulative cached: {_totalCachedTokens}");
-    }
-
-    public void ClearHistory()
-    {
-        var systemPrompt = _conversationHistory[0];
-        _conversationHistory.Clear();
-        _conversationHistory.Add(systemPrompt);
+        _session = await _agent.CreateSessionAsync();
         _displayHistory.Clear();
         _actionLog.Clear();
     }
@@ -455,7 +414,7 @@ public sealed class AiOperatorService
     }
 
     /// <summary>Switch to an existing chat by ID.</summary>
-    public void SwitchChat(string chatId)
+    public async void SwitchChat(string chatId)
     {
         if (chatId == CurrentChatId) return;
 
@@ -463,22 +422,27 @@ public sealed class AiOperatorService
         if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
             SaveCurrentChat();
 
-        var session = _chatStore.Load(chatId);
-        if (session is null) return;
+        var chatSession = _chatStore.Load(chatId);
+        if (chatSession is null) return;
 
-        CurrentChatId = session.Id;
-        CurrentChatTitle = session.Title;
+        CurrentChatId = chatSession.Id;
+        CurrentChatTitle = chatSession.Title;
         ClearHistory();
 
         // Restore display history
-        _displayHistory.AddRange(session.Messages);
+        _displayHistory.AddRange(chatSession.Messages);
 
-        // Rebuild conversation history for the API
-        foreach (var msg in session.Messages)
+        // Rebuild MAF agent session history from saved messages.
+        // We inject them into the session's in-memory chat history so the agent
+        // has context from the previous conversation.
+        if (_session.TryGetInMemoryChatHistory(out var history))
         {
-            _conversationHistory.Add(new ChatMessage(
-                msg.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                msg.Content));
+            foreach (var msg in chatSession.Messages)
+            {
+                history.Add(new ChatMessage(
+                    msg.Role == "user" ? ChatRole.User : ChatRole.Assistant,
+                    msg.Content));
+            }
         }
 
         ChatListChanged?.Invoke();

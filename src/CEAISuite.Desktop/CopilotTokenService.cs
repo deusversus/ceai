@@ -242,33 +242,19 @@ internal sealed class CopilotTokenService : IDisposable
     {
         if (_cachedModels is not null) return _cachedModels;
 
-        // Attempt 1: GitHub internal models endpoint (uses OAuth token directly)
+        // GitHub Models Catalog API — the correct public endpoint
         var models = await TryFetchModels(
+            "https://models.github.ai/catalog/models",
+            $"Bearer {githubToken}");
+
+        // Fallback: GitHub REST API for Copilot models
+        models ??= await TryFetchModels(
             "https://api.github.com/copilot_internal/v2/models",
-            $"token {githubToken}");
+            $"Bearer {githubToken}");
 
-        // Attempt 2: Copilot API /models (uses session token)
-        if (models is null)
-        {
-            var sessionToken = await GetSessionTokenAsync(githubToken);
-            models = await TryFetchModels(
-                $"{BaseUrl}models",
-                $"Bearer {sessionToken}");
-        }
-
-        // Attempt 3: Copilot API /v1/models
-        if (models is null)
-        {
-            var sessionToken = await GetSessionTokenAsync(githubToken);
-            models = await TryFetchModels(
-                $"{BaseUrl}v1/models",
-                $"Bearer {sessionToken}");
-        }
-
-        // All attempts failed — return empty (caller shows error)
+        // All API attempts failed — use curated fallback
         if (models is null || models.Count == 0)
-            throw new InvalidOperationException(
-                "Could not fetch model list from Copilot API. You can still type a model ID manually.");
+            models = FallbackModels();
 
         models.Sort((a, b) =>
         {
@@ -286,10 +272,7 @@ internal sealed class CopilotTokenService : IDisposable
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, url);
             request.Headers.TryAddWithoutValidation("Authorization", authHeader);
-            request.Headers.TryAddWithoutValidation("Editor-Version", EditorVersion);
-            request.Headers.TryAddWithoutValidation("Editor-Plugin-Version", EditorPluginVersion);
             request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
-            request.Headers.TryAddWithoutValidation("Copilot-Integration-Id", "vscode-chat");
             request.Headers.TryAddWithoutValidation("Accept", "application/json");
 
             using var response = await _http.SendAsync(request);
@@ -300,7 +283,7 @@ internal sealed class CopilotTokenService : IDisposable
 
             var models = new List<CopilotModelInfo>();
 
-            // Handle OpenAI-style { "data": [...] } response
+            // Handle multiple response shapes: bare array, { data: [] }, { models: [] }
             var items = root.ValueKind == JsonValueKind.Array
                 ? root.EnumerateArray()
                 : root.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array
@@ -311,29 +294,23 @@ internal sealed class CopilotTokenService : IDisposable
 
             foreach (var item in items)
             {
-                var id = "";
-                if (item.TryGetProperty("id", out var idEl))
-                    id = idEl.GetString() ?? "";
-                else if (item.TryGetProperty("name", out var n))
-                    id = n.GetString() ?? "";
+                var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
                 if (string.IsNullOrEmpty(id)) continue;
 
-                var name = id;
-                var vendor = "";
-                if (item.TryGetProperty("name", out var nameEl) && nameEl.GetString() != id)
-                    name = nameEl.GetString() ?? id;
-                if (item.TryGetProperty("vendor", out var vendorEl))
-                    vendor = vendorEl.GetString() ?? "";
-                else if (item.TryGetProperty("owned_by", out var ownerEl))
-                    vendor = ownerEl.GetString() ?? "";
+                // Catalog IDs are "publisher/model" — strip prefix for display
+                var shortId = id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
 
-                var capabilities = "";
-                if (item.TryGetProperty("capabilities", out var capEl) &&
-                    capEl.ValueKind == JsonValueKind.Object &&
-                    capEl.TryGetProperty("type", out var typeEl))
-                    capabilities = typeEl.GetString() ?? "";
+                var name = item.TryGetProperty("friendly_name", out var fn) ? fn.GetString() ?? shortId
+                         : item.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? shortId
+                         : shortId;
 
-                models.Add(new CopilotModelInfo(id, name, vendor, capabilities));
+                var vendor = item.TryGetProperty("publisher", out var pubEl) ? pubEl.GetString() ?? ""
+                           : item.TryGetProperty("vendor", out var vendorEl) ? vendorEl.GetString() ?? ""
+                           : item.TryGetProperty("owned_by", out var ownerEl) ? ownerEl.GetString() ?? ""
+                           : "";
+
+                // Use the short ID as the model identifier (what the API actually accepts)
+                models.Add(new CopilotModelInfo(shortId, name, vendor, ""));
             }
 
             return models.Count > 0 ? models : null;
@@ -346,6 +323,21 @@ internal sealed class CopilotTokenService : IDisposable
 
     /// <summary>Clears the cached model list (e.g. when token changes).</summary>
     public void InvalidateModels() => _cachedModels = null;
+
+    /// <summary>Curated fallback when API model list isn't available.</summary>
+    private static List<CopilotModelInfo> FallbackModels() =>
+    [
+        new("claude-sonnet-4-6",  "Claude Sonnet 4.6",  "Anthropic", "chat"),
+        new("claude-opus-4-6",    "Claude Opus 4.6",    "Anthropic", "chat"),
+        new("claude-haiku-4-5",   "Claude Haiku 4.5",   "Anthropic", "chat"),
+        new("gpt-5.4",            "GPT-5.4",            "OpenAI",    "chat"),
+        new("gpt-4.1",            "GPT-4.1",            "OpenAI",    "chat"),
+        new("o3",                 "o3",                  "OpenAI",    "chat"),
+        new("o4-mini",            "o4-mini",             "OpenAI",    "chat"),
+        new("gpt-4o",             "GPT-4o",              "OpenAI",    "chat"),
+        new("gpt-4o-mini",        "GPT-4o mini",         "OpenAI",    "chat"),
+        new("gemini-2.0-flash",   "Gemini 2.0 Flash",   "Google",    "chat"),
+    ];
 }
 
 /// <summary>Model info returned by the Copilot /models endpoint.</summary>

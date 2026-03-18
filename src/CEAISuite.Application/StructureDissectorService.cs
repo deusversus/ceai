@@ -166,15 +166,25 @@ public sealed class StructureDissectorService(IEngineFacade engine)
 
             bool consecutive = i > 0 && fields[i].Offset - fields[i - 1].Offset == 4;
 
-            if (isStatInt && (runStart == -1 || consecutive))
+            if (isStatInt)
             {
-                if (runStart == -1) runStart = i;
+                if (runStart == -1 || consecutive)
+                {
+                    if (runStart == -1) runStart = i;
+                }
+                else
+                {
+                    // Non-consecutive stat int — close previous run, start new one
+                    if (runStart != -1 && i - runStart >= 3)
+                        clusters.Add((runStart, i - 1));
+                    runStart = i;
+                }
             }
             else
             {
                 if (runStart != -1 && i - runStart >= 3)
                     clusters.Add((runStart, i - 1));
-                runStart = isStatInt ? i : -1;
+                runStart = -1;
             }
         }
         // Final run check

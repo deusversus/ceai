@@ -2510,7 +2510,7 @@ public sealed class AiToolFunctions(
             : $"No instructions {(includeReads ? "accessing" : "writing to")} offset 0x{(ulong)(nuint)ParseAddress(offset):X} found in {moduleName}.";
     }
 
-    [Description("Find function boundaries around a given address by scanning for prologue/epilogue patterns (push rbp, sub rsp, ret). Returns the likely function start, end, and size.")]
+    [Description("Find function boundaries around a given address by scanning for prologue/epilogue patterns (push rbp, sub rsp, ret, int3 padding). Returns the likely function start, end, and size.")]
     public async Task<string> FindFunctionBoundaries(
         [Description("Process ID")] int processId,
         [Description("Address inside the function (hex)")] string address,
@@ -2518,7 +2518,7 @@ public sealed class AiToolFunctions(
     {
         var targetAddr = (ulong)ParseAddress(address);
         var startAddr = targetAddr > (ulong)searchRange ? targetAddr - (ulong)searchRange : 0UL;
-        var totalLen = (long)Math.Min((ulong)searchRange * 2, 0x100000UL); // cap at 1MB
+        var totalLen = (long)Math.Min((ulong)searchRange * 2, 0x100000UL);
 
         // Read in chunks (engine limits per-call reads)
         const int chunkSize = 0x10000;
@@ -2546,9 +2546,11 @@ public sealed class AiToolFunctions(
         while (decoder.IP < startAddr + (ulong)bytes.Length)
         {
             var instr = decoder.Decode();
-            if (instr.IsInvalid) break;
+            if (instr.IsInvalid) { continue; } // skip invalid bytes, don't break
             instructions.Add(instr);
         }
+
+        if (instructions.Count == 0) return $"Could not decode any instructions around 0x{targetAddr:X}.";
 
         // Scan backward from target for prologue patterns
         ulong funcStart = 0;
@@ -2558,74 +2560,105 @@ public sealed class AiToolFunctions(
             if (instructions[i].IP > targetAddr) continue;
 
             var instr = instructions[i];
-            // push rbp / push rsp patterns
+
+            // Pattern 1: push rbp (classic frame pointer prologue)
             if (instr.Mnemonic == Mnemonic.Push && instr.Op0Register == Register.RBP)
             {
                 funcStart = instr.IP;
                 foundStart = true;
                 break;
             }
-            // sub rsp, imm (common prologue without push rbp)
+
+            // Pattern 2: sub rsp, imm (frameless prologue) preceded by a boundary
             if (instr.Mnemonic == Mnemonic.Sub && instr.Op0Register == Register.RSP &&
-                instr.GetOpKind(1) == OpKind.Immediate8 || instr.GetOpKind(1) == OpKind.Immediate32)
+                (instr.GetOpKind(1) == OpKind.Immediate8 || instr.GetOpKind(1) == OpKind.Immediate32))
             {
-                // Check if previous instruction is not part of another function
-                if (i > 0 && instructions[i - 1].Mnemonic == Mnemonic.Ret)
+                // Accept if preceded by ret, int3, or a push sequence
+                if (i > 0)
                 {
-                    funcStart = instr.IP;
-                    foundStart = true;
-                    break;
-                }
-                // Also accept if preceded by int3 padding
-                if (i > 0 && instructions[i - 1].Mnemonic == Mnemonic.Int3)
-                {
-                    funcStart = instr.IP;
-                    foundStart = true;
-                    break;
-                }
-                // Accept push rbp right before sub rsp
-                if (i > 0 && instructions[i - 1].Mnemonic == Mnemonic.Push &&
-                    instructions[i - 1].Op0Register == Register.RBP)
-                {
-                    funcStart = instructions[i - 1].IP;
-                    foundStart = true;
-                    break;
+                    var prev = instructions[i - 1];
+                    if (prev.Mnemonic is Mnemonic.Ret or Mnemonic.Int3)
+                    {
+                        funcStart = instr.IP;
+                        foundStart = true;
+                        break;
+                    }
+                    // Accept push rbp/rdi/rsi/rbx before sub rsp (common IL2CPP pattern)
+                    if (prev.Mnemonic == Mnemonic.Push)
+                    {
+                        // Walk back through consecutive push instructions to find the function start
+                        int pushStart = i - 1;
+                        while (pushStart > 0 && instructions[pushStart - 1].Mnemonic == Mnemonic.Push)
+                            pushStart--;
+                        // Verify boundary: before the push sequence should be ret/int3/start of buffer
+                        if (pushStart == 0 ||
+                            instructions[pushStart - 1].Mnemonic is Mnemonic.Ret or Mnemonic.Int3 or Mnemonic.Jmp)
+                        {
+                            funcStart = instructions[pushStart].IP;
+                            foundStart = true;
+                            break;
+                        }
+                    }
                 }
             }
-            // int3 boundary followed by real code
+
+            // Pattern 3: int3 boundary followed by real code
             if (instr.Mnemonic == Mnemonic.Int3 && i + 1 < instructions.Count && instructions[i + 1].IP <= targetAddr)
             {
-                funcStart = instructions[i + 1].IP;
-                foundStart = true;
-                break;
+                // Skip consecutive int3 padding
+                int nextReal = i + 1;
+                while (nextReal < instructions.Count && instructions[nextReal].Mnemonic == Mnemonic.Int3)
+                    nextReal++;
+                if (nextReal < instructions.Count && instructions[nextReal].IP <= targetAddr)
+                {
+                    funcStart = instructions[nextReal].IP;
+                    foundStart = true;
+                    break;
+                }
             }
         }
 
         // Scan forward from target for epilogue
         ulong funcEnd = 0;
         bool foundEnd = false;
+        int retCount = 0;
         foreach (var instr in instructions)
         {
             if (instr.IP < targetAddr) continue;
 
-            if (instr.Mnemonic == Mnemonic.Ret || instr.Mnemonic == Mnemonic.Int3)
+            if (instr.Mnemonic == Mnemonic.Ret)
             {
                 funcEnd = instr.IP + (ulong)instr.Length;
                 foundEnd = true;
+                retCount++;
+                // Continue to find int3 padding after ret (true function end)
+                continue;
+            }
+            // int3 after ret confirms we're past the function
+            if (foundEnd && instr.Mnemonic == Mnemonic.Int3)
                 break;
+            // Non-int3 after ret means there are more paths (e.g., multiple returns)
+            if (foundEnd && instr.Mnemonic != Mnemonic.Int3)
+            {
+                foundEnd = false; // reset, keep looking for final ret
             }
         }
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Function boundary analysis around 0x{targetAddr:X}:");
-        sb.AppendLine($"  Start: {(foundStart ? $"0x{funcStart:X}" : "not found (searched {searchRange} bytes back)")}");
-        sb.AppendLine($"  End:   {(foundEnd ? $"0x{funcEnd:X}" : "not found (searched {searchRange} bytes forward)")}");
+        sb.AppendLine($"  Start: {(foundStart ? $"0x{funcStart:X}" : $"not found (searched {searchRange} bytes back)")}");
+        sb.AppendLine($"  End:   {(foundEnd ? $"0x{funcEnd:X}" : $"not found (searched {searchRange} bytes forward)")}");
         if (foundStart && foundEnd)
-            sb.AppendLine($"  Size:  {funcEnd - funcStart} bytes (0x{funcEnd - funcStart:X})");
+        {
+            var size = funcEnd - funcStart;
+            sb.AppendLine($"  Size:  {size} bytes (0x{size:X})");
+        }
+        if (retCount > 1)
+            sb.AppendLine($"  Note:  {retCount} return instructions found (multiple exit paths)");
         return sb.ToString().TrimEnd();
     }
 
-    [Description("Find all CALL instructions that target a specific function address. Scans module code for direct calls (call 0xABCD) and returns caller addresses. Useful for tracing who calls a known function.")]
+    [Description("Find all CALL and JMP instructions that target a specific function address. Scans module code for direct calls (call 0xABCD), indirect calls (call [rip+disp] resolved to target), and tail-call jumps. Useful for tracing who calls a known function.")]
     public async Task<string> GetCallerGraph(
         [Description("Process ID")] int processId,
         [Description("Target function address (hex)")] string targetAddress,
@@ -2669,10 +2702,44 @@ public sealed class AiToolFunctions(
                     var instr = decoder.Decode();
                     if (instr.IsInvalid) continue;
 
-                    if (instr.Mnemonic == Mnemonic.Call && instr.NearBranchTarget == target)
+                    bool isCall = instr.Mnemonic == Mnemonic.Call;
+                    bool isJmp = instr.Mnemonic == Mnemonic.Jmp;
+                    if (!isCall && !isJmp) continue;
+
+                    bool matches = false;
+                    string callType = isCall ? "CALL" : "JMP (tail call)";
+
+                    // Direct near branch (E8 rel32 for call, E9 rel32 for jmp)
+                    if (instr.NearBranchTarget == target)
+                    {
+                        matches = true;
+                    }
+                    // Indirect RIP-relative: call [rip+disp] → try to resolve the pointer
+                    else if (instr.IsIPRelativeMemoryOperand && instr.IPRelativeMemoryAddress != 0)
+                    {
+                        // The instruction reads a pointer from [rip+disp]; read 8 bytes at that address
+                        try
+                        {
+                            var ptrResult = await engineFacade.ReadMemoryAsync(processId,
+                                (nuint)instr.IPRelativeMemoryAddress, 8);
+                            var ptrBytes = ptrResult.Bytes is byte[] pb ? pb : ptrResult.Bytes.ToArray();
+                            if (ptrBytes.Length == 8)
+                            {
+                                var resolvedTarget = BitConverter.ToUInt64(ptrBytes, 0);
+                                if (resolvedTarget == target)
+                                {
+                                    matches = true;
+                                    callType = isCall ? "CALL [indirect, resolved]" : "JMP [indirect, resolved]";
+                                }
+                            }
+                        }
+                        catch { /* pointer read failed, skip */ }
+                    }
+
+                    if (matches)
                     {
                         formatter.Format(instr, output);
-                        results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | in {mod.Name}");
+                        results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | {callType} | in {mod.Name}");
                         if (results.Count >= maxResults) break;
                     }
                 }
@@ -2681,7 +2748,8 @@ public sealed class AiToolFunctions(
 
         return results.Count > 0
             ? $"Callers of 0x{target:X} ({results.Count} found):\n{string.Join('\n', results)}"
-            : $"No direct CALL instructions targeting 0x{target:X} found in {moduleName}.";
+            : $"No CALL/JMP instructions targeting 0x{target:X} found in {moduleName}.\n" +
+              "Note: If the target is called through vtables or register-indirect calls (call rax), those cannot be resolved statically.";
     }
 
     [Description("Search for instruction patterns in a module. Find specific mnemonics, register usage, or memory access patterns. Examples: 'mov.*\\\\[rsi\\\\+0x38\\\\]', 'call.*GameAssembly', 'imul.*ebx'.")]

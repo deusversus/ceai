@@ -18,11 +18,18 @@ public sealed class AppSettings
     /// <summary>DPAPI-encrypted, Base64-encoded API key (written to disk).</summary>
     public string? EncryptedApiKey { get; set; }
 
-    /// <summary>AI provider: "openai", "anthropic", "openai-compatible".</summary>
+    /// <summary>AI provider: "openai", "anthropic", "openai-compatible", "copilot".</summary>
     public string Provider { get; set; } = "openai";
 
     /// <summary>For OpenAI-compatible endpoints (e.g., local LLMs, Azure, etc.).</summary>
     public string? CustomEndpoint { get; set; }
+
+    /// <summary>Runtime-only plaintext GitHub token for Copilot provider (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GitHubToken { get; set; }
+
+    /// <summary>DPAPI-encrypted, Base64-encoded GitHub token (written to disk).</summary>
+    public string? EncryptedGitHubToken { get; set; }
 
     public string Model { get; set; } = "gpt-5.4";
     public int RefreshIntervalMs { get; set; } = 500;
@@ -70,11 +77,25 @@ public sealed class AppSettingsService
             catch { _settings.OpenAiApiKey = null; }
         }
 
+        // Decrypt stored GitHub token (for Copilot provider)
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGitHubToken))
+        {
+            try
+            {
+                _settings.GitHubToken = DecryptString(_settings.EncryptedGitHubToken);
+            }
+            catch { _settings.GitHubToken = null; }
+        }
+
         // Environment variable overrides stored key if present
         var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
                   ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         if (!string.IsNullOrWhiteSpace(envKey) && string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
             _settings.OpenAiApiKey = envKey;
+
+        var envGitHub = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        if (!string.IsNullOrWhiteSpace(envGitHub) && string.IsNullOrWhiteSpace(_settings.GitHubToken))
+            _settings.GitHubToken = envGitHub;
 
         var envModel = Environment.GetEnvironmentVariable("CEAI_MODEL");
         if (!string.IsNullOrWhiteSpace(envModel))
@@ -96,6 +117,12 @@ public sealed class AppSettingsService
             _settings.EncryptedApiKey = EncryptString(_settings.OpenAiApiKey);
         else
             _settings.EncryptedApiKey = null;
+
+        // Encrypt GitHub token before writing
+        if (!string.IsNullOrWhiteSpace(_settings.GitHubToken))
+            _settings.EncryptedGitHubToken = EncryptString(_settings.GitHubToken);
+        else
+            _settings.EncryptedGitHubToken = null;
 
         Directory.CreateDirectory(SettingsDir);
         var options = new JsonSerializerOptions { WriteIndented = true };

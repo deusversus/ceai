@@ -29,6 +29,18 @@ public partial class SettingsWindow : Window
         new("claude-haiku-4-5",  "Claude Haiku 4.5",  "Fast & cheap"),
     ];
 
+    private static readonly ModelInfo[] CopilotModels =
+    [
+        new("gpt-5.4",           "GPT-5.4",           "Latest flagship"),
+        new("gpt-4.1",           "GPT-4.1",           "Fast & affordable"),
+        new("claude-sonnet-4-6", "Claude Sonnet 4.6", "Best balance"),
+        new("claude-sonnet-4.5", "Claude Sonnet 4.5", "Previous gen"),
+        new("o3",                "o3",                 "Deep reasoning"),
+        new("o4-mini",           "o4-mini",            "Fast reasoning"),
+        new("gpt-4o",            "GPT-4o",             "Multimodal"),
+        new("gpt-4o-mini",       "GPT-4o mini",        "Cheapest"),
+    ];
+
     public SettingsWindow(AppSettingsService settingsService)
     {
         InitializeComponent();
@@ -45,6 +57,7 @@ public partial class SettingsWindow : Window
         var providerRadio = provider switch
         {
             "anthropic" => ProviderAnthropic,
+            "copilot" => ProviderCopilot,
             "openai-compatible" => ProviderCompatible,
             _ => ProviderOpenAI,
         };
@@ -54,7 +67,7 @@ public partial class SettingsWindow : Window
         if (!string.IsNullOrWhiteSpace(s.CustomEndpoint))
             EndpointBox.Text = s.CustomEndpoint;
 
-        // API Key
+        // API Key (for non-Copilot providers)
         if (!string.IsNullOrWhiteSpace(s.OpenAiApiKey))
         {
             ApiKeyBox.Password = s.OpenAiApiKey;
@@ -66,6 +79,20 @@ public partial class SettingsWindow : Window
         {
             ApiKeyStatus.Text = "No API key — AI operator disabled";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
+        }
+
+        // GitHub Token (for Copilot provider)
+        if (!string.IsNullOrWhiteSpace(s.GitHubToken))
+        {
+            GitHubTokenBox.Password = s.GitHubToken;
+            GitHubTokenTextBox.Text = s.GitHubToken;
+            GitHubTokenStatus.Text = "✓ GitHub token configured";
+            GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
+        }
+        else
+        {
+            GitHubTokenStatus.Text = "No GitHub token — Copilot provider disabled";
+            GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
         }
 
         // General
@@ -83,6 +110,7 @@ public partial class SettingsWindow : Window
     private string GetSelectedProvider()
     {
         if (ProviderAnthropic.IsChecked == true) return "anthropic";
+        if (ProviderCopilot.IsChecked == true) return "copilot";
         if (ProviderCompatible.IsChecked == true) return "openai-compatible";
         return "openai";
     }
@@ -90,9 +118,16 @@ public partial class SettingsWindow : Window
     private void ProviderCard_Checked(object sender, RoutedEventArgs e)
     {
         var provider = GetSelectedProvider();
+        var isCopilot = provider == "copilot";
 
         if (CustomEndpointPanel is not null)
             CustomEndpointPanel.Visibility = provider == "openai-compatible" ? Visibility.Visible : Visibility.Collapsed;
+
+        // Toggle between API Key panel and GitHub Token panel
+        if (ApiKeyPanel is not null)
+            ApiKeyPanel.Visibility = isCopilot ? Visibility.Collapsed : Visibility.Visible;
+        if (GitHubTokenPanel is not null)
+            GitHubTokenPanel.Visibility = isCopilot ? Visibility.Visible : Visibility.Collapsed;
 
         if (ApiKeySubtitle is not null)
         {
@@ -117,6 +152,7 @@ public partial class SettingsWindow : Window
         var models = provider switch
         {
             "anthropic" => AnthropicModels,
+            "copilot" => CopilotModels,
             "openai-compatible" => Array.Empty<ModelInfo>(),
             _ => OpenAIModels,
         };
@@ -231,6 +267,26 @@ public partial class SettingsWindow : Window
         }
     }
 
+    private bool _ghTokenVisible;
+    private void ToggleGitHubTokenVisibility(object sender, RoutedEventArgs e)
+    {
+        _ghTokenVisible = !_ghTokenVisible;
+        if (_ghTokenVisible)
+        {
+            GitHubTokenTextBox.Text = GitHubTokenBox.Password;
+            GitHubTokenTextBox.Visibility = Visibility.Visible;
+            GitHubTokenBox.Visibility = Visibility.Collapsed;
+            ShowGitHubTokenBtn.Content = "Hide";
+        }
+        else
+        {
+            GitHubTokenBox.Password = GitHubTokenTextBox.Text;
+            GitHubTokenBox.Visibility = Visibility.Visible;
+            GitHubTokenTextBox.Visibility = Visibility.Collapsed;
+            ShowGitHubTokenBtn.Content = "Show";
+        }
+    }
+
     private void RefreshSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (RefreshIntervalBox is not null)
@@ -244,6 +300,7 @@ public partial class SettingsWindow : Window
         s.Provider = GetSelectedProvider();
         s.CustomEndpoint = s.Provider == "openai-compatible" ? EndpointBox.Text : null;
         s.OpenAiApiKey = _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password;
+        s.GitHubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;
         s.Model = GetSelectedModel();
 
         if (int.TryParse(RefreshIntervalBox.Text, out var interval) && interval >= 100)

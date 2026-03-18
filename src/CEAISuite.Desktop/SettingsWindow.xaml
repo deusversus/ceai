@@ -91,7 +91,7 @@
                             <TextBlock Text="Choose your AI backend"
                                        Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
 
-                            <UniformGrid Columns="3" x:Name="ProviderCards" Margin="0,0,0,4">
+                            <UniformGrid Columns="4" x:Name="ProviderCards" Margin="0,0,0,4">
                                 <RadioButton x:Name="ProviderOpenAI" GroupName="Provider" Tag="openai"
                                              Checked="ProviderCard_Checked" Style="{x:Null}">
                                     <RadioButton.Template>
@@ -132,6 +132,34 @@
                                                     <TextBlock Text="Anthropic" FontWeight="SemiBold" FontSize="13"
                                                                Foreground="{DynamicResource PrimaryForeground}" />
                                                     <TextBlock Text="Claude Opus, Sonnet, Haiku" FontSize="11"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+
+                                <RadioButton x:Name="ProviderCopilot" GroupName="Provider" Tag="copilot"
+                                             Checked="ProviderCard_Checked" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
+                                                    Margin="0,0,6,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="GitHub Copilot" FontWeight="SemiBold" FontSize="13"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="Uses your Copilot subscription" FontSize="11"
                                                                Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
                                                 </StackPanel>
                                             </Border>
@@ -237,10 +265,11 @@
 
                             <Separator Margin="0,14,0,14" />
 
-                            <!-- API Key -->
-                            <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14" />
-                            <TextBlock x:Name="ApiKeySubtitle" Text="Get yours at platform.openai.com"
-                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" TextWrapping="Wrap" />
+                            <!-- API Key (for OpenAI, Anthropic, Compatible) -->
+                            <StackPanel x:Name="ApiKeyPanel">
+                                <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14" />
+                                <TextBlock x:Name="ApiKeySubtitle" Text="Get yours at platform.openai.com"
+                                           Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" TextWrapping="Wrap" />
 
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -257,6 +286,30 @@
 
                             <TextBlock x:Name="ApiKeyStatus" Margin="0,6,0,0"
                                        Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
+                            </StackPanel>
+
+                            <!-- GitHub Token (for Copilot provider) -->
+                            <StackPanel x:Name="GitHubTokenPanel" Visibility="Collapsed">
+                                <TextBlock Text="GitHub Token" FontWeight="SemiBold" FontSize="14" />
+                                <TextBlock Text="Personal access token with Copilot access (github.com/settings/tokens)"
+                                           Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" TextWrapping="Wrap" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <PasswordBox x:Name="GitHubTokenBox" FontFamily="Consolas" FontSize="13"
+                                                 Padding="8,6" VerticalContentAlignment="Center" />
+                                    <Button Grid.Column="1" Content="Show" Margin="8,0,0,0" Padding="10,6"
+                                            Click="ToggleGitHubTokenVisibility" x:Name="ShowGitHubTokenBtn" />
+                                </Grid>
+                                <TextBox x:Name="GitHubTokenTextBox" FontFamily="Consolas" FontSize="13"
+                                         Padding="8,6" Margin="0,4,0,0" Visibility="Collapsed" />
+
+                                <TextBlock x:Name="GitHubTokenStatus" Margin="0,6,0,0"
+                                           Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
+                            </StackPanel>
 
                             <TextBlock Text="Provider and model changes take effect on next message."
                                        Foreground="{DynamicResource TertiaryForeground}" Margin="0,14,0,0" FontSize="11" FontStyle="Italic" />

@@ -112,15 +112,26 @@ internal sealed class CopilotTokenService : IDisposable
         _sessionToken = data.GetProperty("token").GetString()
             ?? throw new InvalidOperationException("Copilot token response missing 'token' field.");
 
-        // Parse expiry — ISO-8601 string like "2025-01-01T12:00:00Z"
-        if (data.TryGetProperty("expires_at", out var expiresEl) &&
-            DateTimeOffset.TryParse(expiresEl.GetString(), out var expiresAt))
+        // Parse expiry — can be ISO-8601 string or Unix timestamp (number)
+        if (data.TryGetProperty("expires_at", out var expiresEl))
         {
-            _expiresAt = expiresAt;
+            if (expiresEl.ValueKind == JsonValueKind.String &&
+                DateTimeOffset.TryParse(expiresEl.GetString(), out var expiresAt))
+            {
+                _expiresAt = expiresAt;
+            }
+            else if (expiresEl.ValueKind == JsonValueKind.Number)
+            {
+                _expiresAt = DateTimeOffset.FromUnixTimeSeconds(expiresEl.GetInt64());
+            }
+            else
+            {
+                _expiresAt = DateTimeOffset.UtcNow.AddHours(1);
+            }
         }
         else
         {
-            _expiresAt = DateTimeOffset.UtcNow.AddHours(1); // fallback
+            _expiresAt = DateTimeOffset.UtcNow.AddHours(1);
         }
 
         return _sessionToken;

@@ -82,11 +82,22 @@
         </Grid.RowDefinitions>
 
         <TabControl x:Name="SettingsTabs">
-            <TabItem Header="API Keys">
+            <TabItem Header="AI Provider">
                 <Border Background="{DynamicResource PanelBackground}">
                     <StackPanel Margin="16">
-                        <TextBlock Text="OpenAI API Key" FontWeight="SemiBold" FontSize="14" />
-                        <TextBlock Text="Used for the integrated AI operator. Get yours at platform.openai.com"
+                        <TextBlock Text="Provider" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Which AI provider to use for the integrated operator"
+                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,4,0,8" TextWrapping="Wrap" />
+                        <ComboBox x:Name="ProviderCombo" Padding="8,6" SelectionChanged="ProviderCombo_SelectionChanged">
+                            <ComboBoxItem Content="OpenAI" Tag="openai" />
+                            <ComboBoxItem Content="Anthropic (Claude)" Tag="anthropic" />
+                            <ComboBoxItem Content="OpenAI-Compatible" Tag="openai-compatible" />
+                        </ComboBox>
+
+                        <Separator Margin="0,16,0,16" />
+
+                        <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock x:Name="ApiKeySubtitle" Text="Used for the integrated AI operator"
                                    Foreground="{DynamicResource SecondaryForeground}" Margin="0,4,0,8" TextWrapping="Wrap" />
 
                         <Grid>
@@ -107,17 +118,19 @@
 
                         <Separator Margin="0,20,0,20" />
 
+                        <StackPanel x:Name="CustomEndpointPanel" Visibility="Collapsed">
+                            <TextBlock Text="API Endpoint" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Base URL for the OpenAI-compatible API"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,4,0,8" />
+                            <TextBox x:Name="EndpointBox" FontFamily="Consolas" FontSize="13" Padding="8,6"
+                                     Text="http://localhost:11434/v1/" />
+                            <Separator Margin="0,16,0,16" />
+                        </StackPanel>
+
                         <TextBlock Text="Model" FontWeight="SemiBold" FontSize="14" />
-                        <TextBlock Text="Which OpenAI model to use for the AI operator"
+                        <TextBlock x:Name="ModelSubtitle" Text="Which model to use for the AI operator"
                                    Foreground="{DynamicResource SecondaryForeground}" Margin="0,4,0,8" />
-                        <ComboBox x:Name="ModelCombo" IsEditable="True" FontFamily="Consolas" Padding="8,6">
-                            <ComboBoxItem Content="gpt-5.4" />
-                            <ComboBoxItem Content="gpt-4.1" />
-                            <ComboBoxItem Content="gpt-4o" />
-                            <ComboBoxItem Content="gpt-4o-mini" />
-                            <ComboBoxItem Content="o3" />
-                            <ComboBoxItem Content="o4-mini" />
-                        </ComboBox>
+                        <ComboBox x:Name="ModelCombo" IsEditable="True" FontFamily="Consolas" Padding="8,6" />
 
                         <TextBlock Text="Changes to API key or model require app restart to take effect."
                                    Foreground="{DynamicResource WarningForeground}" Margin="0,16,0,0" FontStyle="Italic" TextWrapping="Wrap" />

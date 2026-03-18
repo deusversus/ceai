@@ -127,13 +127,7 @@ public partial class MainWindow : Window
 
     private IChatClient? CreateChatClient()
     {
-        var apiKey = _appSettingsService.Settings.OpenAiApiKey;
-        if (string.IsNullOrWhiteSpace(apiKey)) return null;
-
-        var model = _appSettingsService.Settings.Model;
-        return new OpenAIClient(apiKey)
-            .GetChatClient(model)
-            .AsIChatClient();
+        return ChatClientFactory.Create(_appSettingsService.Settings);
     }
 
     /// <summary>Provides dynamic context to the AI agent before each message.</summary>

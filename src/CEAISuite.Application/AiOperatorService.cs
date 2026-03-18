@@ -14,6 +14,7 @@ public sealed record AiActionLogEntry(
 public sealed class AiOperatorService
 {
     private readonly IChatClient _chatClient;
+    private readonly IChatClient _baseChatClient;
     private readonly List<ChatMessage> _conversationHistory = new();
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
@@ -65,6 +66,7 @@ public sealed class AiOperatorService
         _contextProvider = contextProvider;
         _toolFunctions = toolFunctions;
         var baseClient = chatClient ?? new StubChatClient();
+        _baseChatClient = baseClient;
 
         // Build AIFunction list from the tool functions instance using reflection
         var methods = typeof(AiToolFunctions).GetMethods(
@@ -132,7 +134,7 @@ public sealed class AiOperatorService
         _conversationHistory.Add(new ChatMessage(ChatRole.User, fullUserMessage));
 
         // Trim history to sliding window before sending
-        TrimHistory();
+        await TrimHistoryAsync(cancellationToken);
 
         try
         {
@@ -259,10 +261,10 @@ public sealed class AiOperatorService
     /// <summary>
     /// Trim conversation history to a sliding window, keeping the system prompt
     /// at index 0 and the most recent <see cref="MaxConversationMessages"/> messages.
-    /// Also prunes old tool result content to reduce token bloat (inspired by OpenCode's
-    /// compaction pattern — preserve recent tool output, truncate old results).
+    /// When enough messages are being dropped, uses AI-powered compaction to preserve
+    /// context as a summary (inspired by OpenCode's compaction agent pattern).
     /// </summary>
-    private void TrimHistory()
+    private async Task TrimHistoryAsync(CancellationToken ct)
     {
         // Phase 1: Prune old tool results to reduce token waste.
         // Keep full results for the last ToolResultProtectCount messages; truncate older ones.
@@ -279,14 +281,113 @@ public sealed class AiOperatorService
             }
         }
 
-        // Phase 2: Sliding window — drop oldest messages beyond the limit.
+        // Phase 2: Sliding window with compaction — drop oldest messages beyond the limit.
         if (MaxConversationMessages <= 0) return;
         int maxTotal = MaxConversationMessages + 1; // +1 for system prompt at index 0
         if (_conversationHistory.Count <= maxTotal) return;
 
         int removeCount = _conversationHistory.Count - maxTotal;
-        Log("INFO", $"Trimming conversation history: removing {removeCount} old messages (keeping {MaxConversationMessages} + system prompt)");
-        _conversationHistory.RemoveRange(1, removeCount);
+        Log("INFO", $"History exceeds limit: {_conversationHistory.Count} messages, need to remove {removeCount}");
+
+        await CompactHistoryAsync(removeCount, ct);
+    }
+
+    /// <summary>
+    /// Compact old conversation history into a summary, preserving context while reducing tokens.
+    /// Uses the base (unwrapped) chat client so tool auto-invocation doesn't interfere.
+    /// </summary>
+    private async Task CompactHistoryAsync(int removeCount, CancellationToken ct)
+    {
+        // Only compact if we're dropping enough messages to justify the API cost
+        if (removeCount < 6)
+        {
+            Log("INFO", $"Trimming {removeCount} messages (below compaction threshold)");
+            _conversationHistory.RemoveRange(1, removeCount);
+            return;
+        }
+
+        // Extract the messages we're about to remove (skip system prompt at index 0)
+        var oldMessages = _conversationHistory.GetRange(1, removeCount);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Summarize this conversation history concisely for context continuity. Focus on:");
+        sb.AppendLine("- What the user is trying to accomplish");
+        sb.AppendLine("- Key discoveries, addresses, values found");
+        sb.AppendLine("- What actions were taken and their results");
+        sb.AppendLine("- What's currently in progress");
+        sb.AppendLine("Keep it under 500 words. Use bullet points.");
+        sb.AppendLine();
+        sb.AppendLine("--- CONVERSATION TO SUMMARIZE ---");
+
+        foreach (var msg in oldMessages)
+        {
+            var role = msg.Role == ChatRole.User ? "User"
+                     : msg.Role == ChatRole.Assistant ? "Assistant"
+                     : "System";
+            foreach (var content in msg.Contents)
+            {
+                if (content is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
+                {
+                    var text = tc.Text.Length > 500 ? tc.Text[..500] + "..." : tc.Text;
+                    sb.AppendLine($"[{role}]: {text}");
+                }
+                else if (content is FunctionCallContent fc)
+                {
+                    sb.AppendLine($"[Tool Call]: {fc.Name}");
+                }
+                else if (content is FunctionResultContent fr)
+                {
+                    var result = fr.Result?.ToString() ?? "";
+                    var truncated = result.Length > 200 ? result[..200] + "..." : result;
+                    sb.AppendLine($"[Tool Result]: {truncated}");
+                }
+            }
+        }
+
+        try
+        {
+            Log("INFO", $"Compacting {removeCount} messages into summary...");
+            UpdateStatus("Compacting history...");
+
+            var compactMessages = new List<ChatMessage>
+            {
+                new(ChatRole.System, "You are a conversation summarizer. Produce a concise summary of the conversation."),
+                new(ChatRole.User, sb.ToString())
+            };
+
+            // Use the base client (no function invocation middleware) with low temperature
+            var compactOptions = new ChatOptions { Temperature = 0.1f };
+            var response = await _baseChatClient.GetResponseAsync(compactMessages, compactOptions, ct);
+            TrackUsage(response);
+
+            var summaryText = "";
+            foreach (var msg in response.Messages)
+                foreach (var content in msg.Contents)
+                    if (content is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
+                        summaryText = tc.Text;
+
+            if (!string.IsNullOrWhiteSpace(summaryText))
+            {
+                _conversationHistory.RemoveRange(1, removeCount);
+
+                // Insert compacted summary right after system prompt
+                _conversationHistory.Insert(1, new ChatMessage(ChatRole.System,
+                    $"[CONVERSATION SUMMARY — earlier context compacted]\n{summaryText}"));
+
+                Log("INFO", $"Compacted {removeCount} messages into {summaryText.Length} char summary");
+            }
+            else
+            {
+                // Fallback: just trim without summary
+                _conversationHistory.RemoveRange(1, removeCount);
+                Log("WARN", "Compaction produced empty summary, falling back to trim");
+            }
+        }
+        catch (Exception ex)
+        {
+            Log("WARN", $"Compaction failed ({ex.Message}), falling back to trim");
+            _conversationHistory.RemoveRange(1, removeCount);
+        }
     }
 
     /// <summary>Extract token usage from a response and update cumulative counters.</summary>
@@ -745,7 +846,7 @@ public sealed class AiOperatorService
             CancellationToken cancellationToken = default)
         {
             var response = new ChatResponse(new ChatMessage(ChatRole.Assistant,
-                "AI operator is not configured. Set your OpenAI API key in the OPENAI_API_KEY environment variable and restart the application."));
+                "AI operator is not configured. Set your API key in Settings (or via the OPENAI_API_KEY / ANTHROPIC_API_KEY environment variable) and restart the application."));
             return Task.FromResult(response);
         }
 

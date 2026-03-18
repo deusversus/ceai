@@ -8,6 +8,10 @@ public partial class SettingsWindow : Window
 {
     private readonly AppSettingsService _settingsService;
     private bool _keyVisible;
+    private bool _suppressProviderChanged;
+
+    private static readonly string[] OpenAIModels = ["gpt-5.4", "gpt-4.1", "gpt-4o", "gpt-4o-mini", "o3", "o4-mini"];
+    private static readonly string[] AnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"];
 
     public SettingsWindow(AppSettingsService settingsService)
     {
@@ -20,18 +24,36 @@ public partial class SettingsWindow : Window
     {
         var s = _settingsService.Settings;
 
+        // Provider (set before API key so subtitle updates)
+        _suppressProviderChanged = true;
+        var provider = (s.Provider ?? "openai").ToLowerInvariant();
+        foreach (ComboBoxItem item in ProviderCombo.Items)
+        {
+            if ((string)item.Tag == provider)
+            {
+                ProviderCombo.SelectedItem = item;
+                break;
+            }
+        }
+        _suppressProviderChanged = false;
+        ApplyProviderUI(provider);
+
+        // Custom endpoint
+        if (!string.IsNullOrWhiteSpace(s.CustomEndpoint))
+            EndpointBox.Text = s.CustomEndpoint;
+
         // API Key
         if (!string.IsNullOrWhiteSpace(s.OpenAiApiKey))
         {
             ApiKeyBox.Password = s.OpenAiApiKey;
             ApiKeyTextBox.Text = s.OpenAiApiKey;
             ApiKeyStatus.Text = "API key is configured";
-            ApiKeyStatus.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "SuccessForeground");
+            ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
         }
         else
         {
             ApiKeyStatus.Text = "No API key configured — AI operator is disabled";
-            ApiKeyStatus.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty, "WarningForeground");
+            ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
         }
 
         // Model
@@ -49,9 +71,54 @@ public partial class SettingsWindow : Window
         ThemeLight.IsChecked = theme == AppTheme.Light;
     }
 
+    private void ProviderCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressProviderChanged) return;
+        if (ProviderCombo.SelectedItem is ComboBoxItem item)
+        {
+            var provider = (string)item.Tag;
+            ApplyProviderUI(provider);
+        }
+    }
+
+    private void ApplyProviderUI(string provider)
+    {
+        // Show/hide custom endpoint panel
+        if (CustomEndpointPanel is not null)
+            CustomEndpointPanel.Visibility = provider == "openai-compatible" ? Visibility.Visible : Visibility.Collapsed;
+
+        // Update subtitle text
+        if (ApiKeySubtitle is not null)
+        {
+            ApiKeySubtitle.Text = provider switch
+            {
+                "anthropic" => "Get yours at console.anthropic.com",
+                "openai-compatible" => "API key for the compatible endpoint",
+                _ => "Get yours at platform.openai.com",
+            };
+        }
+
+        // Populate model suggestions (preserve current text if user typed something custom)
+        if (ModelCombo is null) return;
+        var currentModel = ModelCombo.Text;
+        ModelCombo.Items.Clear();
+
+        var models = provider switch
+        {
+            "anthropic" => AnthropicModels,
+            "openai-compatible" => Array.Empty<string>(),
+            _ => OpenAIModels,
+        };
+
+        foreach (var model in models)
+            ModelCombo.Items.Add(new ComboBoxItem { Content = model });
+
+        // Restore model text (or set default for new provider)
+        ModelCombo.Text = currentModel;
+    }
+
     private void ThemeRadio_Checked(object sender, RoutedEventArgs e)
     {
-        // Live preview
         var theme = ThemeLight?.IsChecked == true ? AppTheme.Light
                   : ThemeDark?.IsChecked == true ? AppTheme.Dark
                   : AppTheme.System;
@@ -87,6 +154,13 @@ public partial class SettingsWindow : Window
     {
         var s = _settingsService.Settings;
 
+        // Provider
+        if (ProviderCombo.SelectedItem is ComboBoxItem providerItem)
+            s.Provider = (string)providerItem.Tag;
+
+        // Custom endpoint
+        s.CustomEndpoint = s.Provider == "openai-compatible" ? EndpointBox.Text : null;
+
         // Get the key from whichever control is visible
         s.OpenAiApiKey = _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password;
         s.Model = ModelCombo.Text;
@@ -103,7 +177,7 @@ public partial class SettingsWindow : Window
 
         _settingsService.Save();
 
-        MessageBox.Show("Settings saved. API key and model changes require an app restart.",
+        MessageBox.Show("Settings saved. API key, model, and provider changes require an app restart.",
             "Settings Saved", MessageBoxButton.OK, MessageBoxImage.Information);
         DialogResult = true;
         Close();

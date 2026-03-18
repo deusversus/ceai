@@ -18,6 +18,12 @@ public sealed class AppSettings
     /// <summary>DPAPI-encrypted, Base64-encoded API key (written to disk).</summary>
     public string? EncryptedApiKey { get; set; }
 
+    /// <summary>AI provider: "openai", "anthropic", "openai-compatible".</summary>
+    public string Provider { get; set; } = "openai";
+
+    /// <summary>For OpenAI-compatible endpoints (e.g., local LLMs, Azure, etc.).</summary>
+    public string? CustomEndpoint { get; set; }
+
     public string Model { get; set; } = "gpt-5.4";
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
@@ -65,13 +71,22 @@ public sealed class AppSettingsService
         }
 
         // Environment variable overrides stored key if present
-        var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
+                  ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
         if (!string.IsNullOrWhiteSpace(envKey) && string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
             _settings.OpenAiApiKey = envKey;
 
         var envModel = Environment.GetEnvironmentVariable("CEAI_MODEL");
         if (!string.IsNullOrWhiteSpace(envModel))
             _settings.Model = envModel;
+
+        var envProvider = Environment.GetEnvironmentVariable("CEAI_PROVIDER");
+        if (!string.IsNullOrWhiteSpace(envProvider))
+            _settings.Provider = envProvider;
+
+        var envEndpoint = Environment.GetEnvironmentVariable("CEAI_ENDPOINT");
+        if (!string.IsNullOrWhiteSpace(envEndpoint))
+            _settings.CustomEndpoint = envEndpoint;
     }
 
     public void Save()

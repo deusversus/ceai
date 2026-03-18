@@ -288,27 +288,50 @@
                                        Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
                             </StackPanel>
 
-                            <!-- GitHub Token (for Copilot provider) -->
+                            <!-- GitHub Auth (for Copilot provider) -->
                             <StackPanel x:Name="GitHubTokenPanel" Visibility="Collapsed">
-                                <TextBlock Text="GitHub Token" FontWeight="SemiBold" FontSize="14" />
-                                <TextBlock Text="Personal access token with Copilot access (github.com/settings/tokens)"
+                                <TextBlock Text="GitHub Authentication" FontWeight="SemiBold" FontSize="14" />
+                                <TextBlock Text="Sign in with your GitHub account to use Copilot models"
                                            Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" TextWrapping="Wrap" />
 
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <PasswordBox x:Name="GitHubTokenBox" FontFamily="Consolas" FontSize="13"
-                                                 Padding="8,6" VerticalContentAlignment="Center" />
-                                    <Button Grid.Column="1" Content="Show" Margin="8,0,0,0" Padding="10,6"
-                                            Click="ToggleGitHubTokenVisibility" x:Name="ShowGitHubTokenBtn" />
-                                </Grid>
-                                <TextBox x:Name="GitHubTokenTextBox" FontFamily="Consolas" FontSize="13"
-                                         Padding="8,6" Margin="0,4,0,0" Visibility="Collapsed" />
+                                <Button x:Name="GitHubSignInBtn" Content="🔗  Sign in with GitHub"
+                                        Click="GitHubSignIn_Click" Padding="16,10" FontSize="14" FontWeight="SemiBold"
+                                        HorizontalAlignment="Left" Cursor="Hand" />
 
-                                <TextBlock x:Name="GitHubTokenStatus" Margin="0,6,0,0"
+                                <StackPanel x:Name="DeviceFlowPanel" Visibility="Collapsed" Margin="0,12,0,0">
+                                    <TextBlock Text="Enter this code on GitHub:" FontSize="13"
+                                               Foreground="{DynamicResource SecondaryForeground}" />
+                                    <TextBlock x:Name="DeviceCodeText" FontFamily="Consolas" FontSize="28" FontWeight="Bold"
+                                               Margin="0,6,0,6" Cursor="Hand" MouseLeftButtonUp="CopyDeviceCode_Click" />
+                                    <TextBlock FontSize="12" Foreground="{DynamicResource TertiaryForeground}" Margin="0,0,0,8">
+                                        <Run Text="Click the code to copy  •  " />
+                                        <Run x:Name="DeviceFlowStatusText" Text="Waiting for authorization…" />
+                                    </TextBlock>
+                                    <ProgressBar x:Name="DeviceFlowProgress" IsIndeterminate="True" Height="3"
+                                                 Margin="0,0,0,4" />
+                                </StackPanel>
+
+                                <TextBlock x:Name="GitHubTokenStatus" Margin="0,8,0,0"
                                            Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
+
+                                <!-- Hidden fallback for manual token entry -->
+                                <Expander Header="Advanced: paste token manually" Margin="0,10,0,0"
+                                          FontSize="11" Foreground="{DynamicResource TertiaryForeground}">
+                                    <StackPanel Margin="0,6,0,0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <PasswordBox x:Name="GitHubTokenBox" FontFamily="Consolas" FontSize="13"
+                                                         Padding="8,6" VerticalContentAlignment="Center" />
+                                            <Button Grid.Column="1" Content="Show" Margin="8,0,0,0" Padding="10,6"
+                                                    Click="ToggleGitHubTokenVisibility" x:Name="ShowGitHubTokenBtn" />
+                                        </Grid>
+                                        <TextBox x:Name="GitHubTokenTextBox" FontFamily="Consolas" FontSize="13"
+                                                 Padding="8,6" Margin="0,4,0,0" Visibility="Collapsed" />
+                                    </StackPanel>
+                                </Expander>
                             </StackPanel>
 
                             <TextBlock Text="Provider and model changes take effect on next message."

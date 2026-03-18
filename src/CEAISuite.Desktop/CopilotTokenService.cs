@@ -5,12 +5,10 @@ using System.Text.Json;
 namespace CEAISuite.Desktop;
 
 /// <summary>
-/// Handles the GitHub Copilot two-token dance:
-///   1. GitHub OAuth token (long-lived, from user settings)
-///   2. Copilot session token (expires ~1h, refreshed transparently)
-///
-/// The Copilot API at api.githubcopilot.com is wire-compatible with OpenAI's
-/// Chat Completions API, so we only need to exchange the token and set headers.
+/// Handles GitHub Copilot authentication and token management:
+///   - OAuth Device Flow: user clicks "Sign in", gets a code, authorizes in browser
+///   - Two-token dance: GitHub OAuth token → Copilot session token (auto-refreshed)
+///   - Model list fetching from the Copilot API
 /// </summary>
 internal sealed class CopilotTokenService : IDisposable
 {
@@ -18,6 +16,9 @@ internal sealed class CopilotTokenService : IDisposable
     private const string EditorVersion = "vscode/1.95.3";
     private const string EditorPluginVersion = "copilot/1.246.0";
     private const string UserAgent = "GitHubCopilotChat/0.22.4";
+
+    // GitHub OAuth App client ID used by Copilot editor plugins
+    private const string DeviceFlowClientId = "Iv1.b507a08c87ecfe98";
 
     private readonly HttpClient _http = new();
     private string? _sessionToken;
@@ -129,6 +130,101 @@ internal sealed class CopilotTokenService : IDisposable
     {
         _http.Dispose();
         _lock.Dispose();
+    }
+
+    // ─── OAuth Device Flow ──────────────────────────────────────────
+
+    /// <summary>Result of starting the device flow.</summary>
+    public sealed record DeviceFlowStart(
+        string DeviceCode,
+        string UserCode,
+        string VerificationUri,
+        int ExpiresInSeconds,
+        int PollIntervalSeconds);
+
+    /// <summary>
+    /// Step 1: Request a device code from GitHub.
+    /// Returns the user code to display and the verification URL to open.
+    /// </summary>
+    public async Task<DeviceFlowStart> StartDeviceFlowAsync()
+    {
+        var content = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["client_id"] = DeviceFlowClientId,
+            ["scope"] = "read:user",
+        });
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://github.com/login/device/code");
+        request.Content = content;
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+        using var response = await _http.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var data = JsonSerializer.Deserialize<JsonElement>(json);
+
+        return new DeviceFlowStart(
+            DeviceCode: data.GetProperty("device_code").GetString()!,
+            UserCode: data.GetProperty("user_code").GetString()!,
+            VerificationUri: data.GetProperty("verification_uri").GetString()!,
+            ExpiresInSeconds: data.TryGetProperty("expires_in", out var exp) ? exp.GetInt32() : 900,
+            PollIntervalSeconds: data.TryGetProperty("interval", out var intv) ? intv.GetInt32() : 5);
+    }
+
+    /// <summary>
+    /// Step 2: Poll GitHub until the user authorizes (or timeout/cancel).
+    /// Returns the OAuth access token on success.
+    /// </summary>
+    public async Task<string> PollDeviceFlowAsync(
+        string deviceCode, int pollInterval, int expiresIn, CancellationToken ct)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(expiresIn);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(TimeSpan.FromSeconds(pollInterval), ct);
+
+            var content = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["client_id"] = DeviceFlowClientId,
+                ["device_code"] = deviceCode,
+                ["grant_type"] = "urn:ietf:params:oauth:grant-type:device_code",
+            });
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://github.com/login/oauth/access_token");
+            request.Content = content;
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            using var response = await _http.SendAsync(request, ct);
+            var json = await response.Content.ReadAsStringAsync(ct);
+            var data = JsonSerializer.Deserialize<JsonElement>(json);
+
+            if (data.TryGetProperty("access_token", out var tokenEl))
+            {
+                var token = tokenEl.GetString();
+                if (!string.IsNullOrEmpty(token))
+                    return token;
+            }
+
+            // Check for terminal errors
+            if (data.TryGetProperty("error", out var errorEl))
+            {
+                var error = errorEl.GetString();
+                if (error == "authorization_pending" || error == "slow_down")
+                {
+                    if (error == "slow_down") pollInterval += 5;
+                    continue;
+                }
+                // expired_token, access_denied, etc.
+                var desc = data.TryGetProperty("error_description", out var descEl)
+                    ? descEl.GetString() : error;
+                throw new InvalidOperationException($"GitHub authorization failed: {desc}");
+            }
+        }
+
+        throw new TimeoutException("GitHub device authorization timed out.");
     }
 
     // ─── Model list fetching ────────────────────────────────────────

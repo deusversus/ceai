@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using CEAISuite.Application;
 
 namespace CEAISuite.Desktop;
@@ -9,6 +11,7 @@ public partial class SettingsWindow : Window
     private readonly AppSettingsService _settingsService;
     private bool _keyVisible;
     private bool _suppressModelListChange;
+    private CancellationTokenSource? _deviceFlowCts;
 
     private record ModelInfo(string Id, string Name, string Description);
 
@@ -78,12 +81,13 @@ public partial class SettingsWindow : Window
         {
             GitHubTokenBox.Password = s.GitHubToken;
             GitHubTokenTextBox.Text = s.GitHubToken;
-            GitHubTokenStatus.Text = "✓ GitHub token configured";
+            GitHubTokenStatus.Text = "✓ Signed in to GitHub Copilot";
             GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
+            GitHubSignInBtn.Content = "✓  Signed in — sign in again?";
         }
         else
         {
-            GitHubTokenStatus.Text = "No GitHub token — Copilot provider disabled";
+            GitHubTokenStatus.Text = "Sign in to enable Copilot";
             GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
         }
 
@@ -399,10 +403,87 @@ public partial class SettingsWindow : Window
 
     private void CancelSettings(object sender, RoutedEventArgs e)
     {
+        _deviceFlowCts?.Cancel();
         var savedTheme = Enum.TryParse<AppTheme>(_settingsService.Settings.Theme, true, out var t) ? t : AppTheme.System;
         ThemeManager.ApplyTheme(savedTheme);
 
         DialogResult = false;
         Close();
+    }
+
+    // ─── GitHub Device Flow ─────────────────────────────────────────
+
+    private async void GitHubSignIn_Click(object sender, RoutedEventArgs e)
+    {
+        _deviceFlowCts?.Cancel();
+        _deviceFlowCts = new CancellationTokenSource();
+        var ct = _deviceFlowCts.Token;
+
+        try
+        {
+            GitHubSignInBtn.IsEnabled = false;
+            GitHubSignInBtn.Content = "Starting…";
+            DeviceFlowPanel.Visibility = Visibility.Visible;
+            DeviceFlowProgress.IsIndeterminate = true;
+            DeviceFlowStatusText.Text = "Contacting GitHub…";
+
+            var service = ChatClientFactory.CopilotService;
+            var start = await service.StartDeviceFlowAsync();
+
+            // Show the code and open browser
+            DeviceCodeText.Text = start.UserCode;
+            DeviceFlowStatusText.Text = "Waiting for authorization…";
+            GitHubSignInBtn.Content = "Waiting…";
+
+            // Copy code to clipboard and open verification URL
+            Clipboard.SetText(start.UserCode);
+            Process.Start(new ProcessStartInfo(start.VerificationUri) { UseShellExecute = true });
+
+            // Poll until authorized
+            var oauthToken = await service.PollDeviceFlowAsync(
+                start.DeviceCode, start.PollIntervalSeconds, start.ExpiresInSeconds, ct);
+
+            // Success — store the token
+            GitHubTokenBox.Password = oauthToken;
+            GitHubTokenTextBox.Text = oauthToken;
+            GitHubTokenStatus.Text = "✓ Signed in to GitHub Copilot";
+            GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
+            GitHubSignInBtn.Content = "✓  Signed in — sign in again?";
+            DeviceFlowPanel.Visibility = Visibility.Collapsed;
+
+            // Invalidate cached models so they re-fetch with new token
+            service.InvalidateModels();
+            service.Invalidate();
+
+            // Auto-refresh the model list
+            if (GetSelectedProvider() == "copilot")
+                PopulateModelList("copilot");
+        }
+        catch (OperationCanceledException)
+        {
+            DeviceFlowStatusText.Text = "Cancelled";
+        }
+        catch (Exception ex)
+        {
+            DeviceFlowStatusText.Text = $"Failed: {ex.Message}";
+            GitHubTokenStatus.Text = $"Auth failed: {ex.Message}";
+            GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "ErrorForeground");
+        }
+        finally
+        {
+            GitHubSignInBtn.IsEnabled = true;
+            DeviceFlowProgress.IsIndeterminate = false;
+            if (GitHubSignInBtn.Content is string s && s == "Waiting…")
+                GitHubSignInBtn.Content = "🔗  Sign in with GitHub";
+        }
+    }
+
+    private void CopyDeviceCode_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (DeviceCodeText.Text is { Length: > 0 } code)
+        {
+            Clipboard.SetText(code);
+            DeviceFlowStatusText.Text = "Code copied! Waiting for authorization…";
+        }
     }
 }

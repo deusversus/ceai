@@ -102,6 +102,15 @@ internal static class ChatClientFactory
             var token = _tokenService.GetSessionTokenAsync(_githubToken).GetAwaiter().GetResult();
             ApplyHeaders(message, token);
             ProcessNext(message, pipeline, currentIndex);
+
+            // Retry once with a fresh token on auth failures
+            var status = message.Response?.Status ?? 0;
+            if (status == 400 || status == 401 || status == 403)
+            {
+                token = _tokenService.ForceRefreshAsync(_githubToken).GetAwaiter().GetResult();
+                ApplyHeaders(message, token);
+                ProcessNext(message, pipeline, currentIndex);
+            }
         }
 
         public override async ValueTask ProcessAsync(
@@ -112,6 +121,15 @@ internal static class ChatClientFactory
             var token = await _tokenService.GetSessionTokenAsync(_githubToken);
             ApplyHeaders(message, token);
             await ProcessNextAsync(message, pipeline, currentIndex);
+
+            // Retry once with a fresh token on auth failures
+            var status = message.Response?.Status ?? 0;
+            if (status == 400 || status == 401 || status == 403)
+            {
+                token = await _tokenService.ForceRefreshAsync(_githubToken);
+                ApplyHeaders(message, token);
+                await ProcessNextAsync(message, pipeline, currentIndex);
+            }
         }
 
         private static void ApplyHeaders(System.ClientModel.Primitives.PipelineMessage message, string sessionToken)

@@ -96,6 +96,11 @@ public partial class SettingsWindow : Window
         RefreshSlider.Value = s.RefreshIntervalMs;
         ShowUnresolvedCheck.IsChecked = s.ShowUnresolvedAsQuestionMarks;
 
+        // Rate limiting
+        RateLimitBox.Text = s.RateLimitSeconds.ToString();
+        RateLimitSlider.Value = s.RateLimitSeconds;
+        RateLimitWaitCheck.IsChecked = s.RateLimitWait;
+
         // Theme
         var theme = Enum.TryParse<AppTheme>(s.Theme, true, out var t) ? t : AppTheme.System;
         ThemeSystem.IsChecked = theme == AppTheme.System;
@@ -136,6 +141,10 @@ public partial class SettingsWindow : Window
         }
 
         PopulateModelList(provider);
+
+        // Auto-fetch usage when Copilot is selected
+        if (CopilotUsagePanel is not null)
+            TryAutoFetchUsage();
     }
 
     private void PopulateModelList(string provider)
@@ -374,6 +383,12 @@ public partial class SettingsWindow : Window
             RefreshIntervalBox.Text = ((int)e.NewValue).ToString();
     }
 
+    private void RateLimitSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (RateLimitBox is not null)
+            RateLimitBox.Text = ((int)e.NewValue).ToString();
+    }
+
     private void SaveSettings(object sender, RoutedEventArgs e)
     {
         var s = _settingsService.Settings;
@@ -389,6 +404,10 @@ public partial class SettingsWindow : Window
 
         s.ShowUnresolvedAsQuestionMarks = ShowUnresolvedCheck.IsChecked == true;
 
+        if (int.TryParse(RateLimitBox.Text, out var rateLimit) && rateLimit >= 0)
+            s.RateLimitSeconds = rateLimit;
+        s.RateLimitWait = RateLimitWaitCheck.IsChecked == true;
+
         s.Theme = ThemeLight.IsChecked == true ? "Light"
                 : ThemeDark.IsChecked == true ? "Dark"
                 : "System";
@@ -399,6 +418,104 @@ public partial class SettingsWindow : Window
             "Settings Saved", MessageBoxButton.OK, MessageBoxImage.Information);
         DialogResult = true;
         Close();
+    }
+
+    // ─── Copilot Usage ──────────────────────────────────────────────
+
+    private async void RefreshUsage_Click(object sender, RoutedEventArgs e)
+    {
+        await FetchAndDisplayUsageAsync();
+    }
+
+    private void TryAutoFetchUsage()
+    {
+        var githubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;
+        if (GetSelectedProvider() == "copilot" && !string.IsNullOrWhiteSpace(githubToken))
+        {
+            CopilotUsagePanel.Visibility = Visibility.Visible;
+            _ = FetchAndDisplayUsageAsync();
+        }
+        else
+        {
+            CopilotUsagePanel.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private async Task FetchAndDisplayUsageAsync()
+    {
+        var githubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;
+        if (string.IsNullOrWhiteSpace(githubToken))
+        {
+            UsageErrorText.Text = "No GitHub token available";
+            return;
+        }
+
+        RefreshUsageBtn.IsEnabled = false;
+        UsageErrorText.Text = "";
+
+        try
+        {
+            var usage = await ChatClientFactory.CopilotService.GetUsageAsync(githubToken);
+
+            Dispatcher.Invoke(() =>
+            {
+                CopilotUsagePanel.Visibility = Visibility.Visible;
+                UsagePlanText.Text = usage.Plan;
+                UsageResetText.Text = usage.ResetDate;
+
+                // Premium interactions
+                var pi = usage.PremiumInteractions;
+                if (pi.Unlimited)
+                {
+                    PremiumProgressBar.Value = 100;
+                    PremiumUsageText.Text = "Unlimited";
+                }
+                else
+                {
+                    var used = pi.Entitlement - pi.Remaining;
+                    PremiumProgressBar.Maximum = pi.Entitlement > 0 ? pi.Entitlement : 1;
+                    PremiumProgressBar.Value = used;
+                    PremiumUsageText.Text = $"{used} / {pi.Entitlement} used";
+                }
+
+                // Chat quota
+                if (usage.Chat.Unlimited)
+                {
+                    ChatQuotaPanel.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    ChatQuotaPanel.Visibility = Visibility.Visible;
+                    var chatUsed = usage.Chat.Entitlement - usage.Chat.Remaining;
+                    ChatQuotaText.Text = $"{chatUsed} / {usage.Chat.Entitlement} used";
+                }
+
+                // Completions quota
+                if (usage.Completions.Unlimited)
+                {
+                    CompletionsQuotaPanel.Visibility = Visibility.Collapsed;
+                }
+                else
+                {
+                    CompletionsQuotaPanel.Visibility = Visibility.Visible;
+                    var compUsed = usage.Completions.Entitlement - usage.Completions.Remaining;
+                    CompletionsQuotaText.Text = $"{compUsed} / {usage.Completions.Entitlement} used";
+                }
+
+                UsageErrorText.Text = "";
+            });
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                UsageErrorText.Text = $"Failed to load usage: {ex.Message}";
+            });
+        }
+        finally
+        {
+            Dispatcher.Invoke(() => RefreshUsageBtn.IsEnabled = true);
+        }
     }
 
     private void CancelSettings(object sender, RoutedEventArgs e)
@@ -458,6 +575,9 @@ public partial class SettingsWindow : Window
             // Auto-refresh the model list
             if (GetSelectedProvider() == "copilot")
                 PopulateModelList("copilot");
+
+            // Auto-fetch usage after sign-in
+            TryAutoFetchUsage();
         }
         catch (OperationCanceledException)
         {

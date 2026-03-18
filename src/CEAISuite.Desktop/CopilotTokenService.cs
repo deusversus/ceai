@@ -137,6 +137,49 @@ internal sealed class CopilotTokenService : IDisposable
         return _sessionToken;
     }
 
+    // ─── Usage / Quota ────────────────────────────────────────────
+
+    /// <summary>
+    /// Fetches the current Copilot usage/quota from the GitHub API.
+    /// Uses the GitHub OAuth token (NOT the Copilot session token).
+    /// </summary>
+    public async Task<CopilotUsageInfo> GetUsageAsync(string githubToken)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/copilot_internal/user");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", githubToken);
+        request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+
+        using var response = await _http.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+
+        var json = await response.Content.ReadAsStringAsync();
+        var data = JsonSerializer.Deserialize<JsonElement>(json);
+
+        var plan = data.TryGetProperty("copilot_plan", out var planEl) ? planEl.GetString() ?? "unknown" : "unknown";
+        var resetDate = data.TryGetProperty("quota_reset_date", out var resetEl) ? resetEl.GetString() ?? "" : "";
+
+        CopilotQuota ParseQuota(JsonElement parent, string key)
+        {
+            if (!parent.TryGetProperty("quota_snapshots", out var snapshots) ||
+                !snapshots.TryGetProperty(key, out var q))
+                return new CopilotQuota(0, 0, 0, false);
+
+            var entitlement = q.TryGetProperty("entitlement", out var e) ? e.GetInt32() : 0;
+            var remaining = q.TryGetProperty("remaining", out var r) ? r.GetInt32() : 0;
+            var pct = q.TryGetProperty("percent_remaining", out var p) ? p.GetDouble() : 0;
+            var unlimited = q.TryGetProperty("unlimited", out var u) && u.GetBoolean();
+            return new CopilotQuota(entitlement, remaining, pct, unlimited);
+        }
+
+        return new CopilotUsageInfo(
+            plan,
+            resetDate,
+            ParseQuota(data, "premium_interactions"),
+            ParseQuota(data, "chat"),
+            ParseQuota(data, "completions"));
+    }
+
     public void Dispose()
     {
         _http.Dispose();
@@ -378,3 +421,14 @@ internal sealed class CopilotTokenService : IDisposable
 
 /// <summary>Model info returned by the Copilot /models endpoint.</summary>
 internal sealed record CopilotModelInfo(string Id, string Name, string Vendor, string Capabilities);
+
+/// <summary>Quota snapshot for a single Copilot resource category.</summary>
+internal sealed record CopilotQuota(int Entitlement, int Remaining, double PercentRemaining, bool Unlimited);
+
+/// <summary>Copilot subscription usage/quota info.</summary>
+internal sealed record CopilotUsageInfo(
+    string Plan,
+    string ResetDate,
+    CopilotQuota PremiumInteractions,
+    CopilotQuota Chat,
+    CopilotQuota Completions);

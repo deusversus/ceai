@@ -103,6 +103,8 @@ public partial class MainWindow : Window
             System.Diagnostics.Debug.WriteLine($"AI provider init failed: {ex.Message}");
         }
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
+        _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
+        _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
 
         // Live status updates from AI agent
         _aiOperatorService.StatusChanged += status =>
@@ -128,6 +130,8 @@ public partial class MainWindow : Window
                 {
                     var newClient = CreateChatClient();
                     _aiOperatorService.Reconfigure(newClient);
+                    _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
+                    _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
                 }
                 catch (Exception ex)
                 {

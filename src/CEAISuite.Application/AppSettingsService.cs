@@ -39,6 +39,12 @@ public sealed class AppSettings
 
     /// <summary>Maximum conversation messages (excluding system prompt) sent to the API. 0 = unlimited.</summary>
     public int MaxConversationMessages { get; set; } = 40;
+
+    /// <summary>Minimum seconds between AI requests. 0 = disabled.</summary>
+    public int RateLimitSeconds { get; set; } = 0;
+
+    /// <summary>If true, queue and wait for cooldown; if false, reject with error.</summary>
+    public bool RateLimitWait { get; set; } = true;
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]

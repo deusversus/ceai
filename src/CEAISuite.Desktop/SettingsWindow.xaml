@@ -314,6 +314,52 @@
                                 <TextBlock x:Name="GitHubTokenStatus" Margin="0,8,0,0"
                                            Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
 
+                                <!-- Copilot Usage / Quota -->
+                                <StackPanel x:Name="CopilotUsagePanel" Visibility="Collapsed" Margin="0,12,0,0">
+                                    <Separator Margin="0,0,0,10" />
+                                    <TextBlock Text="Copilot Usage" FontWeight="SemiBold" FontSize="13" />
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                        <TextBlock Text="Plan:" FontSize="12" Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,6,0" />
+                                        <TextBlock x:Name="UsagePlanText" Text="—" FontSize="12" FontWeight="SemiBold" />
+                                    </StackPanel>
+
+                                    <TextBlock Text="Premium Interactions" FontSize="12" Margin="0,8,0,2"
+                                               Foreground="{DynamicResource SecondaryForeground}" />
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <ProgressBar x:Name="PremiumProgressBar" Height="12" Minimum="0" Maximum="100" Value="0"
+                                                     Background="{DynamicResource InputBackground}"
+                                                     Foreground="{DynamicResource SelectionHighlight}" />
+                                        <TextBlock x:Name="PremiumUsageText" Grid.Column="1" FontSize="11" Margin="8,0,0,0"
+                                                   VerticalAlignment="Center" Foreground="{DynamicResource SecondaryForeground}" />
+                                    </Grid>
+
+                                    <StackPanel x:Name="ChatQuotaPanel" Visibility="Collapsed" Margin="0,6,0,0">
+                                        <TextBlock Text="Chat" FontSize="12" Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,2" />
+                                        <TextBlock x:Name="ChatQuotaText" FontSize="11" Foreground="{DynamicResource TertiaryForeground}" />
+                                    </StackPanel>
+
+                                    <StackPanel x:Name="CompletionsQuotaPanel" Visibility="Collapsed" Margin="0,6,0,0">
+                                        <TextBlock Text="Completions" FontSize="12" Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,2" />
+                                        <TextBlock x:Name="CompletionsQuotaText" FontSize="11" Foreground="{DynamicResource TertiaryForeground}" />
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                        <TextBlock Text="Resets:" FontSize="11" Foreground="{DynamicResource TertiaryForeground}" Margin="0,0,6,0" />
+                                        <TextBlock x:Name="UsageResetText" Text="—" FontSize="11" Foreground="{DynamicResource TertiaryForeground}" />
+                                    </StackPanel>
+
+                                    <Button x:Name="RefreshUsageBtn" Content="↻ Refresh Usage" Margin="0,8,0,0"
+                                            Padding="10,5" FontSize="11" HorizontalAlignment="Left"
+                                            Click="RefreshUsage_Click" />
+                                    <TextBlock x:Name="UsageErrorText" Margin="0,4,0,0" FontSize="11"
+                                               Foreground="{DynamicResource ErrorForeground}" TextWrapping="Wrap" />
+                                </StackPanel>
+
                                 <!-- Hidden fallback for manual token entry -->
                                 <Expander Header="Advanced: paste token manually" Margin="0,10,0,0"
                                           FontSize="11" Foreground="{DynamicResource TertiaryForeground}">
@@ -366,6 +412,33 @@
 
                         <CheckBox x:Name="ShowUnresolvedCheck" Content="Show unresolved pointers as '??' (CE-style)"
                                   IsChecked="True" FontSize="13" />
+
+                        <Separator Margin="0,20,0,20" />
+
+                        <TextBlock Text="Rate Limiting" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Minimum time between AI requests (prevents abuse detection)"
+                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,4,0,8" />
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="RateLimitBox" Width="60" FontFamily="Consolas"
+                                     Padding="8,6" Text="0" />
+                            <Slider Grid.Column="1" x:Name="RateLimitSlider" Minimum="0" Maximum="60"
+                                    Value="0" TickFrequency="1" IsSnapToTickEnabled="True"
+                                    Margin="12,0" VerticalAlignment="Center"
+                                    ValueChanged="RateLimitSlider_ValueChanged" />
+                            <TextBlock Grid.Column="2" Text="sec" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <CheckBox x:Name="RateLimitWaitCheck"
+                                  Content="Wait for cooldown instead of rejecting"
+                                  IsChecked="True" FontSize="13" Margin="0,10,0,0" />
+
+                        <TextBlock Text="Set to 0 to disable rate limiting."
+                                   Foreground="{DynamicResource TertiaryForeground}" Margin="0,6,0,0" FontSize="11" FontStyle="Italic" />
                     </StackPanel>
                 </Border>
             </TabItem>

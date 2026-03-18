@@ -52,6 +52,10 @@ public sealed class AiOperatorService
     private long _totalCachedTokens;
     private int _totalRequests;
 
+    // Rate limiting
+    private DateTimeOffset? _lastRequestTime;
+    private readonly object _rateLimitLock = new();
+
     /// <summary>Cumulative input tokens sent across all requests in this session.</summary>
     public long TotalPromptTokens => _totalPromptTokens;
     /// <summary>Cumulative output tokens received across all requests in this session.</summary>
@@ -63,6 +67,12 @@ public sealed class AiOperatorService
 
     /// <summary>Maximum number of conversation messages (excluding system prompt) to send to the API.</summary>
     public int MaxConversationMessages { get; set; } = 40;
+
+    /// <summary>Minimum seconds between AI requests. 0 = disabled.</summary>
+    public int RateLimitSeconds { get; set; }
+
+    /// <summary>If true, queue and wait for cooldown; if false, reject with error.</summary>
+    public bool RateLimitWait { get; set; } = true;
     private static readonly string LogDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
     private static readonly string LogPath = Path.Combine(LogDir, $"ai-agent-{DateTime.Now:yyyy-MM-dd}.log");
@@ -242,6 +252,36 @@ public sealed class AiOperatorService
 
     public async Task<string> SendMessageAsync(string userMessage, CancellationToken cancellationToken = default)
     {
+        // Rate limiting
+        if (RateLimitSeconds > 0)
+        {
+            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset? last;
+            lock (_rateLimitLock) { last = _lastRequestTime; }
+
+            if (last.HasValue)
+            {
+                var elapsed = now - last.Value;
+                var cooldown = TimeSpan.FromSeconds(RateLimitSeconds);
+                if (elapsed < cooldown)
+                {
+                    if (RateLimitWait)
+                    {
+                        var remaining = cooldown - elapsed;
+                        UpdateStatus($"Rate limited — waiting {remaining.TotalSeconds:F1}s…");
+                        await Task.Delay(remaining, cancellationToken);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException(
+                            $"Rate limited: please wait {(cooldown - elapsed).TotalSeconds:F0}s before sending another request.");
+                    }
+                }
+            }
+
+            lock (_rateLimitLock) { _lastRequestTime = DateTimeOffset.UtcNow; }
+        }
+
         var sw = System.Diagnostics.Stopwatch.StartNew();
         Log("INFO", $"User: {userMessage}");
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));

@@ -594,6 +594,25 @@ public sealed class AiToolFunctions(
                 // Still allow but warn
             }
 
+            // ── PageGuard co-tenancy gate ──
+            // Hard-reject PageGuard on pages shared with many address table entries.
+            // Hot heap pages cause guard-page storms that can wedge the target process.
+            const int CoTenancyThreshold = 10;
+            if (bpMode == BreakpointMode.PageGuard)
+            {
+                var targetPage = parsedAddr & ~(nuint)4095;
+                int coTenants = CountPageCoTenants(targetPage);
+                if (coTenants > CoTenancyThreshold)
+                {
+                    return $"❌ PageGuard REJECTED: Target address 0x{parsedAddr:X} shares a 4KB page with {coTenants} other address table entries (threshold: {CoTenancyThreshold}). " +
+                           $"PageGuard on crowded pages causes guard-page storms that can hang the target process.\n" +
+                           $"Recommended alternatives:\n" +
+                           $"  1. Use FindWritersToOffset or TraceFieldWriters to find the code that writes to this field\n" +
+                           $"  2. Install a Stealth code-cave hook on the writer instruction instead\n" +
+                           $"  3. Use Hardware mode (limited to 4 simultaneous BPs) if you must watch data directly";
+                }
+            }
+
             // For risky modes (PageGuard, Hardware), use transactional install with rollback
             if (watchdogService is not null && bpMode is BreakpointMode.PageGuard or BreakpointMode.Hardware)
             {
@@ -656,6 +675,26 @@ public sealed class AiToolFunctions(
         return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
     }
 
+    [Description("EMERGENCY: Restore all page guard protections without locks. Use when a PageGuard breakpoint has hung the target process and normal RemoveBreakpoint fails. Opens a fresh process handle to bypass potential deadlocks.")]
+    public async Task<string> EmergencyRestorePageProtection(
+        [Description("Process ID of the hung process")] int processId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var restored = await breakpointService.EmergencyRestorePageProtectionAsync(processId);
+        return restored > 0
+            ? $"✅ Emergency restore complete: {restored} page guard protection(s) restored. Target process should recover."
+            : "No active page guard breakpoints found to restore.";
+    }
+
+    [Description("EMERGENCY: Force detach debugger and clean up all breakpoints. Nuclear option when the target is completely hung. Restores page guards, detaches debugger, and tears down the debug session.")]
+    public async Task<string> ForceDetachAndCleanup(
+        [Description("Process ID of the hung process")] int processId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        await breakpointService.ForceDetachAndCleanupAsync(processId);
+        return $"✅ Force detach complete for process {processId}. Page guards restored, debugger detached, session torn down.";
+    }
+
     [Description("List all active breakpoints for a process.")]
     public async Task<string> ListBreakpoints([Description("Process ID")] int processId)
     {
@@ -691,6 +730,56 @@ public sealed class AiToolFunctions(
             breakpointId,
             hits = hits.Select(h => new { h.BreakpointId, h.Address, h.ThreadId, h.Timestamp, h.Registers }),
             count = hits.Count
+        });
+    }
+
+    [Description("Get health status for a breakpoint: lifecycle state, hit count, throttle status, page co-tenancy, and mode-specific diagnostics. Use this to monitor degraded breakpoints.")]
+    public async Task<string> GetBreakpointHealth(
+        [Description("Breakpoint ID")] string breakpointId,
+        [Description("Process ID")] int processId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var bps = await breakpointService.ListBreakpointsAsync(processId);
+        var bp = bps.FirstOrDefault(b => string.Equals(b.Id, breakpointId, StringComparison.Ordinal));
+        if (bp is null) return $"Breakpoint {breakpointId} not found on process {processId}.";
+
+        var lifecycle = breakpointService.GetLifecycleStatus(breakpointId);
+        var hits = await breakpointService.GetHitLogAsync(breakpointId, 1);
+        var lastHit = hits.Count > 0 ? hits[0].Timestamp : "none";
+
+        // Page co-tenancy for PageGuard breakpoints
+        int coTenants = 0;
+        bool isPageGuard = string.Equals(bp.Mode, "PageGuard", StringComparison.OrdinalIgnoreCase);
+        if (isPageGuard)
+        {
+            var addr = ParseAddress(bp.Address);
+            var pageBase = addr & ~(nuint)0xFFF;
+            coTenants = CountPageCoTenants(pageBase);
+        }
+
+        return ToJson(new
+        {
+            breakpointId,
+            address = bp.Address,
+            type = bp.Type,
+            mode = bp.Mode,
+            isEnabled = bp.IsEnabled,
+            lifecycleStatus = lifecycle.ToString(),
+            hitCount = bp.HitCount,
+            lastHitTimestamp = lastHit,
+            hitAction = bp.HitAction,
+            pageCoTenancy = isPageGuard ? coTenants : (int?)null,
+            health = lifecycle switch
+            {
+                BreakpointLifecycleStatus.Active => "HEALTHY",
+                BreakpointLifecycleStatus.Armed => "HEALTHY",
+                BreakpointLifecycleStatus.ThrottleDisabled => "DEGRADED — hit-rate throttle triggered, BP auto-disabled",
+                BreakpointLifecycleStatus.Faulted => "FAULTED — installation or re-arm failure",
+                BreakpointLifecycleStatus.SingleHitRemoved => "COMPLETED — single-hit BP fired and auto-removed",
+                BreakpointLifecycleStatus.Downgraded => "DEGRADED — mode was downgraded",
+                BreakpointLifecycleStatus.ManuallyDisabled => "DISABLED — manually disabled by operator",
+                _ => "UNKNOWN"
+            }
         });
     }
 
@@ -798,6 +887,17 @@ public sealed class AiToolFunctions(
                     CountCoTenants(root, pageBase, addr, ref coTenants);
                 if (coTenants > 0)
                     warnings.Add($"Page co-tenancy: {coTenants} other address table entries share this 4KB page — PageGuard will affect all of them");
+
+                // Escalate to CRITICAL when co-tenancy exceeds gate threshold
+                if (coTenants > 10)
+                {
+                    riskLevel = "CRITICAL";
+                    recommended.Clear();
+                    recommended.Add("Use FindWritersToOffset or TraceFieldWriters to find the code path that writes to this field");
+                    recommended.Add("Install a Stealth code-cave hook on the discovered writer instruction");
+                    recommended.Add($"Hardware (DR register, max 4 BPs) [{capabilityMap.GetValueOrDefault(BreakpointMode.Hardware, "?")}] — if you must watch data directly");
+                    warnings.Add($"⛔ PageGuard BLOCKED: {coTenants} co-tenants on this page exceeds threshold (10). Guard-page storms will hang the target.");
+                }
 
                 avoid.Add("Stealth (code cave cannot monitor data writes)");
                 avoid.Add("Software (INT3 cannot monitor data writes)");
@@ -3284,6 +3384,15 @@ public sealed class AiToolFunctions(
         }
         foreach (var child in node.Children)
             CountCoTenants(child, pageBase, excludeAddr, ref count);
+    }
+
+    /// <summary>Count how many address table entries share the same 4KB page as the target.</summary>
+    private int CountPageCoTenants(nuint targetPage)
+    {
+        int count = 0;
+        foreach (var root in addressTableService.Roots)
+            CountCoTenants(root, targetPage, nuint.MaxValue, ref count);
+        return count;
     }
 
     // ── Non-debugger write tracing (M2) ──

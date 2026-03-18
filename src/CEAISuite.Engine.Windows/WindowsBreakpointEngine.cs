@@ -176,6 +176,24 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                         return false;
                     }
 
+                    // Check if this software BP has a pending single-step re-arm.
+                    // If so, we can't remove the BP yet — the re-arm handler needs it
+                    // to complete the 0xCC → original → single-step → 0xCC cycle.
+                    // Setting PendingRemoval tells the single-step handler to clean up after re-arm.
+                    bool hasPendingRearm = breakpoint.Mode == BreakpointMode.Software &&
+                        session.PendingSoftwareRearm.Values.Any(
+                            id => string.Equals(id, breakpointId, StringComparison.Ordinal));
+
+                    if (hasPendingRearm)
+                    {
+                        breakpoint.PendingRemoval = true;
+                        // Don't remove from Breakpoints or SoftwareBreakpoints yet —
+                        // HandleSingleStepException will complete re-arm then clean up.
+                        // But do remove from the registry so external lookups see it gone.
+                        _breakpointRegistry.TryRemove(breakpointId, out _);
+                        return true;
+                    }
+
                     session.Breakpoints.Remove(breakpointId);
                     breakpoint.IsEnabled = false;
 
@@ -187,10 +205,31 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                         session.PendingSoftwareRearm.Remove(pendingThreadId);
                     }
 
-                    if (breakpoint.Type == BreakpointType.Software)
+                    if (breakpoint.Mode == BreakpointMode.Software)
                     {
                         session.SoftwareBreakpoints.Remove(breakpoint.Address);
                         RestoreOriginalByte(session, breakpoint);
+                    }
+                    else if (breakpoint.Mode == BreakpointMode.PageGuard)
+                    {
+                        if (breakpoint.PageBaseAddress is { } pageBase)
+                        {
+                            if (session.PageGuardBreakpoints.TryGetValue(pageBase, out var bpList))
+                            {
+                                bpList.Remove(breakpoint);
+                                if (bpList.Count == 0)
+                                {
+                                    session.PageGuardBreakpoints.Remove(pageBase);
+                                    // Last BP on this page — restore original protection
+                                    if (breakpoint.OriginalPageProtection is { } origProt)
+                                    {
+                                        VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase,
+                                            (UIntPtr)PageSize, origProt, out _);
+                                    }
+                                }
+                                // If other BPs remain on this page, guard stays active
+                            }
+                        }
                     }
                     else
                     {
@@ -200,6 +239,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
                     detachSession = session.Breakpoints.Count == 0;
                 }
+
+                _breakpointRegistry.TryRemove(breakpointId, out _);
 
                 if (detachSession)
                 {
@@ -496,7 +537,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     return; // Safety: thread has been suspended too long, bail out
                 }
 
-                Wow64SetThreadContext(threadHandle, ref context);
+                if (!Wow64SetThreadContext(threadHandle, ref context))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[BreakpointEngine] Wow64SetThreadContext failed for thread handle 0x{threadHandle:X} " +
+                        $"(error {Marshal.GetLastWin32Error()}). Hardware BP may not be applied to this thread.");
+                }
             }
             else
             {
@@ -525,7 +571,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     return; // Safety: thread has been suspended too long, bail out
                 }
 
-                SetThreadContext(threadHandle, ref context);
+                if (!SetThreadContext(threadHandle, ref context))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[BreakpointEngine] SetThreadContext failed for thread handle 0x{threadHandle:X} " +
+                        $"(error {Marshal.GetLastWin32Error()}). Hardware BP may not be applied to this thread.");
+                }
             }
         }
         finally
@@ -627,21 +678,33 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             }
 
             // Step 2: Arm the PAGE_GUARD with NO lock held.
-            // If a guard violation fires before step 3, HandlePageGuardViolation won't
-            // find the BP in PageGuardBreakpoints and will treat it as "not ours" (safe).
+            // Query the actual page protection first — don't hardcode PAGE_READWRITE.
+            uint actualProtection = 0x04; // PAGE_READWRITE fallback
+            if (VirtualQueryEx(processHandle, (IntPtr)pageBase, out var mbi,
+                Marshal.SizeOf<MEMORY_BASIC_INFORMATION>()) != 0)
+            {
+                // Strip PAGE_GUARD if already set, we'll add it back
+                actualProtection = mbi.Protect & ~PageGuard;
+            }
+
             if (!VirtualProtectEx(processHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
-                PageGuard | 0x04 /* PAGE_READWRITE with GUARD */, out uint oldProtect))
+                PageGuard | actualProtection, out uint oldProtect))
             {
                 throw CreateWin32Exception($"Unable to set PAGE_GUARD at 0x{pageBase:X}.");
             }
 
-            breakpoint.OriginalPageProtection = oldProtect;
+            breakpoint.OriginalPageProtection = actualProtection;
 
             // Step 3: Lock → register BP in dictionaries → release lock.
             lock (session.SyncRoot)
             {
                 session.Breakpoints[breakpoint.Id] = breakpoint;
-                session.PageGuardBreakpoints[pageBase] = breakpoint;
+                if (!session.PageGuardBreakpoints.TryGetValue(pageBase, out var bpList))
+                {
+                    bpList = new List<BreakpointState>();
+                    session.PageGuardBreakpoints[pageBase] = bpList;
+                }
+                bpList.Add(breakpoint);
                 _breakpointRegistry[breakpoint.Id] = breakpoint;
             }
 
@@ -658,10 +721,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
         var pageBase = faultAddress & ~(nuint)(PageSize - 1);
 
-        if (!session.PageGuardBreakpoints.TryGetValue(pageBase, out var breakpoint))
+        if (!session.PageGuardBreakpoints.TryGetValue(pageBase, out var bpList) || bpList.Count == 0)
             return;
 
-        // Capture register snapshot
+        // Capture register snapshot once (shared across all BPs on this page)
         var threadHandle = session.ThreadHandles.GetValueOrDefault(debugEvent.dwThreadId);
         var registers = new Dictionary<string, string>();
         if (threadHandle != IntPtr.Zero)
@@ -679,12 +742,20 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             }
         }
 
-        if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, faultAddress, registers))
+        // Log hit for ALL enabled BPs on this page
+        foreach (var breakpoint in bpList)
         {
-            // Hit-rate exceeded — auto-disable, don't re-arm the guard
-            breakpoint.IsEnabled = false;
-            return;
+            if (!breakpoint.IsEnabled) continue;
+
+            if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, faultAddress, registers))
+            {
+                breakpoint.IsEnabled = false;
+            }
         }
+
+        // If ALL BPs on this page are disabled, don't re-arm the guard
+        if (bpList.All(bp => !bp.IsEnabled))
+            return;
 
         // Single-step then re-arm PAGE_GUARD
         if (threadHandle != IntPtr.Zero)
@@ -699,11 +770,26 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         if (!session.PendingPageGuardRearm.Remove(threadId, out var pageBase))
             return;
 
-        if (session.PageGuardBreakpoints.TryGetValue(pageBase, out var bp) && bp.IsEnabled)
+        if (!session.PageGuardBreakpoints.TryGetValue(pageBase, out var bpList))
+            return;
+
+        // Only re-arm if at least one BP on this page is still enabled
+        var activeBp = bpList.FirstOrDefault(bp => bp.IsEnabled);
+        if (activeBp is null)
+            return;
+
+        if (!VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
+            PageGuard | (activeBp.OriginalPageProtection ?? 0x04), out _))
         {
-            // Re-apply PAGE_GUARD
-            VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
-                PageGuard | (bp.OriginalPageProtection ?? 0x04), out _);
+            // Re-arm failed (e.g., process dying). Mark all BPs on this page as broken.
+            foreach (var bp in bpList)
+            {
+                bp.IsEnabled = false;
+                bp.ThrottleDisabled = true;
+            }
+            System.Diagnostics.Debug.WriteLine(
+                $"[BreakpointEngine] RearmPageGuard failed at page 0x{pageBase:X} " +
+                $"(error {Marshal.GetLastWin32Error()}). {bpList.Count} BP(s) marked as disabled.");
         }
     }
 
@@ -973,11 +1059,26 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         RearmPageGuard(session, debugEvent.dwThreadId);
 
         if (session.PendingSoftwareRearm.TryGetValue(debugEvent.dwThreadId, out var breakpointId) &&
-            session.Breakpoints.TryGetValue(breakpointId, out var softwareBreakpoint) &&
-            softwareBreakpoint.IsEnabled)
+            session.Breakpoints.TryGetValue(breakpointId, out var softwareBreakpoint))
         {
+            // ALWAYS complete the re-arm cycle regardless of IsEnabled state.
+            // If we restored the original byte and set TrapFlag, we MUST write 0xCC back
+            // and clear TrapFlag before checking whether the BP should stay active.
+            // This prevents the race where RemoveBreakpointAsync sets IsEnabled=false
+            // between INT3 handler and single-step handler, leaving TrapFlag stuck.
             ReArmSoftwareBreakpoint(session, threadHandle, softwareBreakpoint);
             session.PendingSoftwareRearm.Remove(debugEvent.dwThreadId);
+
+            // Now handle deferred removal if RemoveBreakpointAsync flagged it
+            if (softwareBreakpoint.PendingRemoval)
+            {
+                softwareBreakpoint.IsEnabled = false;
+                softwareBreakpoint.PendingRemoval = false;
+                session.Breakpoints.Remove(softwareBreakpoint.Id);
+                session.SoftwareBreakpoints.Remove(softwareBreakpoint.Address);
+                RestoreOriginalByte(session, softwareBreakpoint);
+            }
+
             return DbgContinue;
         }
 
@@ -1127,6 +1228,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     /// <summary>Max hits per second before a breakpoint is auto-disabled to prevent game freezes.</summary>
     private const int MaxHitsPerSecond = 200;
 
+    /// <summary>Max hit log entries per breakpoint (ring buffer). Total count tracked separately via HitCount.</summary>
+    private const int MaxHitLogEntries = 500;
+
     /// <summary>
     /// Log a breakpoint hit and check hit-rate. Returns true if the breakpoint should be
     /// auto-disabled due to excessive firing (>200 hits/sec).
@@ -1137,6 +1241,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         nuint address,
         IReadOnlyDictionary<string, string> registerSnapshot)
     {
+        // Ring buffer: evict oldest entries when at capacity
+        while (breakpoint.HitLog.Count >= MaxHitLogEntries)
+            breakpoint.HitLog.TryDequeue(out _);
+
         breakpoint.HitLog.Enqueue(
             new BreakpointHitEvent(
                 breakpoint.Id,
@@ -1238,6 +1346,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             lock (session.SyncRoot)
             {
                 snapshot = session.PageGuardBreakpoints.Values
+                    .SelectMany(list => list)
                     .Where(bp => bp.IsEnabled)
                     .ToList();
             }
@@ -1407,8 +1516,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         public Dictionary<int, IntPtr> ThreadHandles { get; } = new();
 
-        /// <summary>Page guard breakpoints keyed by the guarded page base address.</summary>
-        public Dictionary<nuint, BreakpointState> PageGuardBreakpoints { get; } = new();
+        /// <summary>Page guard breakpoints keyed by the guarded page base address. Multiple BPs may share a page.</summary>
+        public Dictionary<nuint, List<BreakpointState>> PageGuardBreakpoints { get; } = new();
 
         /// <summary>Tracks which BP is pending single-step re-arm of its PAGE_GUARD flag.</summary>
         public Dictionary<int, nuint> PendingPageGuardRearm { get; } = new();
@@ -1450,6 +1559,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         /// <summary>When true, this BP auto-disables after the first hit.</summary>
         public bool SingleHit { get; }
+
+        /// <summary>When true, removal is deferred until a pending single-step re-arm completes.</summary>
+        public bool PendingRemoval { get; set; }
 
         public int HitCount;
 
@@ -1797,4 +1909,20 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     private static extern bool VirtualProtectEx(
         IntPtr processHandle, IntPtr baseAddress, UIntPtr size,
         uint newProtect, out uint oldProtect);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern int VirtualQueryEx(
+        IntPtr hProcess, IntPtr lpAddress, out MEMORY_BASIC_INFORMATION lpBuffer, int dwLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MEMORY_BASIC_INFORMATION
+    {
+        public IntPtr BaseAddress;
+        public IntPtr AllocationBase;
+        public uint AllocationProtect;
+        public IntPtr RegionSize;
+        public uint State;
+        public uint Protect;
+        public uint Type;
+    }
 }

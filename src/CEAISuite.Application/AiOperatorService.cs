@@ -394,7 +394,8 @@ public sealed class AiOperatorService
                         SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
                         FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
         Breakpoints: SetBreakpoint (with mode: Auto/Stealth/PageGuard/Hardware/Software), RemoveBreakpoint,
-                     ListBreakpoints, GetBreakpointHitLog, GetBreakpointModeCapabilities
+                     ListBreakpoints, GetBreakpointHitLog, GetBreakpointHealth, GetBreakpointModeCapabilities,
+                     EmergencyRestorePageProtection, ForceDetachAndCleanup
         Code Cave Hooks: InstallCodeCaveHook, RemoveCodeCaveHook, ListCodeCaveHooks, GetCodeCaveHookHits,
                          DryRunHookInstall
         Utility: IdentifyArtifact (look up any ID to determine its type and management commands)
@@ -416,7 +417,7 @@ public sealed class AiOperatorService
         ═══ ARTIFACT ID PREFIXES ═══
         All IDs are prefixed by type. Use these prefixes to identify artifact types at a glance:
           hook-*    → Code cave stealth hook (RemoveCodeCaveHook, GetCodeCaveHookHits)
-          bp-*      → Breakpoint (RemoveBreakpoint, GetBreakpointHitLog)
+          bp-*      → Breakpoint (RemoveBreakpoint, GetBreakpointHitLog, GetBreakpointHealth)
           script-*  → Script entry in address table (ToggleScript, DisableScript, ViewScript)
           addr-*    → Address table entry (EditTableEntry, RemoveTableEntry)
           group-*   → Address table group (ListAddressTable)
@@ -473,8 +474,14 @@ public sealed class AiOperatorService
           Use InstallCodeCaveHook directly for full control over register capture.
 
         • PageGuard: Uses PAGE_GUARD memory protection. Less intrusive than hardware BPs for
-          monitoring memory writes/reads. Still requires debugger. Good for data breakpoints on
-          pages with frequent access.
+          monitoring memory writes/reads. Still requires debugger.
+          ⚠️ CRITICAL SAFETY RULES:
+          - NEVER use on heap pages with >10 co-resident address table entries (guard storms hang the target)
+          - ProbeTargetRisk and SetBreakpoint will BLOCK PageGuard when co-tenancy exceeds 10
+          - ALWAYS prefer code-cave hooks over data breakpoints when possible
+          - Use ONLY on isolated pages (stack-local, module .data, low co-tenancy heap)
+          - When ProbeTargetRisk returns risk=CRITICAL: abort and use static analysis path instead
+          - If target hangs: use EmergencyRestorePageProtection or ForceDetachAndCleanup immediately
 
         • Hardware: DR0-DR3 debug registers. Requires thread suspension to write CONTEXT.
           Best for: single-shot analysis (find what writes/reads an address). Limited to 4 active.
@@ -512,6 +519,15 @@ public sealed class AiOperatorService
         3. If Hardware mode freezes the game, remove the breakpoint and switch to Stealth
         4. Code caves capture register snapshots in a ring buffer you can read with GetCodeCaveHookHits
         5. For finding what WRITES a data address, use mode=PageGuard with singleHit=true
+           — BUT ONLY if ProbeTargetRisk shows risk ≤ MEDIUM (co-tenancy ≤ 10)
+           — If risk is CRITICAL: use static analysis (FindWritersToOffset, TraceFieldWriters)
+             then install a Stealth code-cave hook on the discovered writer instruction
+
+        EMERGENCY RECOVERY (when a breakpoint hangs the target):
+        1. EmergencyRestorePageProtection → restores all page guards via a fresh process handle (no locks)
+        2. ForceDetachAndCleanup → nuclear option: restores guards, detaches debugger, tears down session
+        3. GetBreakpointHealth → check if a BP is degraded/faulted/throttled
+        Use these tools IMMEDIATELY if the target becomes unresponsive after a breakpoint install.
 
         SAFE HOOK WORKFLOW (NEW — always prefer this):
         1. ProbeTargetRisk → assess address risk and recommended modes

@@ -126,6 +126,20 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
             h.RegisterSnapshot)).ToArray();
     }
 
+    /// <summary>Emergency: restore all page guard protections without locks. For crash recovery.</summary>
+    public async Task<int> EmergencyRestorePageProtectionAsync(int processId)
+    {
+        EnsureAvailable();
+        return await breakpointEngine!.EmergencyRestorePageProtectionAsync(processId);
+    }
+
+    /// <summary>Force detach debugger and clean up. Nuclear option for hung processes.</summary>
+    public async Task ForceDetachAndCleanupAsync(int processId)
+    {
+        EnsureAvailable();
+        await breakpointEngine!.ForceDetachAndCleanupAsync(processId);
+    }
+
     private void EnsureAvailable()
     {
         if (!IsAvailable)

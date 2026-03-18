@@ -385,8 +385,10 @@ public sealed class AiOperatorService
         Process: ListProcesses, InspectProcess, AttachProcess, FindProcess, CheckProcessLiveness
         Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
         Scanning: StartScan, RefineScan, GetScanResults, ListMemoryRegions
-        Analysis: Disassemble, DissectStructure, ScanForPointers, GenerateSignature, TestSignatureUniqueness
-        Static Analysis: FindWritersToOffset, FindFunctionBoundaries, GetCallerGraph, SearchInstructionPattern
+        Analysis: Disassemble (warns on non-executable memory), DissectStructure (with typeHint: auto/int32/float/pointers),
+                  ScanForPointers, GenerateSignature, TestSignatureUniqueness
+        Static Analysis: FindWritersToOffset (with includeReads), FindByMemoryOperand (structured operand search),
+                         FindFunctionBoundaries, GetCallerGraph, SearchInstructionPattern, TraceFieldWriters
         Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,
                         SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
                         FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
@@ -423,8 +425,16 @@ public sealed class AiOperatorService
         TIP: For "unknown initial value", start with UnknownInitialValue, then use Increased/Decreased.
 
         ANALYZING CODE / "WHAT WRITES TO THIS ADDRESS":
+        PREFERRED: Use TraceFieldWriters — it takes a table entry ID/label and automatically:
+          - extracts the structure offset from parent-relative metadata
+          - searches all module code for displacement-based memory operands
+          - tries adjacent offsets if primary search finds nothing
+          - identifies containing functions for any writers found
+          - provides actionable next steps if no direct references exist
+        MANUAL ALTERNATIVE:
         1. ProbeTargetRisk first to assess the address (executable vs data, risk level)
-        2. If data address: use FindWritersToOffset to statically find writer instructions
+        2. If data address: use FindByMemoryOperand (structured, no regex format issues)
+           or FindWritersToOffset (with includeReads=true for full data flow)
         3. If code address: DryRunHookInstall to preview hook safety
         4. CheckHookConflicts to verify no overlapping patches
         5. SetBreakpoint with recommended mode (use singleHit=true for risky targets)
@@ -433,7 +443,9 @@ public sealed class AiOperatorService
         8. Analyze the assembly to understand the write pattern
         9. Explain findings to user in plain language
         SAFE ALTERNATIVE (no debugger): Use SampledWriteTrace to check if address is hot,
-        then FindWritersToOffset + FindFunctionBoundaries for static analysis.
+        then FindByMemoryOperand + FindFunctionBoundaries for static analysis.
+        NOTE: Disassemble now warns when the target is non-executable memory.
+        NOTE: DissectStructure supports typeHint='int32' for game stat blocks (avoids float false positives).
 
         ═══ BREAKPOINT MODES (IMPORTANT) ═══
 

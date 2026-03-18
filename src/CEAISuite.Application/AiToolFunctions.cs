@@ -169,7 +169,48 @@ public sealed class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Memory address to start disassembling")] string address)
     {
+        // Pre-check: warn if the target address is not in executable memory
+        string? execWarning = null;
+        string? protectionString = null;
+        try
+        {
+            if (memoryProtectionEngine is not null)
+            {
+                var addr = ParseAddress(address);
+                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+                if (!region.IsExecutable)
+                {
+                    protectionString = (region.IsReadable, region.IsWritable) switch
+                    {
+                        (true, true) => "RW (Read/Write)",
+                        (true, false) => "R (Read-only)",
+                        (false, true) => "W (Write-only)",
+                        _ => "NoAccess"
+                    };
+                    execWarning = "Address is not in executable memory — decoded instructions are likely meaningless data. Consider using BrowseMemory or HexDump instead.";
+                }
+            }
+        }
+        catch
+        {
+            // Protection query failed (e.g., address not mapped) — proceed without warning
+        }
+
         var overview = await disassemblyService.DisassembleAtAsync(processId, address);
+
+        if (execWarning is not null)
+        {
+            return ToJson(new
+            {
+                warning = execWarning,
+                protection = protectionString,
+                startAddress = overview.StartAddress,
+                instructions = overview.Lines.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
+                count = overview.Lines.Count,
+                summary = overview.Summary
+            });
+        }
+
         return ToJson(new
         {
             startAddress = overview.StartAddress,
@@ -1025,16 +1066,19 @@ public sealed class AiToolFunctions(
     public async Task<string> DissectStructure(
         [Description("Process ID")] int processId,
         [Description("Base address to start analysis (hex string)")] string address,
-        [Description("Region size in bytes (default 256)")] int regionSize = 256)
+        [Description("Region size in bytes (default 256)")] int regionSize = 256,
+        [Description("Type interpretation hint: 'auto' (default), 'int32' (prefer integers, good for stat blocks), 'float' (prefer floats, good for coordinates), 'pointers' (prefer pointer detection)")] string typeHint = "auto")
     {
         var dissector = new StructureDissectorService(engineFacade);
         var addr = AddressTableService.ParseAddress(address);
-        var fields = await dissector.DissectAsync(processId, addr, regionSize);
+        var (fields, clustersDetected) = await dissector.DissectAsync(processId, addr, regionSize, typeHint);
 
         if (fields.Count == 0) return "No identifiable fields found in this region.";
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Structure analysis at 0x{addr:X} ({fields.Count} fields):");
+        sb.AppendLine($"Structure analysis at 0x{addr:X} ({fields.Count} fields, hint={typeHint}):");
+        if (clustersDetected > 0)
+            sb.AppendLine($"  Detected {clustersDetected} integer cluster(s) — consecutive game-stat-like Int32 values.");
         sb.AppendLine("Offset  | Type     | Value                | Confidence");
         sb.AppendLine("--------|----------|----------------------|-----------");
         foreach (var f in fields)
@@ -2328,12 +2372,13 @@ public sealed class AiToolFunctions(
 
     // ── Static Analysis Tools ──
 
-    [Description("Search a module's code for instructions that write to a specific offset (e.g., [reg+0x38]). Returns all MOV/ADD/SUB/XOR/INC/DEC/IMUL instructions targeting [any_register + offset]. Essential for finding what code writes to a known data field.")]
+    [Description("Search a module's code for instructions that write to a specific offset (e.g., [reg+0x38]). Returns all MOV/ADD/SUB/XOR/INC/DEC/IMUL instructions targeting [any_register + offset]. Essential for finding what code writes to a known data field. Set includeReads=true to also find reads and LEA address computations.")]
     public async Task<string> FindWritersToOffset(
         [Description("Process ID")] int processId,
         [Description("Module name (e.g., 'GameAssembly.dll') or 'all' to scan loaded modules")] string moduleName,
         [Description("The displacement/offset to search for (hex), e.g., '0x38' or '38'")] string offset,
-        [Description("Max results to return")] int maxResults = 30)
+        [Description("Max results to return")] int maxResults = 30,
+        [Description("Also include instructions that READ from [reg+offset] (useful for tracing data flow)")] bool includeReads = false)
     {
         var dispValue = (long)(ulong)ParseAddress(offset);
         var attachment = await engineFacade.AttachAsync(processId);
@@ -2372,6 +2417,8 @@ public sealed class AiToolFunctions(
                     var instr = decoder.Decode();
                     if (instr.IsInvalid) continue;
 
+                    bool isLea = instr.Mnemonic == Mnemonic.Lea;
+
                     for (int opIdx = 0; opIdx < instr.OpCount; opIdx++)
                     {
                         if (instr.GetOpKind(opIdx) == OpKind.Memory &&
@@ -2379,21 +2426,31 @@ public sealed class AiToolFunctions(
                             instr.MemoryBase != Register.None)
                         {
                             bool isWrite = opIdx == 0 && IsWriteInstruction(instr);
-                            if (isWrite)
-                            {
-                                formatter.Format(instr, output);
-                                results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | base={instr.MemoryBase} | in {mod.Name}");
-                                if (results.Count >= maxResults) break;
-                            }
+
+                            string classification;
+                            if (isLea)
+                                classification = "LEA (address computation)";
+                            else if (isWrite)
+                                classification = "WRITE";
+                            else
+                                classification = "READ";
+
+                            // Default mode: only include writes. With includeReads: include all.
+                            if (!isWrite && !isLea && !includeReads) continue;
+
+                            formatter.Format(instr, output);
+                            results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | {classification} | base={instr.MemoryBase} | in {mod.Name}");
+                            if (results.Count >= maxResults) break;
                         }
                     }
                 }
             }
         }
 
+        var label = includeReads ? "Accessors of" : "Writers to";
         return results.Count > 0
-            ? $"Writers to offset 0x{(ulong)(nuint)ParseAddress(offset):X} ({results.Count} found):\n{string.Join('\n', results)}"
-            : $"No instructions writing to offset 0x{(ulong)(nuint)ParseAddress(offset):X} found in {moduleName}.";
+            ? $"{label} offset 0x{(ulong)(nuint)ParseAddress(offset):X} ({results.Count} found):\n{string.Join('\n', results)}"
+            : $"No instructions {(includeReads ? "accessing" : "writing to")} offset 0x{(ulong)(nuint)ParseAddress(offset):X} found in {moduleName}.";
     }
 
     [Description("Find function boundaries around a given address by scanning for prologue/epilogue patterns (push rbp, sub rsp, ret). Returns the likely function start, end, and size.")]
@@ -2619,7 +2676,371 @@ public sealed class AiToolFunctions(
 
         return results.Count > 0
             ? $"Pattern matches for '{pattern}' ({results.Count} found):\n{string.Join('\n', results)}"
-            : $"No instructions matching '{pattern}' found in {moduleName}.";
+            : $"No instructions matching '{pattern}' found in {moduleName}.\nNote: MASM formatter uses hex suffixed with 'h' (e.g., [rax+38h] not [rax+0x38]). Consider using FindByMemoryOperand for offset-based searches.";
+    }
+
+    [Description("Search for instructions with a specific memory operand displacement and optional base register. More reliable than regex pattern search since it uses structured operand data, not text matching.")]
+    public async Task<string> FindByMemoryOperand(
+        [Description("Process ID")] int processId,
+        [Description("Module name (or 'all')")] string moduleName,
+        [Description("Memory displacement/offset to match (hex), e.g., '0x38'")] string displacement,
+        [Description("Optional base register filter, e.g., 'rsi', 'rax', or 'any'")] string baseRegister = "any",
+        [Description("Filter: 'writes', 'reads', 'all'")] string filter = "all",
+        [Description("Max results")] int maxResults = 50)
+    {
+        var dispValue = (long)(ulong)ParseAddress(displacement);
+        bool filterAnyBase = baseRegister.Equals("any", StringComparison.OrdinalIgnoreCase);
+
+        var attachment = await engineFacade.AttachAsync(processId);
+        var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? attachment.Modules.ToList()
+            : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (targetModules.Count == 0) return $"Module '{moduleName}' not found.";
+
+        var results = new List<string>();
+        var formatter = new MasmFormatter();
+        var output = new StringOutput();
+
+        foreach (var mod in targetModules)
+        {
+            if (results.Count >= maxResults) break;
+
+            const int chunkSize = 0x10000;
+            for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
+            {
+                var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
+                var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
+
+                MemoryReadResult memResult;
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                catch { continue; }
+
+                var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                if (bytes.Length == 0) continue;
+
+                var reader = new ByteArrayCodeReader(bytes);
+                var decoder = Decoder.Create(64, reader, (ulong)readAddr);
+
+                while (decoder.IP < (ulong)readAddr + (ulong)bytes.Length)
+                {
+                    var instr = decoder.Decode();
+                    if (instr.IsInvalid) continue;
+
+                    bool isLea = instr.Mnemonic == Mnemonic.Lea;
+
+                    for (int opIdx = 0; opIdx < instr.OpCount; opIdx++)
+                    {
+                        if (instr.GetOpKind(opIdx) != OpKind.Memory) continue;
+                        if ((long)instr.MemoryDisplacement64 != dispValue) continue;
+                        if (instr.MemoryBase == Register.None) continue;
+                        if (!filterAnyBase && !instr.MemoryBase.ToString().Equals(baseRegister, StringComparison.OrdinalIgnoreCase)) continue;
+
+                        string classification;
+                        if (isLea)
+                            classification = "LEA";
+                        else if (opIdx == 0 && IsWriteInstruction(instr))
+                            classification = "WRITE";
+                        else
+                            classification = "READ";
+
+                        if (filter.Equals("writes", StringComparison.OrdinalIgnoreCase) && classification != "WRITE") continue;
+                        if (filter.Equals("reads", StringComparison.OrdinalIgnoreCase) && classification != "READ") continue;
+
+                        formatter.Format(instr, output);
+                        results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | {classification} | base={instr.MemoryBase} | in {mod.Name}");
+                        if (results.Count >= maxResults) break;
+                    }
+                }
+            }
+        }
+
+        var baseDesc = filterAnyBase ? "any base" : $"base={baseRegister}";
+        return results.Count > 0
+            ? $"Memory operand matches for displacement 0x{(ulong)(nuint)ParseAddress(displacement):X}, {baseDesc}, filter={filter} ({results.Count} found):\n{string.Join('\n', results)}"
+            : $"No instructions with displacement 0x{(ulong)(nuint)ParseAddress(displacement):X} ({baseDesc}, filter={filter}) found in {moduleName}.";
+    }
+
+    [Description("High-level tool that bridges from a known data field to the code that writes it. " +
+        "Given an address table entry (by ID or label), extracts its structure offset, finds the containing module's code, " +
+        "and searches for instructions referencing that offset. Combines table metadata + FindByMemoryOperand + caller analysis. " +
+        "This is the recommended starting point for 'find what writes to this field' investigations.")]
+    public async Task<string> TraceFieldWriters(
+        [Description("Process ID")] int processId,
+        [Description("Address table entry ID or label (e.g., 'EXP' or 'ct-75')")] string entryIdOrLabel,
+        [Description("Module to search (e.g., 'GameAssembly.dll'). If empty, searches all code modules.")] string moduleName = "",
+        [Description("Max results per search strategy")] int maxResults = 30)
+    {
+        // Step 1: Resolve the table entry
+        var node = ResolveNode(entryIdOrLabel);
+        if (node is null)
+            return $"Address table entry '{entryIdOrLabel}' not found.";
+        if (!node.ResolvedAddress.HasValue)
+            return $"Entry '{node.Label}' ({node.Id}) has no resolved address — refresh the table first.";
+
+        var resolvedAddr = node.ResolvedAddress.Value;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"═══ TraceFieldWriters: {node.Label} ({node.Id}) ═══");
+        sb.AppendLine($"Resolved address: 0x{resolvedAddr:X}");
+        sb.AppendLine($"Data type: {node.DataType}");
+        sb.AppendLine($"Current value: {node.CurrentValue}");
+
+        // Step 2: Determine structure offset from parent or address pattern
+        long? structOffset = null;
+        string offsetSource = "unknown";
+
+        if (node.IsOffset && node.Parent is not null && node.Parent.ResolvedAddress.HasValue)
+        {
+            // Parent-relative offset: the offset IS the displacement we need
+            structOffset = (long)((ulong)resolvedAddr - (ulong)node.Parent.ResolvedAddress.Value);
+            offsetSource = $"parent-relative ({node.Parent.Label} + 0x{structOffset:X})";
+        }
+        else if (node.Address.StartsWith("+") || node.Address.StartsWith("-"))
+        {
+            // Symbolic offset address like "+38"
+            if (long.TryParse(node.Address.TrimStart('+'), System.Globalization.NumberStyles.HexNumber, null, out var parsed))
+            {
+                structOffset = parsed;
+                offsetSource = $"symbolic offset ({node.Address})";
+            }
+        }
+
+        if (structOffset.HasValue)
+        {
+            sb.AppendLine($"Structure offset: 0x{structOffset.Value:X} (from {offsetSource})");
+        }
+        else
+        {
+            sb.AppendLine("⚠️ Could not determine structure offset — no parent-relative relationship found.");
+            sb.AppendLine("   Falling back to absolute address search only.");
+        }
+
+        // Step 3: Determine search module(s)
+        var attachment = await engineFacade.AttachAsync(processId);
+        var searchModules = string.IsNullOrWhiteSpace(moduleName) || moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? attachment.Modules.Where(m => m.SizeBytes > 0x1000).ToList()
+            : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (searchModules.Count == 0)
+        {
+            sb.AppendLine($"⚠️ Module '{moduleName}' not found.");
+            return sb.ToString();
+        }
+
+        var modNames = string.Join(", ", searchModules.Select(m => m.Name).Take(5));
+        if (searchModules.Count > 5) modNames += $" (+{searchModules.Count - 5} more)";
+        sb.AppendLine($"Searching: {modNames}");
+        sb.AppendLine();
+
+        var allResults = new List<(string Strategy, string Line)>();
+
+        // Strategy A: If we have a structure offset, search for displacement-based memory operands
+        if (structOffset.HasValue)
+        {
+            sb.AppendLine($"── Strategy A: Instructions with memory displacement 0x{structOffset.Value:X} ──");
+            var formatter = new MasmFormatter();
+            var output = new StringOutput();
+            int stratACount = 0;
+
+            foreach (var mod in searchModules)
+            {
+                if (stratACount >= maxResults) break;
+
+                const int chunkSize = 0x10000;
+                for (long off = 0; off < mod.SizeBytes && stratACount < maxResults; off += chunkSize)
+                {
+                    var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
+                    var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
+
+                    MemoryReadResult memResult;
+                    try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                    catch { continue; }
+
+                    var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                    if (bytes.Length == 0) continue;
+
+                    var reader = new ByteArrayCodeReader(bytes);
+                    var decoder = Decoder.Create(64, reader, (ulong)readAddr);
+
+                    while (decoder.IP < (ulong)readAddr + (ulong)bytes.Length)
+                    {
+                        var instr = decoder.Decode();
+                        if (instr.IsInvalid) continue;
+
+                        bool isLea = instr.Mnemonic == Mnemonic.Lea;
+
+                        for (int opIdx = 0; opIdx < instr.OpCount; opIdx++)
+                        {
+                            if (instr.GetOpKind(opIdx) != OpKind.Memory) continue;
+                            if ((long)instr.MemoryDisplacement64 != structOffset.Value) continue;
+                            if (instr.MemoryBase == Register.None) continue;
+
+                            string classification;
+                            if (isLea) classification = "LEA";
+                            else if (opIdx == 0 && IsWriteInstruction(instr)) classification = "WRITE";
+                            else classification = "READ";
+
+                            formatter.Format(instr, output);
+                            var line = $"  0x{instr.IP:X} | {output.ToStringAndReset()} | {classification} | base={instr.MemoryBase} | {mod.Name}";
+                            allResults.Add(("A", line));
+                            sb.AppendLine(line);
+                            stratACount++;
+                            if (stratACount >= maxResults) break;
+                        }
+                    }
+                }
+            }
+
+            if (stratACount == 0)
+                sb.AppendLine("  (no results — the field may be accessed through helper functions or computed offsets)");
+            sb.AppendLine();
+        }
+
+        // Strategy B: Search for nearby small offsets if offset is small (common in IL2CPP)
+        // If the primary offset search found nothing and offset < 0x200, also try adjacent offsets
+        if (structOffset.HasValue && allResults.Count == 0 && structOffset.Value < 0x200)
+        {
+            var adjacentOffsets = new[] { structOffset.Value - 4, structOffset.Value + 4, structOffset.Value - 8, structOffset.Value + 8 };
+            sb.AppendLine($"── Strategy B: Adjacent offsets (±4, ±8 from 0x{structOffset.Value:X}) ──");
+            int stratBCount = 0;
+
+            foreach (var adjOff in adjacentOffsets.Where(o => o > 0))
+            {
+                if (stratBCount >= 10) break;
+                foreach (var mod in searchModules.Take(3))
+                {
+                    if (stratBCount >= 10) break;
+
+                    const int chunkSize = 0x10000;
+                    var formatter = new MasmFormatter();
+                    var output = new StringOutput();
+
+                    for (long off = 0; off < mod.SizeBytes && stratBCount < 10; off += chunkSize)
+                    {
+                        var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
+                        var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
+
+                        MemoryReadResult memResult;
+                        try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                        catch { continue; }
+
+                        var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
+                        if (bytes.Length == 0) continue;
+
+                        var reader = new ByteArrayCodeReader(bytes);
+                        var decoder = Decoder.Create(64, reader, (ulong)readAddr);
+
+                        while (decoder.IP < (ulong)readAddr + (ulong)bytes.Length)
+                        {
+                            var instr = decoder.Decode();
+                            if (instr.IsInvalid) continue;
+
+                            for (int opIdx = 0; opIdx < instr.OpCount; opIdx++)
+                            {
+                                if (instr.GetOpKind(opIdx) != OpKind.Memory) continue;
+                                if ((long)instr.MemoryDisplacement64 != adjOff) continue;
+                                if (instr.MemoryBase == Register.None) continue;
+                                if (opIdx != 0 || !IsWriteInstruction(instr)) continue;
+
+                                formatter.Format(instr, output);
+                                var line = $"  0x{instr.IP:X} | {output.ToStringAndReset()} | WRITE to +0x{adjOff:X} (adjacent) | base={instr.MemoryBase} | {mod.Name}";
+                                allResults.Add(("B", line));
+                                sb.AppendLine(line);
+                                stratBCount++;
+                                if (stratBCount >= 10) break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (stratBCount == 0)
+                sb.AppendLine("  (no adjacent offset writers found either)");
+            sb.AppendLine();
+        }
+
+        // Strategy C: If we found writers, try to identify their containing functions
+        if (allResults.Count > 0)
+        {
+            sb.AppendLine("── Strategy C: Function context for top writer candidates ──");
+            var writerAddresses = allResults
+                .Where(r => r.Line.Contains("WRITE"))
+                .Select(r =>
+                {
+                    var addrStr = r.Line.TrimStart().Split('|')[0].Trim();
+                    return ParseAddress(addrStr);
+                })
+                .Distinct()
+                .Take(5);
+
+            foreach (var writerAddr in writerAddresses)
+            {
+                // Find function boundaries around this writer
+                var containingMod = searchModules.FirstOrDefault(m =>
+                    (ulong)writerAddr >= (ulong)m.BaseAddress &&
+                    (ulong)writerAddr < (ulong)m.BaseAddress + (ulong)m.SizeBytes);
+
+                if (containingMod is null) continue;
+
+                // Quick backward scan for function prologue (push rbp / sub rsp)
+                const int scanBack = 0x200;
+                var scanStart = (nuint)Math.Max((long)writerAddr - scanBack, (long)containingMod.BaseAddress);
+                var scanLen = (int)((ulong)writerAddr - (ulong)scanStart + 0x20);
+
+                MemoryReadResult scanMem;
+                try { scanMem = await engineFacade.ReadMemoryAsync(processId, scanStart, scanLen); }
+                catch { continue; }
+
+                var scanBytes = scanMem.Bytes is byte[] sa ? sa : scanMem.Bytes.ToArray();
+                var scanReader = new ByteArrayCodeReader(scanBytes);
+                var scanDecoder = Decoder.Create(64, scanReader, (ulong)scanStart);
+
+                nuint funcStart = 0;
+                while (scanDecoder.IP < (ulong)writerAddr)
+                {
+                    var ins = scanDecoder.Decode();
+                    if (ins.IsInvalid) continue;
+                    // push rbp or sub rsp,imm
+                    if ((ins.Mnemonic == Mnemonic.Push && ins.Op0Register == Register.RBP) ||
+                        (ins.Mnemonic == Mnemonic.Sub && ins.Op0Register == Register.RSP))
+                    {
+                        funcStart = (nuint)ins.IP;
+                    }
+                }
+
+                if (funcStart != 0)
+                {
+                    sb.AppendLine($"  Writer 0x{writerAddr:X} → likely function at 0x{funcStart:X} in {containingMod.Name}");
+                    sb.AppendLine($"    (use GetCallerGraph with this function address to find call sites)");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        // Summary
+        sb.AppendLine("── Summary ──");
+        int writes = allResults.Count(r => r.Line.Contains("WRITE"));
+        int reads = allResults.Count(r => r.Line.Contains("READ") && !r.Line.Contains("READWRITE"));
+        int leas = allResults.Count(r => r.Line.Contains("LEA"));
+        sb.AppendLine($"Total: {allResults.Count} results ({writes} writes, {reads} reads, {leas} LEAs)");
+
+        if (allResults.Count == 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("💡 No direct offset references found. Possible reasons:");
+            sb.AppendLine("   • Field is accessed through IL2CPP/Unity accessor functions (indirect calls)");
+            sb.AppendLine("   • Offset is computed at runtime rather than embedded in displacement");
+            sb.AppendLine("   • Writer code is in a different module (try moduleName='all')");
+            sb.AppendLine("   • Field uses a different base+offset decomposition than expected");
+            sb.AppendLine();
+            sb.AppendLine("🔧 Next steps:");
+            sb.AppendLine("   1. Try searching adjacent offsets manually with FindByMemoryOperand");
+            sb.AppendLine("   2. Use function analysis around the known reward hook addresses");
+            sb.AppendLine("   3. Install a stealth code-cave hook on a nearby known function and capture register snapshots");
+            sb.AppendLine("   4. Use SampledWriteTrace on the data address to confirm write activity");
+        }
+
+        return sb.ToString();
     }
 
     // ── Helpers ──
@@ -2627,14 +3048,39 @@ public sealed class AiToolFunctions(
     private static bool IsWriteInstruction(Iced.Intel.Instruction instr)
     {
         var m = instr.Mnemonic;
-        return m is Mnemonic.Mov or Mnemonic.Add or Mnemonic.Sub or Mnemonic.Xor
+        return m is
+            // Basic ALU
+            Mnemonic.Mov or Mnemonic.Add or Mnemonic.Sub or Mnemonic.Xor
             or Mnemonic.And or Mnemonic.Or or Mnemonic.Inc or Mnemonic.Dec
             or Mnemonic.Imul or Mnemonic.Shl or Mnemonic.Shr or Mnemonic.Sar
-            or Mnemonic.Movss or Mnemonic.Movsd or Mnemonic.Movaps or Mnemonic.Movups
+            // Unary
+            or Mnemonic.Neg or Mnemonic.Not
+            // Rotate / shift
+            or Mnemonic.Rol or Mnemonic.Ror or Mnemonic.Rcl or Mnemonic.Rcr
+            // Conditional moves
+            or Mnemonic.Cmova or Mnemonic.Cmovae or Mnemonic.Cmovb or Mnemonic.Cmovbe
+            or Mnemonic.Cmove or Mnemonic.Cmovg or Mnemonic.Cmovge or Mnemonic.Cmovl
+            or Mnemonic.Cmovle or Mnemonic.Cmovne or Mnemonic.Cmovno or Mnemonic.Cmovnp
+            or Mnemonic.Cmovns or Mnemonic.Cmovo or Mnemonic.Cmovp or Mnemonic.Cmovs
+            // Exchange / compare-exchange
+            or Mnemonic.Xchg or Mnemonic.Cmpxchg or Mnemonic.Cmpxchg8b or Mnemonic.Cmpxchg16b
+            // Sign-extend store
+            or Mnemonic.Movsxd
+            // Bit operations
+            or Mnemonic.Bts or Mnemonic.Btr or Mnemonic.Btc
+            // String operations
+            or Mnemonic.Stosb or Mnemonic.Stosd or Mnemonic.Stosq
+            or Mnemonic.Movsb or Mnemonic.Movsd
+            // SSE scalar / packed
+            or Mnemonic.Movss or Mnemonic.Movaps or Mnemonic.Movups
             or Mnemonic.Addss or Mnemonic.Addsd or Mnemonic.Mulss or Mnemonic.Mulsd
             or Mnemonic.Subss or Mnemonic.Subsd or Mnemonic.Divss or Mnemonic.Divsd
             or Mnemonic.Cvtsi2ss or Mnemonic.Cvtsi2sd
-            or Mnemonic.Movdqu or Mnemonic.Movdqa or Mnemonic.Movq;
+            or Mnemonic.Movdqu or Mnemonic.Movdqa or Mnemonic.Movq
+            // AVX
+            or Mnemonic.Vmovss or Mnemonic.Vmovsd or Mnemonic.Vmovaps or Mnemonic.Vmovups
+            or Mnemonic.Vmovdqu or Mnemonic.Vmovdqa
+            or Mnemonic.Vaddss or Mnemonic.Vaddsd or Mnemonic.Vmulss or Mnemonic.Vmulsd;
     }
 
     /// <summary>Resolve a node by ID first, then by label (case-insensitive).</summary>

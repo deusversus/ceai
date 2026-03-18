@@ -17,11 +17,13 @@ public sealed class StructureDissectorService(IEngineFacade engine)
 
     /// <summary>
     /// Analyze a region of memory starting at baseAddress and identify probable fields.
+    /// Returns the field list and the number of integer clusters detected.
     /// </summary>
-    public async Task<IReadOnlyList<StructureField>> DissectAsync(
+    public async Task<(IReadOnlyList<StructureField> Fields, int ClustersDetected)> DissectAsync(
         int processId,
         nuint baseAddress,
         int regionSize = 256,
+        string typeHint = "auto",
         CancellationToken ct = default)
     {
         var result = await engine.ReadMemoryAsync(processId, baseAddress, regionSize, ct);
@@ -30,7 +32,7 @@ public sealed class StructureDissectorService(IEngineFacade engine)
 
         for (var offset = 0; offset <= bytes.Length - 4; offset += 4)
         {
-            var candidates = AnalyzeOffset(bytes, offset, baseAddress);
+            var candidates = AnalyzeOffset(bytes, offset, baseAddress, typeHint);
             if (candidates.Count > 0)
             {
                 var best = candidates.OrderByDescending(c => c.Confidence).First();
@@ -38,10 +40,16 @@ public sealed class StructureDissectorService(IEngineFacade engine)
             }
         }
 
-        return fields;
+        int clustersDetected = 0;
+        if (typeHint is "auto" or "int32")
+        {
+            clustersDetected = ApplyIntegerClustering(fields, bytes, baseAddress);
+        }
+
+        return (fields, clustersDetected);
     }
 
-    private static List<StructureField> AnalyzeOffset(byte[] bytes, int offset, nuint baseAddr)
+    private static List<StructureField> AnalyzeOffset(byte[] bytes, int offset, nuint baseAddr, string typeHint)
     {
         var results = new List<StructureField>();
 
@@ -100,7 +108,123 @@ public sealed class StructureDissectorService(IEngineFacade engine)
                 results.Add(new StructureField(offset, "Padding/Zero", "0", 0.3));
         }
 
+        // Apply hint-based scoring adjustments
+        if (typeHint is not "auto")
+            results = ApplyTypeHint(results, typeHint);
+
         return results;
+    }
+
+    private static List<StructureField> ApplyTypeHint(List<StructureField> candidates, string typeHint)
+    {
+        var adjusted = new List<StructureField>(candidates.Count);
+        foreach (var c in candidates)
+        {
+            var conf = c.Confidence;
+            switch (typeHint)
+            {
+                case "int32":
+                    if (c.ProbableType == "Int32")
+                        conf = Math.Min(conf * 1.5, 0.95);
+                    else if (c.ProbableType == "Float")
+                        conf *= 0.5;
+                    break;
+                case "float":
+                    if (c.ProbableType == "Float")
+                        conf = Math.Min(conf * 1.3, 0.95);
+                    else if (c.ProbableType == "Int32")
+                        conf *= 0.6;
+                    break;
+                case "pointers":
+                    if (c.ProbableType == "Pointer")
+                        conf = Math.Min(conf * 1.5, 0.95);
+                    break;
+            }
+            adjusted.Add(c with { Confidence = conf });
+        }
+        return adjusted;
+    }
+
+    /// <summary>
+    /// Post-processing: detect runs of consecutive Int32 fields with game-stat-like values
+    /// and boost their confidence. Also re-evaluate Float fields adjacent to clusters.
+    /// Returns the number of clusters detected.
+    /// </summary>
+    private static int ApplyIntegerClustering(List<StructureField> fields, byte[] bytes, nuint baseAddress)
+    {
+        if (fields.Count < 3) return 0;
+
+        // Find runs of 3+ consecutive Int32 results (offset stride = 4) in stat range [1, 100_000]
+        var clusters = new List<(int startIdx, int endIdx)>();
+        int runStart = -1;
+
+        for (int i = 0; i < fields.Count; i++)
+        {
+            bool isStatInt = fields[i].ProbableType == "Int32"
+                && int.TryParse(fields[i].DisplayValue, out var v)
+                && v >= 1 && v <= 100_000;
+
+            bool consecutive = i > 0 && fields[i].Offset - fields[i - 1].Offset == 4;
+
+            if (isStatInt && (runStart == -1 || consecutive))
+            {
+                if (runStart == -1) runStart = i;
+            }
+            else
+            {
+                if (runStart != -1 && i - runStart >= 3)
+                    clusters.Add((runStart, i - 1));
+                runStart = isStatInt ? i : -1;
+            }
+        }
+        // Final run check
+        if (runStart != -1 && fields.Count - runStart >= 3)
+            clusters.Add((runStart, fields.Count - 1));
+
+        if (clusters.Count == 0) return 0;
+
+        // Build a set of offsets that are within any cluster
+        var clusteredOffsets = new HashSet<int>();
+        foreach (var (s, e) in clusters)
+            for (int i = s; i <= e; i++)
+                clusteredOffsets.Add(fields[i].Offset);
+
+        // Boost Int32 fields within clusters
+        for (int i = 0; i < fields.Count; i++)
+        {
+            if (clusteredOffsets.Contains(fields[i].Offset) && fields[i].ProbableType == "Int32")
+            {
+                fields[i] = fields[i] with { Confidence = Math.Max(fields[i].Confidence, 0.85) };
+            }
+        }
+
+        // Re-evaluate Float-classified fields within or adjacent to a cluster
+        foreach (var (s, e) in clusters)
+        {
+            int clusterStartOffset = fields[s].Offset;
+            int clusterEndOffset = fields[e].Offset;
+
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (fields[i].ProbableType != "Float") continue;
+
+                int off = fields[i].Offset;
+                bool adjacent = off >= clusterStartOffset - 4 && off <= clusterEndOffset + 4;
+                if (!adjacent) continue;
+
+                // Re-check: if the raw int32 value is in game-stat range, replace with Int32
+                if (off + 4 <= bytes.Length)
+                {
+                    int rawInt = BitConverter.ToInt32(bytes, off);
+                    if (rawInt >= 1 && rawInt <= 100_000)
+                    {
+                        fields[i] = new StructureField(off, "Int32", rawInt.ToString(), 0.8);
+                    }
+                }
+            }
+        }
+
+        return clusters.Count;
     }
 
     private static double ClassifyInt32(int value)

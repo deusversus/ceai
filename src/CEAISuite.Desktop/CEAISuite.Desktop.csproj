@@ -12,6 +12,13 @@
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
   </ItemGroup>
 
+  <!-- Copy agent skills to build output for FileAgentSkillsProvider -->
+  <ItemGroup>
+    <Content Include="..\..\skills\**\*" Link="skills\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows</TargetFramework>

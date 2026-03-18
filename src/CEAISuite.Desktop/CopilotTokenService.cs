@@ -253,31 +253,53 @@ internal sealed class CopilotTokenService : IDisposable
     {
         if (_cachedModels is not null) return _cachedModels;
 
-        // GitHub Models Catalog API — the correct public endpoint
-        var models = await TryFetchModels(
+        // Primary: Copilot's own model list (only returns models actually usable via Copilot)
+        string? sessionToken = null;
+        try { sessionToken = await GetSessionTokenAsync(githubToken); } catch { }
+        if (sessionToken is not null)
+        {
+            var models = await TryFetchModels(
+                "https://api.githubcopilot.com/models",
+                $"Bearer {sessionToken}",
+                stripPublisher: false);
+
+            models ??= await TryFetchModels(
+                "https://api.githubcopilot.com/v1/models",
+                $"Bearer {sessionToken}",
+                stripPublisher: false);
+
+            if (models is not null && models.Count > 0)
+            {
+                models.Sort((a, b) =>
+                {
+                    var cmp = string.Compare(a.Vendor, b.Vendor, StringComparison.OrdinalIgnoreCase);
+                    return cmp != 0 ? cmp : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase);
+                });
+                _cachedModels = models;
+                return models;
+            }
+        }
+
+        // Fallback: GitHub Models Catalog (broader, may include models not on Copilot)
+        var catalogModels = await TryFetchModels(
             "https://models.github.ai/catalog/models",
-            $"Bearer {githubToken}");
+            $"Bearer {githubToken}",
+            stripPublisher: true);
 
-        // Fallback: GitHub REST API for Copilot models
-        models ??= await TryFetchModels(
-            "https://api.github.com/copilot_internal/v2/models",
-            $"Bearer {githubToken}");
+        if (catalogModels is null || catalogModels.Count == 0)
+            catalogModels = FallbackModels();
 
-        // All API attempts failed — use curated fallback
-        if (models is null || models.Count == 0)
-            models = FallbackModels();
-
-        models.Sort((a, b) =>
+        catalogModels.Sort((a, b) =>
         {
             var cmp = string.Compare(a.Vendor, b.Vendor, StringComparison.OrdinalIgnoreCase);
             return cmp != 0 ? cmp : string.Compare(a.Id, b.Id, StringComparison.OrdinalIgnoreCase);
         });
 
-        _cachedModels = models;
-        return models;
+        _cachedModels = catalogModels;
+        return catalogModels;
     }
 
-    private async Task<List<CopilotModelInfo>?> TryFetchModels(string url, string authHeader)
+    private async Task<List<CopilotModelInfo>?> TryFetchModels(string url, string authHeader, bool stripPublisher = false)
     {
         try
         {
@@ -285,6 +307,10 @@ internal sealed class CopilotTokenService : IDisposable
             request.Headers.TryAddWithoutValidation("Authorization", authHeader);
             request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
             request.Headers.TryAddWithoutValidation("Accept", "application/json");
+            // Required headers for Copilot API endpoints
+            request.Headers.TryAddWithoutValidation("Editor-Version", EditorVersion);
+            request.Headers.TryAddWithoutValidation("Editor-Plugin-Version", EditorPluginVersion);
+            request.Headers.TryAddWithoutValidation("Copilot-Integration-Id", "vscode-chat");
 
             using var response = await _http.SendAsync(request);
             if (!response.IsSuccessStatusCode) return null;
@@ -308,8 +334,8 @@ internal sealed class CopilotTokenService : IDisposable
                 var id = item.TryGetProperty("id", out var idEl) ? idEl.GetString() ?? "" : "";
                 if (string.IsNullOrEmpty(id)) continue;
 
-                // Catalog IDs are "publisher/model" — strip prefix for display
-                var shortId = id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
+                // Catalog IDs are "publisher/model" — strip prefix for API use
+                var shortId = stripPublisher && id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
 
                 var name = item.TryGetProperty("friendly_name", out var fn) ? fn.GetString() ?? shortId
                          : item.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? shortId
@@ -320,7 +346,6 @@ internal sealed class CopilotTokenService : IDisposable
                            : item.TryGetProperty("owned_by", out var ownerEl) ? ownerEl.GetString() ?? ""
                            : "";
 
-                // Use the short ID as the model identifier (what the API actually accepts)
                 models.Add(new CopilotModelInfo(shortId, name, vendor, ""));
             }
 

@@ -325,8 +325,26 @@ public sealed class AiOperatorService
         catch (Exception ex)
         {
             sw.Stop();
+            // Try to extract response body for better diagnostics (ClientResultException from OpenAI SDK)
+            var detail = "";
+            try
+            {
+                var rawMethod = ex.GetType().GetMethod("GetRawResponse");
+                if (rawMethod is not null)
+                {
+                    var raw = rawMethod.Invoke(ex, null);
+                    var contentProp = raw?.GetType().GetProperty("Content");
+                    if (contentProp is not null)
+                    {
+                        var body = contentProp.GetValue(raw)?.ToString();
+                        if (!string.IsNullOrEmpty(body))
+                            detail = $" | Response: {body}";
+                    }
+                }
+            }
+            catch { /* best effort */ }
             var errorMessage = $"AI error: {ex.Message}";
-            Log("ERROR", $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            Log("ERROR", $"{ex.GetType().Name}: {ex.Message}{detail}\n{ex.StackTrace}");
             UpdateStatus($"Error ({sw.Elapsed.TotalSeconds:F1}s)");
             _displayHistory.Add(new AiChatMessage("assistant", errorMessage, DateTimeOffset.UtcNow));
             return errorMessage;

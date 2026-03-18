@@ -10,6 +10,7 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
         int? processId,
         IReadOnlyList<AddressTableEntry> addressEntries,
         IReadOnlyList<AiActionLogEntry> actionLog,
+        string? chatId = null,
         CancellationToken cancellationToken = default)
     {
         var sessionId = $"session-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
@@ -19,6 +20,7 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
             e.Label,
             e.Address,
             e.DataType.ToString(),
+            e.CurrentValue,
             e.Notes,
             e.IsLocked ? new[] { "locked" } : Array.Empty<string>()
         )).ToArray();
@@ -39,7 +41,8 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
             DateTimeOffset.UtcNow,
             domainEntries,
             Array.Empty<ScanSession>(),
-            domainActions);
+            domainActions,
+            chatId);
 
         await repository.SaveAsync(session, cancellationToken);
         return sessionId;
@@ -52,7 +55,7 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
         return await repository.ListRecentAsync(limit, cancellationToken);
     }
 
-    public async Task<(IReadOnlyList<AddressTableEntry> Entries, string ProcessName, int? ProcessId)?> LoadSessionAsync(
+    public async Task<(IReadOnlyList<AddressTableEntry> Entries, string ProcessName, int? ProcessId, string? ChatId)?> LoadSessionAsync(
         string sessionId,
         CancellationToken cancellationToken = default)
     {
@@ -64,13 +67,13 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
             e.Label,
             e.AddressExpression,
             Enum.TryParse<MemoryDataType>(e.ValueType, true, out var dt) ? dt : MemoryDataType.Int32,
-            "?",
+            e.CurrentValue ?? "?",
             null,
             e.Notes,
             e.Tags.Contains("locked"),
             null
         )).ToArray();
 
-        return (entries, session.ProcessName, session.ProcessId);
+        return (entries, session.ProcessName, session.ProcessId, session.ChatId);
     }
 }

@@ -323,17 +323,18 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
 
     public async Task RefreshAllAsync(int processId, CancellationToken cancellationToken = default)
     {
-        // Ensure we have module info
-        if (_processModules.Count == 0)
+        // Always refresh module list — base addresses change due to ASLR on every process restart
+        try
         {
-            try
-            {
-                var attachment = await engineFacade.AttachAsync(processId, cancellationToken);
-                var arch = "x64"; // default
-                try { arch = TryDetectArchitecture(processId); } catch { }
-                SetProcessContext(attachment.Modules, arch == "x86");
-            }
-            catch { /* proceed without modules — raw hex addresses may still work */ }
+            var attachment = await engineFacade.AttachAsync(processId, cancellationToken);
+            var arch = "x64"; // default
+            try { arch = TryDetectArchitecture(processId); } catch { }
+            SetProcessContext(attachment.Modules, arch == "x86");
+        }
+        catch
+        {
+            // If refresh fails but we have cached modules, proceed with stale data
+            if (_processModules.Count == 0) return;
         }
         await RefreshNodes(_roots, processId, cancellationToken);
     }
@@ -580,6 +581,12 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
     {
         foreach (var node in nodes)
             _roots.Add(node);
+    }
+
+    /// <summary>Remove all entries and groups from the address table.</summary>
+    public void ClearAll()
+    {
+        _roots.Clear();
     }
 
     public AddressTableNode? FindNode(string id) => FindInCollection(_roots, id);

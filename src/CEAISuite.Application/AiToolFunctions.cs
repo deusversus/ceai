@@ -1948,7 +1948,7 @@ public sealed class AiToolFunctions(
         if (sessionService is null) return "Session service not available.";
         var result = await sessionService.LoadSessionAsync(sessionId);
         if (result is null) return $"Session '{sessionId}' not found.";
-        var (entries, processName, processId) = result.Value;
+        var (entries, processName, processId) = (result.Value.Entries, result.Value.ProcessName, result.Value.ProcessId);
         addressTableService.ImportFlat(entries);
         return $"Loaded session '{sessionId}': {processName} (PID {processId}), {entries.Count} entries restored.";
     }

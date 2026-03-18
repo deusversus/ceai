@@ -1905,11 +1905,15 @@ public partial class MainWindow : Window
 
         try
         {
+            // Save current chat first so it's persisted to disk
+            _aiOperatorService.SaveCurrentChat();
+
             var sessionId = await _sessionService.SaveSessionAsync(
                 dashboard.CurrentInspection?.ProcessName,
                 dashboard.CurrentInspection?.ProcessId,
                 _addressTableService.Entries.ToArray(),
-                _aiOperatorService.ActionLog.ToArray());
+                _aiOperatorService.ActionLog.ToArray(),
+                _aiOperatorService.CurrentChatId);
 
             DataContext = dashboard with { StatusMessage = $"Session saved: {sessionId}" };
         }
@@ -1969,9 +1973,28 @@ public partial class MainWindow : Window
                 return;
             }
 
+            // Clear existing table before importing
+            _addressTableService.ClearAll();
+
+            // Restore entries with full metadata (label, notes, locked status, values)
             foreach (var entry in loaded.Value.Entries)
             {
-                _addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
+                var node = new CEAISuite.Application.AddressTableNode(entry.Id, entry.Label, false)
+                {
+                    Address = entry.Address,
+                    DataType = entry.DataType,
+                    CurrentValue = entry.CurrentValue,
+                    Notes = entry.Notes,
+                    IsLocked = entry.IsLocked,
+                    LockedValue = entry.IsLocked ? entry.CurrentValue : null
+                };
+                _addressTableService.ImportNodes(new[] { node });
+            }
+
+            // Restore chat history if a chat was linked
+            if (!string.IsNullOrEmpty(loaded.Value.ChatId))
+            {
+                _aiOperatorService.SwitchChat(loaded.Value.ChatId);
             }
 
             DataContext = dashboard with

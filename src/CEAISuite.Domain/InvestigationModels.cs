@@ -14,13 +14,15 @@ public sealed record InvestigationSession(
     DateTimeOffset CreatedAtUtc,
     IReadOnlyList<AddressEntry> AddressEntries,
     IReadOnlyList<ScanSession> ScanSessions,
-    IReadOnlyList<AIActionLog> ActionLog);
+    IReadOnlyList<AIActionLog> ActionLog,
+    string? ChatId = null);
 
 public sealed record AddressEntry(
     string Id,
     string Label,
     string AddressExpression,
     string ValueType,
+    string? CurrentValue,
     string? Notes,
     IReadOnlyList<string> Tags);
 

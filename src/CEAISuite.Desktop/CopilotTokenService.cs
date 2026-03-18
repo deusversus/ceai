@@ -137,59 +137,43 @@ internal sealed class CopilotTokenService : IDisposable
     private List<CopilotModelInfo>? _cachedModels;
 
     /// <summary>
-    /// Fetches available models from the Copilot API.
+    /// Fetches available models from the GitHub Copilot API.
+    /// Tries multiple endpoints: GitHub internal API (OAuth token), then
+    /// Copilot API (session token), then falls back to a curated list.
     /// Results are cached after first successful fetch.
     /// </summary>
     public async Task<List<CopilotModelInfo>> FetchModelsAsync(string githubToken)
     {
         if (_cachedModels is not null) return _cachedModels;
 
-        var sessionToken = await GetSessionTokenAsync(githubToken);
+        // Attempt 1: GitHub internal models endpoint (uses OAuth token directly)
+        var models = await TryFetchModels(
+            "https://api.github.com/copilot_internal/v2/models",
+            $"token {githubToken}");
 
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}models");
-        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {sessionToken}");
-        request.Headers.TryAddWithoutValidation("Editor-Version", EditorVersion);
-        request.Headers.TryAddWithoutValidation("Editor-Plugin-Version", EditorPluginVersion);
-        request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
-        request.Headers.TryAddWithoutValidation("Copilot-Integration-Id", "vscode-chat");
-
-        using var response = await _http.SendAsync(request);
-        response.EnsureSuccessStatusCode();
-
-        var json = await response.Content.ReadAsStringAsync();
-        var root = JsonSerializer.Deserialize<JsonElement>(json);
-
-        var models = new List<CopilotModelInfo>();
-
-        if (root.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array)
+        // Attempt 2: Copilot API /models (uses session token)
+        if (models is null)
         {
-            foreach (var item in dataArr.EnumerateArray())
-            {
-                var id = item.GetProperty("id").GetString() ?? "";
-                var name = id; // default display name = id
-                var vendor = "";
-
-                if (item.TryGetProperty("name", out var nameEl))
-                    name = nameEl.GetString() ?? id;
-                if (item.TryGetProperty("vendor", out var vendorEl))
-                    vendor = vendorEl.GetString() ?? "";
-                else if (item.TryGetProperty("owned_by", out var ownerEl))
-                    vendor = ownerEl.GetString() ?? "";
-
-                // Filter to chat-capable models
-                var capabilities = "";
-                if (item.TryGetProperty("capabilities", out var capEl))
-                {
-                    if (capEl.ValueKind == JsonValueKind.Object &&
-                        capEl.TryGetProperty("type", out var typeEl))
-                        capabilities = typeEl.GetString() ?? "";
-                }
-
-                models.Add(new CopilotModelInfo(id, name, vendor, capabilities));
-            }
+            var sessionToken = await GetSessionTokenAsync(githubToken);
+            models = await TryFetchModels(
+                $"{BaseUrl}models",
+                $"Bearer {sessionToken}");
         }
 
-        // Sort: chat models first, then by vendor, then by name
+        // Attempt 3: Copilot API /v1/models
+        if (models is null)
+        {
+            var sessionToken = await GetSessionTokenAsync(githubToken);
+            models = await TryFetchModels(
+                $"{BaseUrl}v1/models",
+                $"Bearer {sessionToken}");
+        }
+
+        // All attempts failed — return empty (caller shows error)
+        if (models is null || models.Count == 0)
+            throw new InvalidOperationException(
+                "Could not fetch model list from Copilot API. You can still type a model ID manually.");
+
         models.Sort((a, b) =>
         {
             var cmp = string.Compare(a.Vendor, b.Vendor, StringComparison.OrdinalIgnoreCase);
@@ -198,6 +182,70 @@ internal sealed class CopilotTokenService : IDisposable
 
         _cachedModels = models;
         return models;
+    }
+
+    private async Task<List<CopilotModelInfo>?> TryFetchModels(string url, string authHeader)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.TryAddWithoutValidation("Authorization", authHeader);
+            request.Headers.TryAddWithoutValidation("Editor-Version", EditorVersion);
+            request.Headers.TryAddWithoutValidation("Editor-Plugin-Version", EditorPluginVersion);
+            request.Headers.TryAddWithoutValidation("User-Agent", UserAgent);
+            request.Headers.TryAddWithoutValidation("Copilot-Integration-Id", "vscode-chat");
+            request.Headers.TryAddWithoutValidation("Accept", "application/json");
+
+            using var response = await _http.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return null;
+
+            var json = await response.Content.ReadAsStringAsync();
+            var root = JsonSerializer.Deserialize<JsonElement>(json);
+
+            var models = new List<CopilotModelInfo>();
+
+            // Handle OpenAI-style { "data": [...] } response
+            var items = root.ValueKind == JsonValueKind.Array
+                ? root.EnumerateArray()
+                : root.TryGetProperty("data", out var dataArr) && dataArr.ValueKind == JsonValueKind.Array
+                    ? dataArr.EnumerateArray()
+                    : root.TryGetProperty("models", out var modelsArr) && modelsArr.ValueKind == JsonValueKind.Array
+                        ? modelsArr.EnumerateArray()
+                        : default;
+
+            foreach (var item in items)
+            {
+                var id = "";
+                if (item.TryGetProperty("id", out var idEl))
+                    id = idEl.GetString() ?? "";
+                else if (item.TryGetProperty("name", out var n))
+                    id = n.GetString() ?? "";
+                if (string.IsNullOrEmpty(id)) continue;
+
+                var name = id;
+                var vendor = "";
+                if (item.TryGetProperty("name", out var nameEl) && nameEl.GetString() != id)
+                    name = nameEl.GetString() ?? id;
+                if (item.TryGetProperty("vendor", out var vendorEl))
+                    vendor = vendorEl.GetString() ?? "";
+                else if (item.TryGetProperty("owned_by", out var ownerEl))
+                    vendor = ownerEl.GetString() ?? "";
+
+                var capabilities = "";
+                if (item.TryGetProperty("capabilities", out var capEl) &&
+                    capEl.ValueKind == JsonValueKind.Object &&
+                    capEl.TryGetProperty("type", out var typeEl))
+                    capabilities = typeEl.GetString() ?? "";
+
+                models.Add(new CopilotModelInfo(id, name, vendor, capabilities));
+            }
+
+            return models.Count > 0 ? models : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Clears the cached model list (e.g. when token changes).</summary>

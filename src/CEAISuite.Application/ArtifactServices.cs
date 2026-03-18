@@ -246,7 +246,7 @@ public sealed class AddressTableExportService
         foreach (var element in doc.RootElement.EnumerateArray())
         {
             entries.Add(new AddressTableEntry(
-                Guid.NewGuid().ToString("N")[..8],
+                $"addr-{Guid.NewGuid().ToString("N")[..8]}",
                 element.GetProperty("Label").GetString() ?? "imported",
                 element.GetProperty("Address").GetString() ?? "0x0",
                 Enum.Parse<Engine.Abstractions.MemoryDataType>(element.GetProperty("DataType").GetString() ?? "Int32"),

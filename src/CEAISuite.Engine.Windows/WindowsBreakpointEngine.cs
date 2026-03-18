@@ -107,7 +107,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     }
 
                     var breakpoint = new BreakpointState(
-                        Guid.NewGuid().ToString("N"),
+                        $"bp-{Guid.NewGuid().ToString("N")[..8]}",
                         processId,
                         address,
                         type,
@@ -615,7 +615,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 if (existing is not null) return existing.ToDescriptor();
 
                 var breakpoint = new BreakpointState(
-                    Guid.NewGuid().ToString("N"), processId, address, type, action, BreakpointMode.PageGuard, singleHit);
+                    $"bp-{Guid.NewGuid().ToString("N")[..8]}", processId, address, type, action, BreakpointMode.PageGuard, singleHit);
 
                 // Apply PAGE_GUARD to the target page
                 if (!VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,

@@ -210,7 +210,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
 
     public AddressTableEntry AddEntry(string address, MemoryDataType dataType, string currentValue, string? label = null)
     {
-        var id = Guid.NewGuid().ToString("N")[..8];
+        var id = $"addr-{Guid.NewGuid().ToString("N")[..8]}";
         var node = new AddressTableNode(id, label ?? $"Address_{id}", false)
         {
             Address = address,
@@ -227,7 +227,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         var group = FindNode(groupId) ?? throw new InvalidOperationException($"Group '{groupId}' not found.");
         if (!group.IsGroup) throw new InvalidOperationException($"'{groupId}' is not a group.");
 
-        var id = Guid.NewGuid().ToString("N")[..8];
+        var id = $"addr-{Guid.NewGuid().ToString("N")[..8]}";
         var node = new AddressTableNode(id, label ?? $"Address_{id}", false)
         {
             Address = address,
@@ -242,7 +242,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
     /// <summary>Create a named group at root level.</summary>
     public AddressTableNode CreateGroup(string label)
     {
-        var id = Guid.NewGuid().ToString("N")[..8];
+        var id = $"group-{Guid.NewGuid().ToString("N")[..8]}";
         var group = new AddressTableNode(id, label, true);
         _roots.Add(group);
         return group;
@@ -254,7 +254,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         var parent = FindNode(parentGroupId) ?? throw new InvalidOperationException($"Group '{parentGroupId}' not found.");
         if (!parent.IsGroup) throw new InvalidOperationException($"'{parentGroupId}' is not a group.");
 
-        var id = Guid.NewGuid().ToString("N")[..8];
+        var id = $"group-{Guid.NewGuid().ToString("N")[..8]}";
         var group = new AddressTableNode(id, label, true) { Parent = parent };
         parent.Children.Add(group);
         return group;

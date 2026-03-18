@@ -90,7 +90,7 @@ public sealed class WindowsScanEngine : IScanEngine
                     }
 
                     return new ScanResultSet(
-                        Guid.NewGuid().ToString("N")[..12],
+                        $"scan-{Guid.NewGuid().ToString("N")[..8]}",
                         processId,
                         constraints,
                         results,

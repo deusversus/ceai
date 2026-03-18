@@ -1582,8 +1582,9 @@ public partial class MainWindow : Window
         }
 
         // Clone the node
+        var prefix = _clipboard.IsGroup ? "group" : (_clipboard.AssemblerScript != null ? "script" : "addr");
         var clone = new AddressTableNode(
-            Guid.NewGuid().ToString("N")[..8],
+            $"{prefix}-{Guid.NewGuid().ToString("N")[..8]}",
             _clipboard.Label + " (copy)",
             _clipboard.IsGroup)
         {

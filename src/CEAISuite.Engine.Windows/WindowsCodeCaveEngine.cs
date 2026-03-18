@@ -136,7 +136,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine
     private CodeCaveState InstallHook(int processId, nuint address, bool captureRegisters)
     {
         var hProcess = GetProcessHandle(processId);
-        var hookId = Guid.NewGuid().ToString("N");
+        var hookId = $"hook-{Guid.NewGuid().ToString("N")[..8]}";
 
         // Step 1: Read original bytes at the target (we need at least FarJmpSize=14 bytes)
         // Read extra bytes to accommodate instruction alignment

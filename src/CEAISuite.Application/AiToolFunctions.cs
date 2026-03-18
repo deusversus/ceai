@@ -221,6 +221,36 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [Description("Identify what type of artifact an ID refers to (hook, breakpoint, script, address entry, group, scan). " +
+        "Use this when you have an opaque ID and need to know what it is before calling the right management tool.")]
+    public Task<string> IdentifyArtifact(
+        [Description("The artifact ID to look up")] string id)
+    {
+        // Prefix-based fast path
+        if (id.StartsWith("hook-", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(ToJson(new { id, type = "hook", description = "Code cave stealth hook. Use RemoveCodeCaveHook / GetCodeCaveHookHits to manage." }));
+        if (id.StartsWith("bp-", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(ToJson(new { id, type = "breakpoint", description = "Breakpoint. Use RemoveBreakpoint / GetBreakpointHitLog to manage." }));
+        if (id.StartsWith("script-", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(ToJson(new { id, type = "script", description = "Script entry in address table. Use ToggleScript / DisableScript / ViewScript to manage." }));
+        if (id.StartsWith("addr-", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(ToJson(new { id, type = "address", description = "Address table entry. Use EditTableEntry / RemoveTableEntry to manage." }));
+        if (id.StartsWith("group-", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(ToJson(new { id, type = "group", description = "Address table group node. Use ListAddressTable to see contents." }));
+        if (id.StartsWith("scan-", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult(ToJson(new { id, type = "scan", description = "Scan result set. Use GetScanResults / RefineScan to work with results." }));
+
+        // Fallback: search active stores for legacy unprefixed IDs
+        var node = addressTableService.FindNode(id);
+        if (node is not null)
+        {
+            var kind = node.IsGroup ? "group" : (node.IsScriptEntry ? "script" : "address");
+            return Task.FromResult(ToJson(new { id, type = kind, description = $"Address table node '{node.Label}' (legacy unprefixed ID)." }));
+        }
+
+        return Task.FromResult(ToJson(new { id, type = "unknown", description = "ID not recognized. It may be expired, removed, or from a different session." }));
+    }
+
     [Description("Disassemble machine code at an address in a process. Shows assembly instructions.")]
     public async Task<string> Disassemble(
         [Description("Process ID")] int processId,
@@ -1560,7 +1590,7 @@ public sealed class AiToolFunctions(
             }
         }
 
-        var nodeId = Guid.NewGuid().ToString("N")[..12];
+        var nodeId = $"script-{Guid.NewGuid().ToString("N")[..8]}";
         var node = new AddressTableNode(nodeId, label, false)
         {
             AssemblerScript = script

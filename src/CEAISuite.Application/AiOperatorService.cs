@@ -397,6 +397,7 @@ public sealed class AiOperatorService
                      ListBreakpoints, GetBreakpointHitLog, GetBreakpointModeCapabilities
         Code Cave Hooks: InstallCodeCaveHook, RemoveCodeCaveHook, ListCodeCaveHooks, GetCodeCaveHookHits,
                          DryRunHookInstall
+        Utility: IdentifyArtifact (look up any ID to determine its type and management commands)
         Safety: ProbeTargetRisk, CheckAddressSafety, ListUnsafeAddresses, ClearUnsafeAddress,
                 CheckHookConflicts, SampledWriteTrace
         Transactions: BeginTransaction, RollbackTransaction, ListJournalEntries
@@ -411,6 +412,16 @@ public sealed class AiOperatorService
         Artifacts: GenerateTrainerScript, GenerateAutoAssemblerScript, GenerateLuaScript, SaveCheatTable
         Other: SummarizeInvestigation, SetHotkey, ListHotkeys, RemoveHotkey, GetCurrentContext,
                UndoWrite, RedoWrite, PatchHistory, LoadCheatTable
+
+        ═══ ARTIFACT ID PREFIXES ═══
+        All IDs are prefixed by type. Use these prefixes to identify artifact types at a glance:
+          hook-*    → Code cave stealth hook (RemoveCodeCaveHook, GetCodeCaveHookHits)
+          bp-*      → Breakpoint (RemoveBreakpoint, GetBreakpointHitLog)
+          script-*  → Script entry in address table (ToggleScript, DisableScript, ViewScript)
+          addr-*    → Address table entry (EditTableEntry, RemoveTableEntry)
+          group-*   → Address table group (ListAddressTable)
+          scan-*    → Scan result set (GetScanResults, RefineScan)
+        If unsure about an ID, call IdentifyArtifact(id) to get its type and management commands.
 
         ═══ KEY WORKFLOWS ═══
 

@@ -72,7 +72,7 @@ internal static class ChatClientFactory
         var options = new OpenAIClientOptions { Endpoint = CopilotTokenService.BaseUrl };
         options.AddPolicy(
             new CopilotAuthPolicy(CopilotService, githubToken),
-            System.ClientModel.Primitives.PipelinePosition.PerCall);
+            System.ClientModel.Primitives.PipelinePosition.BeforeTransport);
 
         return new OpenAIClient(new System.ClientModel.ApiKeyCredential("copilot-pending"), options)
             .GetChatClient(model)
@@ -103,9 +103,9 @@ internal static class ChatClientFactory
             ApplyHeaders(message, token);
             ProcessNext(message, pipeline, currentIndex);
 
-            // Retry once with a fresh token on auth failures
+            // Retry once with a fresh token on auth failures (not 400 — that's a payload issue)
             var status = message.Response?.Status ?? 0;
-            if (status == 400 || status == 401 || status == 403)
+            if (status == 401 || status == 403)
             {
                 token = _tokenService.ForceRefreshAsync(_githubToken).GetAwaiter().GetResult();
                 ApplyHeaders(message, token);
@@ -122,9 +122,9 @@ internal static class ChatClientFactory
             ApplyHeaders(message, token);
             await ProcessNextAsync(message, pipeline, currentIndex);
 
-            // Retry once with a fresh token on auth failures
+            // Retry once with a fresh token on auth failures (not 400 — that's a payload issue)
             var status = message.Response?.Status ?? 0;
-            if (status == 400 || status == 401 || status == 403)
+            if (status == 401 || status == 403)
             {
                 token = await _tokenService.ForceRefreshAsync(_githubToken);
                 ApplyHeaders(message, token);

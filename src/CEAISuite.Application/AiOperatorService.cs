@@ -35,14 +35,15 @@ internal static class DangerousTools
 
 public sealed class AiOperatorService
 {
-    private readonly AIAgent _agent;
-    private readonly IChatClient _baseChatClient;
+    private AIAgent _agent;
+    private IChatClient _baseChatClient;
     private AgentSession _session = null!;
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore = new();
+    private readonly IList<AITool> _tools;
 
     // Token usage tracking
     private long _totalPromptTokens;
@@ -79,7 +80,7 @@ public sealed class AiOperatorService
 
     public IReadOnlyList<AiChatMessage> DisplayHistory => _displayHistory;
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
-    public bool IsConfigured { get; }
+    public bool IsConfigured { get; private set; }
 
     /// <summary>Number of messages in the MAF session history (post-compaction). Useful for monitoring.</summary>
     public int SessionMessageCount =>
@@ -103,7 +104,7 @@ public sealed class AiOperatorService
         // Dangerous tools are wrapped with ApprovalRequiredAIFunction.
         var methods = typeof(AiToolFunctions).GetMethods(
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-        var tools = methods
+        _tools = methods
             .Where(m => !m.IsSpecialName)
             .Select(m => AIFunctionFactory.Create(m, toolFunctions))
             .Select(fn => DangerousTools.Names.Contains(fn.Name)
@@ -111,6 +112,17 @@ public sealed class AiOperatorService
                 : fn)
             .ToList();
 
+        _agent = BuildAgent(baseClient);
+
+        // Start with a fresh chat session
+        NewChat();
+
+        // Ensure log directory exists
+        try { Directory.CreateDirectory(LogDir); } catch { /* best effort */ }
+    }
+
+    private AIAgent BuildAgent(IChatClient client)
+    {
         // Build the MAF compaction pipeline (gentle → aggressive):
         // 1. Collapse old tool-call groups into summaries (cheap, no API call)
         // 2. LLM-powered summarization when context gets large (costs an API call!)
@@ -122,12 +134,12 @@ public sealed class AiOperatorService
         // tokens, so we trigger summarization only when total context hits 48K.
         var compactionPipeline = new PipelineCompactionStrategy(
             new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(20)),
-            new SummarizationCompactionStrategy(baseClient, CompactionTriggers.TokensExceed(48_000)),
+            new SummarizationCompactionStrategy(client, CompactionTriggers.TokensExceed(48_000)),
             new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(30)),
             new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(96_000)));
 
         // Build the MAF agent with compaction, tools, and system prompt
-        _agent = baseClient
+        return client
             .AsBuilder()
             .UseAIContextProviders(new CompactionProvider(compactionPipeline))
             .BuildAIAgent(new ChatClientAgentOptions
@@ -137,7 +149,7 @@ public sealed class AiOperatorService
                 ChatOptions = new ChatOptions
                 {
                     Instructions = SystemPrompt,
-                    Tools = tools,
+                    Tools = _tools,
                     Temperature = 0.3f,
                     AdditionalProperties = new AdditionalPropertiesDictionary
                     {
@@ -145,12 +157,38 @@ public sealed class AiOperatorService
                     }
                 },
             });
+    }
 
-        // Start with a fresh chat session
-        NewChat();
+    /// <summary>
+    /// Hot-swap the AI provider without restarting the app.
+    /// Preserves display history and action log; creates a new MAF agent session.
+    /// </summary>
+    public void Reconfigure(IChatClient? newClient)
+    {
+        var baseClient = newClient ?? new StubChatClient();
+        _baseChatClient = baseClient;
+        _agent = BuildAgent(baseClient);
+        IsConfigured = newClient is not null;
 
-        // Ensure log directory exists
-        try { Directory.CreateDirectory(LogDir); } catch { /* best effort */ }
+        // Save current chat, then start a fresh session with the new agent
+        if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
+            SaveCurrentChat();
+
+        _session = _agent.CreateSessionAsync().GetAwaiter().GetResult();
+
+        // Replay existing display history into the new agent session
+        if (_displayHistory.Count > 0 && _session.TryGetInMemoryChatHistory(out var history))
+        {
+            foreach (var msg in _displayHistory)
+            {
+                history.Add(new ChatMessage(
+                    msg.Role == "user" ? ChatRole.User : ChatRole.Assistant,
+                    msg.Content));
+            }
+        }
+
+        Log("INFO", $"Reconfigured AI provider (IsConfigured={IsConfigured})");
+        StatusChanged?.Invoke(IsConfigured ? "Ready (provider updated)" : "Not configured");
     }
 
     private void Log(string level, string message)

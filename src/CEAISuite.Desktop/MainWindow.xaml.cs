@@ -122,6 +122,18 @@ public partial class MainWindow : Window
             {
                 if (_refreshTimer is not null)
                     _refreshTimer.Interval = TimeSpan.FromMilliseconds(_appSettingsService.Settings.RefreshIntervalMs);
+
+                // Hot-swap AI provider when settings change
+                try
+                {
+                    var newClient = CreateChatClient();
+                    _aiOperatorService.Reconfigure(newClient);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"AI provider reconfigure failed: {ex.Message}");
+                    _aiOperatorService.Reconfigure(null);
+                }
             });
         };
 

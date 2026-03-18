@@ -148,6 +148,12 @@ public interface IBreakpointEngine
         string breakpointId,
         int maxEntries = 50,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Emergency: restore all page guard protections without locks. For crash recovery.</summary>
+    Task<int> EmergencyRestorePageProtectionAsync(int processId);
+
+    /// <summary>Force detach debugger and clean up. Nuclear option for hung processes.</summary>
+    Task ForceDetachAndCleanupAsync(int processId);
 }
 
 // ─── Code Cave Engine ────────────────────────────────────────────────

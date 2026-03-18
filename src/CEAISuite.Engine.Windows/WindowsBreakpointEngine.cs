@@ -605,33 +605,47 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
             var session = GetOrCreateSession(processId, cancellationToken);
 
+            // Step 1: Lock → check for existing BP, create state, capture pageBase → release lock.
+            // VirtualProtectEx must NOT be called under lock — the debug loop acquires
+            // the same lock and would deadlock on the guard-page violation storm.
+            BreakpointState breakpoint;
+            nuint pageBase;
+            IntPtr processHandle;
+
             lock (session.SyncRoot)
             {
-                var pageBase = address & ~(nuint)(PageSize - 1);
+                pageBase = address & ~(nuint)(PageSize - 1);
 
-                // Check for existing page guard BP at same address
                 var existing = session.Breakpoints.Values.FirstOrDefault(
                     bp => bp.IsEnabled && bp.Address == address && bp.Mode == BreakpointMode.PageGuard);
                 if (existing is not null) return existing.ToDescriptor();
 
-                var breakpoint = new BreakpointState(
+                breakpoint = new BreakpointState(
                     $"bp-{Guid.NewGuid().ToString("N")[..8]}", processId, address, type, action, BreakpointMode.PageGuard, singleHit);
-
-                // Apply PAGE_GUARD to the target page
-                if (!VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
-                    PageGuard | 0x04 /* PAGE_READWRITE with GUARD */, out uint oldProtect))
-                {
-                    throw CreateWin32Exception($"Unable to set PAGE_GUARD at 0x{pageBase:X}.");
-                }
-
                 breakpoint.PageBaseAddress = pageBase;
-                breakpoint.OriginalPageProtection = oldProtect;
+                processHandle = session.ProcessHandle;
+            }
+
+            // Step 2: Arm the PAGE_GUARD with NO lock held.
+            // If a guard violation fires before step 3, HandlePageGuardViolation won't
+            // find the BP in PageGuardBreakpoints and will treat it as "not ours" (safe).
+            if (!VirtualProtectEx(processHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
+                PageGuard | 0x04 /* PAGE_READWRITE with GUARD */, out uint oldProtect))
+            {
+                throw CreateWin32Exception($"Unable to set PAGE_GUARD at 0x{pageBase:X}.");
+            }
+
+            breakpoint.OriginalPageProtection = oldProtect;
+
+            // Step 3: Lock → register BP in dictionaries → release lock.
+            lock (session.SyncRoot)
+            {
                 session.Breakpoints[breakpoint.Id] = breakpoint;
                 session.PageGuardBreakpoints[pageBase] = breakpoint;
                 _breakpointRegistry[breakpoint.Id] = breakpoint;
-
-                return breakpoint.ToDescriptor();
             }
+
+            return breakpoint.ToDescriptor();
         }, cancellationToken);
 
     private void HandlePageGuardViolation(ProcessDebugSession session, DEBUG_EVENT debugEvent)
@@ -1209,6 +1223,75 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             ["EFLAGS"] = $"0x{nativeContext.EFlags:X8}"
         };
     }
+
+    // ─── Emergency Recovery ─────────────────────────────────────────────
+
+    public Task<int> EmergencyRestorePageProtectionAsync(int processId) =>
+        Task.Run(() =>
+        {
+            // Snapshot page guard breakpoints under a brief lock, then release.
+            List<BreakpointState> snapshot;
+
+            if (!_sessions.TryGetValue(processId, out var session))
+                return 0;
+
+            lock (session.SyncRoot)
+            {
+                snapshot = session.PageGuardBreakpoints.Values
+                    .Where(bp => bp.IsEnabled)
+                    .ToList();
+            }
+
+            if (snapshot.Count == 0)
+                return 0;
+
+            // Open a fresh process handle so we don't depend on the session handle
+            // (which may be in use by the debug loop). ProcessVmOperation is enough
+            // for VirtualProtectEx.
+            var freshHandle = OpenProcess(ProcessVmOperation, false, processId);
+            if (freshHandle == IntPtr.Zero)
+                return 0;
+
+            var restored = 0;
+            try
+            {
+                foreach (var bp in snapshot)
+                {
+                    if (bp.PageBaseAddress is not { } pageBase)
+                        continue;
+
+                    var originalProtect = bp.OriginalPageProtection ?? 0x04u; // PAGE_READWRITE fallback
+                    if (VirtualProtectEx(freshHandle, (IntPtr)pageBase, (UIntPtr)PageSize,
+                        originalProtect, out _))
+                    {
+                        bp.IsEnabled = false;
+                        restored++;
+                    }
+                }
+            }
+            finally
+            {
+                CloseHandle(freshHandle);
+            }
+
+            return restored;
+        });
+
+    public Task ForceDetachAndCleanupAsync(int processId) =>
+        Task.Run(async () =>
+        {
+            // Step 1: Restore all page guard protections (lock-free path).
+            await EmergencyRestorePageProtectionAsync(processId).ConfigureAwait(false);
+
+            // Step 2: Detach the debugger directly — no lock required.
+            DebugActiveProcessStop(processId);
+
+            // Step 3: Best-effort session cleanup.
+            if (_sessions.TryGetValue(processId, out var session))
+            {
+                StopSession(session, detachFromProcess: false);
+            }
+        });
 
     private void StopSession(ProcessDebugSession session, bool detachFromProcess)
     {

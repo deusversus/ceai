@@ -168,7 +168,10 @@ public sealed class AiOperatorService
             new CompactionProvider(compactionPipeline),
         };
 
-        foreach (var skillsDir in ResolveSkillsPaths())
+        // Only one FileAgentSkillsProvider allowed — it registers load_skill and
+        // read_skill_resource tools, and duplicate tool names cause Copilot API 400s.
+        // Prefer user skills dir (overrides), fall back to built-in.
+        foreach (var skillsDir in ResolveSkillsPaths().Reverse())
         {
             if (Directory.Exists(skillsDir))
             {
@@ -176,6 +179,7 @@ public sealed class AiOperatorService
                 {
                     contextProviders.Add(new FileAgentSkillsProvider(skillsDir));
                     Log("INFO", $"Loaded skills from: {skillsDir}");
+                    break;
                 }
                 catch (Exception ex)
                 {

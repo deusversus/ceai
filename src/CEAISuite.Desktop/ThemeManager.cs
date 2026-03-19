@@ -31,10 +31,16 @@ public static class ThemeManager
 
         var mergedDictionaries = System.Windows.Application.Current.Resources.MergedDictionaries;
 
-        if (_currentThemeDictionary is not null)
-            mergedDictionaries.Remove(_currentThemeDictionary);
+        // Remove ALL existing theme dictionaries (including the App.xaml default)
+        for (int i = mergedDictionaries.Count - 1; i >= 0; i--)
+        {
+            var src = mergedDictionaries[i].Source;
+            if (src is not null && (src.OriginalString.Contains("DarkTheme") || src.OriginalString.Contains("LightTheme")))
+                mergedDictionaries.RemoveAt(i);
+        }
 
-        mergedDictionaries.Insert(0, dict);
+        // Add at end so it takes precedence over any remaining dictionaries
+        mergedDictionaries.Add(dict);
         _currentThemeDictionary = dict;
 
         CurrentTheme = theme;

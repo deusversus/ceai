@@ -307,7 +307,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("List memory regions of a process. Shows base address, size, and access flags (R/W/X). Use to understand memory layout before scanning or to find executable/writable regions for code injection.")]
+    [Description("List memory regions of a process. Shows base address, size, and access flags (R/W/X).")]
     public async Task<string> ListMemoryRegions(
         [Description("Process ID")] int processId,
         [Description("Filter: 'all', 'readable', 'writable', 'executable' (default: readable)")] string filter = "readable")
@@ -363,7 +363,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Added to address table: {entry.Label} at {entry.Address} ({entry.DataType})");
     }
 
-    [Description("List all entries currently in the address table. Shows ID, label, address, value, type, and lock state. Returns up to 50 entries; use offset parameter to paginate.")]
+    [Description("List address table entries. Returns up to 50 entries with offset pagination.")]
     public Task<string> ListAddressTable(
         [Description("Number of entries to skip (default 0). Use for pagination.")] int offset = 0,
         [Description("Max entries to return (default 50, max 100).")] int limit = 50)
@@ -502,7 +502,7 @@ public sealed class AiToolFunctions(
                $"{inspection.Modules.Count} modules loaded.";
     }
 
-    [Description("Load a Cheat Engine .CT (Cheat Table) file and import its entries into the address table with hierarchy and scripts preserved. Provide the full file path.")]
+    [Description("Load a .CT (Cheat Table) file and import entries into the address table.")]
     public Task<string> LoadCheatTable([Description("Full file path to the .CT file")] string filePath)
     {
         if (!System.IO.File.Exists(filePath))
@@ -557,7 +557,7 @@ public sealed class AiToolFunctions(
 
     // ── Breakpoint tools ──
 
-    [Description("Set a breakpoint at a memory address. Supports multiple intrusiveness modes: Auto (engine picks), Stealth (code cave, no debugger), PageGuard (less intrusive), Hardware (DR registers), Software (INT3). Use Stealth or Auto for anti-debug-sensitive targets.")]
+    [Description("Set a breakpoint at an address. Modes: Auto, Stealth (code cave), PageGuard, Hardware (DR), Software (INT3). Use Stealth/Auto for anti-debug targets.")]
     public async Task<string> SetBreakpoint(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex or decimal)")] string address,
@@ -706,7 +706,7 @@ public sealed class AiToolFunctions(
         return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
     }
 
-    [Description("EMERGENCY: Restore all page guard protections without locks. Use when a PageGuard breakpoint has hung the target process and normal RemoveBreakpoint fails. Opens a fresh process handle to bypass potential deadlocks.")]
+    [Description("EMERGENCY: Restore page guard protections without locks. Use when PageGuard breakpoint has hung the target.")]
     public async Task<string> EmergencyRestorePageProtection(
         [Description("Process ID of the hung process")] int processId)
     {
@@ -717,7 +717,7 @@ public sealed class AiToolFunctions(
             : "No active page guard breakpoints found to restore.";
     }
 
-    [Description("EMERGENCY: Force detach debugger and clean up all breakpoints. Nuclear option when the target is completely hung. Restores page guards, detaches debugger, and tears down the debug session.")]
+    [Description("EMERGENCY: Force detach debugger and clean up all breakpoints. Nuclear option for hung targets.")]
     public async Task<string> ForceDetachAndCleanup(
         [Description("Process ID of the hung process")] int processId)
     {
@@ -751,7 +751,7 @@ public sealed class AiToolFunctions(
     [Description("Get the hit log for a breakpoint. Shows when it was triggered, register state, and thread info.")]
     public async Task<string> GetBreakpointHitLog(
         [Description("Breakpoint ID")] string breakpointId,
-        [Description("Maximum entries to return")] int maxEntries = 20)
+        [Description("Maximum entries to return")] int maxEntries = 10)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
         var hits = await breakpointService.GetHitLogAsync(breakpointId, maxEntries);
@@ -759,12 +759,16 @@ public sealed class AiToolFunctions(
         return ToJson(new
         {
             breakpointId,
-            hits = hits.Select(h => new { h.BreakpointId, h.Address, h.ThreadId, h.Timestamp, h.Registers }),
+            hits = hits.Select(h => new
+            {
+                h.BreakpointId, h.Address, h.ThreadId, h.Timestamp,
+                registers = TrimRegisters(h.Registers)
+            }),
             count = hits.Count
         });
     }
 
-    [Description("Get health status for a breakpoint: lifecycle state, hit count, throttle status, page co-tenancy, and mode-specific diagnostics. Use this to monitor degraded breakpoints.")]
+    [Description("Get breakpoint health: lifecycle state, hit count, throttle status, page co-tenancy.")]
     public async Task<string> GetBreakpointHealth(
         [Description("Breakpoint ID")] string breakpointId,
         [Description("Process ID")] int processId)
@@ -814,7 +818,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Get capability matrix for all breakpoint modes. Shows which modes support execute hooks vs data write watches, which require debugger attachment, and stability ratings.")]
+    [Description("Get capability matrix for all breakpoint modes: execute/data support, debugger needs, stability.")]
     public string GetBreakpointModeCapabilities()
     {
         var caps = BreakpointService.GetModeCapabilities();
@@ -830,7 +834,7 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
-    [Description("Probe a memory address to assess risk before setting a breakpoint or hook. Returns region type, protection, page info, recommended modes, and risk level. ALWAYS call this before SetBreakpoint on unfamiliar addresses.")]
+    [Description("Probe an address for risk before setting a breakpoint or hook. Returns region type, protection, recommended modes, risk level.")]
     public async Task<string> ProbeTargetRisk(
         [Description("Process ID")] int processId,
         [Description("Memory address to probe (hex or decimal)")] string address)
@@ -1025,7 +1029,7 @@ public sealed class AiToolFunctions(
             $"Warnings: {string.Join("; ", result.Warnings)}");
     }
 
-    [Description("Deep semantic validation of a script against live process state. Verifies assert bytes match live memory, hook targets are executable, detour space is sufficient, and [DISABLE] restores all [ENABLE] patches. Use this before enabling any script on a live target.")]
+    [Description("Deep validation of a script against live process state. Verifies assert bytes, hook targets, detour space, and disable/enable symmetry.")]
     public async Task<string> ValidateScriptDeep(
         [Description("Node ID or label of the script entry")] string nodeId,
         [Description("Process ID to validate against")] int processId)
@@ -2282,7 +2286,7 @@ public sealed class AiToolFunctions(
     [Description("Walk call stacks of all threads in the process. Returns frames per thread with module resolution.")]
     public async Task<string> GetAllThreadStacks(
         [Description("Process ID")] int processId,
-        [Description("Maximum frames per thread")] int maxFrames = 16)
+        [Description("Maximum frames per thread")] int maxFrames = 8)
     {
         if (callStackEngine is null) return "Call stack engine not available.";
         try
@@ -2296,7 +2300,7 @@ public sealed class AiToolFunctions(
 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine($"Captured stacks for {allStacks.Count} thread(s):");
-            foreach (var (tid, frames) in allStacks.OrderByDescending(kv => kv.Value.Count).Take(8))
+            foreach (var (tid, frames) in allStacks.OrderByDescending(kv => kv.Value.Count).Take(4))
             {
                 sb.AppendLine(FormatCallStack(tid, frames));
                 sb.AppendLine();
@@ -2322,7 +2326,7 @@ public sealed class AiToolFunctions(
 
     // ─── Code Cave (Stealth Hook) Tools ─────────────────────────────────
 
-    [Description("Install a stealth code cave hook at an address. No debugger attachment — game-safe. Redirects execution through an allocated trampoline that captures registers and counts hits. Use this for anti-debug-sensitive targets.")]
+    [Description("Install a stealth code cave hook. No debugger — game-safe. Captures registers and hit count.")]
     public async Task<string> InstallCodeCaveHook(
         [Description("Process ID")] int processId,
         [Description("Memory address to hook (hex or decimal)")] string address,
@@ -2382,11 +2386,12 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Get register snapshots captured by a code cave hook. Returns detailed captures with registers, thread IDs, timestamps, and optional pointer dereferences.")]
+    [Description("Get register snapshots from a code cave hook. Returns captures with key registers, thread IDs, and timestamps.")]
     public async Task<string> GetCodeCaveHookHits(
         [Description("Hook ID")] string hookId,
-        [Description("Maximum entries to return")] int maxEntries = 20,
-        [Description("Process ID for register pointer dereferences (optional)")] int processId = 0)
+        [Description("Maximum entries to return")] int maxEntries = 10,
+        [Description("Process ID for register pointer dereferences (0=skip)")] int processId = 0,
+        [Description("Include pointer dereferences for registers (costs extra reads)")] bool dereference = false)
     {
         if (codeCaveEngine is null) return "Code cave engine not available.";
         var hits = await codeCaveEngine.GetHookHitsAsync(hookId, maxEntries);
@@ -2395,10 +2400,12 @@ public sealed class AiToolFunctions(
         var hitResults = new List<object>();
         foreach (var h in hits)
         {
+            var trimmedRegs = TrimRegisters(h.RegisterSnapshot);
+
             Dictionary<string, string>? dereferences = null;
-            if (processId > 0 && h.RegisterSnapshot.Count > 0)
+            if (dereference && processId > 0 && trimmedRegs.Count > 0)
             {
-                dereferences = await DereferenceRegistersAsync(processId, h.RegisterSnapshot);
+                dereferences = await DereferenceRegistersAsync(processId, trimmedRegs);
             }
 
             hitResults.Add(new
@@ -2406,8 +2413,7 @@ public sealed class AiToolFunctions(
                 address = $"0x{h.Address:X}",
                 threadId = h.ThreadId,
                 timestamp = h.TimestampUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
-                registers = h.RegisterSnapshot,
-                hasRegisterSnapshot = h.RegisterSnapshot.Count > 0,
+                registers = trimmedRegs,
                 dereferences
             });
         }
@@ -2418,6 +2424,22 @@ public sealed class AiToolFunctions(
             hits = hitResults,
             count = hits.Count
         });
+    }
+
+    // Essential registers for debugging — skip R8-R15, segment regs, RFLAGS etc.
+    private static readonly HashSet<string> EssentialRegisters = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "RAX", "RBX", "RCX", "RDX", "RSI", "RDI", "RSP", "RBP", "RIP",
+        "EAX", "EBX", "ECX", "EDX", "ESI", "EDI", "ESP", "EBP", "EIP"
+    };
+
+    /// <summary>Filter registers to only essential ones to save tokens in tool results.</summary>
+    private static Dictionary<string, string> TrimRegisters(IReadOnlyDictionary<string, string>? registers)
+    {
+        if (registers is null || registers.Count == 0) return new();
+        return registers
+            .Where(kv => EssentialRegisters.Contains(kv.Key))
+            .ToDictionary(kv => kv.Key, kv => kv.Value);
     }
 
     private async Task<Dictionary<string, string>> DereferenceRegistersAsync(
@@ -2450,7 +2472,7 @@ public sealed class AiToolFunctions(
         return result;
     }
 
-    [Description("Preview a code cave hook installation WITHOUT actually patching. Shows bytes that would be overwritten, instructions that would be relocated, RIP-relative fixup needs, trampoline size, and a safety assessment. Use before InstallCodeCaveHook for high-confidence installs.")]
+    [Description("Dry-run a code cave hook install. Shows bytes, relocations, fixups, and safety assessment without patching.")]
     public async Task<string> DryRunHookInstall(
         [Description("Process ID")] int processId,
         [Description("Memory address to analyze for hook installation (hex)")] string address)
@@ -2984,7 +3006,7 @@ public sealed class AiToolFunctions(
         [Description("Memory displacement/offset to match (hex), e.g., '0x38'")] string displacement,
         [Description("Optional base register filter, e.g., 'rsi', 'rax', or 'any'")] string baseRegister = "any",
         [Description("Filter: 'writes', 'reads', 'all'")] string filter = "all",
-        [Description("Max results")] int maxResults = 50)
+        [Description("Max results")] int maxResults = 20)
     {
         var dispValue = (long)(ulong)ParseAddress(displacement);
         bool filterAnyBase = baseRegister.Equals("any", StringComparison.OrdinalIgnoreCase);

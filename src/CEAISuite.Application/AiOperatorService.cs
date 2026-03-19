@@ -88,7 +88,7 @@ internal static class ToolCategories
         "GetCurrentContext", "SummarizeInvestigation",
         "SaveSession", "ListSessions", "LoadSession",
         // Meta-tools (always available)
-        "request_tools", "list_tool_categories",
+        "request_tools", "list_tool_categories", "unload_tools",
     };
 
     /// <summary>Category name → tool names. Agent calls request_tools(category) to load these.</summary>
@@ -245,6 +245,8 @@ public sealed class AiOperatorService
             "Categories: " + string.Join(", ", ToolCategories.Categories.Keys));
         _allToolsByName["list_tool_categories"] = AIFunctionFactory.Create(ListToolCategories,
             "list_tool_categories", "List available tool categories and which are currently loaded.");
+        _allToolsByName["unload_tools"] = AIFunctionFactory.Create(UnloadTools, "unload_tools",
+            "Unload tool categories no longer needed to free token budget. Use 'all' to reset to core only.");
 
         // Start with only core tools — agent requests more via request_tools()
         _tools = [];
@@ -323,6 +325,7 @@ public sealed class AiOperatorService
                     Instructions = SystemPrompt,
                     Tools = _tools,
                     Temperature = 0.3f,
+                    MaxOutputTokens = 2048,
                 },
             });
     }
@@ -542,12 +545,15 @@ public sealed class AiOperatorService
                 }
             }
 
-            // Inject any pending screenshots as image content for future turns
+            // Inject any pending screenshots as image content for future turns (max 3 per turn)
             if (_toolFunctions is not null)
             {
-                while (_toolFunctions.PendingImages.TryDequeue(out var img))
+                int imagesProcessed = 0;
+                const int maxImagesPerTurn = 3;
+                while (imagesProcessed < maxImagesPerTurn && _toolFunctions.PendingImages.TryDequeue(out var img))
                 {
-                    UpdateStatus("Analyzing screenshot...");
+                    imagesProcessed++;
+                    UpdateStatus($"Analyzing screenshot ({imagesProcessed})...");
                     var imageMsg = new ChatMessage(ChatRole.User, new List<AIContent>
                     {
                         new TextContent($"[Screenshot: {img.Description}]"),
@@ -562,6 +568,9 @@ public sealed class AiOperatorService
                             if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
                                 assistantText += "\n" + tc.Text;
                 }
+                // Drain any excess images to prevent stale accumulation
+                while (_toolFunctions.PendingImages.TryDequeue(out _))
+                    Log("WARN", "Discarded excess pending image (max 3 per turn)");
             }
 
             if (string.IsNullOrWhiteSpace(assistantText))
@@ -672,7 +681,9 @@ public sealed class AiOperatorService
                 // --- Multi-turn approval loop (MAF pattern) ---
                 // RunStreamingAsync returns EARLY when it hits approval-required tools.
                 // We must collect approvals, get user decision, then re-run with the response.
-                while (pendingApprovals.Count > 0)
+                const int maxApprovalRounds = 5;
+                int approvalRound = 0;
+                while (pendingApprovals.Count > 0 && approvalRound++ < maxApprovalRounds)
                 {
                     var approvalResponses = new List<AIContent>();
 
@@ -719,6 +730,13 @@ public sealed class AiOperatorService
                             toolCalls, toolResults, pendingApprovals, cancellationToken);
                     }
                     // Loop again if the re-run triggered MORE approval requests
+                }
+
+                if (approvalRound >= maxApprovalRounds && pendingApprovals.Count > 0)
+                {
+                    Log("APPROVAL", $"Hit max approval rounds ({maxApprovalRounds}), aborting remaining approvals");
+                    state.AssistantText += "\n\n⚠️ Reached maximum approval rounds — some tool calls were skipped.";
+                    pendingApprovals.Clear();
                 }
 
                 sw.Stop();
@@ -928,14 +946,68 @@ public sealed class AiOperatorService
                $"\n\nActive tools: {_tools.Count} / {_allToolsByName.Count} total";
     }
 
+    /// <summary>Meta-tool: unload tool categories no longer needed to reclaim token budget.</summary>
+    [System.ComponentModel.Description("Unload tool categories to free token budget. Use when done with a category.")]
+    private string UnloadTools(
+        [System.ComponentModel.Description("Category to unload (comma-separated for multiple). Use 'all' to reset to core only.")] string categories)
+    {
+        if (string.Equals(categories.Trim(), "all", StringComparison.OrdinalIgnoreCase))
+        {
+            var removedCount = _tools.Count;
+            LoadCoreTools();
+            Log("TOOLS", $"Unloaded all categories, reset to {_tools.Count} core tools");
+            return $"Reset to core tools. Removed {removedCount - _tools.Count} tools. Active: {_tools.Count}.";
+        }
+
+        var unloaded = new List<string>();
+        var notLoaded = new List<string>();
+
+        foreach (var cat in categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!_loadedCategories.Remove(cat))
+            {
+                notLoaded.Add(cat);
+                continue;
+            }
+
+            if (ToolCategories.Categories.TryGetValue(cat, out var toolNames))
+            {
+                var coreNames = ToolCategories.Core;
+                foreach (var name in toolNames)
+                {
+                    if (coreNames.Contains(name)) continue; // don't remove core tools
+                    _tools.RemoveAll(t => t is AIFunction f &&
+                        string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            unloaded.Add(cat);
+        }
+
+        Log("TOOLS", $"Unloaded [{string.Join(", ", unloaded)}]. Active: {_tools.Count} tools.");
+        if (unloaded.Count == 0)
+            return $"No categories were loaded to unload. Not loaded: {string.Join(", ", notLoaded)}.";
+        return $"Unloaded {string.Join(", ", unloaded)}. Active tools: {_tools.Count}.";
+    }
+
     /// <summary>
     /// Replay saved chat messages into an agent session's history with full fidelity.
     /// Reconstructs FunctionCallContent/FunctionResultContent from stored metadata
     /// so the agent remembers which tools it called and what they returned.
+    /// Limits replay to the most recent messages and truncates large tool results
+    /// to avoid blowing the token budget on chat restore.
     /// </summary>
     private void ReplayHistoryInto(IList<ChatMessage> history, IEnumerable<AiChatMessage> messages)
     {
-        foreach (var msg in messages)
+        const int maxReplayMessages = 20;
+        const int maxToolResultChars = 2000;
+
+        // Take only the most recent messages to avoid token explosion on restore
+        var messageList = messages as IList<AiChatMessage> ?? messages.ToList();
+        var replayMessages = messageList.Count > maxReplayMessages
+            ? messageList.Skip(messageList.Count - maxReplayMessages)
+            : messageList;
+
+        foreach (var msg in replayMessages)
         {
             var role = msg.Role == "user" ? ChatRole.User : ChatRole.Assistant;
 
@@ -969,16 +1041,22 @@ public sealed class AiOperatorService
             }
             history.Add(new ChatMessage(ChatRole.Assistant, contents));
 
-            // Tool results as separate messages (matching LLM conversation structure)
+            // Tool results as separate messages — truncate large results to save tokens
             if (msg.ToolResults is not null)
             {
                 foreach (var tr in msg.ToolResults)
                 {
+                    var result = tr.Result ?? "";
+                    if (result.Length > maxToolResultChars)
+                        result = result[..maxToolResultChars] + $"... [truncated, was {result.Length} chars]";
                     history.Add(new ChatMessage(ChatRole.Tool,
-                        [new FunctionResultContent(tr.CallId, tr.Result ?? "")]));
+                        [new FunctionResultContent(tr.CallId, result)]));
                 }
             }
         }
+
+        if (messageList.Count > maxReplayMessages)
+            Log("INFO", $"Chat restore: replayed {maxReplayMessages} of {messageList.Count} messages (older messages trimmed)");
     }
 
     /// <summary>Look up tool name from collected tool calls by matching CallId.</summary>
@@ -1129,8 +1207,9 @@ public sealed class AiOperatorService
 
     /// <summary>
     /// Build the dynamic context string to append to the user message.
-    /// Returns null if no context is available.
+    /// Returns null if context is unavailable or unchanged since last injection.
     /// </summary>
+    private string? _lastContextSuffix;
     private string? BuildContextSuffix()
     {
         if (_contextProvider is null) return null;
@@ -1138,7 +1217,12 @@ public sealed class AiOperatorService
         {
             var ctx = _contextProvider();
             if (string.IsNullOrWhiteSpace(ctx)) return null;
-            return $"[CURRENT STATE]\n{ctx}";
+            var suffix = $"[CURRENT STATE]\n{ctx}";
+            // Skip if identical to the last injected context (avoid redundant tokens in history)
+            if (string.Equals(suffix, _lastContextSuffix, StringComparison.Ordinal))
+                return null;
+            _lastContextSuffix = suffix;
+            return suffix;
         }
         catch { return null; }
     }

@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
@@ -11,7 +12,16 @@ using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
-public sealed record AiChatMessage(string Role, string Content, DateTimeOffset Timestamp);
+public sealed record AiChatMessage(string Role, string Content, DateTimeOffset Timestamp)
+{
+    /// <summary>Tool calls made by the assistant in this message (null if none).</summary>
+    public List<AiToolCallInfo>? ToolCalls { get; init; }
+    /// <summary>Tool results returned during this message (null if none).</summary>
+    public List<AiToolResultInfo>? ToolResults { get; init; }
+}
+
+public sealed record AiToolCallInfo(string CallId, string Name, string? ArgumentsJson);
+public sealed record AiToolResultInfo(string CallId, string Name, string? Result);
 
 public sealed record AiActionLogEntry(
     string ToolName,
@@ -244,14 +254,7 @@ public sealed class AiOperatorService
 
         // Replay existing display history into the new agent session
         if (_displayHistory.Count > 0 && _session.TryGetInMemoryChatHistory(out var history))
-        {
-            foreach (var msg in _displayHistory)
-            {
-                history.Add(new ChatMessage(
-                    msg.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                    msg.Content));
-            }
-        }
+            ReplayHistoryInto(history, _displayHistory);
 
         Log("INFO", $"Reconfigured AI provider (IsConfigured={IsConfigured})");
         StatusChanged?.Invoke(IsConfigured ? "Ready (provider updated)" : "Not configured");
@@ -325,6 +328,8 @@ public sealed class AiOperatorService
             // Extract tool calls and final text from all response messages
             var assistantText = "";
             int toolCallCount = 0;
+            var toolCalls = new List<AiToolCallInfo>();
+            var toolResults = new List<AiToolResultInfo>();
             foreach (var message in response.Messages)
             {
                 foreach (var content in message.Contents)
@@ -339,6 +344,9 @@ public sealed class AiOperatorService
                         var argsStr = functionCall.Arguments is not null
                             ? string.Join(", ", functionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
                             : "";
+                        var argsJson = functionCall.Arguments is not null
+                            ? JsonSerializer.Serialize(functionCall.Arguments)
+                            : null;
                         UpdateStatus($"Tool: {functionCall.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
                         Log("TOOL", $"Call: {functionCall.Name}({argsStr})");
                         _actionLog.Add(new AiActionLogEntry(
@@ -346,6 +354,8 @@ public sealed class AiOperatorService
                             argsStr,
                             "invoked",
                             DateTimeOffset.UtcNow));
+                        toolCalls.Add(new AiToolCallInfo(
+                            functionCall.CallId ?? "", functionCall.Name ?? "unknown", argsJson));
                     }
                     else if (content is FunctionResultContent functionResult)
                     {
@@ -360,6 +370,8 @@ public sealed class AiOperatorService
                                 break;
                             }
                         }
+                        toolResults.Add(new AiToolResultInfo(
+                            functionResult.CallId ?? "", LookupToolName(toolCalls, functionResult.CallId), resultStr));
                     }
                     else if (content is FunctionApprovalRequestContent approvalRequest)
                     {
@@ -385,9 +397,13 @@ public sealed class AiOperatorService
                                         var a = fc2.Arguments is not null
                                             ? string.Join(", ", fc2.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
                                             : "";
+                                        var aj = fc2.Arguments is not null
+                                            ? JsonSerializer.Serialize(fc2.Arguments) : null;
                                         UpdateStatus($"Tool: {fc2.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
                                         Log("TOOL", $"Call: {fc2.Name}({a})");
                                         _actionLog.Add(new AiActionLogEntry(fc2.Name ?? "unknown", a, "invoked", DateTimeOffset.UtcNow));
+                                        toolCalls.Add(new AiToolCallInfo(
+                                            fc2.CallId ?? "", fc2.Name ?? "unknown", aj));
                                     }
                                     else if (c is FunctionResultContent fr2)
                                     {
@@ -398,6 +414,8 @@ public sealed class AiOperatorService
                                         {
                                             if (_actionLog[i].Result == "invoked") { _actionLog[i] = _actionLog[i] with { Result = t }; break; }
                                         }
+                                        toolResults.Add(new AiToolResultInfo(
+                                            fr2.CallId ?? "", LookupToolName(toolCalls, fr2.CallId), r));
                                     }
                                 }
                             }
@@ -453,7 +471,11 @@ public sealed class AiOperatorService
                 : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})";
             UpdateStatus(summary);
             Log("INFO", $"Assistant: {(assistantText.Length > 300 ? assistantText[..300] + "..." : assistantText)}");
-            _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));
+            _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow)
+            {
+                ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
+                ToolResults = toolResults.Count > 0 ? toolResults : null
+            });
             SaveCurrentChat();
             return assistantText;
         }
@@ -518,6 +540,8 @@ public sealed class AiOperatorService
 
             int toolCallCount = 0;
             var assistantText = "";
+            var toolCalls = new List<AiToolCallInfo>();
+            var toolResults = new List<AiToolResultInfo>();
 
             try
             {
@@ -540,9 +564,13 @@ public sealed class AiOperatorService
                             var args = fc.Arguments is not null
                                 ? string.Join(", ", fc.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
                                 : "";
+                            var argsJson = fc.Arguments is not null
+                                ? JsonSerializer.Serialize(fc.Arguments) : null;
                             UpdateStatus($"Tool: {fc.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
                             Log("TOOL", $"Call: {fc.Name}({args})");
                             _actionLog.Add(new AiActionLogEntry(fc.Name ?? "unknown", args, "invoked", DateTimeOffset.UtcNow));
+                            toolCalls.Add(new AiToolCallInfo(
+                                fc.CallId ?? "", fc.Name ?? "unknown", argsJson));
                             await channel.Writer.WriteAsync(
                                 new AgentStreamEvent.ToolCallStarted(fc.Name ?? "unknown", args), cancellationToken);
                         }
@@ -559,6 +587,8 @@ public sealed class AiOperatorService
                                     break;
                                 }
                             }
+                            toolResults.Add(new AiToolResultInfo(
+                                fr.CallId ?? "", LookupToolName(toolCalls, fr.CallId), resultStr));
                             await channel.Writer.WriteAsync(
                                 new AgentStreamEvent.ToolCallCompleted(fr.CallId ?? "unknown", truncated), cancellationToken);
                         }
@@ -585,7 +615,11 @@ public sealed class AiOperatorService
                 if (string.IsNullOrWhiteSpace(assistantText))
                     assistantText = "(Tool calls executed — see action log for details)";
 
-                _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));
+                _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow)
+                {
+                    ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
+                    ToolResults = toolResults.Count > 0 ? toolResults : null
+                });
                 SaveCurrentChat();
 
                 var summary = toolCallCount > 0
@@ -634,6 +668,63 @@ public sealed class AiOperatorService
         Log("APPROVAL", $"Auto-approved {toolName} (no approval handler registered)");
         return true;
     }
+
+    /// <summary>
+    /// Replay saved chat messages into an agent session's history with full fidelity.
+    /// Reconstructs FunctionCallContent/FunctionResultContent from stored metadata
+    /// so the agent remembers which tools it called and what they returned.
+    /// </summary>
+    private void ReplayHistoryInto(IList<ChatMessage> history, IEnumerable<AiChatMessage> messages)
+    {
+        foreach (var msg in messages)
+        {
+            var role = msg.Role == "user" ? ChatRole.User : ChatRole.Assistant;
+
+            // Simple message (no tool data) — plain text replay
+            if (msg.ToolCalls is null or { Count: 0 } && msg.ToolResults is null or { Count: 0 })
+            {
+                history.Add(new ChatMessage(role, msg.Content));
+                continue;
+            }
+
+            // Assistant message with tool calls — reconstruct structured content
+            var contents = new List<AIContent>();
+            if (!string.IsNullOrEmpty(msg.Content))
+                contents.Add(new TextContent(msg.Content));
+
+            if (msg.ToolCalls is not null)
+            {
+                foreach (var tc in msg.ToolCalls)
+                {
+                    IDictionary<string, object?>? args = null;
+                    if (tc.ArgumentsJson is not null)
+                    {
+                        try
+                        {
+                            args = JsonSerializer.Deserialize<Dictionary<string, object?>>(tc.ArgumentsJson);
+                        }
+                        catch { /* fall back to null args */ }
+                    }
+                    contents.Add(new FunctionCallContent(tc.CallId, tc.Name, args));
+                }
+            }
+            history.Add(new ChatMessage(ChatRole.Assistant, contents));
+
+            // Tool results as separate messages (matching LLM conversation structure)
+            if (msg.ToolResults is not null)
+            {
+                foreach (var tr in msg.ToolResults)
+                {
+                    history.Add(new ChatMessage(ChatRole.Tool,
+                        [new FunctionResultContent(tr.CallId, tr.Result ?? "")]));
+                }
+            }
+        }
+    }
+
+    /// <summary>Look up tool name from collected tool calls by matching CallId.</summary>
+    private static string LookupToolName(List<AiToolCallInfo> toolCalls, string? callId) =>
+        toolCalls.FirstOrDefault(tc => tc.CallId == callId)?.Name ?? "unknown";
 
     /// <summary>Extract token usage from an agent response and update cumulative counters.</summary>
     private void TrackUsage(AgentResponse response)
@@ -726,16 +817,9 @@ public sealed class AiOperatorService
 
         // Rebuild MAF agent session history from saved messages.
         // We inject them into the session's in-memory chat history so the agent
-        // has context from the previous conversation.
+        // has context from the previous conversation, including tool call/result structure.
         if (_session.TryGetInMemoryChatHistory(out var history))
-        {
-            foreach (var msg in chatSession.Messages)
-            {
-                history.Add(new ChatMessage(
-                    msg.Role == "user" ? ChatRole.User : ChatRole.Assistant,
-                    msg.Content));
-            }
-        }
+            ReplayHistoryInto(history, chatSession.Messages);
 
         ChatListChanged?.Invoke();
     }

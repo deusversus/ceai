@@ -31,6 +31,15 @@ public sealed class ChatHistoryDisplayItem
     public bool IsCurrent { get; init; }
 }
 
+/// <summary>Display model for attachment chips in the chat input.</summary>
+public sealed class AttachmentChip
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string Label { get; init; } = "Pasted";
+    public string Preview { get; init; } = "";
+    public string FullText { get; init; } = "";
+}
+
 public partial class MainWindow : Window
 {
     private readonly string _databasePath;
@@ -51,6 +60,7 @@ public partial class MainWindow : Window
     private readonly MemorySnapshotService _snapshotService;
     private readonly PointerRescanService _pointerRescanService;
     private readonly AppSettingsService _appSettingsService;
+    private readonly List<AttachmentChip> _attachments = new();
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
     public MainWindow()
@@ -203,6 +213,15 @@ public partial class MainWindow : Window
         // Init search box placeholder
         ChatSearchBox.Text = (string)ChatSearchBox.Tag;
         ChatSearchBox.Foreground = FindThemeBrush("SecondaryForeground");
+
+        // Wire up chat input placeholder and paste handler
+        ModelSelectorText.Text = _appSettingsService.Settings.Model;
+        DataObject.AddPastingHandler(AiChatInputTextBox, OnChatInputPaste);
+        AiChatInputTextBox.TextChanged += (_, _) =>
+        {
+            AiChatPlaceholder.Visibility = string.IsNullOrEmpty(AiChatInputTextBox.Text)
+                ? Visibility.Visible : Visibility.Collapsed;
+        };
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -647,11 +666,23 @@ public partial class MainWindow : Window
 
     private async void SendAiMessage(object sender, RoutedEventArgs e)
     {
-        var message = AiChatInputTextBox.Text?.Trim();
+        var inputText = AiChatInputTextBox.Text?.Trim();
+
+        // Build message: attachments prepended as context blocks
+        var parts = new List<string>();
+        foreach (var att in _attachments)
+        {
+            parts.Add($"<context label=\"{att.Label}\">\n{att.FullText}\n</context>");
+        }
+        if (!string.IsNullOrEmpty(inputText))
+            parts.Add(inputText);
+
+        var message = string.Join("\n\n", parts);
         if (string.IsNullOrEmpty(message)) return;
 
         AiChatInputTextBox.Text = "";
-        // Status is now driven by AiOperatorService.StatusChanged events
+        _attachments.Clear();
+        RefreshAttachmentChips();
 
         try
         {
@@ -664,12 +695,10 @@ public partial class MainWindow : Window
         }
         finally
         {
-            // Final status is already set by StatusChanged, but ensure fallback
             if (AiStatusText.Text.StartsWith("Thinking") || AiStatusText.Text.StartsWith("Tool:"))
                 AiStatusText.Text = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
             RefreshAiChatDisplay();
             RefreshChatSwitcher();
-            // Also refresh address table in case AI modified it
             if (DataContext is WorkspaceDashboard dashboard)
             {
                 DataContext = dashboard with
@@ -681,9 +710,9 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OnAiChatKeyDown(object sender, KeyEventArgs e)
+    private void OnAiChatPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Enter)
+        if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None)
         {
             SendAiMessage(sender, e);
             e.Handled = true;
@@ -2330,14 +2359,159 @@ public partial class MainWindow : Window
         var context = e.Data.GetData("CEAIContext") as string;
         if (string.IsNullOrWhiteSpace(context)) return;
 
-        // Prepend context to the chat input
-        var existing = AiChatInputTextBox.Text?.Trim();
-        AiChatInputTextBox.Text = string.IsNullOrEmpty(existing)
-            ? context + " "
-            : context + " " + existing;
+        // Add as attachment chip instead of raw text
+        AddAttachment("Context", context);
         AiChatInputTextBox.Focus();
-        AiChatInputTextBox.CaretIndex = AiChatInputTextBox.Text.Length;
         e.Handled = true;
+    }
+
+    // ── Attachment Management ──
+
+    private void OnChatInputPaste(object sender, DataObjectPastingEventArgs e)
+    {
+        if (e.DataObject.GetDataPresent(DataFormats.UnicodeText))
+        {
+            var text = e.DataObject.GetData(DataFormats.UnicodeText) as string;
+            if (text is not null && (text.Contains('\n') || text.Length > 300))
+            {
+                e.CancelCommand();
+                AddAttachment(text.Contains('\n') ? "Pasted" : "Pasted text", text);
+            }
+        }
+    }
+
+    private void AddAttachment(string label, string fullText)
+    {
+        var lines = fullText.Split('\n');
+        var preview = lines[0].Trim();
+        if (preview.Length > 60) preview = preview[..57] + "…";
+        if (lines.Length > 1) preview += $" (+{lines.Length - 1} lines)";
+
+        _attachments.Add(new AttachmentChip
+        {
+            Label = label,
+            Preview = preview,
+            FullText = fullText
+        });
+        RefreshAttachmentChips();
+    }
+
+    private void RefreshAttachmentChips()
+    {
+        AttachmentChips.ItemsSource = null;
+        AttachmentChips.ItemsSource = _attachments.ToList();
+        AttachmentChips.Visibility = _attachments.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void RemoveAttachment_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string id)
+        {
+            _attachments.RemoveAll(a => a.Id == id);
+            RefreshAttachmentChips();
+        }
+    }
+
+    private void AttachContext_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "Attach Context File",
+            Filter = "Text files|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv|All files|*.*",
+            Multiselect = true
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            foreach (var file in dlg.FileNames)
+            {
+                try
+                {
+                    var content = File.ReadAllText(file);
+                    AddAttachment(Path.GetFileName(file), content);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show($"Failed to read {file}: {ex.Message}", "Error",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
+            }
+        }
+    }
+
+    // ── Model Selector ──
+
+    private async void ModelSelector_Click(object sender, RoutedEventArgs e)
+    {
+        if (ModelSelectorPopup.IsOpen)
+        {
+            ModelSelectorPopup.IsOpen = false;
+            return;
+        }
+
+        ModelSelectorList.Children.Clear();
+
+        var currentModel = _appSettingsService.Settings.Model;
+
+        List<string> models = new();
+        if (_appSettingsService.Settings.Provider.Equals("copilot", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(_appSettingsService.Settings.GitHubToken))
+        {
+            try
+            {
+                var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(_appSettingsService.Settings.GitHubToken);
+                models.AddRange(copilotModels.Select(m => m.Id));
+            }
+            catch { }
+        }
+
+        if (models.Count == 0)
+        {
+            models.AddRange(new[] { "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-5.4", "claude-sonnet-4", "claude-sonnet-4.5", "o4-mini" });
+        }
+
+        if (!models.Contains(currentModel))
+            models.Insert(0, currentModel);
+
+        foreach (var model in models)
+        {
+            var btn = new Button
+            {
+                Content = model,
+                FontSize = 12,
+                Padding = new Thickness(12, 6, 12, 6),
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Background = System.Windows.Media.Brushes.Transparent,
+                Foreground = (System.Windows.Media.Brush)FindResource(model == currentModel ? "AccentForeground" : "PrimaryForeground"),
+                BorderThickness = new Thickness(0),
+                Cursor = System.Windows.Input.Cursors.Hand,
+                FontWeight = model == currentModel ? FontWeights.SemiBold : FontWeights.Normal,
+                Tag = model
+            };
+            btn.Click += ModelSelectorItem_Click;
+            ModelSelectorList.Children.Add(btn);
+        }
+
+        ModelSelectorPopup.IsOpen = true;
+    }
+
+    private void ModelSelectorItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string model) return;
+        ModelSelectorPopup.IsOpen = false;
+
+        _appSettingsService.Settings.Model = model;
+        _appSettingsService.Save();
+        ModelSelectorText.Text = model;
+
+        try
+        {
+            var newClient = CreateChatClient();
+            _aiOperatorService.Reconfigure(newClient);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Model switch failed: {ex.Message}");
+        }
     }
 }
 

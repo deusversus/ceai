@@ -510,6 +510,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                         <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
                     <TextBlock Grid.Column="0" VerticalAlignment="Center">
                         <Run Text="AI OPERATOR" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource SecondaryForeground}" />
@@ -518,7 +519,10 @@
                     <Button Grid.Column="2" Content="＋ New" Padding="8,2" Margin="0,0,4,0"
                             FontSize="10" ToolTip="New Chat" Click="NewAiChat"
                             Style="{StaticResource ToolbarButton}" />
-                    <ToggleButton x:Name="ChatHistoryToggle" Grid.Column="3" Content="History"
+                    <Button Grid.Column="3" Content="Export" Padding="8,2" Margin="0,0,4,0"
+                            FontSize="10" ToolTip="Export chat to Markdown file" Click="ExportAiChat"
+                            Style="{StaticResource ToolbarButton}" />
+                    <ToggleButton x:Name="ChatHistoryToggle" Grid.Column="4" Content="History"
                                   Padding="8,2" FontSize="10" ToolTip="Toggle chat history"
                                   IsChecked="False" Click="ToggleChatHistory"
                                   Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}" />
@@ -598,36 +602,136 @@
                     </DockPanel>
                 </Border>
 
-                <!-- Bottom: Input + Status -->
-                <StackPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
-                    <Grid>
+                <!-- Bottom: Attachments + Input + Controls + Status -->
+                <DockPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
+                    <!-- Status bar at very bottom -->
+                    <Grid DockPanel.Dock="Bottom" Margin="0,4,0,0">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*" />
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
-                        <TextBox x:Name="AiChatInputTextBox" Grid.Column="0" Margin="0,0,6,0"
-                                 Padding="8,6" FontSize="12" KeyDown="OnAiChatKeyDown"
-                                 Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}" AcceptsReturn="False" />
-                        <Button Grid.Column="1" Padding="12,6" Click="SendAiMessage" Content="Send" FontSize="11" />
-                    </Grid>
-                    <Grid Margin="0,6,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="Auto" />
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <Button Grid.Column="0" Padding="6,2" Margin="0,0,6,0" Click="ClearAiChat" Content="Clear"
-                                FontSize="10" Style="{StaticResource ToolbarButton}" />
-                        <Button Grid.Column="1" Padding="6,2" Margin="0,0,6,0" Click="ExportAiChat" Content="Export"
-                                FontSize="10" ToolTip="Export chat to Markdown file" Style="{StaticResource ToolbarButton}" />
-                        <TextBlock x:Name="AiStatusText" Grid.Column="2" VerticalAlignment="Center"
+                        <TextBlock x:Name="AiStatusText" Grid.Column="0" VerticalAlignment="Center"
                                    Foreground="{DynamicResource SecondaryForeground}" Text="Ready" FontSize="11" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="AiChatTitleText" Grid.Column="3" VerticalAlignment="Center"
+                        <TextBlock x:Name="AiChatTitleText" Grid.Column="1" VerticalAlignment="Center"
                                    Foreground="{DynamicResource TertiaryForeground}" FontSize="10" TextTrimming="CharacterEllipsis"
                                    MaxWidth="120" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                     </Grid>
-                </StackPanel>
+
+                    <!-- Main input container -->
+                    <Border CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                            Background="{DynamicResource PanelBackground}" Padding="0">
+                        <DockPanel>
+                            <!-- Attachment chips area (hidden when no attachments) -->
+                            <ItemsControl x:Name="AttachmentChips" DockPanel.Dock="Top" Margin="12,8,12,0"
+                                          Visibility="Collapsed">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border Background="{DynamicResource InputBackground}" CornerRadius="6"
+                                                Padding="8,4" Margin="0,0,6,6" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                                MaxWidth="200" ToolTip="{Binding FullText}">
+                                            <Grid>
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel Grid.Column="0" MaxWidth="160">
+                                                    <TextBlock Text="{Binding Label}" FontSize="10" FontWeight="SemiBold"
+                                                               Foreground="{DynamicResource PrimaryForeground}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Text="{Binding Preview}" FontSize="9"
+                                                               Foreground="{DynamicResource SecondaryForeground}" TextTrimming="CharacterEllipsis" />
+                                                </StackPanel>
+                                                <Button Grid.Column="1" Content="✕" FontSize="9" Padding="4,0" Margin="4,0,0,0"
+                                                        Background="Transparent" Foreground="{DynamicResource SecondaryForeground}"
+                                                        BorderThickness="0" Cursor="Hand" VerticalAlignment="Center"
+                                                        Click="RemoveAttachment_Click" Tag="{Binding Id}" />
+                                            </Grid>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <!-- Bottom controls bar -->
+                            <Grid DockPanel.Dock="Bottom" Margin="8,4,8,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- + attach button -->
+                                <Button Grid.Column="0" Content="＋" FontSize="16" Padding="6,0" Margin="0,0,4,0"
+                                        Background="Transparent" Foreground="{DynamicResource SecondaryForeground}"
+                                        BorderThickness="0" Cursor="Hand" ToolTip="Attach context"
+                                        Click="AttachContext_Click" VerticalAlignment="Center" />
+
+                                <!-- Model selector dropdown -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                                    <Button x:Name="ModelSelectorButton" Click="ModelSelector_Click"
+                                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,2">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock x:Name="ModelSelectorText" Text="gpt-4o" FontSize="12"
+                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" />
+                                            <TextBlock Text=" ▾" FontSize="10" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Popup x:Name="ModelSelectorPopup" StaysOpen="False" Placement="Top"
+                                           PlacementTarget="{Binding ElementName=ModelSelectorButton}" AllowsTransparency="True">
+                                        <Border Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}"
+                                                BorderThickness="1" CornerRadius="6" Padding="4" MaxHeight="300">
+                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                <StackPanel x:Name="ModelSelectorList" />
+                                            </ScrollViewer>
+                                        </Border>
+                                    </Popup>
+                                </StackPanel>
+
+                                <!-- Send button (circular, accent color) -->
+                                <Button Grid.Column="3" Click="SendAiMessage" ToolTip="Send message (Enter)"
+                                        Width="32" Height="32" Cursor="Hand" Padding="0">
+                                    <Button.Template>
+                                        <ControlTemplate TargetType="Button">
+                                            <Border x:Name="SendBorder" Background="{DynamicResource ButtonBackground}"
+                                                    CornerRadius="16" Width="32" Height="32">
+                                                <TextBlock Text="↑" FontSize="16" FontWeight="Bold"
+                                                           Foreground="{DynamicResource ButtonForeground}"
+                                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="SendBorder" Property="Background" Value="{DynamicResource ButtonHoverBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsPressed" Value="True">
+                                                    <Setter TargetName="SendBorder" Property="Background" Value="{DynamicResource ButtonPressedBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </Button.Template>
+                                </Button>
+                            </Grid>
+
+                            <!-- TextBox input area with placeholder (multi-line, auto-grow) -->
+                            <Grid Margin="12,8,12,0">
+                                <TextBox x:Name="AiChatInputTextBox"
+                                         Padding="0,4" FontSize="13" AcceptsReturn="True" TextWrapping="Wrap"
+                                         MaxHeight="120" MinHeight="24"
+                                         VerticalScrollBarVisibility="Auto"
+                                         Background="Transparent" BorderThickness="0"
+                                         Foreground="{DynamicResource PrimaryForeground}"
+                                         CaretBrush="{DynamicResource InputCaret}"
+                                         PreviewKeyDown="OnAiChatPreviewKeyDown" />
+                                <TextBlock x:Name="AiChatPlaceholder" Text="How can I help you today?"
+                                           IsHitTestVisible="False" Padding="0,4" FontSize="13"
+                                           Foreground="{DynamicResource TertiaryForeground}" />
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </DockPanel>
 
                 <!-- Chat messages -->
                 <ScrollViewer x:Name="AiChatScrollViewer" VerticalScrollBarVisibility="Auto" Margin="8,0,8,0">

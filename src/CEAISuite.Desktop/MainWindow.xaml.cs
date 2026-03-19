@@ -1131,18 +1131,31 @@ public partial class MainWindow : Window
             Cursor = System.Windows.Input.Cursors.Hand,
         };
 
+        void CollapseCard(Border target, string label, bool approved)
+        {
+            var color = approved
+                ? Color.FromRgb(34, 139, 34)
+                : Color.FromRgb(180, 50, 50);
+            target.Padding = new Thickness(8, 4, 8, 4);
+            target.Background = Brushes.Transparent;
+            target.BorderBrush = Brushes.Transparent;
+            target.BorderThickness = new Thickness(0);
+            target.Child = new TextBlock
+            {
+                Text = label,
+                FontSize = 10,
+                FontStyle = FontStyles.Italic,
+                Foreground = new SolidColorBrush(color),
+            };
+        }
+
         void ResolveThis(bool approved)
         {
-            allowBtn.IsEnabled = false;
-            allowAllBtn.IsEnabled = false;
-            denyBtn.IsEnabled = false;
-            header.Text = approved
+            _pendingApprovals.Remove(approval);
+            var label = approved
                 ? $"✓ Approved: {approval.ToolName}"
                 : $"✗ Denied: {approval.ToolName}";
-            card.BorderBrush = approved
-                ? new SolidColorBrush(Color.FromRgb(34, 139, 34))
-                : new SolidColorBrush(Color.FromRgb(180, 50, 50));
-            _pendingApprovals.Remove(approval);
+            CollapseCard(card, label, approved);
             AiStatusText.Text = approved
                 ? $"Executing {approval.ToolName}..."
                 : $"Denied: {approval.ToolName}";
@@ -1151,7 +1164,6 @@ public partial class MainWindow : Window
 
         void ResolveAllPending(bool approved)
         {
-            // Trust all tools for the rest of this session
             foreach (var pending in _pendingApprovals.ToList())
             {
                 if (approved) _sessionTrustedTools.Add(pending.ToolName);
@@ -1159,22 +1171,12 @@ public partial class MainWindow : Window
             }
             _pendingApprovals.Clear();
 
-            // Update all approval cards visually
-            foreach (var child in AiChatContainer.Children.OfType<Border>())
+            // Collapse all approval cards
+            var suffix = approved ? "Approved" : "Denied";
+            foreach (var child in AiChatContainer.Children.OfType<Border>().ToList())
             {
                 if (child.Tag as string != "approval-card") continue;
-                child.BorderBrush = approved
-                    ? new SolidColorBrush(Color.FromRgb(34, 139, 34))
-                    : new SolidColorBrush(Color.FromRgb(180, 50, 50));
-                if (child.Child is StackPanel sp)
-                {
-                    if (sp.Children[0] is TextBlock h)
-                        h.Text = approved ? "✓ Approved (Allow All)" : "✗ Denied (Deny All)";
-                    // Disable all buttons
-                    foreach (var bp in sp.Children.OfType<StackPanel>())
-                        foreach (var btn in bp.Children.OfType<Button>())
-                            btn.IsEnabled = false;
-                }
+                CollapseCard(child, $"✓ {suffix} (Allow All)", approved);
             }
 
             AiStatusText.Text = approved

@@ -45,6 +45,9 @@ public sealed class AppSettings
 
     /// <summary>If true, queue and wait for cooldown; if false, reject with error.</summary>
     public bool RateLimitWait { get; set; } = true;
+
+    /// <summary>Stream AI responses token-by-token. Disable for batch responses.</summary>
+    public bool UseStreaming { get; set; } = true;
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]

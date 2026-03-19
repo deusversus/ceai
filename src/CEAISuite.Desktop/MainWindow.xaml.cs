@@ -693,54 +693,64 @@ public partial class MainWindow : Window
 
         try
         {
-            var reader = _aiOperatorService.SendMessageStreamingAsync(message);
-
-            // Add a placeholder for the streaming response
-            var streamItem = new AiChatDisplayItem
+            if (_appSettingsService.Settings.UseStreaming)
             {
-                RoleLabel = "AI Operator",
-                Content = "",
-                Timestamp = DateTime.Now.ToString("h:mm tt"),
-                Background = FindThemeBrush("ChatAiBubble")
-            };
+                var reader = _aiOperatorService.SendMessageStreamingAsync(message);
 
-            Dispatcher.Invoke(() =>
-            {
-                if (AiChatList.ItemsSource is List<AiChatDisplayItem> items)
+                // Add a placeholder for the streaming response
+                var streamItem = new AiChatDisplayItem
                 {
-                    items.Add(streamItem);
-                    AiChatList.Items.Refresh();
-                    AiChatScrollViewer.ScrollToEnd();
-                }
-            });
+                    RoleLabel = "AI Operator",
+                    Content = "",
+                    Timestamp = DateTime.Now.ToString("h:mm tt"),
+                    Background = FindThemeBrush("ChatAiBubble")
+                };
 
-            await foreach (var evt in reader.ReadAllAsync())
-            {
-                switch (evt)
+                Dispatcher.Invoke(() =>
                 {
-                    case AgentStreamEvent.TextDelta delta:
-                        streamItem.Content += delta.Text;
-                        Dispatcher.Invoke(() =>
-                        {
-                            AiChatList.Items.Refresh();
-                            AiChatScrollViewer.ScrollToEnd();
-                        });
-                        break;
+                    if (AiChatList.ItemsSource is List<AiChatDisplayItem> items)
+                    {
+                        items.Add(streamItem);
+                        AiChatList.Items.Refresh();
+                        AiChatScrollViewer.ScrollToEnd();
+                    }
+                });
 
-                    case AgentStreamEvent.ToolCallStarted tool:
-                        Dispatcher.Invoke(() => AiStatusText.Text = $"Tool: {tool.ToolName}");
-                        break;
+                await foreach (var evt in reader.ReadAllAsync())
+                {
+                    switch (evt)
+                    {
+                        case AgentStreamEvent.TextDelta delta:
+                            streamItem.Content += delta.Text;
+                            Dispatcher.Invoke(() =>
+                            {
+                                AiChatList.Items.Refresh();
+                                AiChatScrollViewer.ScrollToEnd();
+                            });
+                            break;
 
-                    case AgentStreamEvent.ApprovalRequested approval:
-                        var status = approval.Approved ? "approved" : "denied";
-                        Dispatcher.Invoke(() => AiStatusText.Text = $"⚠ {approval.ToolName} — {status}");
-                        break;
+                        case AgentStreamEvent.ToolCallStarted tool:
+                            Dispatcher.Invoke(() => AiStatusText.Text = $"Tool: {tool.ToolName}");
+                            break;
 
-                    case AgentStreamEvent.Error err:
-                        streamItem.Content = err.Message;
-                        Dispatcher.Invoke(() => AiChatList.Items.Refresh());
-                        break;
+                        case AgentStreamEvent.ApprovalRequested approval:
+                            var status = approval.Approved ? "approved" : "denied";
+                            Dispatcher.Invoke(() => AiStatusText.Text = $"⚠ {approval.ToolName} — {status}");
+                            break;
+
+                        case AgentStreamEvent.Error err:
+                            streamItem.Content = err.Message;
+                            Dispatcher.Invoke(() => AiChatList.Items.Refresh());
+                            break;
+                    }
                 }
+            }
+            else
+            {
+                // Non-streaming: wait for full response
+                Dispatcher.Invoke(() => AiStatusText.Text = "Thinking...");
+                var response = await Task.Run(() => _aiOperatorService.SendMessageAsync(message));
+                // RefreshAiChatDisplay in finally block will show the response
             }
         }
         catch (Exception ex)

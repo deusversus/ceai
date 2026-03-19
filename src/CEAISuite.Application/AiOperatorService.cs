@@ -66,6 +66,80 @@ internal static class DangerousTools
     };
 }
 
+/// <summary>
+/// Tool categories for progressive loading. Only core tools are loaded initially;
+/// the agent requests additional categories on-demand via <c>request_tools</c>.
+/// </summary>
+internal static class ToolCategories
+{
+    /// <summary>Tools loaded at session start — always available.</summary>
+    public static readonly HashSet<string> Core = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Process management
+        "ListProcesses", "FindProcess", "AttachProcess", "InspectProcess", "CheckProcessLiveness",
+        // Basic memory
+        "ReadMemory", "WriteMemory", "ProbeAddress", "BrowseMemory",
+        // Basic scanning
+        "StartScan", "RefineScan", "GetScanResults",
+        // Address table essentials
+        "ListAddressTable", "AddToAddressTable", "RemoveFromAddressTable", "RefreshAddressTable",
+        "FreezeAddress", "UnfreezeAddress",
+        // Context & sessions
+        "GetCurrentContext", "SummarizeInvestigation",
+        "SaveSession", "ListSessions", "LoadSession",
+        // Meta-tools (always available)
+        "request_tools", "list_tool_categories",
+    };
+
+    /// <summary>Category name → tool names. Agent calls request_tools(category) to load these.</summary>
+    public static readonly Dictionary<string, string[]> Categories = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["memory_advanced"] = [
+            "HexDump", "ListMemoryRegions", "DissectStructure",
+            "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection" ],
+        ["address_table"] = [
+            "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
+            "CreateAddressGroup", "MoveEntryToGroup", "FreezeAddressAtValue", "ToggleScript" ],
+        ["scanning_advanced"] = [
+            "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths" ],
+        ["breakpoints"] = [
+            "SetBreakpoint", "RemoveBreakpoint", "ListBreakpoints",
+            "GetBreakpointHitLog", "GetBreakpointHealth", "GetBreakpointModeCapabilities",
+            "ProbeTargetRisk", "EmergencyRestorePageProtection", "ForceDetachAndCleanup" ],
+        ["disassembly"] = [
+            "Disassemble", "FindWritersToOffset", "FindFunctionBoundaries", "GetCallerGraph",
+            "SearchInstructionPattern", "FindByMemoryOperand",
+            "GetCallStack", "GetAllThreadStacks", "ResolveSymbol" ],
+        ["hooks"] = [
+            "InstallCodeCaveHook", "RemoveCodeCaveHook", "ListCodeCaveHooks",
+            "GetCodeCaveHookHits", "DryRunHookInstall" ],
+        ["scripts"] = [
+            "ListScripts", "ViewScript", "ValidateScript", "ValidateScriptDeep",
+            "EnableScript", "DisableScript", "EditScript", "CreateScriptEntry",
+            "GenerateAutoAssemblerScript", "GenerateLuaScript", "GenerateTrainerScript" ],
+        ["snapshots"] = [
+            "CaptureSnapshot", "CompareSnapshots", "CompareSnapshotWithLive",
+            "ListSnapshots", "DeleteSnapshot" ],
+        ["safety"] = [
+            "CheckHookConflicts", "CheckAddressSafety", "ListUnsafeAddresses",
+            "ClearUnsafeAddress", "SampledWriteTrace" ],
+        ["signatures"] = [
+            "GenerateSignature", "TestSignatureUniqueness" ],
+        ["hotkeys"] = [
+            "SetHotkey", "ListHotkeys", "RemoveHotkey" ],
+        ["undo"] = [
+            "UndoWrite", "RedoWrite", "PatchHistory" ],
+        ["transactions"] = [
+            "BeginTransaction", "RollbackTransaction", "ListJournalEntries" ],
+        ["cheat_tables"] = [
+            "LoadCheatTable", "SaveCheatTable" ],
+        ["vision"] = [
+            "CaptureProcessWindow" ],
+        ["utility"] = [
+            "IdentifyArtifact" ],
+    };
+}
+
 public sealed class AiOperatorService
 {
     private AIAgent _agent;
@@ -76,7 +150,9 @@ public sealed class AiOperatorService
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore = new();
-    private readonly IList<AITool> _tools;
+    private readonly List<AITool> _tools;
+    private readonly Dictionary<string, AITool> _allToolsByName;
+    private readonly HashSet<string> _loadedCategories = new(StringComparer.OrdinalIgnoreCase);
 
     // Token usage tracking
     private long _totalPromptTokens;
@@ -147,13 +223,34 @@ public sealed class AiOperatorService
         // Dangerous tools are wrapped with ApprovalRequiredAIFunction.
         var methods = typeof(AiToolFunctions).GetMethods(
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
-        _tools = methods
+        var allTools = methods
             .Where(m => !m.IsSpecialName)
             .Select(m => AIFunctionFactory.Create(m, toolFunctions))
             .Select(fn => DangerousTools.Names.Contains(fn.Name)
                 ? (AITool)new ApprovalRequiredAIFunction(fn)
                 : fn)
             .ToList();
+
+        // Index all tools by name for on-demand loading
+        _allToolsByName = new(StringComparer.OrdinalIgnoreCase);
+        foreach (var tool in allTools)
+        {
+            var name = tool is AIFunction f ? f.Name : tool.GetType().Name;
+            _allToolsByName[name] = tool;
+        }
+
+        // Add the meta-tools for progressive tool loading
+        _allToolsByName["request_tools"] = AIFunctionFactory.Create(RequestTools, "request_tools",
+            "Load additional tool categories on-demand. Call this before using specialized tools. " +
+            "Categories: " + string.Join(", ", ToolCategories.Categories.Keys));
+        _allToolsByName["list_tool_categories"] = AIFunctionFactory.Create(ListToolCategories,
+            "list_tool_categories", "List available tool categories and which are currently loaded.");
+
+        // Start with only core tools — agent requests more via request_tools()
+        _tools = [];
+        LoadCoreTools();
+
+        Log("INFO", $"Progressive tools: {_tools.Count} core loaded, {_allToolsByName.Count} total available");
 
         _agent = BuildAgent(baseClient);
 
@@ -754,6 +851,83 @@ public sealed class AiOperatorService
         return true;
     }
 
+    // ─── Progressive Tool Loading ───────────────────────────────────────
+
+    /// <summary>Load core tools into the active tool list.</summary>
+    private void LoadCoreTools()
+    {
+        _tools.Clear();
+        _loadedCategories.Clear();
+        foreach (var name in ToolCategories.Core)
+        {
+            if (_allToolsByName.TryGetValue(name, out var tool))
+                _tools.Add(tool);
+        }
+    }
+
+    /// <summary>
+    /// Meta-tool: agent calls this to load additional tool categories on-demand.
+    /// Returns the list of newly loaded tool names.
+    /// </summary>
+    [System.ComponentModel.Description("Load additional tool categories on-demand.")]
+    private string RequestTools(
+        [System.ComponentModel.Description("Category to load (e.g. breakpoints, disassembly, scripts, hooks, snapshots, memory_advanced, scanning_advanced, address_table, safety, signatures, hotkeys, undo, transactions, cheat_tables, vision, utility). Comma-separated for multiple.")] string categories)
+    {
+        var loaded = new List<string>();
+        var alreadyLoaded = new List<string>();
+        var activeNames = new HashSet<string>(_tools.Select(t => t is AIFunction f ? f.Name : ""),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var cat in categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (_loadedCategories.Contains(cat))
+            {
+                alreadyLoaded.Add(cat);
+                continue;
+            }
+
+            if (!ToolCategories.Categories.TryGetValue(cat, out var toolNames))
+                continue;
+
+            foreach (var name in toolNames)
+            {
+                if (activeNames.Contains(name)) continue;
+                if (_allToolsByName.TryGetValue(name, out var tool))
+                {
+                    _tools.Add(tool);
+                    activeNames.Add(name);
+                    loaded.Add(name);
+                }
+            }
+            _loadedCategories.Add(cat);
+        }
+
+        Log("TOOLS", $"Loaded categories: [{categories}] → {loaded.Count} new tools " +
+            $"(active: {_tools.Count}, already loaded: [{string.Join(", ", alreadyLoaded)}])");
+
+        if (loaded.Count == 0 && alreadyLoaded.Count > 0)
+            return $"Categories already loaded: {string.Join(", ", alreadyLoaded)}. No new tools added.";
+        if (loaded.Count == 0)
+            return $"No matching categories found. Available: {string.Join(", ", ToolCategories.Categories.Keys)}";
+
+        return $"Loaded {loaded.Count} tools: {string.Join(", ", loaded)}. Active tool count: {_tools.Count}.";
+    }
+
+    /// <summary>Meta-tool: list available categories and their load status.</summary>
+    [System.ComponentModel.Description("List available tool categories and which are currently loaded.")]
+    private string ListToolCategories()
+    {
+        var lines = new List<string>();
+        foreach (var (cat, tools) in ToolCategories.Categories)
+        {
+            var status = _loadedCategories.Contains(cat) ? "✓ loaded" : "○ available";
+            lines.Add($"  {cat} ({tools.Length} tools) — {status}");
+        }
+        return $"Tool categories ({_loadedCategories.Count}/{ToolCategories.Categories.Count} loaded):\n" +
+               string.Join("\n", lines) +
+               $"\n\nActive tools: {_tools.Count} / {_allToolsByName.Count} total";
+    }
+
     /// <summary>
     /// Replay saved chat messages into an agent session's history with full fidelity.
     /// Reconstructs FunctionCallContent/FunctionResultContent from stored metadata
@@ -878,6 +1052,7 @@ public sealed class AiOperatorService
         CurrentChatId = $"chat-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}";
         CurrentChatTitle = "New Chat";
         ClearHistory();
+        LoadCoreTools(); // Reset to core tools for fresh conversation
         ChatListChanged?.Invoke();
     }
 
@@ -995,37 +1170,33 @@ public sealed class AiOperatorService
         • Your first response to a task should include TOOL CALLS, not descriptions of what you intend to do.
         • If you need to load skills, do it silently — don't narrate your preparation steps.
 
-        ═══ YOUR TOOLS ═══
-        Process: ListProcesses, InspectProcess, AttachProcess, FindProcess, CheckProcessLiveness
-        Memory: ReadMemory, WriteMemory, BrowseMemory, ProbeAddress, HexDump
-        Scanning: StartScan, RefineScan, GetScanResults, ListMemoryRegions
-        Analysis: Disassemble, DissectStructure, ScanForPointers, GenerateSignature, TestSignatureUniqueness,
-                  ResolveSymbol (converts 'Module.dll+offset' to live address — use before analysis tools)
-        Static Analysis: FindWritersToOffset, FindByMemoryOperand, FindFunctionBoundaries, GetCallerGraph,
-                         SearchInstructionPattern, TraceFieldWriters
-        Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RenameAddressTableEntry,
-                        SetEntryNotes, CreateAddressGroup, MoveEntryToGroup, RefreshAddressTable,
-                        FreezeAddress, UnfreezeAddress, FreezeAddressAtValue, ToggleScript, GetAddressTableNode
-        Breakpoints: SetBreakpoint (mode: Auto/Stealth/PageGuard/Hardware/Software), RemoveBreakpoint,
-                     ListBreakpoints, GetBreakpointHitLog, GetBreakpointHealth,
-                     EmergencyRestorePageProtection, ForceDetachAndCleanup
-        Code Cave Hooks: InstallCodeCaveHook, RemoveCodeCaveHook, ListCodeCaveHooks, GetCodeCaveHookHits,
-                         DryRunHookInstall
-        Utility: IdentifyArtifact (look up any ID to determine its type and management commands)
-        Safety: ProbeTargetRisk, CheckAddressSafety, ListUnsafeAddresses, ClearUnsafeAddress,
-                CheckHookConflicts, SampledWriteTrace
-        Transactions: BeginTransaction, RollbackTransaction, ListJournalEntries
-        Validation: ValidateScript, ValidateScriptDeep
-        Call Stack: GetCallStack, GetAllThreadStacks
-        Scripts: ListScripts, ViewScript, EnableScript, DisableScript, EditScript, CreateScriptEntry
-        Sessions: SaveSession, ListSessions, LoadSession
-        Vision: CaptureProcessWindow (captures game window screenshot for visual analysis)
-        Memory Protection: ChangeMemoryProtection, AllocateMemory, FreeMemory, QueryMemoryProtection
-        Snapshots: CaptureSnapshot, CompareSnapshots, CompareSnapshotWithLive, ListSnapshots, DeleteSnapshot
-        Pointer Rescan: RescanPointerPath, ValidatePointerPaths
-        Artifacts: GenerateTrainerScript, GenerateAutoAssemblerScript, GenerateLuaScript, SaveCheatTable
-        Other: SummarizeInvestigation, SetHotkey, ListHotkeys, RemoveHotkey, GetCurrentContext,
-               UndoWrite, RedoWrite, PatchHistory, LoadCheatTable
+        ═══ YOUR TOOLS (PROGRESSIVE LOADING) ═══
+        You start each conversation with a core set of tools (process, basic memory, scanning, address table).
+        For specialized operations, call request_tools(category) to load additional tools on-demand.
+        This keeps context lean and saves tokens — only load what you need.
+
+        ALWAYS LOADED (core):
+        Process: ListProcesses, FindProcess, AttachProcess, InspectProcess, CheckProcessLiveness
+        Memory: ReadMemory, WriteMemory, ProbeAddress, BrowseMemory
+        Scanning: StartScan, RefineScan, GetScanResults
+        Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RefreshAddressTable,
+                       FreezeAddress, UnfreezeAddress
+        Context: GetCurrentContext, SummarizeInvestigation, SaveSession, ListSessions, LoadSession
+
+        ON-DEMAND CATEGORIES (call request_tools to load):
+        • breakpoints — SetBreakpoint, RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog, ProbeTargetRisk...
+        • disassembly — Disassemble, FindWritersToOffset, GetCallerGraph, GetCallStack, ResolveSymbol...
+        • hooks — InstallCodeCaveHook, RemoveCodeCaveHook, DryRunHookInstall...
+        • scripts — ListScripts, ViewScript, EnableScript, CreateScriptEntry, GenerateAutoAssemblerScript...
+        • memory_advanced — HexDump, ListMemoryRegions, DissectStructure, ChangeMemoryProtection...
+        • scanning_advanced — ScanForPointers, RescanPointerPath, ValidatePointerPaths
+        • address_table — RenameAddressTableEntry, SetEntryNotes, CreateAddressGroup, FreezeAddressAtValue...
+        • snapshots — CaptureSnapshot, CompareSnapshots, CompareSnapshotWithLive...
+        • safety — CheckHookConflicts, CheckAddressSafety, SampledWriteTrace...
+        • signatures, hotkeys, undo, transactions, cheat_tables, vision, utility
+
+        Example: Before disassembling code, call request_tools("disassembly").
+        You can load multiple at once: request_tools("breakpoints,hooks,scripts")
 
         ═══ ARTIFACT ID PREFIXES ═══
         All IDs are prefixed by type:

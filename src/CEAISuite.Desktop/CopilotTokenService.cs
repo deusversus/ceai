@@ -22,6 +22,7 @@ internal sealed class CopilotTokenService : IDisposable
 
     private readonly HttpClient _http = new();
     private string? _sessionToken;
+    private string? _lastGithubToken; // Track which GitHub token was used
     private DateTimeOffset _expiresAt;
     private readonly SemaphoreSlim _lock = new(1, 1);
 
@@ -46,13 +47,21 @@ internal sealed class CopilotTokenService : IDisposable
     /// </summary>
     public async Task<string> GetSessionTokenAsync(string githubToken)
     {
-        // Fast path: token still valid (with 60s buffer)
-        if (_sessionToken is not null && DateTimeOffset.UtcNow < _expiresAt - TimeSpan.FromSeconds(60))
+        // Fast path: token still valid (with 60s buffer) AND same GitHub token
+        if (_sessionToken is not null && _lastGithubToken == githubToken
+            && DateTimeOffset.UtcNow < _expiresAt - TimeSpan.FromSeconds(60))
             return _sessionToken;
 
         await _lock.WaitAsync();
         try
         {
+            // Invalidate if GitHub token changed (user re-authed)
+            if (_lastGithubToken != githubToken)
+            {
+                _sessionToken = null;
+                _expiresAt = default;
+            }
+
             // Double-check after lock
             if (_sessionToken is not null && DateTimeOffset.UtcNow < _expiresAt - TimeSpan.FromSeconds(60))
                 return _sessionToken;
@@ -134,6 +143,7 @@ internal sealed class CopilotTokenService : IDisposable
             _expiresAt = DateTimeOffset.UtcNow.AddHours(1);
         }
 
+        _lastGithubToken = githubToken;
         return _sessionToken;
     }
 

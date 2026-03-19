@@ -182,10 +182,6 @@ public sealed class AiOperatorService
                     Instructions = SystemPrompt,
                     Tools = _tools,
                     Temperature = 0.3f,
-                    AdditionalProperties = new AdditionalPropertiesDictionary
-                    {
-                        ["reasoning_effort"] = "high"
-                    }
                 },
             });
     }

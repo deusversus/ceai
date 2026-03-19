@@ -200,7 +200,8 @@
                 <MenuItem Header="_Redo" Click="MenuRedo" InputGestureText="Ctrl+Y" />
             </MenuItem>
             <MenuItem Header="_View">
-                <MenuItem x:Name="MenuBarToggleItem" Header="Hide _Menu Bar" Click="ToggleMenuBar"
+                <MenuItem x:Name="MenuBarToggleItem" Header="Auto-Hide _Menu" IsCheckable="True"
+                          Checked="AutoHideMenu_Changed" Unchecked="AutoHideMenu_Changed"
                           InputGestureText="Alt" />
             </MenuItem>
             <MenuItem Header="_Tools">

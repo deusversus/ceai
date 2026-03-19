@@ -34,7 +34,7 @@ public sealed class AppSettings
     public string Model { get; set; } = "gpt-5.4";
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
-    public bool MenuBarVisible { get; set; } = true;
+    public bool AutoHideMenuBar { get; set; } = false;
     public string Theme { get; set; } = "System";
 
     /// <summary>Maximum conversation messages (excluding system prompt) sent to the API. 0 = unlimited.</summary>

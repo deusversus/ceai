@@ -156,9 +156,11 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         PreviewKeyUp += OnPreviewKeyUp;
 
-        // Apply persisted menu bar visibility
-        if (!_appSettingsService.Settings.MenuBarVisible)
+        // Apply persisted auto-hide menu bar state
+        MenuBarToggleItem.IsChecked = _appSettingsService.Settings.AutoHideMenuBar;
+        if (_appSettingsService.Settings.AutoHideMenuBar)
             MainMenu.Visibility = Visibility.Collapsed;
+        MainMenu.LostKeyboardFocus += MainMenu_LostKeyboardFocus;
     }
 
     private IChatClient? CreateChatClient()
@@ -2177,30 +2179,38 @@ public partial class MainWindow : Window
         Close();
     }
 
-    private void ToggleMenuBar(object sender, RoutedEventArgs e)
+    private void AutoHideMenu_Changed(object sender, RoutedEventArgs e)
     {
-        SetMenuBarVisible(MainMenu.Visibility == Visibility.Visible ? false : true);
+        var autoHide = MenuBarToggleItem.IsChecked;
+        _appSettingsService.Settings.AutoHideMenuBar = autoHide;
+        _appSettingsService.Save();
+        // When turning auto-hide ON, collapse after current menu interaction closes
+        // (WPF will close the menu dropdown, then LostKeyboardFocus fires and collapses the bar)
+        // When turning auto-hide OFF, menu is already visible (user just clicked it)
     }
 
     private void OnPreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        // Alt key (without other modifiers) toggles menu bar when hidden
+        // Alt key reveals a hidden (auto-hide) menu bar
         if (e.Key == System.Windows.Input.Key.System && e.SystemKey == System.Windows.Input.Key.LeftAlt
             || e.Key == System.Windows.Input.Key.System && e.SystemKey == System.Windows.Input.Key.RightAlt)
         {
-            if (MainMenu.Visibility == Visibility.Collapsed)
+            if (_appSettingsService.Settings.AutoHideMenuBar && MainMenu.Visibility == Visibility.Collapsed)
             {
-                SetMenuBarVisible(true);
+                MainMenu.Visibility = Visibility.Visible;
+                MainMenu.Focus();
                 e.Handled = true;
             }
         }
     }
 
-    private void SetMenuBarVisible(bool visible)
+    private void MainMenu_LostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
     {
-        MainMenu.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
-        _appSettingsService.Settings.MenuBarVisible = visible;
-        _appSettingsService.Save();
+        // Re-collapse the menu bar when focus leaves it, if auto-hide is on
+        if (_appSettingsService.Settings.AutoHideMenuBar && !MainMenu.IsKeyboardFocusWithin)
+        {
+            MainMenu.Visibility = Visibility.Collapsed;
+        }
     }
 
     private async void MenuUndo(object sender, RoutedEventArgs e)

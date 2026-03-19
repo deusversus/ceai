@@ -731,6 +731,11 @@ public partial class MainWindow : Window
                         Dispatcher.Invoke(() => AiStatusText.Text = $"Tool: {tool.ToolName}");
                         break;
 
+                    case AgentStreamEvent.ApprovalRequested approval:
+                        var status = approval.Approved ? "approved" : "denied";
+                        Dispatcher.Invoke(() => AiStatusText.Text = $"⚠ {approval.ToolName} — {status}");
+                        break;
+
                     case AgentStreamEvent.Error err:
                         streamItem.Content = err.Message;
                         Dispatcher.Invoke(() => AiChatList.Items.Refresh());

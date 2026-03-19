@@ -25,6 +25,7 @@ public abstract record AgentStreamEvent
     public sealed record TextDelta(string Text) : AgentStreamEvent;
     public sealed record ToolCallStarted(string ToolName, string Arguments) : AgentStreamEvent;
     public sealed record ToolCallCompleted(string ToolName, string Result) : AgentStreamEvent;
+    public sealed record ApprovalRequested(string ToolName, string Arguments, bool Approved) : AgentStreamEvent;
     public sealed record Completed(int ToolCallCount, TimeSpan Elapsed) : AgentStreamEvent;
     public sealed record Error(string Message) : AgentStreamEvent;
 }
@@ -560,6 +561,22 @@ public sealed class AiOperatorService
                             }
                             await channel.Writer.WriteAsync(
                                 new AgentStreamEvent.ToolCallCompleted(fr.CallId ?? "unknown", truncated), cancellationToken);
+                        }
+                        else if (content is FunctionApprovalRequestContent approvalRequest)
+                        {
+                            var approved = await HandleApprovalRequestAsync(approvalRequest);
+                            var toolName = approvalRequest.FunctionCall.Name ?? "unknown";
+                            var argsStr = approvalRequest.FunctionCall.Arguments is not null
+                                ? string.Join(", ", approvalRequest.FunctionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
+                                : "";
+                            await channel.Writer.WriteAsync(
+                                new AgentStreamEvent.ApprovalRequested(toolName, argsStr, approved), cancellationToken);
+
+                            // Send approval response back to agent so it can continue
+                            var responseMsg = new ChatMessage(ChatRole.User,
+                                [approvalRequest.CreateResponse(approved)]);
+                            if (_session.TryGetInMemoryChatHistory(out var approvalHistory))
+                                approvalHistory.Add(responseMsg);
                         }
                     }
                 }

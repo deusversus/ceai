@@ -35,7 +35,16 @@ public abstract record AgentStreamEvent
     public sealed record TextDelta(string Text) : AgentStreamEvent;
     public sealed record ToolCallStarted(string ToolName, string Arguments) : AgentStreamEvent;
     public sealed record ToolCallCompleted(string ToolName, string Result) : AgentStreamEvent;
-    public sealed record ApprovalRequested(string ToolName, string Arguments, bool Approved) : AgentStreamEvent;
+    /// <summary>
+    /// Emitted when a dangerous tool needs user approval. The UI should present
+    /// Allow/Deny buttons and call Resolve(true/false) to continue the agent.
+    /// </summary>
+    public sealed record ApprovalRequested(string ToolName, string Arguments) : AgentStreamEvent
+    {
+        private readonly TaskCompletionSource<bool> _tcs = new();
+        public Task<bool> UserDecision => _tcs.Task;
+        public void Resolve(bool approved) => _tcs.TrySetResult(approved);
+    }
     public sealed record Completed(int ToolCallCount, TimeSpan Elapsed) : AgentStreamEvent;
     public sealed record Error(string Message) : AgentStreamEvent;
 }
@@ -522,6 +531,11 @@ public sealed class AiOperatorService
     /// Streaming version of SendMessageAsync. Returns a ChannelReader that yields
     /// AgentStreamEvents as they arrive — text deltas, tool status, completion.
     /// The UI can consume these to update the chat in real-time.
+    ///
+    /// Approval flow: When a dangerous tool needs approval, the stream emits an
+    /// <see cref="AgentStreamEvent.ApprovalRequested"/> event with a TaskCompletionSource.
+    /// The UI should present Allow/Deny buttons and call Resolve(true/false).
+    /// The service then re-runs the agent with the approval response (MAF multi-turn pattern).
     /// </summary>
     public ChannelReader<AgentStreamEvent> SendMessageStreamingAsync(
         string userMessage, CancellationToken cancellationToken = default)
@@ -538,8 +552,7 @@ public sealed class AiOperatorService
                 ? $"{userMessage}\n\n{contextSuffix}"
                 : userMessage;
 
-            int toolCallCount = 0;
-            var assistantText = "";
+            var state = new StreamState();
             var toolCalls = new List<AiToolCallInfo>();
             var toolResults = new List<AiToolResultInfo>();
 
@@ -547,88 +560,86 @@ public sealed class AiOperatorService
             {
                 UpdateStatus("Thinking...");
 
+                // --- First run: user message ---
+                var pendingApprovals = new List<FunctionApprovalRequestContent>();
+
                 await foreach (var update in _agent.RunStreamingAsync(
                     fullUserMessage, _session, cancellationToken: cancellationToken))
                 {
-                    foreach (var content in update.Contents)
-                    {
-                        if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
-                        {
-                            assistantText += tc.Text;
-                            await channel.Writer.WriteAsync(
-                                new AgentStreamEvent.TextDelta(tc.Text), cancellationToken);
-                        }
-                        else if (content is FunctionCallContent fc)
-                        {
-                            toolCallCount++;
-                            var args = fc.Arguments is not null
-                                ? string.Join(", ", fc.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-                                : "";
-                            var argsJson = fc.Arguments is not null
-                                ? JsonSerializer.Serialize(fc.Arguments) : null;
-                            UpdateStatus($"Tool: {fc.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
-                            Log("TOOL", $"Call: {fc.Name}({args})");
-                            _actionLog.Add(new AiActionLogEntry(fc.Name ?? "unknown", args, "invoked", DateTimeOffset.UtcNow));
-                            toolCalls.Add(new AiToolCallInfo(
-                                fc.CallId ?? "", fc.Name ?? "unknown", argsJson));
-                            await channel.Writer.WriteAsync(
-                                new AgentStreamEvent.ToolCallStarted(fc.Name ?? "unknown", args), cancellationToken);
-                        }
-                        else if (content is FunctionResultContent fr)
-                        {
-                            var resultStr = fr.Result?.ToString() ?? "";
-                            var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
-                            Log("TOOL", $"Result: {truncated}");
-                            for (int i = _actionLog.Count - 1; i >= 0; i--)
-                            {
-                                if (_actionLog[i].Result == "invoked")
-                                {
-                                    _actionLog[i] = _actionLog[i] with { Result = truncated };
-                                    break;
-                                }
-                            }
-                            toolResults.Add(new AiToolResultInfo(
-                                fr.CallId ?? "", LookupToolName(toolCalls, fr.CallId), resultStr));
-                            await channel.Writer.WriteAsync(
-                                new AgentStreamEvent.ToolCallCompleted(fr.CallId ?? "unknown", truncated), cancellationToken);
-                        }
-                        else if (content is FunctionApprovalRequestContent approvalRequest)
-                        {
-                            var approved = await HandleApprovalRequestAsync(approvalRequest);
-                            var toolName = approvalRequest.FunctionCall.Name ?? "unknown";
-                            var argsStr = approvalRequest.FunctionCall.Arguments is not null
-                                ? string.Join(", ", approvalRequest.FunctionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-                                : "";
-                            await channel.Writer.WriteAsync(
-                                new AgentStreamEvent.ApprovalRequested(toolName, argsStr, approved), cancellationToken);
+                    await ProcessStreamUpdate(update, channel, sw, state,
+                        toolCalls, toolResults, pendingApprovals, cancellationToken);
+                }
 
-                            // Send approval response back to agent so it can continue
-                            var responseMsg = new ChatMessage(ChatRole.User,
-                                [approvalRequest.CreateResponse(approved)]);
-                            if (_session.TryGetInMemoryChatHistory(out var approvalHistory))
-                                approvalHistory.Add(responseMsg);
+                // --- Multi-turn approval loop (MAF pattern) ---
+                // RunStreamingAsync returns EARLY when it hits approval-required tools.
+                // We must collect approvals, get user decision, then re-run with the response.
+                while (pendingApprovals.Count > 0)
+                {
+                    var approvalResponses = new List<AIContent>();
+
+                    foreach (var approvalRequest in pendingApprovals)
+                    {
+                        var toolName = approvalRequest.FunctionCall.Name ?? "unknown";
+                        var argsStr = approvalRequest.FunctionCall.Arguments is not null
+                            ? string.Join(", ", approvalRequest.FunctionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
+                            : "";
+
+                        Log("APPROVAL", $"Requesting approval for {toolName}({argsStr})");
+
+                        // Emit interactive event — UI will show Allow/Deny and resolve the TCS
+                        var approvalEvent = new AgentStreamEvent.ApprovalRequested(toolName, argsStr);
+                        await channel.Writer.WriteAsync(approvalEvent, cancellationToken);
+
+                        // Wait for the user's decision (blocks until UI calls Resolve)
+                        bool approved;
+                        try
+                        {
+                            approved = await approvalEvent.UserDecision.WaitAsync(
+                                TimeSpan.FromMinutes(5), cancellationToken);
                         }
+                        catch (TimeoutException)
+                        {
+                            Log("APPROVAL", $"Timed out waiting for approval of {toolName} — auto-denying");
+                            approved = false;
+                        }
+
+                        Log("APPROVAL", $"{toolName}: {(approved ? "APPROVED" : "DENIED")} by user");
+                        approvalResponses.Add(approvalRequest.CreateResponse(approved));
                     }
+
+                    pendingApprovals.Clear();
+
+                    // Re-run agent with all approval responses
+                    var approvalMsg = new ChatMessage(ChatRole.User, approvalResponses);
+                    UpdateStatus("Executing approved tools...");
+
+                    await foreach (var update in _agent.RunStreamingAsync(
+                        [approvalMsg], _session, cancellationToken: cancellationToken))
+                    {
+                        await ProcessStreamUpdate(update, channel, sw, state,
+                            toolCalls, toolResults, pendingApprovals, cancellationToken);
+                    }
+                    // Loop again if the re-run triggered MORE approval requests
                 }
 
                 sw.Stop();
-                if (string.IsNullOrWhiteSpace(assistantText))
-                    assistantText = "(Tool calls executed — see action log for details)";
+                if (string.IsNullOrWhiteSpace(state.AssistantText))
+                    state.AssistantText = "(Tool calls executed — see action log for details)";
 
-                _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow)
+                _displayHistory.Add(new AiChatMessage("assistant", state.AssistantText, DateTimeOffset.UtcNow)
                 {
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
                     ToolResults = toolResults.Count > 0 ? toolResults : null
                 });
                 SaveCurrentChat();
 
-                var summary = toolCallCount > 0
-                    ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s)"
+                var summary = state.ToolCallCount > 0
+                    ? $"Done ({state.ToolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s)"
                     : $"Done ({sw.Elapsed.TotalSeconds:F1}s)";
                 UpdateStatus(summary);
 
                 await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Completed(toolCallCount, sw.Elapsed), cancellationToken);
+                    new AgentStreamEvent.Completed(state.ToolCallCount, sw.Elapsed), cancellationToken);
             }
             catch (Exception ex)
             {
@@ -647,6 +658,78 @@ public sealed class AiOperatorService
         }, cancellationToken);
 
         return channel.Reader;
+    }
+
+    /// <summary>Mutable holder for streaming state (avoids ref params in async methods).</summary>
+    private sealed class StreamState
+    {
+        public int ToolCallCount;
+        public string AssistantText = "";
+    }
+
+    /// <summary>
+    /// Process a single streaming update from RunStreamingAsync — extracts text, tool calls,
+    /// tool results, and approval requests into the appropriate collections.
+    /// </summary>
+    private async Task ProcessStreamUpdate(
+        AgentResponseUpdate update,
+        Channel<AgentStreamEvent> channel,
+        System.Diagnostics.Stopwatch sw,
+        StreamState state,
+        List<AiToolCallInfo> toolCalls,
+        List<AiToolResultInfo> toolResults,
+        List<FunctionApprovalRequestContent> pendingApprovals,
+        CancellationToken cancellationToken)
+    {
+        foreach (var content in update.Contents)
+        {
+            if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
+            {
+                state.AssistantText += tc.Text;
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.TextDelta(tc.Text), cancellationToken);
+            }
+            else if (content is FunctionCallContent fc)
+            {
+                state.ToolCallCount++;
+                var args = fc.Arguments is not null
+                    ? string.Join(", ", fc.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
+                    : "";
+                var argsJson = fc.Arguments is not null
+                    ? JsonSerializer.Serialize(fc.Arguments) : null;
+                UpdateStatus($"Tool: {fc.Name ?? "unknown"} ({state.ToolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
+                Log("TOOL", $"Call: {fc.Name}({args})");
+                _actionLog.Add(new AiActionLogEntry(fc.Name ?? "unknown", args, "invoked", DateTimeOffset.UtcNow));
+                toolCalls.Add(new AiToolCallInfo(
+                    fc.CallId ?? "", fc.Name ?? "unknown", argsJson));
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.ToolCallStarted(fc.Name ?? "unknown", args), cancellationToken);
+            }
+            else if (content is FunctionResultContent fr)
+            {
+                var resultStr = fr.Result?.ToString() ?? "";
+                var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
+                Log("TOOL", $"Result: {truncated}");
+                for (int i = _actionLog.Count - 1; i >= 0; i--)
+                {
+                    if (_actionLog[i].Result == "invoked")
+                    {
+                        _actionLog[i] = _actionLog[i] with { Result = truncated };
+                        break;
+                    }
+                }
+                toolResults.Add(new AiToolResultInfo(
+                    fr.CallId ?? "", LookupToolName(toolCalls, fr.CallId), resultStr));
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.ToolCallCompleted(fr.CallId ?? "unknown", truncated), cancellationToken);
+            }
+            else if (content is FunctionApprovalRequestContent approvalRequest)
+            {
+                // Collect — don't process inline. MAF expects the stream to complete first,
+                // then we re-run with approval responses (multi-turn pattern).
+                pendingApprovals.Add(approvalRequest);
+            }
+        }
     }
 
     /// <summary>Handle an approval request for a dangerous tool call.</summary>

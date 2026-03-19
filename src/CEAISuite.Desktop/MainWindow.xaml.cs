@@ -129,6 +129,14 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(RefreshChatSwitcher);
         };
 
+        // Wire up non-streaming approval handler (shows inline UI, waits for user decision)
+        _aiOperatorService.ApprovalRequested += async (toolName, argsStr) =>
+        {
+            var approval = new AgentStreamEvent.ApprovalRequested(toolName, argsStr);
+            await Dispatcher.InvokeAsync(() => ShowInlineApprovalCard(approval));
+            return await approval.UserDecision;
+        };
+
         _appSettingsService.SettingsChanged += () =>
         {
             Dispatcher.Invoke(() =>
@@ -734,8 +742,10 @@ public partial class MainWindow : Window
                             break;
 
                         case AgentStreamEvent.ApprovalRequested approval:
-                            var status = approval.Approved ? "approved" : "denied";
-                            Dispatcher.Invoke(() => AiStatusText.Text = $"⚠ {approval.ToolName} — {status}");
+                            await Dispatcher.InvokeAsync(() =>
+                            {
+                                ShowInlineApprovalCard(approval);
+                            });
                             break;
 
                         case AgentStreamEvent.Error err:
@@ -1021,6 +1031,106 @@ public partial class MainWindow : Window
     private static Brush FindThemeBrush(string key) =>
         System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
 
+    /// <summary>
+    /// Shows an inline approval card in the chat with Allow/Deny buttons.
+    /// When the user clicks either button, it resolves the approval event's TaskCompletionSource
+    /// so the agent can continue or abort the tool call.
+    /// </summary>
+    private void ShowInlineApprovalCard(AgentStreamEvent.ApprovalRequested approval)
+    {
+        AiStatusText.Text = $"⚠ Awaiting approval: {approval.ToolName}";
+
+        var card = new Border
+        {
+            CornerRadius = new CornerRadius(6),
+            Padding = new Thickness(12, 10, 12, 10),
+            Margin = new Thickness(0, 4, 0, 4),
+            Background = FindThemeBrush("WarningBackground"),
+            BorderBrush = FindThemeBrush("WarningBorder"),
+            BorderThickness = new Thickness(1),
+        };
+
+        var stack = new StackPanel();
+
+        var header = new TextBlock
+        {
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 12,
+            Foreground = FindThemeBrush("WarningForeground"),
+            Text = "⚠ Tool Approval Required",
+            Margin = new Thickness(0, 0, 0, 4)
+        };
+        stack.Children.Add(header);
+
+        var toolInfo = new TextBlock
+        {
+            FontSize = 11,
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = FindThemeBrush("PrimaryForeground"),
+            Text = string.IsNullOrEmpty(approval.Arguments)
+                ? approval.ToolName
+                : $"{approval.ToolName}({approval.Arguments})"
+        };
+        stack.Children.Add(toolInfo);
+
+        var buttonPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 8, 0, 0)
+        };
+
+        var allowBtn = new Button
+        {
+            Content = "✓ Allow",
+            Padding = new Thickness(16, 4, 16, 4),
+            Margin = new Thickness(0, 0, 8, 0),
+            Background = new SolidColorBrush(Color.FromRgb(34, 139, 34)),
+            Foreground = Brushes.White,
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 11,
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+
+        var denyBtn = new Button
+        {
+            Content = "✗ Deny",
+            Padding = new Thickness(16, 4, 16, 4),
+            Background = new SolidColorBrush(Color.FromRgb(180, 50, 50)),
+            Foreground = Brushes.White,
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 11,
+            Cursor = System.Windows.Input.Cursors.Hand,
+        };
+
+        void ResolveApproval(bool approved)
+        {
+            allowBtn.IsEnabled = false;
+            denyBtn.IsEnabled = false;
+            header.Text = approved
+                ? $"✓ Approved: {approval.ToolName}"
+                : $"✗ Denied: {approval.ToolName}";
+            card.BorderBrush = approved
+                ? new SolidColorBrush(Color.FromRgb(34, 139, 34))
+                : new SolidColorBrush(Color.FromRgb(180, 50, 50));
+            AiStatusText.Text = approved
+                ? $"Executing {approval.ToolName}..."
+                : $"Denied: {approval.ToolName}";
+            approval.Resolve(approved);
+        }
+
+        allowBtn.Click += (_, _) => ResolveApproval(true);
+        denyBtn.Click += (_, _) => ResolveApproval(false);
+
+        buttonPanel.Children.Add(allowBtn);
+        buttonPanel.Children.Add(denyBtn);
+        stack.Children.Add(buttonPanel);
+        card.Child = stack;
+
+        // Add the approval card to the chat container (after the ItemsControl)
+        AiChatContainer.Children.Add(card);
+        AiChatScrollViewer.ScrollToEnd();
+    }
+
     private void RefreshAiChatDisplay()
     {
         var userBrush = FindThemeBrush("ChatUserBubble");
@@ -1035,6 +1145,14 @@ public partial class MainWindow : Window
         }).ToList();
 
         AiChatList.ItemsSource = items;
+
+        // Remove any approval cards that were injected during streaming
+        for (int i = AiChatContainer.Children.Count - 1; i >= 0; i--)
+        {
+            if (AiChatContainer.Children[i] != AiChatList)
+                AiChatContainer.Children.RemoveAt(i);
+        }
+
         AiChatScrollViewer.ScrollToEnd();
         AiChatTitleText.Text = _aiOperatorService.CurrentChatTitle;
     }

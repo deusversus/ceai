@@ -16,6 +16,8 @@
     <SolidColorBrush x:Key="TertiaryForeground"       Color="#999999" />
     <SolidColorBrush x:Key="AccentForeground"         Color="#0451A5" />
     <SolidColorBrush x:Key="WarningForeground"        Color="#795E26" />
+    <SolidColorBrush x:Key="WarningBackground"       Color="#FFF8E1" />
+    <SolidColorBrush x:Key="WarningBorder"           Color="#F0C36D" />
     <SolidColorBrush x:Key="SuccessForeground"        Color="#008000" />
 
     <!-- Borders -->

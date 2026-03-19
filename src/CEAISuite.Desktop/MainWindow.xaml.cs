@@ -1028,17 +1028,32 @@ public partial class MainWindow : Window
         ChatHistoryList.ItemsSource = filtered;
     }
 
+    // Track pending approval events so "Allow All" / "Deny All" can resolve them
+    private readonly List<AgentStreamEvent.ApprovalRequested> _pendingApprovals = new();
+    // Tools the user has approved for this session (skip future prompts)
+    private readonly HashSet<string> _sessionTrustedTools = new(StringComparer.OrdinalIgnoreCase);
+
     private static Brush FindThemeBrush(string key) =>
         System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
 
     /// <summary>
-    /// Shows an inline approval card in the chat with Allow/Deny buttons.
-    /// When the user clicks either button, it resolves the approval event's TaskCompletionSource
+    /// Shows an inline approval card in the chat with Allow/Deny/Allow All buttons.
+    /// When the user clicks a button, it resolves the approval event's TaskCompletionSource
     /// so the agent can continue or abort the tool call.
+    /// If the tool was already trusted this session, auto-approves immediately.
     /// </summary>
     private void ShowInlineApprovalCard(AgentStreamEvent.ApprovalRequested approval)
     {
-        AiStatusText.Text = $"⚠ Awaiting approval: {approval.ToolName}";
+        // Auto-approve tools the user already trusted this session
+        if (_sessionTrustedTools.Contains(approval.ToolName))
+        {
+            AiStatusText.Text = $"✓ Auto-approved: {approval.ToolName}";
+            approval.Resolve(true);
+            return;
+        }
+
+        _pendingApprovals.Add(approval);
+        AiStatusText.Text = $"⚠ Awaiting approval: {approval.ToolName} ({_pendingApprovals.Count} pending)";
 
         var card = new Border
         {
@@ -1048,6 +1063,7 @@ public partial class MainWindow : Window
             Background = FindThemeBrush("WarningBackground"),
             BorderBrush = FindThemeBrush("WarningBorder"),
             BorderThickness = new Thickness(1),
+            Tag = "approval-card",
         };
 
         var stack = new StackPanel();
@@ -1082,8 +1098,8 @@ public partial class MainWindow : Window
         var allowBtn = new Button
         {
             Content = "✓ Allow",
-            Padding = new Thickness(16, 4, 16, 4),
-            Margin = new Thickness(0, 0, 8, 0),
+            Padding = new Thickness(12, 4, 12, 4),
+            Margin = new Thickness(0, 0, 6, 0),
             Background = new SolidColorBrush(Color.FromRgb(34, 139, 34)),
             Foreground = Brushes.White,
             FontWeight = FontWeights.SemiBold,
@@ -1091,10 +1107,23 @@ public partial class MainWindow : Window
             Cursor = System.Windows.Input.Cursors.Hand,
         };
 
+        var allowAllBtn = new Button
+        {
+            Content = "✓ Allow All",
+            Padding = new Thickness(12, 4, 12, 4),
+            Margin = new Thickness(0, 0, 6, 0),
+            Background = new SolidColorBrush(Color.FromRgb(26, 110, 26)),
+            Foreground = Brushes.White,
+            FontWeight = FontWeights.SemiBold,
+            FontSize = 11,
+            Cursor = System.Windows.Input.Cursors.Hand,
+            ToolTip = "Approve this and all future tool calls this session",
+        };
+
         var denyBtn = new Button
         {
             Content = "✗ Deny",
-            Padding = new Thickness(16, 4, 16, 4),
+            Padding = new Thickness(12, 4, 12, 4),
             Background = new SolidColorBrush(Color.FromRgb(180, 50, 50)),
             Foreground = Brushes.White,
             FontWeight = FontWeights.SemiBold,
@@ -1102,9 +1131,10 @@ public partial class MainWindow : Window
             Cursor = System.Windows.Input.Cursors.Hand,
         };
 
-        void ResolveApproval(bool approved)
+        void ResolveThis(bool approved)
         {
             allowBtn.IsEnabled = false;
+            allowAllBtn.IsEnabled = false;
             denyBtn.IsEnabled = false;
             header.Text = approved
                 ? $"✓ Approved: {approval.ToolName}"
@@ -1112,21 +1142,56 @@ public partial class MainWindow : Window
             card.BorderBrush = approved
                 ? new SolidColorBrush(Color.FromRgb(34, 139, 34))
                 : new SolidColorBrush(Color.FromRgb(180, 50, 50));
+            _pendingApprovals.Remove(approval);
             AiStatusText.Text = approved
                 ? $"Executing {approval.ToolName}..."
                 : $"Denied: {approval.ToolName}";
             approval.Resolve(approved);
         }
 
-        allowBtn.Click += (_, _) => ResolveApproval(true);
-        denyBtn.Click += (_, _) => ResolveApproval(false);
+        void ResolveAllPending(bool approved)
+        {
+            // Trust all tools for the rest of this session
+            foreach (var pending in _pendingApprovals.ToList())
+            {
+                if (approved) _sessionTrustedTools.Add(pending.ToolName);
+                pending.Resolve(approved);
+            }
+            _pendingApprovals.Clear();
+
+            // Update all approval cards visually
+            foreach (var child in AiChatContainer.Children.OfType<Border>())
+            {
+                if (child.Tag as string != "approval-card") continue;
+                child.BorderBrush = approved
+                    ? new SolidColorBrush(Color.FromRgb(34, 139, 34))
+                    : new SolidColorBrush(Color.FromRgb(180, 50, 50));
+                if (child.Child is StackPanel sp)
+                {
+                    if (sp.Children[0] is TextBlock h)
+                        h.Text = approved ? "✓ Approved (Allow All)" : "✗ Denied (Deny All)";
+                    // Disable all buttons
+                    foreach (var bp in sp.Children.OfType<StackPanel>())
+                        foreach (var btn in bp.Children.OfType<Button>())
+                            btn.IsEnabled = false;
+                }
+            }
+
+            AiStatusText.Text = approved
+                ? "Executing approved tools..."
+                : "Denied all pending tools";
+        }
+
+        allowBtn.Click += (_, _) => ResolveThis(true);
+        allowAllBtn.Click += (_, _) => ResolveAllPending(true);
+        denyBtn.Click += (_, _) => ResolveThis(false);
 
         buttonPanel.Children.Add(allowBtn);
+        buttonPanel.Children.Add(allowAllBtn);
         buttonPanel.Children.Add(denyBtn);
         stack.Children.Add(buttonPanel);
         card.Child = stack;
 
-        // Add the approval card to the chat container (after the ItemsControl)
         AiChatContainer.Children.Add(card);
         AiChatScrollViewer.ScrollToEnd();
     }

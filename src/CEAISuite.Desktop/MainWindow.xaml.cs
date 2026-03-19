@@ -2044,6 +2044,50 @@ public partial class MainWindow : Window
 
     // ── Menu bar handlers ──
 
+    private void OpenSkillsManager(object sender, RoutedEventArgs e)
+    {
+        var window = new SkillsManagerWindow();
+        window.Owner = this;
+        window.ShowDialog();
+
+        if (window.SkillsChanged)
+        {
+            try
+            {
+                var newClient = CreateChatClient();
+                _aiOperatorService.Reconfigure(newClient);
+            }
+            catch { }
+        }
+    }
+
+    private void OpenSkillsFolder(object sender, RoutedEventArgs e)
+    {
+        var userSkillsDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CEAISuite", "skills");
+        Directory.CreateDirectory(userSkillsDir);
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = userSkillsDir,
+            UseShellExecute = true
+        });
+    }
+
+    private void ReloadSkills(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var newClient = CreateChatClient();
+            _aiOperatorService.Reconfigure(newClient);
+            MessageBox.Show("Skills reloaded successfully.", "Skills", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to reload: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+    }
+
     private void OpenSettings(object sender, RoutedEventArgs e)
     {
         var settingsWindow = new SettingsWindow(_appSettingsService);

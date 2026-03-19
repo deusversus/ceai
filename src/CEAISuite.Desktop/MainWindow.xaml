@@ -206,6 +206,12 @@
             <MenuItem Header="_Tools">
                 <MenuItem Header="_Memory Browser" Click="OpenMemoryBrowser" />
             </MenuItem>
+            <MenuItem Header="S_kills">
+                <MenuItem Header="_Manage Skills…" Click="OpenSkillsManager" />
+                <MenuItem Header="Open Skills _Folder" Click="OpenSkillsFolder" />
+                <Separator />
+                <MenuItem Header="_Reload Skills" Click="ReloadSkills" />
+            </MenuItem>
             <MenuItem Header="_Settings" Click="OpenSettings" />
             <MenuItem Header="_Help">
                 <MenuItem Header="_About CE AI Suite" Click="ShowAbout" />

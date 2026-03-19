@@ -139,10 +139,10 @@ internal static class ChatClientFactory
         }
 
         /// <summary>
-        /// The .NET MEAI/OpenAI SDK double-JSON-encodes FunctionResultContent.Result
-        /// when it's a string: the content field becomes "\"actual text\"" instead of
-        /// "actual text". The Copilot API rejects this. This method rewrites the
-        /// request body to unwrap double-encoded tool message content.
+        /// Fix .NET SDK serialization quirks that the Copilot API rejects:
+        /// 1. Double-encoded tool message content ("\"text\"" → "text")
+        /// 2. Tool call arguments "null" → "{}" (parameterless functions)
+        /// 3. Duplicate tool names (from multiple skills providers)
         /// </summary>
         private static void FixToolContentEncoding(System.ClientModel.Primitives.PipelineMessage message)
         {
@@ -155,35 +155,56 @@ internal static class ChatClientFactory
                 var bodyBytes = ms.ToArray();
                 var body = System.Text.Encoding.UTF8.GetString(bodyBytes);
 
-                // Quick check: skip rewrite if no tool messages
-                if (!body.Contains("\"role\":\"tool\"") && !body.Contains("\"role\": \"tool\""))
-                    return;
-
                 using var doc = System.Text.Json.JsonDocument.Parse(body);
                 var root = doc.RootElement;
 
-                if (!root.TryGetProperty("messages", out var messages))
-                    return;
-
                 bool needsRewrite = false;
-                foreach (var msg in messages.EnumerateArray())
+
+                // Check messages for issues
+                if (root.TryGetProperty("messages", out var messages))
                 {
-                    if (msg.TryGetProperty("role", out var role) && role.GetString() == "tool"
-                        && msg.TryGetProperty("content", out var content) && content.ValueKind == System.Text.Json.JsonValueKind.String)
+                    foreach (var msg in messages.EnumerateArray())
                     {
-                        var val = content.GetString();
-                        if (val is not null && val.Length >= 2 && val[0] == '"' && val[^1] == '"')
+                        if (!msg.TryGetProperty("role", out var role)) continue;
+                        var roleStr = role.GetString();
+
+                        if (roleStr == "tool" && msg.TryGetProperty("content", out var content)
+                            && content.ValueKind == System.Text.Json.JsonValueKind.String)
                         {
-                            // Content is double-encoded — needs rewrite
-                            needsRewrite = true;
-                            break;
+                            var val = content.GetString();
+                            if (val is not null && val.Length >= 2 && val[0] == '"' && val[^1] == '"')
+                                needsRewrite = true;
                         }
+
+                        if (roleStr == "assistant" && msg.TryGetProperty("tool_calls", out var tcs))
+                        {
+                            foreach (var tc in tcs.EnumerateArray())
+                            {
+                                if (tc.TryGetProperty("function", out var fn)
+                                    && fn.TryGetProperty("arguments", out var args)
+                                    && args.GetString() == "null")
+                                    needsRewrite = true;
+                            }
+                        }
+                    }
+                }
+
+                // Check for duplicate tool names
+                if (root.TryGetProperty("tools", out var tools))
+                {
+                    var seen = new HashSet<string>();
+                    foreach (var tool in tools.EnumerateArray())
+                    {
+                        if (tool.TryGetProperty("function", out var fn)
+                            && fn.TryGetProperty("name", out var name)
+                            && !seen.Add(name.GetString()!))
+                            needsRewrite = true;
                     }
                 }
 
                 if (!needsRewrite) return;
 
-                // Rebuild the JSON with fixed tool content
+                // Rebuild JSON with all fixes
                 using var output = new System.IO.MemoryStream();
                 using (var writer = new System.Text.Json.Utf8JsonWriter(output))
                 {
@@ -196,33 +217,63 @@ internal static class ChatClientFactory
                             writer.WriteStartArray();
                             foreach (var msg in prop.Value.EnumerateArray())
                             {
-                                bool isToolMsg = msg.TryGetProperty("role", out var r) && r.GetString() == "tool";
-                                if (isToolMsg)
+                                var roleStr = msg.TryGetProperty("role", out var r) ? r.GetString() : null;
+                                bool isToolMsg = roleStr == "tool";
+                                bool isAssistantMsg = roleStr == "assistant";
+
+                                if (isToolMsg || isAssistantMsg)
                                 {
                                     writer.WriteStartObject();
                                     foreach (var field in msg.EnumerateObject())
                                     {
-                                        if (field.Name == "content" && field.Value.ValueKind == System.Text.Json.JsonValueKind.String)
+                                        // Fix 1: unwrap double-encoded tool content
+                                        if (isToolMsg && field.Name == "content"
+                                            && field.Value.ValueKind == System.Text.Json.JsonValueKind.String)
                                         {
                                             var val = field.Value.GetString();
                                             if (val is not null && val.Length >= 2 && val[0] == '"' && val[^1] == '"')
                                             {
-                                                // Unwrap: try JSON-deserializing the inner string
                                                 try
                                                 {
                                                     var unwrapped = System.Text.Json.JsonSerializer.Deserialize<string>(val);
                                                     writer.WriteString("content", unwrapped);
+                                                    continue;
                                                 }
-                                                catch
-                                                {
-                                                    // Not valid double-encoding; keep as-is
-                                                    field.WriteTo(writer);
-                                                }
+                                                catch { }
                                             }
-                                            else
+                                            field.WriteTo(writer);
+                                        }
+                                        // Fix 2: rewrite "null" arguments to "{}"
+                                        else if (isAssistantMsg && field.Name == "tool_calls")
+                                        {
+                                            writer.WritePropertyName("tool_calls");
+                                            writer.WriteStartArray();
+                                            foreach (var tc in field.Value.EnumerateArray())
                                             {
-                                                field.WriteTo(writer);
+                                                writer.WriteStartObject();
+                                                foreach (var tcField in tc.EnumerateObject())
+                                                {
+                                                    if (tcField.Name == "function")
+                                                    {
+                                                        writer.WritePropertyName("function");
+                                                        writer.WriteStartObject();
+                                                        foreach (var fnField in tcField.Value.EnumerateObject())
+                                                        {
+                                                            if (fnField.Name == "arguments" && fnField.Value.GetString() == "null")
+                                                                writer.WriteString("arguments", "{}");
+                                                            else
+                                                                fnField.WriteTo(writer);
+                                                        }
+                                                        writer.WriteEndObject();
+                                                    }
+                                                    else
+                                                    {
+                                                        tcField.WriteTo(writer);
+                                                    }
+                                                }
+                                                writer.WriteEndObject();
                                             }
+                                            writer.WriteEndArray();
                                         }
                                         else
                                         {
@@ -238,6 +289,22 @@ internal static class ChatClientFactory
                             }
                             writer.WriteEndArray();
                         }
+                        // Fix 3: deduplicate tools by function name
+                        else if (prop.Name == "tools")
+                        {
+                            writer.WritePropertyName("tools");
+                            writer.WriteStartArray();
+                            var seenNames = new HashSet<string>();
+                            foreach (var tool in prop.Value.EnumerateArray())
+                            {
+                                if (tool.TryGetProperty("function", out var fn)
+                                    && fn.TryGetProperty("name", out var name)
+                                    && !seenNames.Add(name.GetString()!))
+                                    continue;
+                                tool.WriteTo(writer);
+                            }
+                            writer.WriteEndArray();
+                        }
                         else
                         {
                             prop.WriteTo(writer);
@@ -248,7 +315,7 @@ internal static class ChatClientFactory
 
                 var fixedBytes = output.ToArray();
                 message.Request.Content = System.ClientModel.BinaryContent.Create(new BinaryData(fixedBytes));
-                LogDiag($"REWRITE: fixed double-encoded tool content ({bodyBytes.Length}B → {fixedBytes.Length}B)");
+                LogDiag($"REWRITE: fixed request ({bodyBytes.Length}B → {fixedBytes.Length}B)");
             }
             catch (Exception ex)
             {

@@ -363,18 +363,49 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Added to address table: {entry.Label} at {entry.Address} ({entry.DataType})");
     }
 
-    [Description("List all entries currently in the address table. Shows ID, label, address, value, type, and lock state.")]
-    public Task<string> ListAddressTable()
+    [Description("List all entries currently in the address table. Shows ID, label, address, value, type, and lock state. Returns up to 50 entries; use offset parameter to paginate.")]
+    public Task<string> ListAddressTable(
+        [Description("Number of entries to skip (default 0). Use for pagination.")] int offset = 0,
+        [Description("Max entries to return (default 50, max 100).")] int limit = 50)
     {
         var roots = addressTableService.Roots;
-        if (roots.Count == 0)
-            return Task.FromResult(ToJson(new { entries = Array.Empty<object>(), count = 0 }));
+        var totalCount = CountNodes(roots);
+        if (totalCount == 0)
+            return Task.FromResult(ToJson(new { entries = Array.Empty<object>(), count = 0, total = 0 }));
+
+        limit = Math.Clamp(limit, 1, 100);
+        var allNodes = FlattenNodes(roots);
+        var page = allNodes.Skip(offset).Take(limit);
 
         return Task.FromResult(ToJson(new
         {
-            entries = FormatNodesJson(roots),
-            count = CountNodes(roots)
+            entries = page,
+            count = page.Count(),
+            total = totalCount,
+            offset,
+            hasMore = offset + limit < totalCount
         }));
+    }
+
+    private static List<object> FlattenNodes(IEnumerable<AddressTableNode> nodes)
+    {
+        var result = new List<object>();
+        foreach (var n in nodes)
+        {
+            result.Add(FormatNodeJson(n));
+            if (n.IsGroup && n.Children.Count > 0)
+                result.AddRange(FlattenNodes(n.Children));
+        }
+        return result;
+    }
+
+    private static object FormatNodeJson(AddressTableNode n)
+    {
+        if (n.IsGroup)
+            return new { n.Id, n.Label, type = "group", childCount = n.Children.Count };
+        if (n.IsScriptEntry)
+            return new { n.Id, n.Label, type = "script", enabled = n.IsScriptEnabled };
+        return new { n.Id, n.Label, n.Address, n.DisplayValue, n.DataType, n.IsLocked };
     }
 
     private static void FormatNodes(System.Text.StringBuilder sb, IEnumerable<AddressTableNode> nodes, int indent)

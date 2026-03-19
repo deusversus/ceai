@@ -174,11 +174,13 @@ public sealed class AiOperatorService
         // 2. LLM-powered summarization when context gets large (costs an API call!)
         // 3. Sliding window: keep most recent N user turns (cheap)
         // 4. Emergency truncation backstop (cheap)
+        // Budget: Copilot model limit = 128K. Tool defs ~10K + system prompt ~3K = ~13K overhead.
+        // Leave ~15K for the response → message budget ≈ 100K. Triggers set conservatively.
         var compactionPipeline = new PipelineCompactionStrategy(
-            new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(20)),
-            new SummarizationCompactionStrategy(client, CompactionTriggers.TokensExceed(48_000)),
-            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(30)),
-            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(96_000)));
+            new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(12)),
+            new SummarizationCompactionStrategy(client, CompactionTriggers.TokensExceed(32_000)),
+            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(15)),
+            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(64_000)));
 
         // Discover agent skills from the skills/ directory.
         // Progressive disclosure: only name+description are advertised per skill (~100 tokens each),

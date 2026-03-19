@@ -1,4 +1,5 @@
 ﻿using System.IO;
+using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -16,7 +17,7 @@ namespace CEAISuite.Desktop;
 public sealed class AiChatDisplayItem
 {
     public string RoleLabel { get; init; } = "";
-    public string Content { get; init; } = "";
+    public string Content { get; set; } = "";
     public string Timestamp { get; init; } = "";
     public Brush Background { get; init; } = Brushes.Transparent;
 }
@@ -684,9 +685,56 @@ public partial class MainWindow : Window
         _attachments.Clear();
         RefreshAttachmentChips();
 
+        // Show user message immediately before starting AI work
+        _aiOperatorService.AddUserMessageToHistory(message);
+        RefreshAiChatDisplay();
+
         try
         {
-            await _aiOperatorService.SendMessageAsync(message);
+            var reader = _aiOperatorService.SendMessageStreamingAsync(message);
+
+            // Add a placeholder for the streaming response
+            var streamItem = new AiChatDisplayItem
+            {
+                RoleLabel = "AI Operator",
+                Content = "",
+                Timestamp = DateTime.Now.ToString("h:mm tt"),
+                Background = FindThemeBrush("ChatAiBubble")
+            };
+
+            Dispatcher.Invoke(() =>
+            {
+                if (AiChatList.ItemsSource is List<AiChatDisplayItem> items)
+                {
+                    items.Add(streamItem);
+                    AiChatList.Items.Refresh();
+                    AiChatScrollViewer.ScrollToEnd();
+                }
+            });
+
+            await foreach (var evt in reader.ReadAllAsync())
+            {
+                switch (evt)
+                {
+                    case AgentStreamEvent.TextDelta delta:
+                        streamItem.Content += delta.Text;
+                        Dispatcher.Invoke(() =>
+                        {
+                            AiChatList.Items.Refresh();
+                            AiChatScrollViewer.ScrollToEnd();
+                        });
+                        break;
+
+                    case AgentStreamEvent.ToolCallStarted tool:
+                        Dispatcher.Invoke(() => AiStatusText.Text = $"Tool: {tool.ToolName}");
+                        break;
+
+                    case AgentStreamEvent.Error err:
+                        streamItem.Content = err.Message;
+                        Dispatcher.Invoke(() => AiChatList.Items.Refresh());
+                        break;
+                }
+            }
         }
         catch (Exception ex)
         {

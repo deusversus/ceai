@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Compaction;
 using Microsoft.Extensions.AI;
@@ -16,6 +18,16 @@ public sealed record AiActionLogEntry(
     string Arguments,
     string Result,
     DateTimeOffset Timestamp);
+
+/// <summary>Events emitted during streaming AI responses.</summary>
+public abstract record AgentStreamEvent
+{
+    public sealed record TextDelta(string Text) : AgentStreamEvent;
+    public sealed record ToolCallStarted(string ToolName, string Arguments) : AgentStreamEvent;
+    public sealed record ToolCallCompleted(string ToolName, string Result) : AgentStreamEvent;
+    public sealed record Completed(int ToolCallCount, TimeSpan Elapsed) : AgentStreamEvent;
+    public sealed record Error(string Message) : AgentStreamEvent;
+}
 
 /// <summary>
 /// Names of tools that require user approval before execution.
@@ -134,6 +146,9 @@ public sealed class AiOperatorService
 
     private AIAgent BuildAgent(IChatClient client)
     {
+        Log("DEBUG", $"BuildAgent: tool count = {_tools.Count}, " +
+            $"tool names = [{string.Join(", ", _tools.Take(5).Select(t => t is AIFunction f ? f.Name : t.GetType().Name))}...]");
+
         // Build the MAF compaction pipeline (gentle → aggressive):
         // 1. Collapse old tool-call groups into summaries (cheap, no API call)
         // 2. LLM-powered summarization when context gets large (costs an API call!)
@@ -169,9 +184,12 @@ public sealed class AiOperatorService
             }
         }
 
-        // Build the MAF agent with compaction, skills, tools, and system prompt
+        // Build the MAF agent with compaction, skills, tools, and system prompt.
+        // UseFunctionInvocation() inserts FunctionInvokingChatClient — required for
+        // the agent to actually execute tool calls returned by the model.
         return client
             .AsBuilder()
+            .UseFunctionInvocation()
             .UseAIContextProviders(contextProviders.ToArray())
             .BuildAIAgent(new ChatClientAgentOptions
             {
@@ -280,7 +298,8 @@ public sealed class AiOperatorService
 
         var sw = System.Diagnostics.Stopwatch.StartNew();
         Log("INFO", $"User: {userMessage}");
-        _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
+        // Note: caller should call AddUserMessageToHistory() before this method
+        // so the UI shows the user message immediately.
 
         // Append dynamic context to the user message (keeps system prompt prefix stable for cache hits)
         var contextSuffix = BuildContextSuffix();
@@ -460,6 +479,119 @@ public sealed class AiOperatorService
             _displayHistory.Add(new AiChatMessage("assistant", errorMessage, DateTimeOffset.UtcNow));
             return errorMessage;
         }
+    }
+
+    /// <summary>
+    /// Adds a user message to display history. Call this from the UI BEFORE
+    /// calling SendMessageAsync/SendMessageStreamingAsync so the message
+    /// appears in the chat immediately.
+    /// </summary>
+    public void AddUserMessageToHistory(string userMessage)
+    {
+        _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
+    }
+
+    /// <summary>
+    /// Streaming version of SendMessageAsync. Returns a ChannelReader that yields
+    /// AgentStreamEvents as they arrive — text deltas, tool status, completion.
+    /// The UI can consume these to update the chat in real-time.
+    /// </summary>
+    public ChannelReader<AgentStreamEvent> SendMessageStreamingAsync(
+        string userMessage, CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateUnbounded<AgentStreamEvent>();
+
+        _ = Task.Run(async () =>
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Log("INFO", $"User (streaming): {userMessage}");
+
+            var contextSuffix = BuildContextSuffix();
+            var fullUserMessage = contextSuffix is not null
+                ? $"{userMessage}\n\n{contextSuffix}"
+                : userMessage;
+
+            int toolCallCount = 0;
+            var assistantText = "";
+
+            try
+            {
+                UpdateStatus("Thinking...");
+
+                await foreach (var update in _agent.RunStreamingAsync(
+                    fullUserMessage, _session, cancellationToken: cancellationToken))
+                {
+                    foreach (var content in update.Contents)
+                    {
+                        if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                        {
+                            assistantText += tc.Text;
+                            await channel.Writer.WriteAsync(
+                                new AgentStreamEvent.TextDelta(tc.Text), cancellationToken);
+                        }
+                        else if (content is FunctionCallContent fc)
+                        {
+                            toolCallCount++;
+                            var args = fc.Arguments is not null
+                                ? string.Join(", ", fc.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
+                                : "";
+                            UpdateStatus($"Tool: {fc.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
+                            Log("TOOL", $"Call: {fc.Name}({args})");
+                            _actionLog.Add(new AiActionLogEntry(fc.Name ?? "unknown", args, "invoked", DateTimeOffset.UtcNow));
+                            await channel.Writer.WriteAsync(
+                                new AgentStreamEvent.ToolCallStarted(fc.Name ?? "unknown", args), cancellationToken);
+                        }
+                        else if (content is FunctionResultContent fr)
+                        {
+                            var resultStr = fr.Result?.ToString() ?? "";
+                            var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
+                            Log("TOOL", $"Result: {truncated}");
+                            for (int i = _actionLog.Count - 1; i >= 0; i--)
+                            {
+                                if (_actionLog[i].Result == "invoked")
+                                {
+                                    _actionLog[i] = _actionLog[i] with { Result = truncated };
+                                    break;
+                                }
+                            }
+                            await channel.Writer.WriteAsync(
+                                new AgentStreamEvent.ToolCallCompleted(fr.CallId ?? "unknown", truncated), cancellationToken);
+                        }
+                    }
+                }
+
+                sw.Stop();
+                if (string.IsNullOrWhiteSpace(assistantText))
+                    assistantText = "(Tool calls executed — see action log for details)";
+
+                _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow));
+                SaveCurrentChat();
+
+                var summary = toolCallCount > 0
+                    ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s)"
+                    : $"Done ({sw.Elapsed.TotalSeconds:F1}s)";
+                UpdateStatus(summary);
+
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Completed(toolCallCount, sw.Elapsed), cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                sw.Stop();
+                var errorMsg = $"AI error: {ex.Message}";
+                Log("ERROR", $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                UpdateStatus($"Error ({sw.Elapsed.TotalSeconds:F1}s)");
+                _displayHistory.Add(new AiChatMessage("assistant", errorMsg, DateTimeOffset.UtcNow));
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Error(errorMsg), cancellationToken);
+            }
+            finally
+            {
+                channel.Writer.Complete();
+            }
+        }, cancellationToken);
+
+        return channel.Reader;
     }
 
     /// <summary>Handle an approval request for a dangerous tool call.</summary>
@@ -668,6 +800,10 @@ public sealed class AiOperatorService
         • After completing actions, verify the results before reporting success.
         • When you CANNOT verify something (e.g. "did the damage increase?"), ASK the user to check
           and report back. Frame these clearly: "Please do X in-game and tell me what happens."
+        • NEVER respond with planning statements like "Let me load..." or "I'll start by...".
+          Instead, ACTUALLY call the tools and THEN report what you found.
+        • Your first response to a task should include TOOL CALLS, not descriptions of what you intend to do.
+        • If you need to load skills, do it silently — don't narrate your preparation steps.
 
         ═══ YOUR TOOLS ═══
         Process: ListProcesses, InspectProcess, AttachProcess, FindProcess, CheckProcessLiveness
@@ -766,11 +902,18 @@ public sealed class AiOperatorService
             return Task.FromResult(response);
         }
 
-        public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
             IEnumerable<ChatMessage> messages,
             ChatOptions? options = null,
-            CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return new ChatResponseUpdate
+            {
+                Role = ChatRole.Assistant,
+                Contents = [new TextContent("AI operator is not configured. Set your API key in Settings.")]
+            };
+            await Task.CompletedTask;
+        }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 

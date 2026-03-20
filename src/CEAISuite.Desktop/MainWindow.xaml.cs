@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using AvalonDock.Themes;
 using CEAISuite.Application;
 using CEAISuite.Engine.Abstractions;
 using CEAISuite.Engine.Windows;
@@ -97,6 +98,8 @@ public partial class MainWindow : Window
         var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)
             ? theme : AppTheme.System;
         ThemeManager.ApplyTheme(savedTheme);
+        ApplyDockTheme(ThemeManager.ResolvedTheme);
+        ThemeManager.ThemeChanged += ApplyDockTheme;
 
         // Wire up AI operator with dynamic context injection
         var signatureService = new SignatureGeneratorService(engineFacade);
@@ -2783,6 +2786,13 @@ public partial class MainWindow : Window
         {
             System.Diagnostics.Debug.WriteLine($"Model switch failed: {ex.Message}");
         }
+    }
+
+    private void ApplyDockTheme(AppTheme resolved)
+    {
+        DockManager.Theme = resolved == AppTheme.Light
+            ? new Vs2013LightTheme()
+            : new Vs2013DarkTheme();
     }
 }
 

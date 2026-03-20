@@ -238,9 +238,6 @@
 
         <!-- Row 2: Dockable Panel Layout -->
         <avalonDock:DockingManager x:Name="DockManager" Grid.Row="2">
-            <avalonDock:DockingManager.Theme>
-                <avalonDock:Vs2013DarkTheme />
-            </avalonDock:DockingManager.Theme>
             <avalonDock:LayoutRoot>
                 <avalonDock:LayoutPanel Orientation="Horizontal">
 

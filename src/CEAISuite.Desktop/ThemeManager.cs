@@ -12,6 +12,7 @@ public enum AppTheme
 
 /// <summary>
 /// Manages theme switching by swapping merged resource dictionaries at runtime.
+/// Raises <see cref="ThemeChanged"/> so AvalonDock and other components can react.
 /// </summary>
 public static class ThemeManager
 {
@@ -21,6 +22,9 @@ public static class ThemeManager
         new("pack://application:,,,/Themes/DarkTheme.xaml", UriKind.Absolute);
     private static readonly Uri LightThemeUri =
         new("pack://application:,,,/Themes/LightTheme.xaml", UriKind.Absolute);
+
+    /// <summary>Raised after the resolved theme changes (Dark ↔ Light).</summary>
+    public static event Action<AppTheme>? ThemeChanged;
 
     /// <summary>Apply the given theme to the application.</summary>
     public static void ApplyTheme(AppTheme theme)
@@ -45,6 +49,8 @@ public static class ThemeManager
 
         CurrentTheme = theme;
         ResolvedTheme = resolved;
+
+        ThemeChanged?.Invoke(resolved);
     }
 
     /// <summary>The user-selected theme preference.</summary>

@@ -613,6 +613,16 @@ public partial class SettingsWindow : Window
         Close();
     }
 
+    private void ResetLayoutFromSettings(object sender, RoutedEventArgs e)
+    {
+        var layoutPath = System.IO.Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CEAISuite", "layout.xml");
+        try { System.IO.File.Delete(layoutPath); } catch { }
+        MessageBox.Show("Layout reset. Restart the application to apply the default layout.",
+            "Reset Layout", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
     // ─── GitHub Device Flow ─────────────────────────────────────────
 
     private async void GitHubSignIn_Click(object sender, RoutedEventArgs e)

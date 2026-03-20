@@ -755,6 +755,13 @@
                                      Foreground="{DynamicResource PrimaryForeground}" FontSize="13" Margin="0,0,0,4" />
                         <TextBlock Text="Power user — all panels expanded, extra status bar details"
                                    Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="20,0,0,12" />
+
+                        <!-- Layout Reset -->
+                        <TextBlock Text="Layout" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Reset panel positions and sizes to default."
+                                   Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="0,4,0,8" />
+                        <Button Content="Reset Layout" Padding="12,6" HorizontalAlignment="Left"
+                                Click="ResetLayoutFromSettings" ToolTip="Restores default panel layout on next restart" />
                     </StackPanel>
                 </Border>
             </TabItem>

@@ -148,6 +148,15 @@
             <Setter Property="Margin" Value="0,2" />
         </Style>
 
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource InputBackground}" />
+            <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
+            <Setter Property="Padding" Value="4,2" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+
         <Style TargetType="GridSplitter">
             <Setter Property="Background" Value="{DynamicResource SplitterBrush}" />
             <Style.Triggers>
@@ -190,6 +199,7 @@
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
                     <Button Content="⚠ Stop" Padding="8,3" FontSize="11"
                             Click="CmdEmergencyStop" Foreground="OrangeRed" FontWeight="SemiBold"
+                            Style="{StaticResource ToolbarButton}"
                             ToolTip="Emergency: rollback all patches + force detach (Ctrl+Shift+Esc)" />
                     <Menu Background="Transparent" VerticalAlignment="Center">
                         <MenuItem Header="⋯" FontSize="14" FontWeight="Bold" ToolTip="Menu (Alt)"
@@ -225,6 +235,27 @@
                 <ToolBarTray DockPanel.Dock="Left" Background="Transparent" IsLocked="True">
                     <ToolBar Background="Transparent" Band="0" BandIndex="0"
                              OverflowMode="Never">
+                        <ToolBar.Resources>
+                            <!-- Override ToolBar's default chrome so children respect our theme -->
+                            <Style TargetType="Button" BasedOn="{StaticResource ToolbarButton}" />
+                            <Style TargetType="TextBox">
+                                <Setter Property="Background" Value="{DynamicResource InputBackground}" />
+                                <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
+                                <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                            </Style>
+                            <Style TargetType="ComboBox">
+                                <Setter Property="Background" Value="{DynamicResource InputBackground}" />
+                                <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
+                                <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                            </Style>
+                            <Style TargetType="Separator">
+                                <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
+                                <Setter Property="Margin" Value="4,2" />
+                            </Style>
+                        </ToolBar.Resources>
                         <!-- Session I/O -->
                         <Button Content="📂 Load" Padding="8,3" FontSize="11" Click="LoadSession"
                                 ToolTip="Load session" />

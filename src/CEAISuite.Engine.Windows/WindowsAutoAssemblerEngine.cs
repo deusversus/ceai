@@ -102,6 +102,19 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         {
             var is64Bit = DetectIs64Bit(handle);
             var modules = GetProcessModules(processId);
+
+            if (modules.Count == 0)
+            {
+                // Module enumeration failed — module-relative addresses will all be unresolvable.
+                // This usually means the process is protected, still starting, or has exited.
+                return new ScriptExecutionResult(
+                    false,
+                    $"Unable to enumerate modules for process {processId}. " +
+                    "The process may be protected, still loading, or no longer running.",
+                    Array.Empty<ScriptAllocation>(),
+                    Array.Empty<ScriptPatch>());
+            }
+
             var context = new ExecutionContext(handle, processId, is64Bit, modules);
 
             return ExecuteSectionCore(context, section, ct);
@@ -187,6 +200,48 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
             if (RegisterSymbolRegex().IsMatch(trimmed) || UnregisterSymbolRegex().IsMatch(trimmed))
                 continue;
+
+            // aobscanmodule(symbolName, moduleName, bytePattern)
+            var aobMatch = AobScanModuleRegex().Match(trimmed);
+            if (aobMatch.Success)
+            {
+                var symbolName = aobMatch.Groups[1].Value;
+                var moduleName = aobMatch.Groups[2].Value;
+                var pattern = aobMatch.Groups[3].Value.Trim();
+
+                var found = AobScanModule(ctx, moduleName, pattern, ct);
+                if (found is null)
+                {
+                    return new ScriptExecutionResult(
+                        false,
+                        $"aobscanmodule failed: pattern not found for '{symbolName}' in module '{moduleName}'. " +
+                        $"Pattern: {pattern}. The game version may have changed.",
+                        allocations, patches);
+                }
+
+                defines[symbolName] = $"0x{found.Value:X}";
+                continue;
+            }
+
+            // aobscan(symbolName, bytePattern) — scan all readable memory
+            var aobGlobalMatch = AobScanGlobalRegex().Match(trimmed);
+            if (aobGlobalMatch.Success)
+            {
+                var symbolName = aobGlobalMatch.Groups[1].Value;
+                var pattern = aobGlobalMatch.Groups[2].Value.Trim();
+
+                var found = AobScanAll(ctx, pattern, ct);
+                if (found is null)
+                {
+                    return new ScriptExecutionResult(
+                        false,
+                        $"aobscan failed: pattern not found for '{symbolName}'. Pattern: {pattern}.",
+                        allocations, patches);
+                }
+
+                defines[symbolName] = $"0x{found.Value:X}";
+                continue;
+            }
 
             if (trimmed.StartsWith("LuaCall(", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -339,7 +394,13 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                     var bytes = ParseByteString(bytePattern);
 
                     var origBytes = new byte[bytes.Length];
-                    ReadProcessMemory(ctx.ProcessHandle, (IntPtr)offset, origBytes, origBytes.Length, out _);
+                    if (!ReadProcessMemory(ctx.ProcessHandle, (IntPtr)offset, origBytes, origBytes.Length, out var origRead)
+                        || origRead != origBytes.Length)
+                    {
+                        return new ScriptExecutionResult(
+                            false, $"Failed to read original {bytes.Length} bytes at 0x{offset:X} for backup. " +
+                                   $"Address may be invalid or unreadable (error {Marshal.GetLastWin32Error()}).", allocations, patches);
+                    }
 
                     if (!WriteProcessMemory(ctx.ProcessHandle, (IntPtr)offset, bytes, bytes.Length, out var written)
                         || written != bytes.Length)
@@ -366,8 +427,9 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
                 if (machineCode is null)
                 {
+                    var detail = _lastAssemblyError ?? assemblyText;
                     return new ScriptExecutionResult(
-                        false, $"Failed to assemble code block '{block.Label}': {assemblyText}", allocations, patches);
+                        false, $"Failed to assemble code block '{block.Label}': {detail}", allocations, patches);
                 }
             }
 
@@ -390,7 +452,13 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             }
 
             var origCodeBytes = new byte[finalCode.Length];
-            ReadProcessMemory(ctx.ProcessHandle, (IntPtr)writeAddr, origCodeBytes, origCodeBytes.Length, out _);
+            if (!ReadProcessMemory(ctx.ProcessHandle, (IntPtr)writeAddr, origCodeBytes, origCodeBytes.Length, out var origCodeRead)
+                || origCodeRead != origCodeBytes.Length)
+            {
+                return new ScriptExecutionResult(
+                    false, $"Failed to read original {finalCode.Length} bytes at 0x{writeAddr:X} for backup. " +
+                           $"Address may be invalid or unreadable (error {Marshal.GetLastWin32Error()}).", allocations, patches);
+            }
 
             if (!WriteProcessMemory(ctx.ProcessHandle, (IntPtr)writeAddr, finalCode, finalCode.Length, out var codeWritten)
                 || codeWritten != finalCode.Length)
@@ -403,6 +471,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         }
 
         // Phase 8: Execute dealloc directives
+        var deallocErrors = new List<string>();
         foreach (var name in deallocDirectives)
         {
             ct.ThrowIfCancellationRequested();
@@ -412,10 +481,20 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
             var addr = ResolveAddress(addrStr, defines, ctx);
             if (addr is not null)
-                VirtualFreeEx(ctx.ProcessHandle, (IntPtr)addr.Value, 0, MemRelease);
+            {
+                // Flush instruction cache before freeing — reduces UAF risk if code was recently executing
+                FlushInstructionCache(ctx.ProcessHandle, (IntPtr)addr.Value, 0);
+
+                if (!VirtualFreeEx(ctx.ProcessHandle, (IntPtr)addr.Value, 0, MemRelease))
+                    deallocErrors.Add($"Failed to free '{name}' at 0x{addr.Value:X} (error {Marshal.GetLastWin32Error()})");
+            }
         }
 
-        return new ScriptExecutionResult(true, null, allocations, patches);
+        var deallocWarning = deallocErrors.Count > 0
+            ? $" Warning: {string.Join("; ", deallocErrors)}"
+            : null;
+
+        return new ScriptExecutionResult(true, deallocWarning, allocations, patches);
     }
 
     /// <summary>
@@ -603,6 +682,8 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 AssertRegex().IsMatch(trimmed) ||
                 RegisterSymbolRegex().IsMatch(trimmed) ||
                 UnregisterSymbolRegex().IsMatch(trimmed) ||
+                AobScanModuleRegex().IsMatch(trimmed) ||
+                AobScanGlobalRegex().IsMatch(trimmed) ||
                 LabelDefRegex().IsMatch(trimmed) ||
                 DbRegex().IsMatch(trimmed) ||
                 NopRegex().IsMatch(trimmed))
@@ -758,11 +839,15 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             var encoded = ks.Assemble(assemblyText, (ulong)baseAddress);
             return encoded.Buffer;
         }
-        catch (Keystone.KeystoneException)
+        catch (Keystone.KeystoneException ex)
         {
+            _lastAssemblyError = $"Keystone: {ex.Message} — input: {(assemblyText.Length > 120 ? assemblyText[..120] + "..." : assemblyText)}";
             return null;
         }
     }
+
+    [ThreadStatic]
+    private static string? _lastAssemblyError;
 
     #endregion
 
@@ -867,6 +952,12 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     [GeneratedRegex(@"^nop\s+(\d+)$", RegexOptions.IgnoreCase)]
     private static partial Regex NopRegex();
 
+    [GeneratedRegex(@"^aobscanmodule\(\s*(\w+)\s*,\s*([^,]+?)\s*,\s*((?:[0-9A-Fa-f?]{1,2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex AobScanModuleRegex();
+
+    [GeneratedRegex(@"^aobscan\(\s*(\w+)\s*,\s*((?:[0-9A-Fa-f?]{1,2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex AobScanGlobalRegex();
+
     #endregion
 
     #region P/Invoke
@@ -902,8 +993,159 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool FlushInstructionCache(
+        IntPtr processHandle, IntPtr baseAddress, int size);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWow64Process2(
         IntPtr processHandle, out ushort processMachine, out ushort nativeMachine);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern int VirtualQueryEx(
+        IntPtr hProcess, IntPtr lpAddress, out MemoryBasicInformation lpBuffer, int dwLength);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryBasicInformation
+    {
+        public IntPtr BaseAddress;
+        public IntPtr AllocationBase;
+        public uint AllocationProtect;
+        public IntPtr RegionSize;
+        public uint State;
+        public uint Protect;
+        public uint Type;
+    }
+
+    #endregion
+
+    #region AOB Scanning
+
+    /// <summary>Parse a CE-style byte pattern (e.g. "48 8B 05 ?? ?? ?? ?? 48 85 C0") into bytes + mask.</summary>
+    private static (byte[] pattern, bool[] mask) ParseAobPattern(string patternStr)
+    {
+        var parts = patternStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var bytes = new byte[parts.Length];
+        var mask = new bool[parts.Length]; // true = must match, false = wildcard
+
+        for (var i = 0; i < parts.Length; i++)
+        {
+            if (parts[i] is "?" or "??")
+            {
+                mask[i] = false;
+                bytes[i] = 0;
+            }
+            else
+            {
+                mask[i] = true;
+                bytes[i] = byte.Parse(parts[i], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            }
+        }
+
+        return (bytes, mask);
+    }
+
+    /// <summary>Scan a specific module's memory for an AOB pattern.</summary>
+    private static nuint? AobScanModule(ExecutionContext ctx, string moduleName, string patternStr, CancellationToken ct)
+    {
+        if (!ctx.Modules.TryGetValue(moduleName, out var moduleBase))
+            return null;
+
+        int moduleSize;
+        try
+        {
+            using var proc = Process.GetProcessById(ctx.ProcessId);
+            var mod = proc.Modules.Cast<ProcessModule>()
+                .FirstOrDefault(m => string.Equals(m.ModuleName, moduleName, StringComparison.OrdinalIgnoreCase));
+            moduleSize = mod?.ModuleMemorySize ?? 0;
+        }
+        catch { moduleSize = 0; }
+
+        if (moduleSize == 0) return null;
+
+        var (pattern, mask) = ParseAobPattern(patternStr);
+        return ScanRegion(ctx.ProcessHandle, moduleBase, (nuint)moduleSize, pattern, mask, ct);
+    }
+
+    /// <summary>Scan all readable committed memory for an AOB pattern.</summary>
+    private static nuint? AobScanAll(ExecutionContext ctx, string patternStr, CancellationToken ct)
+    {
+        var (pattern, mask) = ParseAobPattern(patternStr);
+        var mbiSize = Marshal.SizeOf<MemoryBasicInformation>();
+        var address = (nuint)0x10000;
+        var maxAddr = ctx.Is64Bit ? (nuint)0x7FFFFFFEFFFF : (nuint)0x7FFEFFFF;
+
+        while (address < maxAddr)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            if (VirtualQueryEx(ctx.ProcessHandle, (IntPtr)address, out var mbi, mbiSize) == 0)
+                break;
+
+            var regionSize = (nuint)(ulong)mbi.RegionSize;
+            if (regionSize == 0) break;
+
+            if (mbi.State == MemCommit && IsReadable(mbi.Protect))
+            {
+                var found = ScanRegion(ctx.ProcessHandle, address, regionSize, pattern, mask, ct);
+                if (found is not null) return found;
+            }
+
+            address = (nuint)((ulong)address + (ulong)regionSize);
+        }
+
+        return null;
+    }
+
+    private static bool IsReadable(uint protect) =>
+        protect is 0x02 or 0x04 or 0x08    // PAGE_READONLY, PAGE_READWRITE, PAGE_WRITECOPY
+            or 0x20 or 0x40 or 0x80;       // PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_WRITECOPY
+
+    private static nuint? ScanRegion(IntPtr processHandle, nuint baseAddr, nuint regionSize, byte[] pattern, bool[] mask, CancellationToken ct)
+    {
+        const int chunkSize = 0x10000; // 64 KB chunks
+        var overlap = pattern.Length - 1;
+
+        for (nuint offset = 0; offset < regionSize; offset += (nuint)(chunkSize - overlap))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var readSize = (int)Math.Min(chunkSize, (ulong)(regionSize - offset));
+            if (readSize < pattern.Length) break;
+
+            var buffer = new byte[readSize];
+            if (!ReadProcessMemory(processHandle, (IntPtr)(baseAddr + offset), buffer, readSize, out var bytesRead)
+                || bytesRead < pattern.Length)
+                continue;
+
+            var matchIdx = FindPattern(buffer, bytesRead, pattern, mask);
+            if (matchIdx >= 0)
+                return baseAddr + offset + (nuint)matchIdx;
+        }
+
+        return null;
+    }
+
+    private static int FindPattern(byte[] data, int dataLen, byte[] pattern, bool[] mask)
+    {
+        var end = dataLen - pattern.Length;
+        for (var i = 0; i <= end; i++)
+        {
+            var found = true;
+            for (var j = 0; j < pattern.Length; j++)
+            {
+                if (mask[j] && data[i + j] != pattern[j])
+                {
+                    found = false;
+                    break;
+                }
+            }
+
+            if (found) return i;
+        }
+
+        return -1;
+    }
 
     #endregion
 

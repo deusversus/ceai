@@ -48,6 +48,25 @@ public sealed class AppSettings
 
     /// <summary>Stream AI responses token-by-token. Disable for batch responses.</summary>
     public bool UseStreaming { get; set; } = true;
+
+    // ── Token Limits ──
+
+    /// <summary>Token profile preset: "saving", "balanced", "performance".</summary>
+    public string TokenProfile { get; set; } = "balanced";
+
+    // Per-field overrides (null = use profile default)
+    public int? LimitMaxOutputTokens { get; set; }
+    public int? LimitMaxImagesPerTurn { get; set; }
+    public int? LimitMaxApprovalRounds { get; set; }
+    public int? LimitMaxReplayMessages { get; set; }
+    public int? LimitMaxToolResultChars { get; set; }
+    public int? LimitMaxStackFrames { get; set; }
+    public int? LimitMaxBrowseMemoryBytes { get; set; }
+    public int? LimitMaxHitLogEntries { get; set; }
+    public int? LimitMaxSearchResults { get; set; }
+    public int? LimitMaxChatSearchResults { get; set; }
+    public bool? LimitFilterRegisters { get; set; }
+    public bool? LimitDereferenceHookRegisters { get; set; }
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]

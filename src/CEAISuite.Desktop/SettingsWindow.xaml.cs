@@ -107,6 +107,27 @@ public partial class SettingsWindow : Window
         ThemeSystem.IsChecked = theme == AppTheme.System;
         ThemeDark.IsChecked = theme == AppTheme.Dark;
         ThemeLight.IsChecked = theme == AppTheme.Light;
+
+        // Performance / Token Limits
+        var profile = (s.TokenProfile ?? "balanced").ToLowerInvariant();
+        ProfileSaving.IsChecked = profile == "saving";
+        ProfileBalanced.IsChecked = profile == "balanced";
+        ProfilePerformance.IsChecked = profile == "performance";
+        UpdateProfileDescription(profile);
+
+        // Advanced overrides (blank = use profile default)
+        LoadLimitBox(LimitMaxOutputTokens, s.LimitMaxOutputTokens);
+        LoadLimitBox(LimitMaxImagesPerTurn, s.LimitMaxImagesPerTurn);
+        LoadLimitBox(LimitMaxApprovalRounds, s.LimitMaxApprovalRounds);
+        LoadLimitBox(LimitMaxReplayMessages, s.LimitMaxReplayMessages);
+        LoadLimitBox(LimitMaxToolResultChars, s.LimitMaxToolResultChars);
+        LoadLimitBox(LimitMaxStackFrames, s.LimitMaxStackFrames);
+        LoadLimitBox(LimitMaxBrowseMemoryBytes, s.LimitMaxBrowseMemoryBytes);
+        LoadLimitBox(LimitMaxHitLogEntries, s.LimitMaxHitLogEntries);
+        LoadLimitBox(LimitMaxSearchResults, s.LimitMaxSearchResults);
+        LoadLimitBox(LimitMaxChatSearchResults, s.LimitMaxChatSearchResults);
+        LimitFilterRegisters.IsChecked = s.LimitFilterRegisters;
+        LimitDereferenceHookRegisters.IsChecked = s.LimitDereferenceHookRegisters;
     }
 
     private string GetSelectedProvider()
@@ -414,6 +435,25 @@ public partial class SettingsWindow : Window
                 : ThemeDark.IsChecked == true ? "Dark"
                 : "System";
 
+        // Token profile
+        s.TokenProfile = ProfileSaving.IsChecked == true ? "saving"
+                       : ProfilePerformance.IsChecked == true ? "performance"
+                       : "balanced";
+
+        // Advanced overrides (blank = null = use profile default)
+        s.LimitMaxOutputTokens = ParseLimitBox(LimitMaxOutputTokens);
+        s.LimitMaxImagesPerTurn = ParseLimitBox(LimitMaxImagesPerTurn);
+        s.LimitMaxApprovalRounds = ParseLimitBox(LimitMaxApprovalRounds);
+        s.LimitMaxReplayMessages = ParseLimitBox(LimitMaxReplayMessages);
+        s.LimitMaxToolResultChars = ParseLimitBox(LimitMaxToolResultChars);
+        s.LimitMaxStackFrames = ParseLimitBox(LimitMaxStackFrames);
+        s.LimitMaxBrowseMemoryBytes = ParseLimitBox(LimitMaxBrowseMemoryBytes);
+        s.LimitMaxHitLogEntries = ParseLimitBox(LimitMaxHitLogEntries);
+        s.LimitMaxSearchResults = ParseLimitBox(LimitMaxSearchResults);
+        s.LimitMaxChatSearchResults = ParseLimitBox(LimitMaxChatSearchResults);
+        s.LimitFilterRegisters = LimitFilterRegisters.IsChecked; // null = use profile
+        s.LimitDereferenceHookRegisters = LimitDereferenceHookRegisters.IsChecked;
+
         _settingsService.Save();
 
         MessageBox.Show("Settings saved. Provider and model changes take effect on next message.",
@@ -518,6 +558,37 @@ public partial class SettingsWindow : Window
         {
             Dispatcher.Invoke(() => RefreshUsageBtn.IsEnabled = true);
         }
+    }
+
+    // ─── Token Profile Helpers ────────────────────────────────────────
+
+    private void ProfileCard_Checked(object sender, RoutedEventArgs e)
+    {
+        if (sender is not RadioButton rb || rb.Tag is not string profile) return;
+        UpdateProfileDescription(profile);
+    }
+
+    private void UpdateProfileDescription(string profile)
+    {
+        if (ProfileDescription is null) return;
+        ProfileDescription.Text = profile switch
+        {
+            "saving" => "Minimizes tokens per request. Smaller responses, fewer results, filtered registers. Best for pay-per-token APIs.",
+            "performance" => "Maximizes detail and context. Larger responses, more results, all registers, auto-dereference. Higher token cost.",
+            _ => "Balanced trade-off between token cost and AI capability. Recommended for most users.",
+        };
+    }
+
+    private static void LoadLimitBox(TextBox box, int? value)
+    {
+        box.Text = value.HasValue ? value.Value.ToString() : "";
+    }
+
+    private static int? ParseLimitBox(TextBox box)
+    {
+        var text = box.Text.Trim();
+        if (string.IsNullOrEmpty(text)) return null;
+        return int.TryParse(text, out var val) && val > 0 ? val : null;
     }
 
     private void CancelSettings(object sender, RoutedEventArgs e)

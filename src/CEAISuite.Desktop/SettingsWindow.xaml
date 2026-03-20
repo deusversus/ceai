@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings — CE AI Suite"
-        Height="580" Width="600"
+        Height="640" Width="600"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="{DynamicResource WindowBackground}">
@@ -443,6 +443,264 @@
                         <TextBlock Text="Set to 0 to disable rate limiting."
                                    Foreground="{DynamicResource TertiaryForeground}" Margin="0,6,0,0" FontSize="11" FontStyle="Italic" />
                     </StackPanel>
+                </Border>
+            </TabItem>
+
+            <TabItem Header="Performance">
+                <Border Background="{DynamicResource PanelBackground}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0">
+                        <StackPanel Margin="16">
+                            <TextBlock Text="Token Profile" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Controls how much data the AI sends and receives per request"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+
+                            <!-- Profile selector cards -->
+                            <UniformGrid Columns="3" Margin="0,0,0,4">
+                                <RadioButton x:Name="ProfileSaving" GroupName="TokenProfile" Tag="saving"
+                                             Checked="ProfileCard_Checked" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
+                                                    Margin="0,0,6,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="💰 Token Saving" FontWeight="SemiBold" FontSize="13"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="Minimize cost per request" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+
+                                <RadioButton x:Name="ProfileBalanced" GroupName="TokenProfile" Tag="balanced"
+                                             Checked="ProfileCard_Checked" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
+                                                    Margin="0,0,6,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="⚖️ Balanced" FontWeight="SemiBold" FontSize="13"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="Good mix of cost and detail" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+
+                                <RadioButton x:Name="ProfilePerformance" GroupName="TokenProfile" Tag="performance"
+                                             Checked="ProfileCard_Checked" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
+                                                    Margin="0,0,0,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="🚀 Performance" FontWeight="SemiBold" FontSize="13"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="Maximum detail, higher cost" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+                            </UniformGrid>
+
+                            <!-- Profile description -->
+                            <TextBlock x:Name="ProfileDescription" FontSize="11" FontStyle="Italic"
+                                       Foreground="{DynamicResource TertiaryForeground}" Margin="0,6,0,0"
+                                       TextWrapping="Wrap" />
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- Advanced overrides (collapsible) -->
+                            <Expander Header="Advanced Overrides" FontWeight="SemiBold" FontSize="13"
+                                      Foreground="{DynamicResource PrimaryForeground}" IsExpanded="False">
+                                <StackPanel Margin="0,8,0,0">
+                                    <TextBlock Text="Override individual limits. Leave blank to use profile defaults."
+                                               Foreground="{DynamicResource TertiaryForeground}" FontSize="11"
+                                               FontWeight="Normal" Margin="0,0,0,12" />
+
+                                    <!-- LLM / Pipeline -->
+                                    <TextBlock Text="LLM &amp; Pipeline" FontWeight="SemiBold" FontSize="12"
+                                               Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,6" />
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max output tokens" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxOutputTokens" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:2048  B:4096  P:8192" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max images per turn" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxImagesPerTurn" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:3  B:5  P:10" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max approval rounds" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxApprovalRounds" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:5  B:10  P:15" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max replay messages" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxReplayMessages" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:20  B:40  P:80" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max tool result chars" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxToolResultChars" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:2000  B:5000  P:10000" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Separator Margin="0,8,0,12" />
+
+                                    <!-- Tool Output -->
+                                    <TextBlock Text="Tool Output" FontWeight="SemiBold" FontSize="12"
+                                               Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,6" />
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max stack frames" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxStackFrames" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:8  B:16  P:32" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max memory browse bytes" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxBrowseMemoryBytes" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:512  B:2048  P:4096" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max hit log entries" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxHitLogEntries" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:10  B:25  P:50" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max search results" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxSearchResults" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:20  B:50  P:100" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="80" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Max chat search results" VerticalAlignment="Center" FontWeight="Normal" FontSize="12" />
+                                        <TextBox x:Name="LimitMaxChatSearchResults" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="S:10  B:20  P:50" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+
+                                    <Separator Margin="0,8,0,12" />
+
+                                    <!-- Toggles -->
+                                    <TextBlock Text="Behavior" FontWeight="SemiBold" FontSize="12"
+                                               Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,6" />
+
+                                    <CheckBox x:Name="LimitFilterRegisters" Content="Filter registers to essentials only (saves ~60% per breakpoint hit)"
+                                              FontSize="12" FontWeight="Normal" Margin="0,0,0,6" IsThreeState="True" />
+
+                                    <CheckBox x:Name="LimitDereferenceHookRegisters" Content="Auto-dereference hook registers (extra memory reads per hit)"
+                                              FontSize="12" FontWeight="Normal" Margin="0,0,0,6" IsThreeState="True" />
+                                </StackPanel>
+                            </Expander>
+                        </StackPanel>
+                    </ScrollViewer>
                 </Border>
             </TabItem>
 

@@ -35,8 +35,10 @@ public sealed class AiToolFunctions(
     ProcessWatchdogService? watchdogService = null,
     OperationJournal? operationJournal = null,
     AiChatStore? chatStore = null,
-    Func<IReadOnlyList<AiChatMessage>>? currentChatProvider = null)
+    Func<IReadOnlyList<AiChatMessage>>? currentChatProvider = null,
+    TokenLimits? tokenLimits = null)
 {
+    private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
 
@@ -753,8 +755,9 @@ public sealed class AiToolFunctions(
     [Description("Get the hit log for a breakpoint. Shows when it was triggered, register state, and thread info.")]
     public async Task<string> GetBreakpointHitLog(
         [Description("Breakpoint ID")] string breakpointId,
-        [Description("Maximum entries to return")] int maxEntries = 10)
+        [Description("Maximum entries to return")] int maxEntries = 0)
     {
+        if (maxEntries <= 0) maxEntries = _limits.MaxHitLogEntries;
         if (breakpointService is null) return "Breakpoint engine not available.";
         var hits = await breakpointService.GetHitLogAsync(breakpointId, maxEntries);
         if (hits.Count == 0) return $"No hits recorded for breakpoint {breakpointId}.";
@@ -1258,9 +1261,9 @@ public sealed class AiToolFunctions(
     public async Task<string> BrowseMemory(
         [Description("Process ID")] int processId,
         [Description("Start address (hex string)")] string address,
-        [Description("Number of bytes to read (default 128, max 512)")] int length = 128)
+        [Description("Number of bytes to read")] int length = 128)
     {
-        length = Math.Clamp(length, 1, 512);
+        length = Math.Clamp(length, 1, _limits.MaxBrowseMemoryBytes);
         var addr = AddressTableService.ParseAddress(address);
         var result = await engineFacade.ReadMemoryAsync(processId, addr, length);
         var bytes = result.Bytes.ToArray();
@@ -1576,8 +1579,9 @@ public sealed class AiToolFunctions(
 
     [Description("Get the current scan results (top N results from the last scan or refinement).")]
     public Task<string> GetScanResults(
-        [Description("Maximum results to return (default 20)")] int maxResults = 20)
+        [Description("Maximum results to return")] int maxResults = 0)
     {
+        if (maxResults <= 0) maxResults = _limits.MaxSearchResults;
         if (scanService.LastScanResults is null)
             return Task.FromResult("No active scan. Use StartScan first.");
 
@@ -1996,11 +2000,13 @@ public sealed class AiToolFunctions(
     [Description("Search all chat transcripts (current + saved) for a keyword or phrase. Use to recall past findings, addresses, or context lost to compaction.")]
     public string SearchChatHistory(
         [Description("Search query (case-insensitive substring match)")] string query,
-        [Description("Max results to return")] int maxResults = 10,
+        [Description("Max results to return")] int maxResults = 0,
         [Description("Search scope: 'all', 'current', or a specific chat ID")] string scope = "all")
     {
         if (string.IsNullOrWhiteSpace(query))
             return "Please provide a search query.";
+
+        if (maxResults <= 0) maxResults = _limits.MaxChatSearchResults;
 
         var results = new List<(string chatTitle, string chatId, string role, DateTimeOffset timestamp, string snippet)>();
         const int snippetRadius = 120;
@@ -2371,8 +2377,9 @@ public sealed class AiToolFunctions(
     [Description("Walk call stacks of all threads in the process. Returns frames per thread with module resolution.")]
     public async Task<string> GetAllThreadStacks(
         [Description("Process ID")] int processId,
-        [Description("Maximum frames per thread")] int maxFrames = 8)
+        [Description("Maximum frames per thread")] int maxFrames = 0)
     {
+        if (maxFrames <= 0) maxFrames = _limits.MaxStackFrames;
         if (callStackEngine is null) return "Call stack engine not available.";
         try
         {
@@ -2474,10 +2481,12 @@ public sealed class AiToolFunctions(
     [Description("Get register snapshots from a code cave hook. Returns captures with key registers, thread IDs, and timestamps.")]
     public async Task<string> GetCodeCaveHookHits(
         [Description("Hook ID")] string hookId,
-        [Description("Maximum entries to return")] int maxEntries = 10,
+        [Description("Maximum entries to return")] int maxEntries = 0,
         [Description("Process ID for register pointer dereferences (0=skip)")] int processId = 0,
-        [Description("Include pointer dereferences for registers (costs extra reads)")] bool dereference = false)
+        [Description("Include pointer dereferences for registers (costs extra reads)")] bool? dereference = null)
     {
+        if (maxEntries <= 0) maxEntries = _limits.MaxHitLogEntries;
+        dereference ??= _limits.DereferenceHookRegisters;
         if (codeCaveEngine is null) return "Code cave engine not available.";
         var hits = await codeCaveEngine.GetHookHitsAsync(hookId, maxEntries);
         if (hits.Count == 0) return $"No hits recorded for hook {hookId}.";
@@ -2488,7 +2497,7 @@ public sealed class AiToolFunctions(
             var trimmedRegs = TrimRegisters(h.RegisterSnapshot);
 
             Dictionary<string, string>? dereferences = null;
-            if (dereference && processId > 0 && trimmedRegs.Count > 0)
+            if (dereference == true && processId > 0 && trimmedRegs.Count > 0)
             {
                 dereferences = await DereferenceRegistersAsync(processId, trimmedRegs);
             }
@@ -2519,9 +2528,11 @@ public sealed class AiToolFunctions(
     };
 
     /// <summary>Filter registers to only essential ones to save tokens in tool results.</summary>
-    private static Dictionary<string, string> TrimRegisters(IReadOnlyDictionary<string, string>? registers)
+    private Dictionary<string, string> TrimRegisters(IReadOnlyDictionary<string, string>? registers)
     {
         if (registers is null || registers.Count == 0) return new();
+        if (!_limits.FilterRegisters)
+            return registers.ToDictionary(kv => kv.Key, kv => kv.Value);
         return registers
             .Where(kv => EssentialRegisters.Contains(kv.Key))
             .ToDictionary(kv => kv.Key, kv => kv.Value);
@@ -3091,8 +3102,9 @@ public sealed class AiToolFunctions(
         [Description("Memory displacement/offset to match (hex), e.g., '0x38'")] string displacement,
         [Description("Optional base register filter, e.g., 'rsi', 'rax', or 'any'")] string baseRegister = "any",
         [Description("Filter: 'writes', 'reads', 'all'")] string filter = "all",
-        [Description("Max results")] int maxResults = 20)
+        [Description("Max results")] int maxResults = 0)
     {
+        if (maxResults <= 0) maxResults = _limits.MaxSearchResults;
         var dispValue = (long)(ulong)ParseAddress(displacement);
         bool filterAnyBase = baseRegister.Equals("any", StringComparison.OrdinalIgnoreCase);
 

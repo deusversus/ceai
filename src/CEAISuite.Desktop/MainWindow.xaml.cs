@@ -103,8 +103,10 @@ public partial class MainWindow : Window
         var processWatchdog = new ProcessWatchdogService();
         var operationJournal = new OperationJournal();
         var chatStore = new AiChatStore();
+        var tokenLimits = TokenLimits.Resolve(_appSettingsService.Settings);
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), new WindowsCodeCaveEngine(), processWatchdog, operationJournal, chatStore,
-            currentChatProvider: () => _aiOperatorService.DisplayHistory);
+            currentChatProvider: () => _aiOperatorService.DisplayHistory,
+            tokenLimits: tokenLimits);
         IChatClient? chatClient = null;
         try
         {
@@ -118,6 +120,7 @@ public partial class MainWindow : Window
         _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext, chatStore);
         _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
         _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
+        _aiOperatorService.Limits = tokenLimits;
 
         // Live status updates from AI agent
         _aiOperatorService.StatusChanged += status =>
@@ -153,6 +156,7 @@ public partial class MainWindow : Window
                     _aiOperatorService.Reconfigure(newClient);
                     _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
                     _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
+                    _aiOperatorService.Limits = TokenLimits.Resolve(_appSettingsService.Settings);
                 }
                 catch (Exception ex)
                 {

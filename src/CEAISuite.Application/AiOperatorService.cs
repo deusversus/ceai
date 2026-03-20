@@ -182,6 +182,10 @@ public sealed class AiOperatorService
 
     /// <summary>If true, queue and wait for cooldown; if false, reject with error.</summary>
     public bool RateLimitWait { get; set; } = true;
+
+    /// <summary>Configurable token-efficiency limits. Swap at runtime via settings.</summary>
+    public TokenLimits Limits { get; set; } = TokenLimits.Balanced;
+
     private static readonly string LogDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
     private static readonly string LogPath = Path.Combine(LogDir, $"ai-agent-{DateTime.Now:yyyy-MM-dd}.log");
@@ -327,7 +331,7 @@ public sealed class AiOperatorService
                     Instructions = SystemPrompt,
                     Tools = _tools,
                     Temperature = 0.3f,
-                    MaxOutputTokens = 2048,
+                    MaxOutputTokens = Limits.MaxOutputTokens,
                 },
             });
     }
@@ -551,7 +555,7 @@ public sealed class AiOperatorService
             if (_toolFunctions is not null)
             {
                 int imagesProcessed = 0;
-                const int maxImagesPerTurn = 3;
+                int maxImagesPerTurn = Limits.MaxImagesPerTurn;
                 while (imagesProcessed < maxImagesPerTurn && _toolFunctions.PendingImages.TryDequeue(out var img))
                 {
                     imagesProcessed++;
@@ -572,7 +576,7 @@ public sealed class AiOperatorService
                 }
                 // Drain any excess images to prevent stale accumulation
                 while (_toolFunctions.PendingImages.TryDequeue(out _))
-                    Log("WARN", "Discarded excess pending image (max 3 per turn)");
+                    Log("WARN", $"Discarded excess pending image (max {maxImagesPerTurn} per turn)");
             }
 
             if (string.IsNullOrWhiteSpace(assistantText))
@@ -683,7 +687,7 @@ public sealed class AiOperatorService
                 // --- Multi-turn approval loop (MAF pattern) ---
                 // RunStreamingAsync returns EARLY when it hits approval-required tools.
                 // We must collect approvals, get user decision, then re-run with the response.
-                const int maxApprovalRounds = 5;
+                int maxApprovalRounds = Limits.MaxApprovalRounds;
                 int approvalRound = 0;
                 while (pendingApprovals.Count > 0 && approvalRound++ < maxApprovalRounds)
                 {
@@ -1000,8 +1004,8 @@ public sealed class AiOperatorService
     /// </summary>
     private void ReplayHistoryInto(IList<ChatMessage> history, IEnumerable<AiChatMessage> messages)
     {
-        const int maxReplayMessages = 20;
-        const int maxToolResultChars = 2000;
+        int maxReplayMessages = Limits.MaxReplayMessages;
+        int maxToolResultChars = Limits.MaxToolResultChars;
 
         // Take only the most recent messages to avoid token explosion on restore
         var messageList = messages as IList<AiChatMessage> ?? messages.ToList();

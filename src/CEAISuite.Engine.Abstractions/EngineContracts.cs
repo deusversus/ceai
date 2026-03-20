@@ -56,9 +56,18 @@ public interface IEngineFacade
 {
     IReadOnlyCollection<EngineCapability> Capabilities { get; }
 
+    /// <summary>The PID of the currently attached process, or null if not attached.</summary>
+    int? AttachedProcessId { get; }
+
+    /// <summary>True if currently attached to a process.</summary>
+    bool IsAttached { get; }
+
     Task<IReadOnlyList<ProcessDescriptor>> ListProcessesAsync(CancellationToken cancellationToken = default);
 
     Task<EngineAttachment> AttachAsync(int processId, CancellationToken cancellationToken = default);
+
+    /// <summary>Detach from the current process, releasing any cached state.</summary>
+    void Detach();
 
     Task<MemoryReadResult> ReadMemoryAsync(
         int processId,

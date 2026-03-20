@@ -8,6 +8,11 @@ namespace CEAISuite.Tests;
 public sealed class StubEngineFacade : IEngineFacade
 {
     private readonly Dictionary<nuint, byte[]> _memory = new();
+    private int? _attachedProcessId;
+
+    public int? AttachedProcessId => _attachedProcessId;
+
+    public bool IsAttached => _attachedProcessId.HasValue;
 
     public IReadOnlyCollection<EngineCapability> Capabilities { get; } = new[]
     {
@@ -28,8 +33,16 @@ public sealed class StubEngineFacade : IEngineFacade
             new(3000, "calc.exe", "x86")
         });
 
-    public Task<EngineAttachment> AttachAsync(int processId, CancellationToken ct = default) =>
-        Task.FromResult(new EngineAttachment(processId, "TestGame.exe", AttachModules));
+    public Task<EngineAttachment> AttachAsync(int processId, CancellationToken ct = default)
+    {
+        _attachedProcessId = processId;
+        return Task.FromResult(new EngineAttachment(processId, "TestGame.exe", AttachModules));
+    }
+
+    public void Detach()
+    {
+        _attachedProcessId = null;
+    }
 
     public Task<MemoryReadResult> ReadMemoryAsync(int processId, nuint address, int length, CancellationToken ct = default)
     {

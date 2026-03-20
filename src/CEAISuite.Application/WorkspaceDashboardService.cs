@@ -119,6 +119,21 @@ public sealed class WorkspaceDashboardService(
         return overview;
     }
 
+    /// <summary>Detach from the current process, clearing all inspection state.</summary>
+    public void DetachProcess()
+    {
+        engineFacade.Detach();
+
+        if (CurrentDashboard is not null)
+        {
+            CurrentDashboard = CurrentDashboard with
+            {
+                CurrentInspection = null,
+                StatusMessage = "Detached from process."
+            };
+        }
+    }
+
     public async Task<ManualMemoryProbeOverview> ReadAddressAsync(
         int processId,
         string addressText,

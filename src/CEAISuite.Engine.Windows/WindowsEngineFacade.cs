@@ -16,6 +16,19 @@ public sealed class WindowsEngineFacade : IEngineFacade
     private const ushort ImageFileMachineAmd64 = 0x8664;
     private const ushort ImageFileMachineArm64 = 0xAA64;
 
+    private readonly object _attachLock = new();
+    private int? _attachedProcessId;
+
+    public int? AttachedProcessId
+    {
+        get { lock (_attachLock) return _attachedProcessId; }
+    }
+
+    public bool IsAttached
+    {
+        get { lock (_attachLock) return _attachedProcessId.HasValue; }
+    }
+
     public IReadOnlyCollection<EngineCapability> Capabilities { get; } =
         new[]
         {
@@ -59,6 +72,11 @@ public sealed class WindowsEngineFacade : IEngineFacade
                         .OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase)
                         .ToArray();
 
+                    lock (_attachLock)
+                    {
+                        _attachedProcessId = process.Id;
+                    }
+
                     return new EngineAttachment(process.Id, process.ProcessName, modules);
                 }
                 catch (Win32Exception exception)
@@ -69,6 +87,14 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 }
             },
             cancellationToken);
+
+    public void Detach()
+    {
+        lock (_attachLock)
+        {
+            _attachedProcessId = null;
+        }
+    }
 
     public Task<MemoryReadResult> ReadMemoryAsync(
         int processId,

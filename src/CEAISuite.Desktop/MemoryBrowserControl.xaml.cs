@@ -38,6 +38,21 @@ public partial class MemoryBrowserControl : UserControl
         StatusText.Text = $"Attached to {processName} ({processId}). Enter an address and click Go.";
     }
 
+    /// <summary>Clear the display and detach from the current process.</summary>
+    public void Clear()
+    {
+        StopAutoRefresh();
+        _engine = null;
+        _processId = 0;
+        _processName = "";
+        _currentAddress = 0;
+        _previousBytes = null;
+        HexDisplay.Inlines.Clear();
+        HexDisplay.Text = "";
+        AddressBox.Text = "";
+        StatusText.Text = "No process attached.";
+    }
+
     /// <summary>Navigate to the specified address and refresh the display.</summary>
     public async Task NavigateToAddress(nuint address)
     {

@@ -98,6 +98,22 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
     public IReadOnlyList<Patch> GetHistory(int count = 20) =>
         _undoStack.Skip(Math.Max(0, _undoStack.Count - count)).ToList().AsReadOnly();
 
+    /// <summary>Undo ALL patches in reverse order (emergency rollback).</summary>
+    public async Task<int> RollbackAllAsync(CancellationToken ct = default)
+    {
+        int rolled = 0;
+        while (_undoStack.Count > 0)
+        {
+            try
+            {
+                await UndoAsync(ct);
+                rolled++;
+            }
+            catch { break; } // Stop on first failure — target may be gone
+        }
+        return rolled;
+    }
+
     private async Task WriteRawBytesAsync(int processId, nuint address, byte[] data, CancellationToken ct)
     {
         // Write raw bytes by converting to appropriate type writes

@@ -183,43 +183,90 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Row 0: Menu Bar -->
-        <Menu x:Name="MainMenu" Grid.Row="0" Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}"
-              FontSize="12" Padding="2,1">
-            <MenuItem Header="_File">
-                <MenuItem Header="_Save Session" Click="SaveSession" InputGestureText="Ctrl+S" />
-                <MenuItem Header="_Load Session" Click="LoadSession" />
-                <Separator />
-                <MenuItem Header="Load Cheat _Table (.CT)" Click="LoadCheatTable" />
-                <MenuItem Header="Save Cheat Table (.CT)" Click="SaveCheatTable" />
-                <Separator />
-                <MenuItem Header="E_xit" Click="ExitApp" />
-            </MenuItem>
-            <MenuItem Header="_Edit">
-                <MenuItem Header="_Undo" Click="MenuUndo" InputGestureText="Ctrl+Z" />
-                <MenuItem Header="_Redo" Click="MenuRedo" InputGestureText="Ctrl+Y" />
-            </MenuItem>
-            <MenuItem Header="_View">
-                <MenuItem x:Name="MenuBarToggleItem" Header="Auto-Hide _Menu" IsCheckable="True"
-                          Checked="AutoHideMenu_Changed" Unchecked="AutoHideMenu_Changed"
-                          InputGestureText="Alt" />
-                <Separator />
-                <MenuItem Header="_Reset Layout" Click="ResetLayout" />
-            </MenuItem>
-            <MenuItem Header="_Tools">
-                <MenuItem Header="_Memory Browser" Click="OpenMemoryBrowser" />
-            </MenuItem>
-            <MenuItem Header="S_kills">
-                <MenuItem Header="_Manage Skills…" Click="OpenSkillsManager" />
-                <MenuItem Header="Open Skills _Folder" Click="OpenSkillsFolder" />
-                <Separator />
-                <MenuItem Header="_Reload Skills" Click="ReloadSkills" />
-            </MenuItem>
-            <MenuItem Header="_Settings" Click="OpenSettings" />
-            <MenuItem Header="_Help">
-                <MenuItem Header="_About CE AI Suite" Click="ShowAbout" />
-            </MenuItem>
-        </Menu>
+        <!-- Row 0: Command Bar -->
+        <Border Grid.Row="0" Background="{DynamicResource MenuBarBackground}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <!-- Right side: Hamburger menu + Settings gear -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
+                    <Menu Background="Transparent" VerticalAlignment="Center">
+                        <MenuItem Header="⋯" FontSize="14" FontWeight="Bold" ToolTip="Menu (Alt)"
+                                  Padding="8,4">
+                            <MenuItem Header="_File">
+                                <MenuItem Header="_Save Session" Click="SaveSession" InputGestureText="Ctrl+S" />
+                                <MenuItem Header="_Load Session" Click="LoadSession" />
+                                <Separator />
+                                <MenuItem Header="Load Cheat _Table (.CT)" Click="LoadCheatTable" />
+                                <MenuItem Header="Save Cheat Table (.CT)" Click="SaveCheatTable" />
+                                <Separator />
+                                <MenuItem Header="E_xit" Click="ExitApp" />
+                            </MenuItem>
+                            <MenuItem Header="_Edit">
+                                <MenuItem Header="_Undo" Click="MenuUndo" InputGestureText="Ctrl+Z" />
+                                <MenuItem Header="_Redo" Click="MenuRedo" InputGestureText="Ctrl+Y" />
+                            </MenuItem>
+                            <MenuItem Header="_View">
+                                <MenuItem Header="_Memory Browser" Click="OpenMemoryBrowser" />
+                                <Separator />
+                                <MenuItem Header="_Reset Layout" Click="ResetLayout" />
+                            </MenuItem>
+                            <MenuItem Header="S_kills">
+                                <MenuItem Header="_Manage Skills…" Click="OpenSkillsManager" />
+                                <MenuItem Header="Open Skills _Folder" Click="OpenSkillsFolder" />
+                                <Separator />
+                                <MenuItem Header="_Reload Skills" Click="ReloadSkills" />
+                            </MenuItem>
+                            <MenuItem Header="_Help">
+                                <MenuItem Header="_About CE AI Suite" Click="ShowAbout" />
+                            </MenuItem>
+                        </MenuItem>
+                    </Menu>
+                    <Button Content="⚙" FontSize="14" Padding="8,4" ToolTip="Settings"
+                            Click="OpenSettings" Style="{StaticResource ToolbarButton}" />
+                </StackPanel>
+
+                <!-- Left side: Command buttons -->
+                <ToolBarTray DockPanel.Dock="Left" Background="Transparent" IsLocked="True">
+                    <ToolBar Background="Transparent" Band="0" BandIndex="0"
+                             OverflowMode="Never">
+                        <!-- Process controls -->
+                        <ComboBox x:Name="ProcessComboBox" Width="180" FontSize="11"
+                                  ToolTip="Select process (Ctrl+P)"
+                                  IsEditable="True" IsTextSearchEnabled="True"
+                                  DisplayMemberPath="Label" />
+                        <Button Content="📎 Attach" Padding="8,3" FontSize="11" Click="CmdAttachProcess"
+                                ToolTip="Attach to selected process" />
+                        <Button Content="⏏ Detach" Padding="8,3" FontSize="11" Click="CmdDetachProcess"
+                                ToolTip="Detach from process" />
+                        <Separator />
+
+                        <!-- Scan -->
+                        <Button Content="🔍 Scan" Padding="8,3" FontSize="11" Click="CmdFocusScanner"
+                                ToolTip="Focus scanner panel (Ctrl+F)" />
+                        <Separator />
+
+                        <!-- Session -->
+                        <Button Content="💾 Save" Padding="8,3" FontSize="11" Click="SaveSession"
+                                ToolTip="Save session (Ctrl+S)" />
+                        <Button Content="↩ Undo" Padding="8,3" FontSize="11" Click="MenuUndo"
+                                ToolTip="Undo last patch (Ctrl+Z)" />
+                        <Button Content="↪ Redo" Padding="8,3" FontSize="11" Click="MenuRedo"
+                                ToolTip="Redo (Ctrl+Y)" />
+                        <Separator />
+
+                        <!-- Script -->
+                        <Button Content="▶ Run" Padding="8,3" FontSize="11" Click="CmdRunScript"
+                                ToolTip="Toggle selected script (F5)" />
+                        <Separator />
+
+                        <!-- Emergency -->
+                        <Button Content="⚠ Emergency Stop" Padding="8,3" FontSize="11"
+                                Click="CmdEmergencyStop" Foreground="OrangeRed" FontWeight="SemiBold"
+                                ToolTip="Force detach + rollback all patches (Ctrl+Shift+Esc)" />
+                    </ToolBar>
+                </ToolBarTray>
+            </DockPanel>
+        </Border>
 
         <!-- Row 1: Compact status/profile bar -->
         <Border Grid.Row="1" Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}"

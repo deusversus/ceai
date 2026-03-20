@@ -25,6 +25,15 @@ public sealed class AiChatDisplayItem
     public Brush Background { get; init; } = Brushes.Transparent;
 }
 
+/// <summary>Display model for process selection in the command bar ComboBox.</summary>
+public sealed class ProcessComboItem
+{
+    public int Pid { get; init; }
+    public string Name { get; init; } = "";
+    public string Label => $"{Name} (PID {Pid})";
+    public override string ToString() => Label;
+}
+
 /// <summary>Display model for chat history list items.</summary>
 public sealed class ChatHistoryDisplayItem
 {
@@ -184,12 +193,6 @@ public partial class MainWindow : Window
         DataContext = WorkspaceDashboard.CreateLoading();
         Loaded += OnLoaded;
         PreviewKeyUp += OnPreviewKeyUp;
-
-        // Apply persisted auto-hide menu bar state
-        MenuBarToggleItem.IsChecked = _appSettingsService.Settings.AutoHideMenuBar;
-        if (_appSettingsService.Settings.AutoHideMenuBar)
-            MainMenu.Visibility = Visibility.Collapsed;
-        MainMenu.LostKeyboardFocus += MainMenu_LostKeyboardFocus;
     }
 
     private IChatClient? CreateChatClient()
@@ -241,6 +244,7 @@ public partial class MainWindow : Window
         source?.AddHook(WndProc);
 
         DataContext = await _dashboardService.BuildAsync(_databasePath);
+        PopulateProcessCombo();
         RefreshChatSwitcher();
         // Init search box placeholder
         ChatSearchBox.Text = (string)ChatSearchBox.Tag;
@@ -293,6 +297,7 @@ public partial class MainWindow : Window
                 BreakpointStatus = dashboard.BreakpointStatus,
                 StatusMessage = $"Refreshed: {updated.RunningProcesses.Count} processes found."
             };
+            PopulateProcessCombo();
         }
         catch (Exception ex)
         {
@@ -2407,38 +2412,174 @@ public partial class MainWindow : Window
         Close();
     }
 
-    private void AutoHideMenu_Changed(object sender, RoutedEventArgs e)
-    {
-        var autoHide = MenuBarToggleItem.IsChecked;
-        _appSettingsService.Settings.AutoHideMenuBar = autoHide;
-        _appSettingsService.Save();
-        // When turning auto-hide ON, collapse after current menu interaction closes
-        // (WPF will close the menu dropdown, then LostKeyboardFocus fires and collapses the bar)
-        // When turning auto-hide OFF, menu is already visible (user just clicked it)
-    }
+    // AutoHideMenu_Changed removed — replaced by hamburger menu in command bar
 
     private void OnPreviewKeyUp(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        // Alt key reveals a hidden (auto-hide) menu bar
-        if (e.Key == System.Windows.Input.Key.System && e.SystemKey == System.Windows.Input.Key.LeftAlt
-            || e.Key == System.Windows.Input.Key.System && e.SystemKey == System.Windows.Input.Key.RightAlt)
+        // Ctrl+P → focus process combo
+        if (e.Key == System.Windows.Input.Key.P
+            && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
         {
-            if (_appSettingsService.Settings.AutoHideMenuBar && MainMenu.Visibility == Visibility.Collapsed)
-            {
-                MainMenu.Visibility = Visibility.Visible;
-                MainMenu.Focus();
-                e.Handled = true;
-            }
+            ProcessComboBox.Focus();
+            ProcessComboBox.IsDropDownOpen = true;
+            e.Handled = true;
+        }
+        // Ctrl+F → focus scanner
+        else if (e.Key == System.Windows.Input.Key.F
+                 && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            CmdFocusScanner(this, new RoutedEventArgs());
+            e.Handled = true;
         }
     }
 
-    private void MainMenu_LostKeyboardFocus(object sender, System.Windows.Input.KeyboardFocusChangedEventArgs e)
+    #region Command Bar Handlers
+
+    private void CmdAttachProcess(object sender, RoutedEventArgs e)
     {
-        // Re-collapse the menu bar when focus leaves it, if auto-hide is on
-        if (_appSettingsService.Settings.AutoHideMenuBar && !MainMenu.IsKeyboardFocusWithin)
+        if (ProcessComboBox.SelectedItem is ProcessComboItem item)
         {
-            MainMenu.Visibility = Visibility.Collapsed;
+            // Select the matching process in RunningProcessesList and trigger inspection
+            if (DataContext is WorkspaceDashboard dashboard)
+            {
+                var process = dashboard.RunningProcesses?.FirstOrDefault(p => p.Id == item.Pid);
+                if (process != null)
+                {
+                    RunningProcessesList.SelectedItem = process;
+                    InspectSelectedProcess(sender, e);
+                    return;
+                }
+            }
         }
+        StatusBarCenter.Text = "Select a process from the dropdown first";
+    }
+
+    private async void CmdDetachProcess(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
+        {
+            StatusBarCenter.Text = "No process attached";
+            return;
+        }
+
+        var pid = dashboard.CurrentInspection.ProcessId;
+        var processName = dashboard.CurrentInspection.ProcessName;
+
+        try
+        {
+            // 1. Stop auto-refresh so we don't read from a detached process
+            _refreshTimer?.Stop();
+
+            // 2. Remove all breakpoints for this process
+            try
+            {
+                var bps = await _breakpointService.ListBreakpointsAsync(pid);
+                foreach (var bp in bps)
+                    await _breakpointService.RemoveBreakpointAsync(pid, bp.Id);
+            }
+            catch { /* best-effort — process may already be gone */ }
+
+            // 3. Detach engine facade + clear dashboard state
+            _dashboardService.DetachProcess();
+
+            // 4. Update UI DataContext to reflect detach
+            DataContext = dashboard with
+            {
+                CurrentInspection = null,
+                StatusMessage = $"Detached from {processName} ({pid})"
+            };
+
+            // 5. Clear memory browser
+            MemoryBrowserTab.Clear();
+
+            // 6. Update status bar
+            StatusBarProcess.Text = "No process attached";
+            StatusBarCenter.Text = $"Detached from {processName}";
+
+            // 7. Reset process combo selection
+            ProcessComboBox.SelectedItem = null;
+        }
+        catch (Exception ex)
+        {
+            StatusBarCenter.Text = $"Detach error: {ex.Message}";
+        }
+    }
+
+    private void CmdFocusScanner(object sender, RoutedEventArgs e)
+    {
+        // Find and activate the scanner anchorable
+        var scanner = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutAnchorable>()
+            .FirstOrDefault(a => a.ContentId == "scanner");
+        if (scanner != null)
+        {
+            if (scanner.IsAutoHidden) scanner.ToggleAutoHide();
+            scanner.IsActive = true;
+        }
+        ScanValueTextBox?.Focus();
+    }
+
+    private void CmdRunScript(object sender, RoutedEventArgs e)
+    {
+        // Toggle the currently selected script in the address table
+        ToggleSelectedScript(sender, e);
+    }
+
+    private async void CmdEmergencyStop(object sender, RoutedEventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard)
+            return;
+
+        var pid = dashboard.CurrentInspection?.ProcessId;
+        var processName = dashboard.CurrentInspection?.ProcessName ?? "unknown";
+
+        try
+        {
+            // 1. Stop everything immediately
+            _refreshTimer?.Stop();
+
+            // 2. Rollback ALL patches (restores original bytes)
+            var rolled = await _patchUndoService.RollbackAllAsync();
+
+            // 3. Force-detach breakpoint engine (emergency path — no locks)
+            if (pid.HasValue)
+            {
+                try { await _breakpointService.ForceDetachAndCleanupAsync(pid.Value); }
+                catch { /* best-effort */ }
+            }
+
+            // 4. Detach engine facade + clear dashboard
+            _dashboardService.DetachProcess();
+
+            // 5. Update UI
+            DataContext = dashboard with
+            {
+                CurrentInspection = null,
+                StatusMessage = $"EMERGENCY STOP — detached from {processName}"
+            };
+            MemoryBrowserTab.Clear();
+            ProcessComboBox.SelectedItem = null;
+
+            StatusBarProcess.Text = "EMERGENCY STOP — detached";
+            StatusBarCenter.Text = $"Rolled back {rolled} patch(es), force-detached";
+        }
+        catch (Exception ex)
+        {
+            StatusBarCenter.Text = $"Emergency stop error: {ex.Message}";
+        }
+    }
+
+    #endregion
+
+    private void PopulateProcessCombo()
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+        var items = (dashboard.RunningProcesses ?? [])
+            .Select(p => new ProcessComboItem { Pid = p.Id, Name = p.Name })
+            .OrderBy(p => p.Name)
+            .ToList();
+        ProcessComboBox.ItemsSource = items;
     }
 
     private async void MenuUndo(object sender, RoutedEventArgs e)

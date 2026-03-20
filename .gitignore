@@ -6,6 +6,9 @@
 # dotenv files
 .env
 
+# Local scratch files
+LOG.md
+
 # User-specific files
 *.rsuser
 *.suo

@@ -539,10 +539,14 @@
 
                         <avalonDock:LayoutAnchorablePane DockHeight="250">
                             <avalonDock:LayoutAnchorable Title="Scanner" ContentId="scanner">
-                                <DockPanel Background="{DynamicResource SidebarBackground}">
-                                    <TextBlock DockPanel.Dock="Top" Text="MEMORY SCANNER" FontSize="11" FontWeight="SemiBold"
-                                               Foreground="{DynamicResource SecondaryForeground}" Margin="8,8,8,4" />
-                                    <StackPanel DockPanel.Dock="Top" Margin="8,0,8,4">
+                                <Grid Background="{DynamicResource SidebarBackground}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+                                    <StackPanel Grid.Row="0" Margin="8,8,8,4">
+                                        <TextBlock Text="MEMORY SCANNER" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,4" />
                                         <Grid>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="*" />
@@ -577,8 +581,12 @@
                                             </StackPanel>
                                         </Border>
                                     </StackPanel>
-                                    <ListView x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
-                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
+                                    <ListView Grid.Row="1" x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0"
+                                              VirtualizingPanel.IsVirtualizing="True"
+                                              VirtualizingPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.VerticalScrollBarVisibility="Auto"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Address" Width="130"
@@ -592,7 +600,7 @@
                                             </GridView>
                                         </ListView.View>
                                     </ListView>
-                                </DockPanel>
+                                </Grid>
                             </avalonDock:LayoutAnchorable>
                             <avalonDock:LayoutAnchorable Title="Output" ContentId="output">
                                 <Border Background="{DynamicResource SidebarBackground}" Padding="8">

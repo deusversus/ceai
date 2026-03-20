@@ -72,7 +72,7 @@ public sealed class AiToolFunctions(
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
         var inspection = await dashboardService.InspectProcessAsync(processId);
-        var modules = inspection.Modules.Take(20)
+        var modules = inspection.Modules
             .Select(m => $"  {m.Name} @ {m.BaseAddress} ({m.Size})");
         return $"Process: {inspection.ProcessName} (PID {inspection.ProcessId})\n" +
                $"Modules ({inspection.Modules.Count} total):\n{string.Join('\n', modules)}";
@@ -81,14 +81,15 @@ public sealed class AiToolFunctions(
     [Description("Read a typed value from process memory at the given address.")]
     public async Task<string> ReadMemory(
         [Description("Process ID")] int processId,
-        [Description("Memory address as hex (e.g. 0x7FF6A000) or decimal")] string address,
+        [Description("Memory address as hex (e.g. 0x7FF6A000), decimal, or symbolic (e.g. 'GameAssembly.dll+9A18E8')")] string address,
         [Description("Data type: Int32, Int64, Float, Double, or Pointer")] string dataType)
     {
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var resolvedAddress = await TryResolveToHex(processId, address);
             var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
-            var probe = await dashboardService.ReadAddressAsync(processId, address, dt);
+            var probe = await dashboardService.ReadAddressAsync(processId, resolvedAddress, dt);
             return $"Read {dt} at {probe.Address}: {probe.DisplayValue}";
         }
         catch (Exception ex)
@@ -100,23 +101,24 @@ public sealed class AiToolFunctions(
     [Description("Write a value to process memory. Records original value for undo (Ctrl+Z). CAUTION: This modifies the target process.")]
     public async Task<string> WriteMemory(
         [Description("Process ID")] int processId,
-        [Description("Memory address")] string address,
+        [Description("Memory address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
         [Description("Data type: Int32, Int64, Float, Double")] string dataType,
         [Description("Value to write")] string value)
     {
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var resolvedAddress = await TryResolveToHex(processId, address);
             var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
             if (patchUndoService is not null)
             {
-                var addr = AddressTableService.ParseAddress(address);
+                var addr = AddressTableService.ParseAddress(resolvedAddress);
                 var result = await patchUndoService.WriteWithUndoAsync(processId, addr, dt, value);
                 return result.BytesWritten > 0
                     ? $"Wrote '{value}' ({dt}) to 0x{addr:X}. {patchUndoService.UndoCount} patches in undo stack."
                     : $"Write failed at 0x{addr:X}.";
             }
-            var message = await dashboardService.WriteAddressAsync(processId, address, dt, value);
+            var message = await dashboardService.WriteAddressAsync(processId, resolvedAddress, dt, value);
             return message;
         }
         catch (Exception ex)
@@ -173,7 +175,7 @@ public sealed class AiToolFunctions(
         "address into the current live address. Returns the resolved address, module base, and offset.")]
     public async Task<string> ResolveSymbol(
         [Description("Process ID")] int processId,
-        [Description("Symbolic expression to resolve, e.g., 'GameAssembly.dll+9A18E8', 'kernel32.dll+1234', or a raw hex address '0x7FF8...'")] string expression)
+        [Description("Symbolic expression to resolve, e.g., 'GameAssembly.dll+9A18E8', 'kernel32.dll', or a raw hex address '0x7FF8...'")] string expression)
     {
         var normalized = expression.Trim();
 
@@ -194,7 +196,7 @@ public sealed class AiToolFunctions(
                 m.Name.Equals(modulePart, StringComparison.OrdinalIgnoreCase));
 
             if (mod is null)
-                return $"Module '{modulePart}' not found. Use InspectProcess to see loaded modules.";
+                return $"Module '{modulePart}' not found. Loaded modules: {string.Join(", ", attachment.Modules.Select(m => m.Name).Take(10))}...";
 
             var resolvedAddr = (ulong)mod.BaseAddress + offset;
             bool inRange = offset < (ulong)mod.SizeBytes;
@@ -210,6 +212,30 @@ public sealed class AiToolFunctions(
                 inModuleRange = inRange,
                 warning = inRange ? (string?)null : $"Offset 0x{offset:X} exceeds module size (0x{mod.SizeBytes:X})"
             });
+        }
+
+        // Bare module name (contains '.') — resolve to base address
+        if (normalized.Contains('.') && !normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+        {
+            var attachment = await engineFacade.AttachAsync(processId);
+            var mod = attachment.Modules.FirstOrDefault(m =>
+                m.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+
+            if (mod is not null)
+            {
+                return ToJson(new
+                {
+                    expression = normalized,
+                    resolvedAddress = $"0x{(ulong)mod.BaseAddress:X}",
+                    module = mod.Name,
+                    moduleBase = $"0x{(ulong)mod.BaseAddress:X}",
+                    sizeBytes = mod.SizeBytes,
+                    offset = "0x0",
+                    isResolved = true
+                });
+            }
+
+            return $"Module '{normalized}' not found. Loaded modules: {string.Join(", ", attachment.Modules.Select(m => m.Name).Take(10))}...";
         }
 
         // Raw address — just validate and return
@@ -255,11 +281,14 @@ public sealed class AiToolFunctions(
         return Task.FromResult(ToJson(new { id, type = "unknown", description = "ID not recognized. It may be expired, removed, or from a different session." }));
     }
 
-    [Description("Disassemble machine code at an address in a process. Shows assembly instructions.")]
+    [Description("Disassemble machine code at an address in a process. Shows assembly instructions. Accepts raw hex (0x...) or symbolic addresses (module.dll+offset).")]
     public async Task<string> Disassemble(
         [Description("Process ID")] int processId,
-        [Description("Memory address to start disassembling")] string address)
+        [Description("Memory address to start disassembling (hex like '0x7FF...' or symbolic like 'GameAssembly.dll+9A18E8')")] string address)
     {
+        // Resolve symbolic address (module+offset or bare module name) to raw hex
+        var resolvedAddress = await TryResolveToHex(processId, address);
+
         // Pre-check: warn if the target address is not in executable memory
         string? execWarning = null;
         string? protectionString = null;
@@ -267,7 +296,7 @@ public sealed class AiToolFunctions(
         {
             if (memoryProtectionEngine is not null)
             {
-                var addr = ParseAddress(address);
+                var addr = ParseAddress(resolvedAddress);
                 var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
                 if (!region.IsExecutable)
                 {
@@ -287,7 +316,11 @@ public sealed class AiToolFunctions(
             // Protection query failed (e.g., address not mapped) — proceed without warning
         }
 
-        var overview = await disassemblyService.DisassembleAtAsync(processId, address);
+        var overview = await disassemblyService.DisassembleAtAsync(processId, resolvedAddress);
+
+        var symbolicNote = resolvedAddress != address.Trim()
+            ? $"Resolved '{address.Trim()}' → {resolvedAddress}"
+            : (string?)null;
 
         if (execWarning is not null)
         {
@@ -295,6 +328,7 @@ public sealed class AiToolFunctions(
             {
                 warning = execWarning,
                 protection = protectionString,
+                resolved = symbolicNote,
                 startAddress = overview.StartAddress,
                 instructions = overview.Lines.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
                 count = overview.Lines.Count,
@@ -304,6 +338,7 @@ public sealed class AiToolFunctions(
 
         return ToJson(new
         {
+            resolved = symbolicNote,
             startAddress = overview.StartAddress,
             instructions = overview.Lines.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
             count = overview.Lines.Count,
@@ -311,7 +346,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("List memory regions of a process. Shows base address, size, and access flags (R/W/X).")]
+    [Description("List memory regions of a process. Shows base address, size, access flags (R/W/X), and owning module name.")]
     public async Task<string> ListMemoryRegions(
         [Description("Process ID")] int processId,
         [Description("Filter: 'all', 'readable', 'writable', 'executable' (default: readable)")] string filter = "readable")
@@ -320,6 +355,15 @@ public sealed class AiToolFunctions(
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var regions = await scanService.EnumerateRegionsAsync(processId);
+
+            // Load modules for ownership annotation
+            IReadOnlyList<ModuleDescriptor>? modules = null;
+            try
+            {
+                var attachment = await engineFacade.AttachAsync(processId);
+                modules = attachment.Modules;
+            }
+            catch { /* proceed without module info */ }
 
             var filtered = filter.ToLowerInvariant() switch
             {
@@ -337,7 +381,9 @@ public sealed class AiToolFunctions(
             foreach (var r in filtered.Take(100))
             {
                 var flags = $"{(r.IsReadable ? "R" : "-")}{(r.IsWritable ? "W" : "-")}{(r.IsExecutable ? "X" : "-")}";
-                sb.AppendLine($"  0x{r.BaseAddress:X} [{FormatBytes(r.RegionSize),-10}] {flags}");
+                var moduleName = FindOwningModule(r.BaseAddress, r.RegionSize, modules);
+                var moduleTag = moduleName is not null ? $" [{moduleName}]" : "";
+                sb.AppendLine($"  0x{r.BaseAddress:X} [{FormatBytes(r.RegionSize),-10}] {flags}{moduleTag}");
             }
             if (filtered.Count > 100)
                 sb.AppendLine($"  ... and {filtered.Count - 100} more regions");
@@ -440,13 +486,28 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Refresh all values in the address table by re-reading from process memory.")]
+    [Description("Refresh all values in the address table by re-reading from process memory. Returns only entries that changed or have non-zero values.")]
     public async Task<string> RefreshAddressTable([Description("Process ID")] int processId)
     {
         await addressTableService.RefreshAllAsync(processId);
         var entries = addressTableService.Entries;
-        var lines = entries.Select(e => $"  {e.Label}: {e.Address} = {e.CurrentValue} (was {e.PreviousValue})");
-        return $"Refreshed {entries.Count} entries:\n{string.Join('\n', lines)}";
+        var total = entries.Count;
+
+        // Only report entries with non-zero values or that changed
+        var changed = entries.Where(e =>
+            e.CurrentValue != e.PreviousValue && e.PreviousValue is not null).ToList();
+        var nonZero = entries.Where(e =>
+            e.CurrentValue is not null && e.CurrentValue != "0" && e.CurrentValue != "0.0").ToList();
+
+        var summary = new
+        {
+            totalRefreshed = total,
+            changedCount = changed.Count,
+            nonZeroCount = nonZero.Count,
+            changed = changed.Select(e => new { e.Label, e.Address, current = e.CurrentValue, previous = e.PreviousValue }),
+        };
+
+        return ToJson(summary);
     }
 
     // ── Artifact generation tools ──
@@ -1000,12 +1061,32 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("View the source code of a script entry by its node ID. Use ListScripts first to find the ID.")]
+    private static void CollectScriptIds(IEnumerable<AddressTableNode> nodes, List<string> results)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsScriptEntry)
+                results.Add($"{node.Id} (\"{node.Label}\")");
+            if (node.Children.Count > 0)
+                CollectScriptIds(node.Children, results);
+        }
+    }
+
+    [Description("View the source code of a script entry by its node ID or label. Use ListScripts first to find the ID.")]
     public Task<string> ViewScript([Description("Node ID or label of the script entry")] string nodeId)
     {
         var node = ResolveNode(nodeId);
-        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
-        if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
+        if (node is null)
+        {
+            // List available scripts to help the operator find the right one
+            var available = new List<string>();
+            CollectScriptIds(addressTableService.Roots, available);
+            var hint = available.Count > 0
+                ? $" Available scripts: {string.Join(", ", available.Take(10))}"
+                : " No scripts in address table.";
+            return Task.FromResult($"Node '{nodeId}' not found.{hint}");
+        }
+        if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry (it's a {(node.IsGroup ? "group" : "value entry")}).");
 
         var type = node.AssemblerScript.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
         var status = node.IsScriptEnabled ? "✅ Enabled" : "❌ Disabled";
@@ -1257,14 +1338,15 @@ public sealed class AiToolFunctions(
         return $"Found {paths.Count} pointer path(s) to 0x{addr:X}:\n{string.Join('\n', lines)}";
     }
 
-    [Description("Browse raw memory at an address. Returns hex dump with ASCII.")]
+    [Description("Browse raw memory at an address. Returns hex dump with ASCII. Accepts hex or symbolic addresses (module.dll+offset).")]
     public async Task<string> BrowseMemory(
         [Description("Process ID")] int processId,
-        [Description("Start address (hex string)")] string address,
+        [Description("Start address (hex, decimal, or symbolic like 'GameAssembly.dll+9A18E8')")] string address,
         [Description("Number of bytes to read")] int length = 128)
     {
         length = Math.Clamp(length, 1, _limits.MaxBrowseMemoryBytes);
-        var addr = AddressTableService.ParseAddress(address);
+        var resolvedAddress = await TryResolveToHex(processId, address);
+        var addr = AddressTableService.ParseAddress(resolvedAddress);
         var result = await engineFacade.ReadMemoryAsync(processId, addr, length);
         var bytes = result.Bytes.ToArray();
 
@@ -1293,12 +1375,13 @@ public sealed class AiToolFunctions(
     [Description("Analyze memory at an address and identify probable data types at each offset (structure dissection). Returns fields with type, value, and confidence.")]
     public async Task<string> DissectStructure(
         [Description("Process ID")] int processId,
-        [Description("Base address to start analysis (hex string)")] string address,
+        [Description("Base address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
         [Description("Region size in bytes (default 256)")] int regionSize = 256,
         [Description("Type interpretation hint: 'auto' (default), 'int32' (prefer integers, good for stat blocks), 'float' (prefer floats, good for coordinates), 'pointers' (prefer pointer detection)")] string typeHint = "auto")
     {
         var dissector = new StructureDissectorService(engineFacade);
-        var addr = AddressTableService.ParseAddress(address);
+        var resolvedAddress = await TryResolveToHex(processId, address);
+        var addr = AddressTableService.ParseAddress(resolvedAddress);
         var (fields, clustersDetected) = await dissector.DissectAsync(processId, addr, regionSize, typeHint);
 
         if (fields.Count == 0) return "No identifiable fields found in this region.";
@@ -1854,14 +1937,15 @@ public sealed class AiToolFunctions(
         return $"Screenshot captured: '{result.WindowTitle}' ({result.Width}x{result.Height}, {result.PngData.Length / 1024}KB). The image has been queued for your visual analysis.";
     }
 
-    [Description("Read a range of raw bytes from process memory and display as hex dump. Useful for examining code bytes, data structures, or verifying patches.")]
+    [Description("Read a range of raw bytes from process memory and display as hex dump. Accepts hex or symbolic addresses. Useful for examining code bytes, data structures, or verifying patches.")]
     public async Task<string> HexDump(
         [Description("Process ID")] int processId,
-        [Description("Start address (hex string)")] string address,
+        [Description("Start address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
         [Description("Number of bytes to read (default 64, max 256)")] int length = 64)
     {
         length = Math.Clamp(length, 1, 256);
-        var addr = ParseAddress(address);
+        var resolvedAddress = await TryResolveToHex(processId, address);
+        var addr = ParseAddress(resolvedAddress);
         var mem = await engineFacade.ReadMemoryAsync(processId, addr, length);
         var raw = mem.Bytes.ToArray();
 
@@ -3504,12 +3588,72 @@ public sealed class AiToolFunctions(
     private AddressTableNode? ResolveNode(string idOrLabel) =>
         addressTableService.FindNode(idOrLabel) ?? addressTableService.FindNodeByLabel(idOrLabel);
 
+    /// <summary>
+    /// Resolve a symbolic address (module+offset or bare module name) to a raw hex string.
+    /// If already hex, returns as-is.
+    /// </summary>
+    private async Task<string> TryResolveToHex(int processId, string address)
+    {
+        var normalized = address.Trim();
+
+        // Already a raw hex address
+        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            return normalized;
+
+        // Check for module+offset pattern
+        var plusIdx = normalized.IndexOf('+');
+        if (plusIdx > 0)
+        {
+            var modulePart = normalized[..plusIdx].Trim();
+            var offsetPart = normalized[(plusIdx + 1)..].Trim();
+            if (offsetPart.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+                offsetPart = offsetPart[2..];
+
+            if (ulong.TryParse(offsetPart, NumberStyles.HexNumber, null, out var offset))
+            {
+                var attachment = await engineFacade.AttachAsync(processId);
+                var mod = attachment.Modules.FirstOrDefault(m =>
+                    m.Name.Equals(modulePart, StringComparison.OrdinalIgnoreCase));
+                if (mod is not null)
+                    return $"0x{(ulong)mod.BaseAddress + offset:X}";
+            }
+        }
+
+        // Bare module name (contains '.')
+        if (normalized.Contains('.'))
+        {
+            var attachment = await engineFacade.AttachAsync(processId);
+            var mod = attachment.Modules.FirstOrDefault(m =>
+                m.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase));
+            if (mod is not null)
+                return $"0x{(ulong)mod.BaseAddress:X}";
+        }
+
+        // Might be raw decimal or plain hex without prefix — pass through
+        return normalized;
+    }
+
     private static nuint ParseAddress(string address)
     {
         var addr = address.Trim();
         if (addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             addr = addr[2..];
         return (nuint)ulong.Parse(addr, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Find which module owns a memory region by checking if the region overlaps with any module's address range.</summary>
+    private static string? FindOwningModule(nuint regionBase, long regionSize, IReadOnlyList<ModuleDescriptor>? modules)
+    {
+        if (modules is null) return null;
+        var regionEnd = (ulong)regionBase + (ulong)regionSize;
+        foreach (var m in modules)
+        {
+            var modBase = (ulong)m.BaseAddress;
+            var modEnd = modBase + (ulong)m.SizeBytes;
+            if ((ulong)regionBase >= modBase && (ulong)regionBase < modEnd)
+                return m.Name;
+        }
+        return null;
     }
 
     private static int CountNodes(IEnumerable<AddressTableNode> nodes, Func<AddressTableNode, bool>? predicate = null)

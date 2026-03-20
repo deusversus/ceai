@@ -320,7 +320,7 @@ public sealed class AiOperatorService
         // the agent to actually execute tool calls returned by the model.
         return client
             .AsBuilder()
-            .UseFunctionInvocation()
+            .UseFunctionInvocation(configure: client => client.IncludeDetailedErrors = true)
             .UseAIContextProviders(contextProviders.ToArray())
             .BuildAIAgent(new ChatClientAgentOptions
             {

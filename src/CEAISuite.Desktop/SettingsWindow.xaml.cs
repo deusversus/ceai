@@ -109,6 +109,12 @@ public partial class SettingsWindow : Window
         ThemeDark.IsChecked = theme == AppTheme.Dark;
         ThemeLight.IsChecked = theme == AppTheme.Light;
 
+        // Density preset
+        var density = (s.DensityPreset ?? "Balanced").ToLowerInvariant();
+        DensityClean.IsChecked = density == "clean";
+        DensityBalanced.IsChecked = density == "balanced";
+        DensityDense.IsChecked = density == "dense";
+
         // Performance / Token Limits
         var profile = (s.TokenProfile ?? "balanced").ToLowerInvariant();
         ProfileSaving.IsChecked = profile == "saving";
@@ -436,6 +442,10 @@ public partial class SettingsWindow : Window
         s.Theme = ThemeLight.IsChecked == true ? "Light"
                 : ThemeDark.IsChecked == true ? "Dark"
                 : "System";
+
+        s.DensityPreset = DensityClean.IsChecked == true ? "Clean"
+                        : DensityDense.IsChecked == true ? "Dense"
+                        : "Balanced";
 
         // Token profile
         s.TokenProfile = ProfileSaving.IsChecked == true ? "saving"

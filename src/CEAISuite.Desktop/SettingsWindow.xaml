@@ -734,6 +734,27 @@
 
                         <TextBlock Text="Theme changes apply immediately."
                                    Foreground="{DynamicResource WarningForeground}" Margin="0,16,0,0" FontStyle="Italic" />
+
+                        <Separator Margin="0,20,0,16" />
+
+                        <TextBlock Text="Information Density" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Controls default panel visibility and UI complexity"
+                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,4,0,12" />
+
+                        <RadioButton x:Name="DensityClean" Content="Clean" GroupName="Density"
+                                     Foreground="{DynamicResource PrimaryForeground}" FontSize="13" Margin="0,0,0,4" />
+                        <TextBlock Text="Minimal — sidebar hidden, bottom panel collapsed, essentials only"
+                                   Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="20,0,0,12" />
+
+                        <RadioButton x:Name="DensityBalanced" Content="Balanced" GroupName="Density"
+                                     Foreground="{DynamicResource PrimaryForeground}" FontSize="13" Margin="0,0,0,4" />
+                        <TextBlock Text="Default — process sidebar visible, output tab open, full toolbar"
+                                   Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="20,0,0,12" />
+
+                        <RadioButton x:Name="DensityDense" Content="Dense" GroupName="Density"
+                                     Foreground="{DynamicResource PrimaryForeground}" FontSize="13" Margin="0,0,0,4" />
+                        <TextBlock Text="Power user — all panels expanded, extra status bar details"
+                                   Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="20,0,0,12" />
                     </StackPanel>
                 </Border>
             </TabItem>

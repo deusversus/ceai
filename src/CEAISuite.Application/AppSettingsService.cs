@@ -37,6 +37,9 @@ public sealed class AppSettings
     public bool AutoHideMenuBar { get; set; } = false;
     public string Theme { get; set; } = "System";
 
+    /// <summary>UI density preset: "Clean", "Balanced", "Dense". Controls default panel visibility.</summary>
+    public string DensityPreset { get; set; } = "Balanced";
+
     /// <summary>Automatically open Memory Browser tab when attaching to a process.</summary>
     public bool AutoOpenMemoryBrowser { get; set; } = true;
 

@@ -110,6 +110,9 @@ public partial class MainWindow : Window
         // Restore saved panel layout (must happen after InitializeComponent + theme)
         RestoreLayout();
 
+        // Apply saved density preset (after layout restore so it can override visibility)
+        ApplyDensityPreset(_appSettingsService.Settings.DensityPreset ?? "Balanced");
+
         // Wire up AI operator with dynamic context injection
         var signatureService = new SignatureGeneratorService(engineFacade);
         var processWatchdog = new ProcessWatchdogService();
@@ -2887,6 +2890,75 @@ public partial class MainWindow : Window
                 return item.Content;
         }
         return null;
+    }
+
+    #endregion
+
+    #region Density Presets
+
+    private void ApplyDensityPreset(string preset)
+    {
+        var anchorables = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutAnchorable>()
+            .ToDictionary(a => a.ContentId ?? "", a => a);
+
+        switch (preset.ToLowerInvariant())
+        {
+            case "clean":
+                // Sidebar hidden, bottom panel auto-hide, AI chat visible
+                SetAnchorableVisibility(anchorables, "processes", autoHide: true);
+                SetAnchorableVisibility(anchorables, "scanner", autoHide: true);
+                SetAnchorableVisibility(anchorables, "output", autoHide: true);
+                SetAnchorableVisibility(anchorables, "aiOperator", visible: true);
+                StatusBarDensity.Text = "Clean";
+                break;
+
+            case "dense":
+                // Everything expanded
+                SetAnchorableVisibility(anchorables, "processes", visible: true);
+                SetAnchorableVisibility(anchorables, "scanner", visible: true);
+                SetAnchorableVisibility(anchorables, "output", visible: true);
+                SetAnchorableVisibility(anchorables, "aiOperator", visible: true);
+                StatusBarDensity.Text = "Dense";
+                break;
+
+            default: // Balanced
+                // Sidebar visible, bottom panel visible with output, AI chat visible
+                SetAnchorableVisibility(anchorables, "processes", visible: true);
+                SetAnchorableVisibility(anchorables, "scanner", visible: true);
+                SetAnchorableVisibility(anchorables, "output", visible: true);
+                SetAnchorableVisibility(anchorables, "aiOperator", visible: true);
+                StatusBarDensity.Text = "Balanced";
+                break;
+        }
+    }
+
+    private static void SetAnchorableVisibility(
+        Dictionary<string, LayoutAnchorable> anchorables, string contentId,
+        bool visible = false, bool autoHide = false)
+    {
+        if (!anchorables.TryGetValue(contentId, out var panel)) return;
+
+        if (autoHide && !panel.IsAutoHidden)
+            panel.ToggleAutoHide();
+        else if (visible && panel.IsAutoHidden)
+            panel.ToggleAutoHide();
+    }
+
+    private void CycleDensityPreset(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        var current = (_appSettingsService.Settings.DensityPreset ?? "Balanced").ToLowerInvariant();
+        var next = current switch
+        {
+            "clean" => "Balanced",
+            "balanced" => "Dense",
+            "dense" => "Clean",
+            _ => "Balanced"
+        };
+        _appSettingsService.Settings.DensityPreset = next;
+        _appSettingsService.Save();
+        ApplyDensityPreset(next);
     }
 
     #endregion

@@ -102,7 +102,9 @@ public partial class MainWindow : Window
         var signatureService = new SignatureGeneratorService(engineFacade);
         var processWatchdog = new ProcessWatchdogService();
         var operationJournal = new OperationJournal();
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), new WindowsCodeCaveEngine(), processWatchdog, operationJournal);
+        var chatStore = new AiChatStore();
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), new WindowsCodeCaveEngine(), processWatchdog, operationJournal, chatStore,
+            currentChatProvider: () => _aiOperatorService.DisplayHistory);
         IChatClient? chatClient = null;
         try
         {
@@ -113,7 +115,7 @@ public partial class MainWindow : Window
             // AI provider init failed — app still starts, just without AI
             System.Diagnostics.Debug.WriteLine($"AI provider init failed: {ex.Message}");
         }
-        _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext);
+        _aiOperatorService = new AiOperatorService(chatClient, toolFunctions, BuildAiContext, chatStore);
         _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
         _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
 

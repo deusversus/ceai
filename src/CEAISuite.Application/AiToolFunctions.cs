@@ -33,7 +33,9 @@ public sealed class AiToolFunctions(
     ICallStackEngine? callStackEngine = null,
     ICodeCaveEngine? codeCaveEngine = null,
     ProcessWatchdogService? watchdogService = null,
-    OperationJournal? operationJournal = null)
+    OperationJournal? operationJournal = null,
+    AiChatStore? chatStore = null,
+    Func<IReadOnlyList<AiChatMessage>>? currentChatProvider = null)
 {
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
@@ -1987,6 +1989,88 @@ public sealed class AiToolFunctions(
         var (entries, processName, processId) = (result.Value.Entries, result.Value.ProcessName, result.Value.ProcessId);
         addressTableService.ImportFlat(entries);
         return $"Loaded session '{sessionId}': {processName} (PID {processId}), {entries.Count} entries restored.";
+    }
+
+    // ── Chat History Search ──
+
+    [Description("Search all chat transcripts (current + saved) for a keyword or phrase. Use to recall past findings, addresses, or context lost to compaction.")]
+    public string SearchChatHistory(
+        [Description("Search query (case-insensitive substring match)")] string query,
+        [Description("Max results to return")] int maxResults = 10,
+        [Description("Search scope: 'all', 'current', or a specific chat ID")] string scope = "all")
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return "Please provide a search query.";
+
+        var results = new List<(string chatTitle, string chatId, string role, DateTimeOffset timestamp, string snippet)>();
+        const int snippetRadius = 120;
+
+        // Search current in-memory chat first
+        if (scope is "all" or "current" && currentChatProvider is not null)
+        {
+            foreach (var msg in currentChatProvider())
+                SearchMessage(msg, query, "(current chat)", "current", snippetRadius, results);
+        }
+
+        // Search saved chats
+        if (scope is not "current" && chatStore is not null)
+        {
+            var chats = scope == "all"
+                ? chatStore.ListAll()
+                : [chatStore.Load(scope)];
+
+            foreach (var chat in chats)
+            {
+                if (chat is null) continue;
+                foreach (var msg in chat.Messages)
+                    SearchMessage(msg, query, chat.Title, chat.Id, snippetRadius, results);
+            }
+        }
+
+        if (results.Count == 0)
+            return $"No matches found for \"{query}\".";
+
+        // Most recent first, capped
+        var capped = results.OrderByDescending(r => r.timestamp).Take(maxResults).ToList();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Found {results.Count} matches for \"{query}\" (showing {capped.Count}):");
+        foreach (var (title, chatId, role, ts, snippet) in capped)
+        {
+            sb.AppendLine($"  [{chatId}] {title} — {role} @ {ts:yyyy-MM-dd HH:mm}");
+            sb.AppendLine($"    ...{snippet}...");
+        }
+        return sb.ToString();
+    }
+
+    private static void SearchMessage(AiChatMessage msg, string query, string chatTitle, string chatId,
+        int snippetRadius, List<(string, string, string, DateTimeOffset, string)> results)
+    {
+        // Search message content
+        var idx = msg.Content.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+        if (idx >= 0)
+        {
+            var start = Math.Max(0, idx - snippetRadius);
+            var end = Math.Min(msg.Content.Length, idx + query.Length + snippetRadius);
+            var snippet = msg.Content[start..end].Replace('\n', ' ').Replace('\r', ' ');
+            results.Add((chatTitle, chatId, msg.Role, msg.Timestamp, snippet));
+        }
+
+        // Search tool results too (often contain addresses, values, findings)
+        if (msg.ToolResults is not null)
+        {
+            foreach (var tr in msg.ToolResults)
+            {
+                if (tr.Result is null) continue;
+                var trIdx = tr.Result.IndexOf(query, StringComparison.OrdinalIgnoreCase);
+                if (trIdx >= 0)
+                {
+                    var start = Math.Max(0, trIdx - snippetRadius);
+                    var end = Math.Min(tr.Result.Length, trIdx + query.Length + snippetRadius);
+                    var snippet = $"[{tr.Name}] {tr.Result[start..end].Replace('\n', ' ').Replace('\r', ' ')}";
+                    results.Add((chatTitle, chatId, "tool:" + tr.Name, msg.Timestamp, snippet));
+                }
+            }
+        }
     }
 
     // ── Signature / AOB tools ──

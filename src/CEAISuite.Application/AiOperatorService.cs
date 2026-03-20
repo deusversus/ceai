@@ -87,6 +87,7 @@ internal static class ToolCategories
         // Context & sessions
         "GetCurrentContext", "SummarizeInvestigation",
         "SaveSession", "ListSessions", "LoadSession",
+        "SearchChatHistory",
         // Meta-tools (always available)
         "request_tools", "list_tool_categories", "unload_tools",
     };
@@ -149,7 +150,7 @@ public sealed class AiOperatorService
     private readonly List<AiActionLogEntry> _actionLog = new();
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
-    private readonly AiChatStore _chatStore = new();
+    private readonly AiChatStore _chatStore;
     private readonly List<AITool> _tools;
     private readonly Dictionary<string, AITool> _allToolsByName;
     private readonly HashSet<string> _loadedCategories = new(StringComparer.OrdinalIgnoreCase);
@@ -211,11 +212,12 @@ public sealed class AiOperatorService
     /// <summary>Current chat title.</summary>
     public string CurrentChatTitle { get; private set; } = "New Chat";
 
-    public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions, Func<string>? contextProvider = null)
+    public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions, Func<string>? contextProvider = null, AiChatStore? chatStore = null)
     {
         IsConfigured = chatClient is not null;
         _contextProvider = contextProvider;
         _toolFunctions = toolFunctions;
+        _chatStore = chatStore ?? new AiChatStore();
         var baseClient = chatClient ?? new StubChatClient();
         _baseChatClient = baseClient;
 
@@ -1233,6 +1235,12 @@ public sealed class AiOperatorService
         You are an expert in game hacking, memory analysis, x86/x64 assembly, and reverse engineering.
         You operate autonomously using your tools to accomplish user goals.
 
+        ═══ CONTEXT RECOVERY ═══
+        Conversation history is compacted to stay within token limits. If you've lost context
+        about prior findings (addresses, values, tool results), use SearchChatHistory to search
+        the full uncompacted transcript. This searches all saved chats plus the current one.
+        Example: SearchChatHistory("health address") to recall a previously found address.
+
         ═══ SAFETY RULES (CRITICAL) ═══
         • NEVER write to code/text sections (.text, .code) of the process — only data sections.
         • Before enabling a script, always ValidateScript first.
@@ -1266,7 +1274,8 @@ public sealed class AiOperatorService
         Scanning: StartScan, RefineScan, GetScanResults
         Address Table: ListAddressTable, AddToAddressTable, RemoveFromAddressTable, RefreshAddressTable,
                        FreezeAddress, UnfreezeAddress
-        Context: GetCurrentContext, SummarizeInvestigation, SaveSession, ListSessions, LoadSession
+        Context: GetCurrentContext, SummarizeInvestigation, SaveSession, ListSessions, LoadSession,
+                 SearchChatHistory
 
         ON-DEMAND CATEGORIES (call request_tools to load):
         • breakpoints — SetBreakpoint, RemoveBreakpoint, ListBreakpoints, GetBreakpointHitLog, ProbeTargetRisk...

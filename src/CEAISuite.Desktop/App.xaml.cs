@@ -49,7 +49,15 @@ public partial class App : System.Windows.Application
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
             Directory.CreateDirectory(logDir);
             var logPath = Path.Combine(logDir, $"crash-{DateTime.Now:yyyy-MM-dd}.log");
-            var entry = $"[{DateTime.Now:HH:mm:ss.fff}] [{source}] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}\n\n";
+            var entry = $"[{DateTime.Now:HH:mm:ss.fff}] [{source}] {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}\n";
+            // Include full inner exception chain
+            var inner = ex.InnerException;
+            while (inner is not null)
+            {
+                entry += $"  ---> {inner.GetType().Name}: {inner.Message}\n  {inner.StackTrace}\n";
+                inner = inner.InnerException;
+            }
+            entry += "\n";
             File.AppendAllText(logPath, entry);
         }
         catch { /* last resort — nothing to do */ }

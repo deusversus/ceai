@@ -115,7 +115,8 @@ public partial class MainWindow : Window
             ? theme : AppTheme.System;
         ThemeManager.ApplyTheme(savedTheme);
         ApplyDockTheme(ThemeManager.ResolvedTheme);
-        ThemeManager.ThemeChanged += ApplyDockTheme;
+        UpdateSystemSelectionColors();
+        ThemeManager.ThemeChanged += t => { ApplyDockTheme(t); UpdateSystemSelectionColors(); };
 
         // Restore saved panel layout (must happen after InitializeComponent + theme)
         RestoreLayout();
@@ -3021,6 +3022,22 @@ public partial class MainWindow : Window
         DockManager.Theme = resolved == AppTheme.Light
             ? new Vs2013LightTheme()
             : new Vs2013DarkTheme();
+    }
+
+    /// <summary>Update system selection colors from current theme resources.</summary>
+    private void UpdateSystemSelectionColors()
+    {
+        if (TryFindResource("SelectionHighlight") is SolidColorBrush highlight)
+        {
+            Resources[SystemColors.HighlightBrushKey] = new SolidColorBrush(highlight.Color);
+            Resources[SystemColors.InactiveSelectionHighlightBrushKey] = new SolidColorBrush(highlight.Color);
+            Resources[SystemColors.ControlBrushKey] = new SolidColorBrush(highlight.Color);
+        }
+        if (TryFindResource("SelectionHighlightText") is SolidColorBrush highlightText)
+        {
+            Resources[SystemColors.HighlightTextBrushKey] = new SolidColorBrush(highlightText.Color);
+            Resources[SystemColors.InactiveSelectionHighlightTextBrushKey] = new SolidColorBrush(highlightText.Color);
+        }
     }
 
     /// <summary>Activate a LayoutDocument tab by its ContentId.</summary>

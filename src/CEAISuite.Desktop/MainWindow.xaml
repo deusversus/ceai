@@ -15,12 +15,12 @@
     <Window.Resources>
         <local:StringToBrushConverter x:Key="BrushConv" />
 
-        <!-- System color overrides for selection highlights -->
-        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="{Binding Color, Source={StaticResource SelectionHighlight}}" />
-        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="{Binding Color, Source={StaticResource SelectionHighlightText}}" />
-        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="{Binding Color, Source={StaticResource SelectionHighlight}}" />
-        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="{Binding Color, Source={StaticResource SelectionHighlightText}}" />
-        <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="{Binding Color, Source={StaticResource SelectionHighlight}}" />
+        <!-- System color overrides for selection highlights — use DynamicResource for theme switching -->
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#264F78" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#CCCCCC" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightBrushKey}" Color="#264F78" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.InactiveSelectionHighlightTextBrushKey}" Color="#CCCCCC" />
+        <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#264F78" />
 
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
@@ -146,15 +146,6 @@
         <Style TargetType="Separator">
             <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
             <Setter Property="Margin" Value="0,2" />
-        </Style>
-
-        <Style TargetType="TextBox">
-            <Setter Property="Background" Value="{DynamicResource InputBackground}" />
-            <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
-            <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
-            <Setter Property="Padding" Value="4,2" />
-            <Setter Property="BorderThickness" Value="1" />
         </Style>
 
         <Style TargetType="GridSplitter">

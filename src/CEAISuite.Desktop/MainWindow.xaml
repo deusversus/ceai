@@ -288,7 +288,8 @@
                         <ComboBox x:Name="ProcessComboBox" Width="180" FontSize="11"
                                   ToolTip="Select process (Ctrl+P)"
                                   IsEditable="True" IsTextSearchEnabled="True"
-                                  DisplayMemberPath="Label" />
+                                  DisplayMemberPath="Label"
+                                  DropDownOpened="ProcessComboBox_DropDownOpened" />
                         <Button Content="📎 Attach" Padding="8,3" FontSize="11" Click="CmdAttachProcess"
                                 ToolTip="Attach to selected process" />
                         <Button Content="⏏ Detach" Padding="8,3" FontSize="11" Click="CmdDetachProcess"

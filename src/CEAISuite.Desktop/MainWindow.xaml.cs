@@ -2651,6 +2651,29 @@ public partial class MainWindow : Window
         ProcessComboBox.ItemsSource = items;
     }
 
+    private async void ProcessComboBox_DropDownOpened(object sender, EventArgs e)
+    {
+        if (DataContext is not WorkspaceDashboard dashboard) return;
+        try
+        {
+            var updated = await _dashboardService.BuildAsync(_databasePath);
+            DataContext = updated with
+            {
+                CurrentInspection = dashboard.CurrentInspection,
+                ScanResults = dashboard.ScanResults,
+                ScanStatus = dashboard.ScanStatus,
+                ScanDetails = dashboard.ScanDetails,
+                AddressTableNodes = _addressTableService.Roots,
+                AddressTableStatus = dashboard.AddressTableStatus,
+                Disassembly = dashboard.Disassembly,
+                BreakpointStatus = dashboard.BreakpointStatus,
+                StatusMessage = dashboard.StatusMessage
+            };
+            PopulateProcessCombo();
+        }
+        catch { /* swallow — non-critical refresh */ }
+    }
+
     private async void MenuUndo(object sender, RoutedEventArgs e)
     {
         await PerformUndoAsync();

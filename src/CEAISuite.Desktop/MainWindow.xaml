@@ -178,7 +178,6 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -278,25 +277,8 @@
             </DockPanel>
         </Border>
 
-        <!-- Row 1: Compact status/profile bar -->
-        <Border Grid.Row="1" Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}"
-                BorderThickness="0,0,0,1" Padding="10,4">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Left" Text="{Binding ProductName}"
-                           FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource PrimaryForeground}" />
-                <TextBlock DockPanel.Dock="Left" Text=" | " Foreground="{DynamicResource BorderBrush}" Margin="6,0" />
-                <TextBlock DockPanel.Dock="Left" Text="{Binding Summary}"
-                           Foreground="{DynamicResource SecondaryForeground}" TextTrimming="CharacterEllipsis" />
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <TextBlock Text="{Binding DefaultProfile.Name}" Foreground="{DynamicResource AccentForeground}" Margin="0,0,10,0" />
-                    <TextBlock Text="{Binding DefaultProfile.TargetPlatform}" Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,10,0" />
-                    <TextBlock Text="{Binding DefaultProfile.TargetProcess}" Foreground="{DynamicResource SecondaryForeground}" />
-                </StackPanel>
-            </DockPanel>
-        </Border>
-
-        <!-- Row 2: Dockable Panel Layout -->
-        <avalonDock:DockingManager x:Name="DockManager" Grid.Row="2">
+        <!-- Row 1: Dockable Panel Layout -->
+        <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1">
             <avalonDock:LayoutRoot>
                 <avalonDock:LayoutPanel Orientation="Horizontal">
 
@@ -950,7 +932,7 @@
         </avalonDock:DockingManager>
 
         <!-- Row 3: Status bar -->
-        <Border Grid.Row="3" Background="{DynamicResource MenuBarBackground}"
+        <Border Grid.Row="2" Background="{DynamicResource MenuBarBackground}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="8,3">
             <Grid>
                 <Grid.ColumnDefinitions>

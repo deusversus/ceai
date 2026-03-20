@@ -132,7 +132,7 @@ public sealed class AddressTableNode : INotifyPropertyChanged
 
     // Tree structure
     public ObservableCollection<AddressTableNode> Children { get; } = new();
-    public bool IsExpanded { get; set; } = true;
+    public bool IsExpanded { get; set; } = false;
 
     // Display helpers (computed — fire from setters above)
     public string DisplayValue => IsGroup ? $"[{Children.Count} items]"

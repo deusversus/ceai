@@ -146,6 +146,19 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
         return results;
     }
 
+    public async Task DeleteAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await using var connection = CreateConnection();
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            DELETE FROM investigation_sessions WHERE id = $id;
+            """;
+        command.Parameters.AddWithValue("$id", sessionId);
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private SqliteConnection CreateConnection() =>
         new(new SqliteConnectionStringBuilder
         {

@@ -76,4 +76,9 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
 
         return (entries, session.ProcessName, session.ProcessId, session.ChatId);
     }
+
+    public async Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
+    {
+        await repository.DeleteAsync(sessionId, cancellationToken);
+    }
 }

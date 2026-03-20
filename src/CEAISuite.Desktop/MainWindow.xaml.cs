@@ -2290,7 +2290,7 @@ public partial class MainWindow : Window
 
         try
         {
-            var sessions = await _sessionService.ListSessionsAsync(20);
+            var sessions = (await _sessionService.ListSessionsAsync(20)).ToList();
             if (sessions.Count == 0)
             {
                 DataContext = dashboard with { StatusMessage = "No saved sessions found." };
@@ -2316,11 +2316,47 @@ public partial class MainWindow : Window
 
             listBox.SelectedIndex = 0;
 
+            var buttonPanel = new System.Windows.Controls.StackPanel
+            {
+                Orientation = System.Windows.Controls.Orientation.Horizontal,
+                HorizontalAlignment = HorizontalAlignment.Right
+            };
+            System.Windows.Controls.DockPanel.SetDock(buttonPanel, System.Windows.Controls.Dock.Bottom);
+
             var loadBtn = new System.Windows.Controls.Button { Content = "Load", Padding = new Thickness(16, 6, 16, 6), IsDefault = true };
             loadBtn.Click += (_, _) => { dialogWindow.DialogResult = true; dialogWindow.Close(); };
-            System.Windows.Controls.DockPanel.SetDock(loadBtn, System.Windows.Controls.Dock.Bottom);
 
-            panel.Children.Add(loadBtn);
+            var deleteBtn = new System.Windows.Controls.Button
+            {
+                Content = "Delete", Padding = new Thickness(16, 6, 16, 6), Margin = new Thickness(8, 0, 0, 0),
+                Foreground = System.Windows.Media.Brushes.OrangeRed
+            };
+            deleteBtn.Click += async (_, _) =>
+            {
+                if (listBox.SelectedIndex < 0) return;
+                var idx = listBox.SelectedIndex;
+                var target = sessions[idx];
+                var confirm = MessageBox.Show(
+                    $"Delete session \"{target.Id}\"?\nThis cannot be undone.",
+                    "Delete Session", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (confirm != MessageBoxResult.Yes) return;
+
+                await _sessionService.DeleteSessionAsync(target.Id);
+                sessions = (await _sessionService.ListSessionsAsync(20)).ToList();
+                listBox.Items.Clear();
+                foreach (var s in sessions)
+                    listBox.Items.Add($"{s.Id}  —  {s.ProcessName}  ({s.AddressEntryCount} addresses, {s.CreatedAtUtc:g})");
+                if (sessions.Count > 0) listBox.SelectedIndex = 0;
+            };
+
+            var cancelBtn = new System.Windows.Controls.Button { Content = "Cancel", Padding = new Thickness(16, 6, 16, 6), Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
+            cancelBtn.Click += (_, _) => { dialogWindow.DialogResult = false; dialogWindow.Close(); };
+
+            buttonPanel.Children.Add(loadBtn);
+            buttonPanel.Children.Add(deleteBtn);
+            buttonPanel.Children.Add(cancelBtn);
+
+            panel.Children.Add(buttonPanel);
             panel.Children.Add(listBox);
             dialogWindow.Content = panel;
 

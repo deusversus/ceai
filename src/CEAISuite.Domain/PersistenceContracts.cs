@@ -18,4 +18,6 @@ public interface IInvestigationSessionRepository
     Task<InvestigationSession?> LoadAsync(string sessionId, CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<SavedInvestigationSession>> ListRecentAsync(int limit, CancellationToken cancellationToken = default);
+
+    Task DeleteAsync(string sessionId, CancellationToken cancellationToken = default);
 }

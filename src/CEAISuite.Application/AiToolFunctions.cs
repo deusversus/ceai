@@ -3590,7 +3590,7 @@ public sealed class AiToolFunctions(
 
     /// <summary>
     /// Resolve a symbolic address (module+offset or bare module name) to a raw hex string.
-    /// If already hex, returns as-is.
+    /// If already hex, returns as-is. Throws if a symbolic pattern is detected but can't resolve.
     /// </summary>
     private async Task<string> TryResolveToHex(int processId, string address)
     {
@@ -3616,17 +3616,25 @@ public sealed class AiToolFunctions(
                     m.Name.Equals(modulePart, StringComparison.OrdinalIgnoreCase));
                 if (mod is not null)
                     return $"0x{(ulong)mod.BaseAddress + offset:X}";
+
+                var available = string.Join(", ", attachment.Modules.Select(m => m.Name).Take(10));
+                throw new InvalidOperationException(
+                    $"Module '{modulePart}' not found (may not be loaded yet). Loaded modules: {available}");
             }
         }
 
         // Bare module name (contains '.')
-        if (normalized.Contains('.'))
+        if (normalized.Contains('.') && !ulong.TryParse(normalized, NumberStyles.HexNumber, null, out _))
         {
             var attachment = await engineFacade.AttachAsync(processId);
             var mod = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase));
             if (mod is not null)
                 return $"0x{(ulong)mod.BaseAddress:X}";
+
+            var available = string.Join(", ", attachment.Modules.Select(m => m.Name).Take(10));
+            throw new InvalidOperationException(
+                $"Module '{normalized}' not found (may not be loaded yet). Loaded modules: {available}");
         }
 
         // Might be raw decimal or plain hex without prefix — pass through

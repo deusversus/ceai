@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using AvalonDock.Themes;
 using AvalonDock.Layout;
+using AvalonDock.Layout.Serialization;
 using CEAISuite.Application;
 using CEAISuite.Engine.Abstractions;
 using CEAISuite.Engine.Windows;
@@ -66,6 +67,10 @@ public partial class MainWindow : Window
     private readonly List<AttachmentChip> _attachments = new();
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
+    private static readonly string LayoutFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CEAISuite", "layout.xml");
+
     public MainWindow()
     {
         InitializeComponent();
@@ -101,6 +106,9 @@ public partial class MainWindow : Window
         ThemeManager.ApplyTheme(savedTheme);
         ApplyDockTheme(ThemeManager.ResolvedTheme);
         ThemeManager.ThemeChanged += ApplyDockTheme;
+
+        // Restore saved panel layout (must happen after InitializeComponent + theme)
+        RestoreLayout();
 
         // Wire up AI operator with dynamic context injection
         var signatureService = new SignatureGeneratorService(engineFacade);
@@ -257,6 +265,7 @@ public partial class MainWindow : Window
 
     protected override void OnClosed(EventArgs e)
     {
+        SaveLayout();
         _refreshTimer?.Stop();
         _hotkeyService.Dispose();
         _aiOperatorService.SaveCurrentChat();
@@ -2812,6 +2821,75 @@ public partial class MainWindow : Window
         if (doc is not null)
             doc.IsActive = true;
     }
+
+    #region Layout Persistence
+
+    private void SaveLayout()
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(LayoutFilePath)!;
+            Directory.CreateDirectory(dir);
+            var serializer = new XmlLayoutSerializer(DockManager);
+            serializer.Serialize(LayoutFilePath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"SaveLayout failed: {ex.Message}");
+        }
+    }
+
+    private void RestoreLayout()
+    {
+        try
+        {
+            if (!File.Exists(LayoutFilePath)) return;
+            var serializer = new XmlLayoutSerializer(DockManager);
+            serializer.LayoutSerializationCallback += (_, args) =>
+            {
+                // Preserve existing content controls — match by ContentId
+                if (args.Content != null) return;
+
+                // Find the original content from the XAML-defined layout
+                var contentId = args.Model?.ContentId;
+                if (string.IsNullOrEmpty(contentId)) { args.Cancel = true; return; }
+
+                var existing = FindContentByContentId(contentId);
+                if (existing != null)
+                    args.Content = existing;
+                else
+                    args.Cancel = true; // Unknown panel — skip it
+            };
+            serializer.Deserialize(LayoutFilePath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"RestoreLayout failed: {ex.Message}");
+            // Corrupted layout file — delete it so next launch uses defaults
+            try { File.Delete(LayoutFilePath); } catch { }
+        }
+    }
+
+    private void ResetLayout(object sender, RoutedEventArgs e)
+    {
+        try { File.Delete(LayoutFilePath); } catch { }
+        MessageBox.Show("Layout reset. Restart the application to apply the default layout.",
+            "Reset Layout", MessageBoxButton.OK, MessageBoxImage.Information);
+    }
+
+    /// <summary>Lookup the original XAML-defined content control by ContentId.</summary>
+    private object? FindContentByContentId(string contentId)
+    {
+        // Walk all current layout elements to find one with matching ContentId that has Content
+        foreach (var item in DockManager.Layout.Descendents().OfType<LayoutContent>())
+        {
+            if (item.ContentId == contentId && item.Content != null)
+                return item.Content;
+        }
+        return null;
+    }
+
+    #endregion
 }
 
 /// <summary>Display model for breakpoint list items.</summary>

@@ -210,6 +210,16 @@
                                 <Separator />
                                 <MenuItem Header="_Reset Layout" Click="ResetLayout" />
                             </MenuItem>
+                            <MenuItem Header="_Windows">
+                                <MenuItem Header="_Processes" Click="ShowPanel" Tag="processes" />
+                                <MenuItem Header="_Scanner" Click="ShowPanel" Tag="scanner" />
+                                <MenuItem Header="_Output" Click="ShowPanel" Tag="output" />
+                                <MenuItem Header="_AI Operator" Click="ShowPanel" Tag="aiOperator" />
+                                <Separator />
+                                <MenuItem Header="_Address Table" Click="ShowPanel" Tag="addressTable" />
+                                <MenuItem Header="_Inspection" Click="ShowPanel" Tag="inspection" />
+                                <MenuItem Header="Memory _Browser" Click="ShowPanel" Tag="memoryBrowser" />
+                            </MenuItem>
                             <MenuItem Header="S_kills">
                                 <MenuItem Header="_Manage Skills…" Click="OpenSkillsManager" />
                                 <MenuItem Header="Open Skills _Folder" Click="OpenSkillsFolder" />

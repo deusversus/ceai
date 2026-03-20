@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private readonly PointerRescanService _pointerRescanService;
     private readonly AppSettingsService _appSettingsService;
     private readonly List<AttachmentChip> _attachments = new();
+    private readonly Dictionary<string, object> _closedPanelContent = new();
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
 
     private static readonly string LayoutFilePath = Path.Combine(
@@ -118,6 +119,13 @@ public partial class MainWindow : Window
 
         // Restore saved panel layout (must happen after InitializeComponent + theme)
         RestoreLayout();
+
+        // Stash panel content when user closes a panel so we can restore it from Windows menu
+        DockManager.AnchorableClosing += (_, args) =>
+        {
+            if (args.Anchorable is { ContentId: not null, Content: not null })
+                _closedPanelContent[args.Anchorable.ContentId] = args.Anchorable.Content;
+        };
 
         // Apply saved density preset (after layout restore so it can override visibility)
         ApplyDensityPreset(_appSettingsService.Settings.DensityPreset ?? "Balanced");
@@ -2966,6 +2974,89 @@ public partial class MainWindow : Window
             doc.IsActive = true;
     }
 
+    /// <summary>Show/restore a panel by ContentId (from Windows menu Tag).</summary>
+    private void ShowPanel(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem menuItem || menuItem.Tag is not string contentId)
+            return;
+
+        // Try as document first (Address Table, Inspection, Memory Browser)
+        var doc = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutDocument>()
+            .FirstOrDefault(d => d.ContentId == contentId);
+        if (doc is not null)
+        {
+            doc.IsActive = true;
+            return;
+        }
+
+        // Try as anchorable (Processes, Scanner, Output, AI Operator)
+        var anchorable = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutAnchorable>()
+            .FirstOrDefault(a => a.ContentId == contentId);
+
+        if (anchorable is not null)
+        {
+            // Panel exists in layout — show it if auto-hidden or hidden
+            if (anchorable.IsAutoHidden)
+                anchorable.ToggleAutoHide();
+            anchorable.Show();
+            anchorable.IsActive = true;
+            return;
+        }
+
+        // Panel was fully closed — find its content and re-add it
+        var content = FindContentByContentId(contentId);
+        if (content is null)
+        {
+            // Content was lost (shouldn't happen) — try the preserved stash
+            if (_closedPanelContent.TryGetValue(contentId, out var stashed))
+                content = stashed;
+        }
+
+        if (content is not null)
+        {
+            var restored = new LayoutAnchorable
+            {
+                ContentId = contentId,
+                Title = GetPanelTitle(contentId),
+                Content = content
+            };
+
+            // Find an appropriate pane to add it to, or create one
+            var targetPane = DockManager.Layout
+                .Descendents()
+                .OfType<LayoutAnchorablePane>()
+                .FirstOrDefault();
+
+            if (targetPane is not null)
+            {
+                targetPane.Children.Add(restored);
+            }
+            else
+            {
+                var newPane = new LayoutAnchorablePane(restored);
+                DockManager.Layout.RootPanel?.Children.Add(newPane);
+            }
+
+            restored.IsActive = true;
+        }
+    }
+
+    private static string GetPanelTitle(string contentId) => contentId switch
+    {
+        "processes" => "Processes",
+        "scanner" => "Scanner",
+        "output" => "Output",
+        "aiOperator" => "AI Operator",
+        "addressTable" => "Address Table",
+        "inspection" => "Inspection",
+        "memoryBrowser" => "Memory Browser",
+        _ => contentId
+    };
+
     #region Layout Persistence
 
     private void SaveLayout()
@@ -3065,8 +3156,8 @@ public partial class MainWindow : Window
                 break;
 
             default: // Balanced
-                // Sidebar visible, bottom panel visible with output, AI chat visible
-                SetAnchorableVisibility(anchorables, "processes", visible: true);
+                // Processes auto-hidden (toolbar handles attach), everything else visible
+                SetAnchorableVisibility(anchorables, "processes", autoHide: true);
                 SetAnchorableVisibility(anchorables, "scanner", visible: true);
                 SetAnchorableVisibility(anchorables, "output", visible: true);
                 SetAnchorableVisibility(anchorables, "aiOperator", visible: true);

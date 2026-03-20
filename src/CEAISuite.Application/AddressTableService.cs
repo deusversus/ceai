@@ -206,6 +206,20 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
     {
         _processModules = modules;
         _is32Bit = is32Bit;
+
+        // Clear cached resolved addresses — ASLR bases change on every process restart,
+        // so stale cached addresses from the old process would cause wrong reads.
+        ClearResolvedAddressCache(_roots);
+    }
+
+    private static void ClearResolvedAddressCache(IEnumerable<AddressTableNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            node.ResolvedAddress = null;
+            if (node.Children.Count > 0)
+                ClearResolvedAddressCache(node.Children);
+        }
     }
 
     public AddressTableEntry AddEntry(string address, MemoryDataType dataType, string currentValue, string? label = null)
@@ -333,8 +347,14 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         }
         catch
         {
-            // If refresh fails but we have cached modules, proceed with stale data
-            if (_processModules.Count == 0) return;
+            // AttachAsync failed — process may be dead or still loading.
+            // Clear stale modules so we don't resolve with wrong ASLR bases.
+            if (_processModules.Count > 0)
+            {
+                _processModules = Array.Empty<ModuleDescriptor>();
+                ClearResolvedAddressCache(_roots);
+            }
+            return;
         }
         await RefreshNodes(_roots, processId, cancellationToken);
     }

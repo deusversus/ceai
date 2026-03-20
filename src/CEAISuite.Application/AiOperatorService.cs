@@ -658,6 +658,38 @@ public sealed class AiOperatorService
 
         _ = Task.Run(async () =>
         {
+            // Rate limiting (mirrors non-streaming path)
+            if (RateLimitSeconds > 0)
+            {
+                var now = DateTimeOffset.UtcNow;
+                DateTimeOffset? last;
+                lock (_rateLimitLock) { last = _lastRequestTime; }
+
+                if (last.HasValue)
+                {
+                    var elapsed = now - last.Value;
+                    var cooldown = TimeSpan.FromSeconds(RateLimitSeconds);
+                    if (elapsed < cooldown)
+                    {
+                        if (RateLimitWait)
+                        {
+                            var remaining = cooldown - elapsed;
+                            UpdateStatus($"Rate limited — waiting {remaining.TotalSeconds:F1}s…");
+                            await Task.Delay(remaining, cancellationToken);
+                        }
+                        else
+                        {
+                            await channel.Writer.WriteAsync(
+                                new AgentStreamEvent.Error($"Rate limited: please wait {(cooldown - elapsed).TotalSeconds:F0}s"), cancellationToken);
+                            channel.Writer.Complete();
+                            return;
+                        }
+                    }
+                }
+
+                lock (_rateLimitLock) { _lastRequestTime = DateTimeOffset.UtcNow; }
+            }
+
             var sw = System.Diagnostics.Stopwatch.StartNew();
             Log("INFO", $"User (streaming): {userMessage}");
 
@@ -776,6 +808,7 @@ public sealed class AiOperatorService
                 if (string.IsNullOrWhiteSpace(state.AssistantText))
                     state.AssistantText = "(Tool calls executed — see action log for details)";
 
+                Log("INFO", $"Assistant: {(state.AssistantText.Length > 300 ? state.AssistantText[..300] + "..." : state.AssistantText)}");
                 _displayHistory.Add(new AiChatMessage("assistant", state.AssistantText, DateTimeOffset.UtcNow)
                 {
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
@@ -783,23 +816,62 @@ public sealed class AiOperatorService
                 });
                 SaveCurrentChat();
 
+                var usagePart = _totalRequests > 0
+                    ? $", tokens: {_totalPromptTokens}↑ {_totalCompletionTokens}↓ {_totalCachedTokens}⚡"
+                    : "";
+                var historyPart = $", {SessionMessageCount} msgs in context";
                 var summary = state.ToolCallCount > 0
-                    ? $"Done ({state.ToolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s)"
-                    : $"Done ({sw.Elapsed.TotalSeconds:F1}s)";
+                    ? $"Done ({state.ToolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})"
+                    : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})";
                 UpdateStatus(summary);
 
                 await channel.Writer.WriteAsync(
                     new AgentStreamEvent.Completed(state.ToolCallCount, sw.Elapsed), cancellationToken);
             }
+            catch (OperationCanceledException)
+            {
+                sw.Stop();
+                var cancelMsg = "⏹ Stopped by user.";
+                Log("INFO", "Streaming cancelled by user");
+                UpdateStatus($"Stopped ({sw.Elapsed.TotalSeconds:F1}s)");
+                _displayHistory.Add(new AiChatMessage("assistant",
+                    state.AssistantText.Length > 0 ? state.AssistantText + "\n\n" + cancelMsg : cancelMsg,
+                    DateTimeOffset.UtcNow)
+                {
+                    ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
+                    ToolResults = toolResults.Count > 0 ? toolResults : null
+                });
+                SaveCurrentChat();
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Error(cancelMsg), CancellationToken.None);
+            }
             catch (Exception ex)
             {
                 sw.Stop();
+                // Try to extract response body for better diagnostics (ClientResultException from OpenAI SDK)
+                var detail = "";
+                try
+                {
+                    var rawMethod = ex.GetType().GetMethod("GetRawResponse");
+                    if (rawMethod is not null)
+                    {
+                        var raw = rawMethod.Invoke(ex, null);
+                        var contentProp = raw?.GetType().GetProperty("Content");
+                        if (contentProp is not null)
+                        {
+                            var body = contentProp.GetValue(raw)?.ToString();
+                            if (!string.IsNullOrEmpty(body))
+                                detail = $" | Response: {body}";
+                        }
+                    }
+                }
+                catch { /* best effort */ }
                 var errorMsg = $"AI error: {ex.Message}";
-                Log("ERROR", $"{ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                Log("ERROR", $"{ex.GetType().Name}: {ex.Message}{detail}\n{ex.StackTrace}");
                 UpdateStatus($"Error ({sw.Elapsed.TotalSeconds:F1}s)");
                 _displayHistory.Add(new AiChatMessage("assistant", errorMsg, DateTimeOffset.UtcNow));
                 await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error(errorMsg), cancellationToken);
+                    new AgentStreamEvent.Error(errorMsg), CancellationToken.None);
             }
             finally
             {
@@ -878,6 +950,14 @@ public sealed class AiOperatorService
                 // Collect — don't process inline. MAF expects the stream to complete first,
                 // then we re-run with approval responses (multi-turn pattern).
                 pendingApprovals.Add(approvalRequest);
+            }
+            else if (content is UsageContent usage)
+            {
+                _totalPromptTokens += usage.Details?.InputTokenCount ?? 0;
+                _totalCompletionTokens += usage.Details?.OutputTokenCount ?? 0;
+                _totalCachedTokens += usage.Details?.AdditionalCounts?.GetValueOrDefault("CachedInputTokenCount") ?? 0;
+                _totalRequests++;
+                Log("USAGE", $"Streaming cumulative prompt: {_totalPromptTokens}, completion: {_totalCompletionTokens}, cached: {_totalCachedTokens}, requests: {_totalRequests}");
             }
         }
     }

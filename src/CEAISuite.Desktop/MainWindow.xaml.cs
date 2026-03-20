@@ -493,6 +493,30 @@ public partial class MainWindow : Window
         ScanDataTypeComboBox.SelectedItem = MemoryDataType.Int32;
     }
 
+    private void OnToolbarScanTypeLoaded(object sender, RoutedEventArgs e)
+    {
+        ToolbarScanType.ItemsSource = Enum.GetValues<MemoryDataType>();
+        ToolbarScanType.SelectedItem = MemoryDataType.Int32;
+    }
+
+    private bool _syncingToolbar;
+
+    private void ToolbarScanValue_Changed(object sender, TextChangedEventArgs e)
+    {
+        if (_syncingToolbar) return;
+        _syncingToolbar = true;
+        ScanValueTextBox.Text = ToolbarScanValue.Text;
+        _syncingToolbar = false;
+    }
+
+    private void ToolbarScanType_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_syncingToolbar || ToolbarScanType.SelectedItem is not MemoryDataType dt) return;
+        _syncingToolbar = true;
+        ScanDataTypeComboBox.SelectedItem = dt;
+        _syncingToolbar = false;
+    }
+
     private async void StartNewScan(object sender, RoutedEventArgs e)
     {
         if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)

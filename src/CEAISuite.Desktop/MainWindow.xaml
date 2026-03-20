@@ -186,8 +186,11 @@
         <Border Grid.Row="0" Background="{DynamicResource MenuBarBackground}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
-                <!-- Right side: Hamburger menu + Settings gear -->
+                <!-- Right side: Emergency Stop + Hamburger menu + Settings gear -->
                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
+                    <Button Content="⚠ Stop" Padding="8,3" FontSize="11"
+                            Click="CmdEmergencyStop" Foreground="OrangeRed" FontWeight="SemiBold"
+                            ToolTip="Emergency: rollback all patches + force detach (Ctrl+Shift+Esc)" />
                     <Menu Background="Transparent" VerticalAlignment="Center">
                         <MenuItem Header="⋯" FontSize="14" FontWeight="Bold" ToolTip="Menu (Alt)"
                                   Padding="8,4">
@@ -238,6 +241,17 @@
                 <ToolBarTray DockPanel.Dock="Left" Background="Transparent" IsLocked="True">
                     <ToolBar Background="Transparent" Band="0" BandIndex="0"
                              OverflowMode="Never">
+                        <!-- Session I/O -->
+                        <Button Content="📂 Load" Padding="8,3" FontSize="11" Click="LoadSession"
+                                ToolTip="Load session" />
+                        <Button Content="💾 Save" Padding="8,3" FontSize="11" Click="SaveSession"
+                                ToolTip="Save session (Ctrl+S)" />
+                        <Button Content="📥 Load CT" Padding="8,3" FontSize="11" Click="LoadCheatTable"
+                                ToolTip="Load Cheat Table (.CT)" />
+                        <Button Content="📤 Export CT" Padding="8,3" FontSize="11" Click="SaveCheatTable"
+                                ToolTip="Export Cheat Table (.CT)" />
+                        <Separator />
+
                         <!-- Process controls -->
                         <ComboBox x:Name="ProcessComboBox" Width="180" FontSize="11"
                                   ToolTip="Select process (Ctrl+P)"
@@ -249,14 +263,19 @@
                                 ToolTip="Detach from process" />
                         <Separator />
 
-                        <!-- Scan -->
-                        <Button Content="🔍 Scan" Padding="8,3" FontSize="11" Click="CmdFocusScanner"
-                                ToolTip="Focus scanner panel (Ctrl+F)" />
+                        <!-- Quick scan -->
+                        <TextBox x:Name="ToolbarScanValue" Width="120" FontSize="11" VerticalContentAlignment="Center"
+                                 ToolTip="Scan value" TextChanged="ToolbarScanValue_Changed" />
+                        <ComboBox x:Name="ToolbarScanType" Width="70" FontSize="11"
+                                  ToolTip="Data type" Loaded="OnToolbarScanTypeLoaded"
+                                  SelectionChanged="ToolbarScanType_Changed" />
+                        <Button Content="🔍 Scan" Padding="8,3" FontSize="11" Click="StartNewScan"
+                                ToolTip="New scan (uses value and type above)" />
+                        <Button Content="🔎 Next" Padding="8,3" FontSize="11" Click="RefineScan"
+                                ToolTip="Refine/next scan" />
                         <Separator />
 
-                        <!-- Session -->
-                        <Button Content="💾 Save" Padding="8,3" FontSize="11" Click="SaveSession"
-                                ToolTip="Save session (Ctrl+S)" />
+                        <!-- Undo / Redo -->
                         <Button Content="↩ Undo" Padding="8,3" FontSize="11" Click="MenuUndo"
                                 ToolTip="Undo last patch (Ctrl+Z)" />
                         <Button Content="↪ Redo" Padding="8,3" FontSize="11" Click="MenuRedo"
@@ -264,14 +283,8 @@
                         <Separator />
 
                         <!-- Script -->
-                        <Button Content="▶ Run" Padding="8,3" FontSize="11" Click="CmdRunScript"
+                        <Button Content="▶ Run/Stop" Padding="8,3" FontSize="11" Click="CmdRunScript"
                                 ToolTip="Toggle selected script (F5)" />
-                        <Separator />
-
-                        <!-- Emergency -->
-                        <Button Content="⚠ Emergency Stop" Padding="8,3" FontSize="11"
-                                Click="CmdEmergencyStop" Foreground="OrangeRed" FontWeight="SemiBold"
-                                ToolTip="Force detach + rollback all patches (Ctrl+Shift+Esc)" />
                     </ToolBar>
                 </ToolBarTray>
             </DockPanel>

@@ -30,13 +30,7 @@
 | Clean up old MemoryBrowserWindow | ✅ Done | Removed, all callers use embedded tab |
 | Bottom status bar (process/center/right) | ✅ Done | StatusBarProcess, StatusBarCenter, StatusBarRight |
 
-**Remaining Phase 1 items:**
-
-| Item | Status | Review Source |
-|------|--------|---------------|
-| Layout persistence (save/restore XML) | Pending | UI-DESIGN §Phase 1 |
-| Density preset system (Clean/Balanced/Dense) | Pending | UI-DESIGN §Information Density Presets |
-| Command bar (replace menu with modern toolbar) | Pending | UI-DESIGN §Zone 1 |
+**All Phase 1 items complete.**
 
 ---
 

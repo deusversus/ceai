@@ -4,6 +4,7 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:CEAISuite.Desktop"
+        xmlns:avalonDock="https://github.com/Dirkster99/AvalonDock"
         mc:Ignorable="d"
         Title="CE AI Suite"
         Height="860"
@@ -178,9 +179,8 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="3*" MinHeight="200" />
+            <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
-            <RowDefinition Height="2*" MinHeight="150" />
         </Grid.RowDefinitions>
 
         <!-- Row 0: Menu Bar -->
@@ -236,652 +236,668 @@
             </DockPanel>
         </Border>
 
-        <!-- Row 2: Main panels (left sidebar | center | right sidebar) -->
-        <Grid Grid.Row="2">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="250" MinWidth="180" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="*" MinWidth="300" />
-                <ColumnDefinition Width="Auto" />
-                <ColumnDefinition Width="300" MinWidth="200" />
-            </Grid.ColumnDefinitions>
+        <!-- Row 2: Dockable Panel Layout -->
+        <avalonDock:DockingManager x:Name="DockManager" Grid.Row="2">
+            <avalonDock:DockingManager.Theme>
+                <avalonDock:Vs2013DarkTheme />
+            </avalonDock:DockingManager.Theme>
+            <avalonDock:LayoutRoot>
+                <avalonDock:LayoutPanel Orientation="Horizontal">
 
-            <!-- LEFT SIDEBAR: Process List -->
-            <DockPanel Grid.Column="0" Background="{DynamicResource SidebarBackground}">
-                <TextBlock DockPanel.Dock="Top" Text="PROCESSES" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{DynamicResource SecondaryForeground}" Margin="8,8,8,4" />
-                <TextBlock DockPanel.Dock="Top" Text="{Binding StatusMessage}"
-                           TextWrapping="Wrap" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="8,0,8,4" />
-                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,8,6">
-                    <Button Padding="8,3" Margin="0,0,6,0" Click="InspectSelectedProcess"
-                            Content="Inspect" FontSize="11" />
-                    <Button Padding="8,3" Click="RefreshProcessList" Content="Refresh"
-                            FontSize="11" Style="{StaticResource ToolbarButton}" />
-                </StackPanel>
-                <ListView x:Name="RunningProcessesList" ItemsSource="{Binding RunningProcesses}"
-                          Background="{DynamicResource SidebarBackground}" BorderThickness="0"
-                          PreviewMouseLeftButtonDown="ProcessList_PreviewMouseLeftButtonDown"
-                          PreviewMouseMove="ProcessList_PreviewMouseMove">
-                    <ListView.ItemTemplate>
-                        <DataTemplate>
-                            <Grid Margin="0,2,0,2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel>
-                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" FontSize="12" />
-                                    <TextBlock Text="{Binding Id, StringFormat=PID {0}}" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                    <!-- Left sidebar: Process List -->
+                    <avalonDock:LayoutAnchorablePane DockWidth="250">
+                        <avalonDock:LayoutAnchorable Title="Processes" ContentId="processes">
+                            <DockPanel Background="{DynamicResource SidebarBackground}">
+                                <TextBlock DockPanel.Dock="Top" Text="PROCESSES" FontSize="11" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource SecondaryForeground}" Margin="8,8,8,4" />
+                                <TextBlock DockPanel.Dock="Top" Text="{Binding StatusMessage}"
+                                           TextWrapping="Wrap" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" Margin="8,0,8,4" />
+                                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,8,6">
+                                    <Button Padding="8,3" Margin="0,0,6,0" Click="InspectSelectedProcess"
+                                            Content="Inspect" FontSize="11" />
+                                    <Button Padding="8,3" Click="RefreshProcessList" Content="Refresh"
+                                            FontSize="11" Style="{StaticResource ToolbarButton}" />
                                 </StackPanel>
-                                <Border Grid.Column="1" Padding="4,1" Background="{DynamicResource InputBackground}" CornerRadius="3">
-                                    <TextBlock FontSize="10" Text="{Binding Architecture}" Foreground="{DynamicResource SecondaryForeground}" />
+                                <ListView x:Name="RunningProcessesList" ItemsSource="{Binding RunningProcesses}"
+                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0"
+                                          PreviewMouseLeftButtonDown="ProcessList_PreviewMouseLeftButtonDown"
+                                          PreviewMouseMove="ProcessList_PreviewMouseMove">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Margin="0,2,0,2">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <StackPanel>
+                                                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" FontSize="12" />
+                                                    <TextBlock Text="{Binding Id, StringFormat=PID {0}}" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                                </StackPanel>
+                                                <Border Grid.Column="1" Padding="4,1" Background="{DynamicResource InputBackground}" CornerRadius="3">
+                                                    <TextBlock FontSize="10" Text="{Binding Architecture}" Foreground="{DynamicResource SecondaryForeground}" />
+                                                </Border>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </DockPanel>
+                        </avalonDock:LayoutAnchorable>
+                    </avalonDock:LayoutAnchorablePane>
+
+                    <!-- Center panels -->
+                    <avalonDock:LayoutPanel Orientation="Vertical" DockWidth="*">
+                        <avalonDock:LayoutDocumentPane DockHeight="3*">
+                            <avalonDock:LayoutDocument Title="Address Table" ContentId="addressTable">
+                                <DockPanel Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
+                                        <TextBlock Text="ADDRESS TABLE" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshAddressTable" Content="Refresh" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RemoveSelectedAddress" Content="Remove" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ToggleLockAddress" Content="Lock" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="CreateAddressGroup" Content="Group" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ExportAddressTable" Content="Export" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ImportAddressTable" Content="Import" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="GenerateTrainerScript" Content="Trainer" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ViewSelectedScript" Content="View Script" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ToggleSelectedScript" Content="Toggle Script" />
+                                        <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
+                                                   Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
+                                    </StackPanel>
+                                    <!-- Column headers -->
+                                    <Grid DockPanel.Dock="Top" Margin="22,0,0,2">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="28" />
+                                            <ColumnDefinition Width="24" />
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="160" />
+                                            <ColumnDefinition Width="70" />
+                                            <ColumnDefinition Width="140" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                        <TextBlock Grid.Column="1" Text="" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                        <TextBlock Grid.Column="2" Text="Description" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                        <TextBlock Grid.Column="3" Text="Address" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                        <TextBlock Grid.Column="4" Text="Type" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                        <TextBlock Grid.Column="5" Text="Value" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                    </Grid>
+                                    <TreeView x:Name="AddressTableTree"
+                                              ItemsSource="{Binding AddressTableNodes}"
+                                              FontFamily="Consolas" FontSize="12"
+                                              Background="{DynamicResource PanelBackground}" BorderThickness="0"
+                                              MouseDoubleClick="AddressTableTree_MouseDoubleClick"
+                                              KeyDown="AddressTableTree_KeyDown"
+                                              PreviewMouseLeftButtonDown="AddressTable_PreviewMouseLeftButtonDown"
+                                              PreviewMouseMove="AddressTable_PreviewMouseMove">
+                                        <TreeView.Resources>
+                                            <ContextMenu x:Key="NodeContextMenu" Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}">
+                                                <MenuItem Header="Toggle Activate" Click="CtxToggleActivate" InputGestureText="Space" />
+                                                <Separator />
+                                                <MenuItem Header="Change Description" Click="CtxChangeDescription" />
+                                                <MenuItem Header="Change Address" Click="CtxChangeAddress" />
+                                                <MenuItem Header="Change Value" Click="CtxChangeValue" />
+                                                <MenuItem Header="Change Type" Click="CtxChangeType" />
+                                                <Separator />
+                                                <MenuItem Header="Toggle Freeze" Click="CtxToggleFreeze" InputGestureText="Ctrl+F" />
+                                                <MenuItem Header="Show as Hexadecimal" Click="CtxShowAsHex" IsCheckable="True" />
+                                                <Separator />
+                                                <MenuItem Header="View Script" Click="ViewSelectedScript" />
+                                                <MenuItem Header="Toggle Script" Click="ToggleSelectedScript" />
+                                                <Separator />
+                                                <MenuItem Header="Browse Memory Region" Click="CtxBrowseMemory" />
+                                                <MenuItem Header="Disassemble Here" Click="CtxDisassemble" />
+                                                <MenuItem Header="Find What Writes" Click="CtxFindWhatWrites" />
+                                                <MenuItem Header="View Write Log" Click="CtxViewWriteLog" />
+                                                <Separator />
+                                                <MenuItem Header="Create Group" Click="CreateAddressGroup" />
+                                                <MenuItem Header="Move to Group..." Click="CtxMoveToGroup" />
+                                                <MenuItem Header="Delete" Click="CtxDelete" InputGestureText="Del" />
+                                                <Separator />
+                                                <MenuItem Header="Cut" Click="CtxCut" InputGestureText="Ctrl+X" />
+                                                <MenuItem Header="Copy" Click="CtxCopy" InputGestureText="Ctrl+C" />
+                                                <MenuItem Header="Paste" Click="CtxPaste" InputGestureText="Ctrl+V" />
+                                            </ContextMenu>
+                                        </TreeView.Resources>
+                                        <TreeView.ItemContainerStyle>
+                                            <Style TargetType="TreeViewItem">
+                                                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                                <Setter Property="ContextMenu" Value="{StaticResource NodeContextMenu}" />
+                                                <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
+                                            </Style>
+                                        </TreeView.ItemContainerStyle>
+                                        <TreeView.ItemTemplate>
+                                            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                                <Grid Margin="2" ToolTip="{Binding StatusTooltip}">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="28" />
+                                                        <ColumnDefinition Width="24" />
+                                                        <ColumnDefinition Width="200" />
+                                                        <ColumnDefinition Width="160" />
+                                                        <ColumnDefinition Width="70" />
+                                                        <ColumnDefinition Width="140" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <CheckBox Grid.Column="0"
+                                                              IsChecked="{Binding IsActive, Mode=TwoWay}"
+                                                              Click="ActiveCheckBox_Click"
+                                                              VerticalAlignment="Center" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding DisplayIcon}" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding Label}" FontWeight="SemiBold" />
+                                                    <TextBlock Grid.Column="3" Text="{Binding DisplayAddress}" Foreground="{DynamicResource AccentForeground}" />
+                                                    <TextBlock Grid.Column="4" Text="{Binding DisplayType}" Foreground="{DynamicResource SecondaryForeground}" />
+                                                    <TextBlock Grid.Column="5"
+                                                               Text="{Binding DisplayValue}"
+                                                               Foreground="{Binding DisplayValueColor, Converter={StaticResource BrushConv}}"
+                                                               FontWeight="{Binding DisplayValueWeight}" />
+                                                </Grid>
+                                            </HierarchicalDataTemplate>
+                                        </TreeView.ItemTemplate>
+                                    </TreeView>
+                                </DockPanel>
+                            </avalonDock:LayoutDocument>
+                            <avalonDock:LayoutDocument Title="Inspection" ContentId="inspection">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel Margin="8">
+                                        <!-- Process Inspection -->
+                                        <TextBlock Text="PROCESS INSPECTION" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,6" />
+                                        <TextBlock FontSize="15" FontWeight="SemiBold"
+                                                   Text="{Binding CurrentInspection.ProcessName, TargetNullValue=No process selected}" />
+                                        <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource SecondaryForeground}"
+                                                   Text="{Binding CurrentInspection.Architecture, TargetNullValue=Pick a running process to inspect modules and memory.}" />
+                                        <TextBlock Margin="0,4,0,0"
+                                                   Text="{Binding CurrentInspection.StatusMessage}" TextWrapping="Wrap" />
+
+                                        <!-- Memory Editor -->
+                                        <TextBlock Text="MEMORY EDITOR" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,14,0,6" />
+                                        <Border Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                                Padding="10" CornerRadius="3" Margin="0,0,0,8">
+                                            <StackPanel>
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                        <RowDefinition Height="Auto" />
+                                                    </Grid.RowDefinitions>
+                                                    <TextBlock Text="Address" Margin="0,0,10,6" VerticalAlignment="Center" FontSize="12" />
+                                                    <TextBox x:Name="AddressTextBox" Grid.Column="1" Text="0x0" FontSize="12" />
+                                                    <TextBlock Grid.Row="1" Text="Type" Margin="0,6,10,6" VerticalAlignment="Center" FontSize="12" />
+                                                    <ComboBox x:Name="TypeComboBox" Grid.Row="1" Grid.Column="1"
+                                                              Margin="0,4,0,0" Loaded="OnTypeComboBoxLoaded" FontSize="12" />
+                                                    <TextBlock Grid.Row="2" Text="Value" Margin="0,6,10,0" VerticalAlignment="Center" FontSize="12" />
+                                                    <TextBox x:Name="ValueTextBox" Grid.Row="2" Grid.Column="1"
+                                                             Text="0" Margin="0,4,0,0" FontSize="12" />
+                                                </Grid>
+                                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                                    <Button Padding="8,3" Margin="0,0,6,0" Click="ReadAddress" Content="Read" FontSize="11" />
+                                                    <Button Padding="8,3" Margin="0,0,6,0" Click="WriteAddress" Content="Write" FontSize="11" />
+                                                    <Button Padding="8,3" Click="AddManualToTable" Content="Add to table" FontSize="11"
+                                                            Style="{StaticResource ToolbarButton}" />
+                                                </StackPanel>
+
+                                                <TextBlock Margin="0,10,0,2" FontWeight="SemiBold" Text="Last probe" FontSize="11" Foreground="{DynamicResource SecondaryForeground}" />
+                                                <TextBlock Text="{Binding CurrentInspection.ManualProbe.Address, TargetNullValue=No manual probe yet}" FontSize="12" />
+                                                <TextBlock Text="{Binding CurrentInspection.ManualProbe.DataType, StringFormat=Type: {0}}" FontSize="12" />
+                                                <TextBlock Text="{Binding CurrentInspection.ManualProbe.DisplayValue, StringFormat=Value: {0}}" FontSize="12" />
+                                                <TextBlock FontFamily="Consolas" Text="{Binding CurrentInspection.ManualProbe.HexBytes}"
+                                                           TextWrapping="Wrap" FontSize="12" />
+                                                <TextBlock Margin="0,8,0,2" FontWeight="SemiBold" Text="Last write" FontSize="11" Foreground="{DynamicResource SecondaryForeground}" />
+                                                <TextBlock Text="{Binding CurrentInspection.LastWriteMessage, TargetNullValue=No writes issued in this session.}"
+                                                           TextWrapping="Wrap" FontSize="12" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Modules -->
+                                        <TextBlock Text="MODULES" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,6,0,6" />
+                                        <ListView x:Name="ModulesList" ItemsSource="{Binding CurrentInspection.Modules}" MaxHeight="160"
+                                                  Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12"
+                                                  PreviewMouseLeftButtonDown="ModuleList_PreviewMouseLeftButtonDown"
+                                                  PreviewMouseMove="ModuleList_PreviewMouseMove">
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Margin="0,0,0,6">
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                                                        <TextBlock Foreground="{DynamicResource SecondaryForeground}" Text="{Binding BaseAddress}" />
+                                                        <TextBlock Foreground="{DynamicResource SecondaryForeground}" Text="{Binding Size}" />
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+
+                                        <!-- Disassembly -->
+                                        <TextBlock Text="DISASSEMBLY" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,10,0,6" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                            <TextBox x:Name="DisasmAddressTextBox" Width="180" Margin="0,0,6,0"
+                                                     Text="0x0" FontSize="12" />
+                                            <Button Padding="8,3" Click="DisassembleAtAddress" Content="Disassemble" FontSize="11" />
+                                        </StackPanel>
+                                        <TextBlock Margin="0,0,0,6" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
+                                                   Text="{Binding Disassembly.Summary, TargetNullValue=Enter an address and click Disassemble.}" />
+                                        <ListView ItemsSource="{Binding Disassembly.Lines}" MaxHeight="240"
+                                                  FontFamily="Consolas" FontSize="11" Background="{DynamicResource PanelBackground}">
+                                            <ListView.View>
+                                                <GridView>
+                                                    <GridViewColumn Header="Address" Width="130"
+                                                                    DisplayMemberBinding="{Binding Address}" />
+                                                    <GridViewColumn Header="Bytes" Width="140"
+                                                                    DisplayMemberBinding="{Binding HexBytes}" />
+                                                    <GridViewColumn Header="Instruction" Width="80"
+                                                                    DisplayMemberBinding="{Binding Mnemonic}" />
+                                                    <GridViewColumn Header="Operands" Width="200"
+                                                                    DisplayMemberBinding="{Binding Operands}" />
+                                                </GridView>
+                                            </ListView.View>
+                                        </ListView>
+
+                                        <!-- Breakpoints -->
+                                        <TextBlock Text="BREAKPOINTS" FontSize="11" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,10,0,6" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                            <TextBox x:Name="BpAddressTextBox" Width="150" Margin="0,0,6,0"
+                                                     Text="0x0" FontSize="12" />
+                                            <ComboBox x:Name="BpTypeComboBox" Width="130" Margin="0,0,6,0"
+                                                      Loaded="OnBpTypeComboBoxLoaded" FontSize="12" />
+                                            <Button Padding="8,3" Click="SetBreakpoint" Content="Set BP" FontSize="11" />
+                                        </StackPanel>
+                                        <TextBlock Margin="0,0,0,4" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
+                                                   Text="{Binding BreakpointStatus, TargetNullValue=No breakpoints set. Attach to a process first.}" />
+                                        <ListView x:Name="BreakpointListView" MaxHeight="150"
+                                                  FontFamily="Consolas" FontSize="11" Background="{DynamicResource PanelBackground}">
+                                            <ListView.View>
+                                                <GridView>
+                                                    <GridViewColumn Header="ID" Width="100"
+                                                                    DisplayMemberBinding="{Binding Id}" />
+                                                    <GridViewColumn Header="Address" Width="120"
+                                                                    DisplayMemberBinding="{Binding Address}" />
+                                                    <GridViewColumn Header="Type" Width="90"
+                                                                    DisplayMemberBinding="{Binding Type}" />
+                                                    <GridViewColumn Header="Hits" Width="50"
+                                                                    DisplayMemberBinding="{Binding HitCount}" />
+                                                    <GridViewColumn Header="Status" Width="70"
+                                                                    DisplayMemberBinding="{Binding Status}" />
+                                                </GridView>
+                                            </ListView.View>
+                                        </ListView>
+                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                            <Button Padding="8,3" Margin="0,0,6,0" Click="RemoveBreakpoint" Content="Remove"
+                                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
+                                            <Button Padding="8,3" Margin="0,0,6,0" Click="RefreshBreakpoints" Content="Refresh"
+                                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
+                                            <Button Padding="8,3" Click="ViewHitLog" Content="View hits"
+                                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </avalonDock:LayoutDocument>
+                        </avalonDock:LayoutDocumentPane>
+
+                        <avalonDock:LayoutAnchorablePane DockHeight="250">
+                            <avalonDock:LayoutAnchorable Title="Scanner" ContentId="scanner">
+                                <DockPanel Background="{DynamicResource SidebarBackground}">
+                                    <TextBlock DockPanel.Dock="Top" Text="MEMORY SCANNER" FontSize="11" FontWeight="SemiBold"
+                                               Foreground="{DynamicResource SecondaryForeground}" Margin="8,8,8,4" />
+                                    <StackPanel DockPanel.Dock="Top" Margin="8,0,8,4">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Margin="0,0,6,0">
+                                                <TextBlock Text="Scan type" FontSize="11" Margin="0,0,0,3" />
+                                                <ComboBox x:Name="ScanTypeComboBox" Loaded="OnScanTypeComboBoxLoaded" FontSize="12" />
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="1">
+                                                <TextBlock Text="Data type" FontSize="11" Margin="0,0,0,3" />
+                                                <ComboBox x:Name="ScanDataTypeComboBox" Loaded="OnScanDataTypeComboBoxLoaded" FontSize="12" />
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Text="Value" FontSize="11" Margin="0,6,0,3" />
+                                        <TextBox x:Name="ScanValueTextBox" Text="" FontSize="12" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                            <Button Padding="8,3" Margin="0,0,6,0" Click="StartNewScan" Content="New scan" FontSize="11" />
+                                            <Button Padding="8,3" Margin="0,0,6,0" Click="RefineScan" Content="Next scan" FontSize="11" />
+                                            <Button Padding="8,3" Margin="0,0,6,0" Click="ResetScan" Content="Reset"
+                                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
+                                            <Button Padding="8,3" Click="AddSelectedScanResultToTable" Content="Add to table"
+                                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
+                                        </StackPanel>
+                                        <Border Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                                CornerRadius="3" Padding="8" Margin="0,6,0,0">
+                                            <StackPanel>
+                                                <TextBlock FontWeight="SemiBold" FontSize="12"
+                                                           Text="{Binding ScanStatus, TargetNullValue=No scan active}" />
+                                                <TextBlock Margin="0,2,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
+                                                           Text="{Binding ScanDetails}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </StackPanel>
+                                    <ListView x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
+                                        <ListView.View>
+                                            <GridView>
+                                                <GridViewColumn Header="Address" Width="130"
+                                                                DisplayMemberBinding="{Binding Address}" />
+                                                <GridViewColumn Header="Value" Width="100"
+                                                                DisplayMemberBinding="{Binding CurrentValue}" />
+                                                <GridViewColumn Header="Previous" Width="100"
+                                                                DisplayMemberBinding="{Binding PreviousValue}" />
+                                                <GridViewColumn Header="Hex" Width="100"
+                                                                DisplayMemberBinding="{Binding HexBytes}" />
+                                            </GridView>
+                                        </ListView.View>
+                                    </ListView>
+                                </DockPanel>
+                            </avalonDock:LayoutAnchorable>
+                            <avalonDock:LayoutAnchorable Title="Output" ContentId="output">
+                                <Border Background="{DynamicResource SidebarBackground}" Padding="8">
+                                    <TextBlock Text="Output log" Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
                                 </Border>
-                            </Grid>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-            </DockPanel>
+                            </avalonDock:LayoutAnchorable>
+                        </avalonDock:LayoutAnchorablePane>
+                    </avalonDock:LayoutPanel>
 
-            <!-- Vertical GridSplitter -->
-            <GridSplitter Grid.Column="1" Width="4" HorizontalAlignment="Center"
-                          VerticalAlignment="Stretch" ResizeDirection="Columns" />
+                    <!-- Right sidebar: AI Operator -->
+                    <avalonDock:LayoutAnchorablePane DockWidth="320">
+                        <avalonDock:LayoutAnchorable Title="AI Operator" ContentId="aiOperator">
+                            <DockPanel Background="{DynamicResource SidebarBackground}"
+                                       AllowDrop="True" Drop="AiPanel_Drop" DragOver="AiPanel_DragOver">
 
-            <!-- CENTER AREA -->
-            <Grid Grid.Column="2">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="3*" MinHeight="150" />
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="2*" MinHeight="100" />
-                </Grid.RowDefinitions>
-
-                <!-- Center Top: Inspection, Memory Editor, Disassembly, Breakpoints -->
-                <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SidebarBackground}">
-                    <StackPanel Margin="8">
-                        <!-- Process Inspection -->
-                        <TextBlock Text="PROCESS INSPECTION" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,0,0,6" />
-                        <TextBlock FontSize="15" FontWeight="SemiBold"
-                                   Text="{Binding CurrentInspection.ProcessName, TargetNullValue=No process selected}" />
-                        <TextBlock Margin="0,4,0,0" Foreground="{DynamicResource SecondaryForeground}"
-                                   Text="{Binding CurrentInspection.Architecture, TargetNullValue=Pick a running process to inspect modules and memory.}" />
-                        <TextBlock Margin="0,4,0,0"
-                                   Text="{Binding CurrentInspection.StatusMessage}" TextWrapping="Wrap" />
-
-                        <!-- Memory Editor -->
-                        <TextBlock Text="MEMORY EDITOR" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,14,0,6" />
-                        <Border Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                                Padding="10" CornerRadius="3" Margin="0,0,0,8">
-                            <StackPanel>
-                                <Grid>
+                                <!-- Header bar -->
+                                <Grid DockPanel.Dock="Top" Margin="8,8,8,4">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Text="Address" Margin="0,0,10,6" VerticalAlignment="Center" FontSize="12" />
-                                    <TextBox x:Name="AddressTextBox" Grid.Column="1" Text="0x0" FontSize="12" />
-                                    <TextBlock Grid.Row="1" Text="Type" Margin="0,6,10,6" VerticalAlignment="Center" FontSize="12" />
-                                    <ComboBox x:Name="TypeComboBox" Grid.Row="1" Grid.Column="1"
-                                              Margin="0,4,0,0" Loaded="OnTypeComboBoxLoaded" FontSize="12" />
-                                    <TextBlock Grid.Row="2" Text="Value" Margin="0,6,10,0" VerticalAlignment="Center" FontSize="12" />
-                                    <TextBox x:Name="ValueTextBox" Grid.Row="2" Grid.Column="1"
-                                             Text="0" Margin="0,4,0,0" FontSize="12" />
-                                </Grid>
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                    <Button Padding="8,3" Margin="0,0,6,0" Click="ReadAddress" Content="Read" FontSize="11" />
-                                    <Button Padding="8,3" Margin="0,0,6,0" Click="WriteAddress" Content="Write" FontSize="11" />
-                                    <Button Padding="8,3" Click="AddManualToTable" Content="Add to table" FontSize="11"
+                                    <TextBlock Grid.Column="0" VerticalAlignment="Center">
+                                        <Run Text="AI OPERATOR" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource SecondaryForeground}" />
+                                        <Run Text="  (drag items here)" FontSize="9" Foreground="{DynamicResource TertiaryForeground}" />
+                                    </TextBlock>
+                                    <Button Grid.Column="2" Content="＋ New" Padding="8,2" Margin="0,0,4,0"
+                                            FontSize="10" ToolTip="New Chat" Click="NewAiChat"
                                             Style="{StaticResource ToolbarButton}" />
-                                </StackPanel>
+                                    <Button Grid.Column="3" Content="Export" Padding="8,2" Margin="0,0,4,0"
+                                            FontSize="10" ToolTip="Export chat to Markdown file" Click="ExportAiChat"
+                                            Style="{StaticResource ToolbarButton}" />
+                                    <ToggleButton x:Name="ChatHistoryToggle" Grid.Column="4" Content="History"
+                                                  Padding="8,2" FontSize="10" ToolTip="Toggle chat history"
+                                                  IsChecked="False" Click="ToggleChatHistory"
+                                                  Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}" />
+                                </Grid>
 
-                                <TextBlock Margin="0,10,0,2" FontWeight="SemiBold" Text="Last probe" FontSize="11" Foreground="{DynamicResource SecondaryForeground}" />
-                                <TextBlock Text="{Binding CurrentInspection.ManualProbe.Address, TargetNullValue=No manual probe yet}" FontSize="12" />
-                                <TextBlock Text="{Binding CurrentInspection.ManualProbe.DataType, StringFormat=Type: {0}}" FontSize="12" />
-                                <TextBlock Text="{Binding CurrentInspection.ManualProbe.DisplayValue, StringFormat=Value: {0}}" FontSize="12" />
-                                <TextBlock FontFamily="Consolas" Text="{Binding CurrentInspection.ManualProbe.HexBytes}"
-                                           TextWrapping="Wrap" FontSize="12" />
-                                <TextBlock Margin="0,8,0,2" FontWeight="SemiBold" Text="Last write" FontSize="11" Foreground="{DynamicResource SecondaryForeground}" />
-                                <TextBlock Text="{Binding CurrentInspection.LastWriteMessage, TargetNullValue=No writes issued in this session.}"
-                                           TextWrapping="Wrap" FontSize="12" />
-                            </StackPanel>
-                        </Border>
+                                <!-- Chat History Panel (collapsible) -->
+                                <Border x:Name="ChatHistoryPanel" DockPanel.Dock="Top" Visibility="Collapsed"
+                                        Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1"
+                                        MaxHeight="260" Margin="0,0,0,4">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Top" Text="RECENT CHATS" FontSize="10" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="8,6,8,4" />
+                                        <TextBox x:Name="ChatSearchBox" DockPanel.Dock="Top" Margin="8,0,8,4"
+                                                 Padding="6,4" FontSize="11" Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                                 BorderBrush="{DynamicResource BorderBrush}" Tag="Search chats..."
+                                                 GotFocus="ChatSearchBox_GotFocus" LostFocus="ChatSearchBox_LostFocus"
+                                                 TextChanged="ChatSearchBox_TextChanged" />
+                                        <ListView x:Name="ChatHistoryList" Background="{DynamicResource PanelBackground}" BorderThickness="0"
+                                                  MouseDoubleClick="ChatHistoryList_DoubleClick">
+                                            <ListView.ItemContainerStyle>
+                                                <Style TargetType="ListViewItem">
+                                                    <Setter Property="Padding" Value="8,4" />
+                                                    <Setter Property="Margin" Value="0" />
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ListViewItem">
+                                                                <Border x:Name="Bd" Padding="{TemplateBinding Padding}"
+                                                                        Background="Transparent" BorderThickness="0,0,0,1"
+                                                                        BorderBrush="{DynamicResource BorderBrush}">
+                                                                    <ContentPresenter />
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                                    </Trigger>
+                                                                    <Trigger Property="IsSelected" Value="True">
+                                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </ListView.ItemContainerStyle>
+                                            <ListView.ContextMenu>
+                                                <ContextMenu Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}">
+                                                    <MenuItem Header="Open" Click="ChatCtx_Open" />
+                                                    <MenuItem Header="Rename" Click="ChatCtx_Rename" />
+                                                    <Separator />
+                                                    <MenuItem Header="Delete" Click="ChatCtx_Delete" />
+                                                </ContextMenu>
+                                            </ListView.ContextMenu>
+                                            <ListView.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="Auto" />
+                                                        </Grid.RowDefinitions>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Title}"
+                                                                   FontSize="12" Foreground="{DynamicResource PrimaryForeground}" FontWeight="SemiBold"
+                                                                   TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding TimeAgo}"
+                                                                   FontSize="10" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
+                                                                   Text="{Binding Preview}" FontSize="10" Foreground="{DynamicResource SecondaryForeground}"
+                                                                   TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ListView.ItemTemplate>
+                                        </ListView>
+                                    </DockPanel>
+                                </Border>
 
-                        <!-- Modules -->
-                        <TextBlock Text="MODULES" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,6,0,6" />
-                        <ListView x:Name="ModulesList" ItemsSource="{Binding CurrentInspection.Modules}" MaxHeight="160"
-                                  Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12"
-                                  PreviewMouseLeftButtonDown="ModuleList_PreviewMouseLeftButtonDown"
-                                  PreviewMouseMove="ModuleList_PreviewMouseMove">
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Margin="0,0,0,6">
-                                        <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
-                                        <TextBlock Foreground="{DynamicResource SecondaryForeground}" Text="{Binding BaseAddress}" />
-                                        <TextBlock Foreground="{DynamicResource SecondaryForeground}" Text="{Binding Size}" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-
-                        <!-- Disassembly -->
-                        <TextBlock Text="DISASSEMBLY" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,10,0,6" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBox x:Name="DisasmAddressTextBox" Width="180" Margin="0,0,6,0"
-                                     Text="0x0" FontSize="12" />
-                            <Button Padding="8,3" Click="DisassembleAtAddress" Content="Disassemble" FontSize="11" />
-                        </StackPanel>
-                        <TextBlock Margin="0,0,0,6" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
-                                   Text="{Binding Disassembly.Summary, TargetNullValue=Enter an address and click Disassemble.}" />
-                        <ListView ItemsSource="{Binding Disassembly.Lines}" MaxHeight="240"
-                                  FontFamily="Consolas" FontSize="11" Background="{DynamicResource PanelBackground}">
-                            <ListView.View>
-                                <GridView>
-                                    <GridViewColumn Header="Address" Width="130"
-                                                    DisplayMemberBinding="{Binding Address}" />
-                                    <GridViewColumn Header="Bytes" Width="140"
-                                                    DisplayMemberBinding="{Binding HexBytes}" />
-                                    <GridViewColumn Header="Instruction" Width="80"
-                                                    DisplayMemberBinding="{Binding Mnemonic}" />
-                                    <GridViewColumn Header="Operands" Width="200"
-                                                    DisplayMemberBinding="{Binding Operands}" />
-                                </GridView>
-                            </ListView.View>
-                        </ListView>
-
-                        <!-- Breakpoints -->
-                        <TextBlock Text="BREAKPOINTS" FontSize="11" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,10,0,6" />
-                        <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                            <TextBox x:Name="BpAddressTextBox" Width="150" Margin="0,0,6,0"
-                                     Text="0x0" FontSize="12" />
-                            <ComboBox x:Name="BpTypeComboBox" Width="130" Margin="0,0,6,0"
-                                      Loaded="OnBpTypeComboBoxLoaded" FontSize="12" />
-                            <Button Padding="8,3" Click="SetBreakpoint" Content="Set BP" FontSize="11" />
-                        </StackPanel>
-                        <TextBlock Margin="0,0,0,4" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
-                                   Text="{Binding BreakpointStatus, TargetNullValue=No breakpoints set. Attach to a process first.}" />
-                        <ListView x:Name="BreakpointListView" MaxHeight="150"
-                                  FontFamily="Consolas" FontSize="11" Background="{DynamicResource PanelBackground}">
-                            <ListView.View>
-                                <GridView>
-                                    <GridViewColumn Header="ID" Width="100"
-                                                    DisplayMemberBinding="{Binding Id}" />
-                                    <GridViewColumn Header="Address" Width="120"
-                                                    DisplayMemberBinding="{Binding Address}" />
-                                    <GridViewColumn Header="Type" Width="90"
-                                                    DisplayMemberBinding="{Binding Type}" />
-                                    <GridViewColumn Header="Hits" Width="50"
-                                                    DisplayMemberBinding="{Binding HitCount}" />
-                                    <GridViewColumn Header="Status" Width="70"
-                                                    DisplayMemberBinding="{Binding Status}" />
-                                </GridView>
-                            </ListView.View>
-                        </ListView>
-                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                            <Button Padding="8,3" Margin="0,0,6,0" Click="RemoveBreakpoint" Content="Remove"
-                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
-                            <Button Padding="8,3" Margin="0,0,6,0" Click="RefreshBreakpoints" Content="Refresh"
-                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
-                            <Button Padding="8,3" Click="ViewHitLog" Content="View hits"
-                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
-                        </StackPanel>
-                    </StackPanel>
-                </ScrollViewer>
-
-                <!-- Horizontal GridSplitter between center sections -->
-                <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
-                              VerticalAlignment="Center" ResizeDirection="Rows" />
-
-                <!-- Center Bottom: Memory Scanner -->
-                <DockPanel Grid.Row="2" Background="{DynamicResource SidebarBackground}">
-                    <TextBlock DockPanel.Dock="Top" Text="MEMORY SCANNER" FontSize="11" FontWeight="SemiBold"
-                               Foreground="{DynamicResource SecondaryForeground}" Margin="8,8,8,4" />
-                    <StackPanel DockPanel.Dock="Top" Margin="8,0,8,4">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Margin="0,0,6,0">
-                                <TextBlock Text="Scan type" FontSize="11" Margin="0,0,0,3" />
-                                <ComboBox x:Name="ScanTypeComboBox" Loaded="OnScanTypeComboBoxLoaded" FontSize="12" />
-                            </StackPanel>
-                            <StackPanel Grid.Column="1">
-                                <TextBlock Text="Data type" FontSize="11" Margin="0,0,0,3" />
-                                <ComboBox x:Name="ScanDataTypeComboBox" Loaded="OnScanDataTypeComboBoxLoaded" FontSize="12" />
-                            </StackPanel>
-                        </Grid>
-                        <TextBlock Text="Value" FontSize="11" Margin="0,6,0,3" />
-                        <TextBox x:Name="ScanValueTextBox" Text="" FontSize="12" />
-                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                            <Button Padding="8,3" Margin="0,0,6,0" Click="StartNewScan" Content="New scan" FontSize="11" />
-                            <Button Padding="8,3" Margin="0,0,6,0" Click="RefineScan" Content="Next scan" FontSize="11" />
-                            <Button Padding="8,3" Margin="0,0,6,0" Click="ResetScan" Content="Reset"
-                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
-                            <Button Padding="8,3" Click="AddSelectedScanResultToTable" Content="Add to table"
-                                    FontSize="11" Style="{StaticResource ToolbarButton}" />
-                        </StackPanel>
-                        <Border Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                                CornerRadius="3" Padding="8" Margin="0,6,0,0">
-                            <StackPanel>
-                                <TextBlock FontWeight="SemiBold" FontSize="12"
-                                           Text="{Binding ScanStatus, TargetNullValue=No scan active}" />
-                                <TextBlock Margin="0,2,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
-                                           Text="{Binding ScanDetails}" />
-                            </StackPanel>
-                        </Border>
-                    </StackPanel>
-                    <ListView x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
-                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
-                        <ListView.View>
-                            <GridView>
-                                <GridViewColumn Header="Address" Width="130"
-                                                DisplayMemberBinding="{Binding Address}" />
-                                <GridViewColumn Header="Value" Width="100"
-                                                DisplayMemberBinding="{Binding CurrentValue}" />
-                                <GridViewColumn Header="Previous" Width="100"
-                                                DisplayMemberBinding="{Binding PreviousValue}" />
-                                <GridViewColumn Header="Hex" Width="100"
-                                                DisplayMemberBinding="{Binding HexBytes}" />
-                            </GridView>
-                        </ListView.View>
-                    </ListView>
-                </DockPanel>
-            </Grid>
-
-            <!-- Vertical GridSplitter -->
-            <GridSplitter Grid.Column="3" Width="4" HorizontalAlignment="Center"
-                          VerticalAlignment="Stretch" ResizeDirection="Columns" />
-
-            <!-- RIGHT SIDEBAR: AI Operator -->
-            <DockPanel Grid.Column="4" Background="{DynamicResource SidebarBackground}"
-                       AllowDrop="True" Drop="AiPanel_Drop" DragOver="AiPanel_DragOver">
-
-                <!-- Header bar -->
-                <Grid DockPanel.Dock="Top" Margin="8,8,8,4">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" VerticalAlignment="Center">
-                        <Run Text="AI OPERATOR" FontSize="11" FontWeight="SemiBold" Foreground="{DynamicResource SecondaryForeground}" />
-                        <Run Text="  (drag items here)" FontSize="9" Foreground="{DynamicResource TertiaryForeground}" />
-                    </TextBlock>
-                    <Button Grid.Column="2" Content="＋ New" Padding="8,2" Margin="0,0,4,0"
-                            FontSize="10" ToolTip="New Chat" Click="NewAiChat"
-                            Style="{StaticResource ToolbarButton}" />
-                    <Button Grid.Column="3" Content="Export" Padding="8,2" Margin="0,0,4,0"
-                            FontSize="10" ToolTip="Export chat to Markdown file" Click="ExportAiChat"
-                            Style="{StaticResource ToolbarButton}" />
-                    <ToggleButton x:Name="ChatHistoryToggle" Grid.Column="4" Content="History"
-                                  Padding="8,2" FontSize="10" ToolTip="Toggle chat history"
-                                  IsChecked="False" Click="ToggleChatHistory"
-                                  Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}" />
-                </Grid>
-
-                <!-- Chat History Panel (collapsible) -->
-                <Border x:Name="ChatHistoryPanel" DockPanel.Dock="Top" Visibility="Collapsed"
-                        Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1"
-                        MaxHeight="260" Margin="0,0,0,4">
-                    <DockPanel>
-                        <TextBlock DockPanel.Dock="Top" Text="RECENT CHATS" FontSize="10" FontWeight="SemiBold"
-                                   Foreground="{DynamicResource TertiaryForeground}" Margin="8,6,8,4" />
-                        <TextBox x:Name="ChatSearchBox" DockPanel.Dock="Top" Margin="8,0,8,4"
-                                 Padding="6,4" FontSize="11" Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                 BorderBrush="{DynamicResource BorderBrush}" Tag="Search chats..."
-                                 GotFocus="ChatSearchBox_GotFocus" LostFocus="ChatSearchBox_LostFocus"
-                                 TextChanged="ChatSearchBox_TextChanged" />
-                        <ListView x:Name="ChatHistoryList" Background="{DynamicResource PanelBackground}" BorderThickness="0"
-                                  MouseDoubleClick="ChatHistoryList_DoubleClick">
-                            <ListView.ItemContainerStyle>
-                                <Style TargetType="ListViewItem">
-                                    <Setter Property="Padding" Value="8,4" />
-                                    <Setter Property="Margin" Value="0" />
-                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                    <Setter Property="Template">
-                                        <Setter.Value>
-                                            <ControlTemplate TargetType="ListViewItem">
-                                                <Border x:Name="Bd" Padding="{TemplateBinding Padding}"
-                                                        Background="Transparent" BorderThickness="0,0,0,1"
-                                                        BorderBrush="{DynamicResource BorderBrush}">
-                                                    <ContentPresenter />
-                                                </Border>
-                                                <ControlTemplate.Triggers>
-                                                    <Trigger Property="IsMouseOver" Value="True">
-                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
-                                                    </Trigger>
-                                                    <Trigger Property="IsSelected" Value="True">
-                                                        <Setter TargetName="Bd" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
-                                                    </Trigger>
-                                                </ControlTemplate.Triggers>
-                                            </ControlTemplate>
-                                        </Setter.Value>
-                                    </Setter>
-                                </Style>
-                            </ListView.ItemContainerStyle>
-                            <ListView.ContextMenu>
-                                <ContextMenu Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}">
-                                    <MenuItem Header="Open" Click="ChatCtx_Open" />
-                                    <MenuItem Header="Rename" Click="ChatCtx_Rename" />
-                                    <Separator />
-                                    <MenuItem Header="Delete" Click="ChatCtx_Delete" />
-                                </ContextMenu>
-                            </ListView.ContextMenu>
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto" />
-                                            <RowDefinition Height="Auto" />
-                                        </Grid.RowDefinitions>
+                                <!-- Bottom: Attachments + Input + Controls + Status -->
+                                <DockPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
+                                    <!-- Status bar at very bottom -->
+                                    <Grid DockPanel.Dock="Bottom" Margin="0,4,0,0">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding Title}"
-                                                   FontSize="12" Foreground="{DynamicResource PrimaryForeground}" FontWeight="SemiBold"
-                                                   TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding TimeAgo}"
-                                                   FontSize="10" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2"
-                                                   Text="{Binding Preview}" FontSize="10" Foreground="{DynamicResource SecondaryForeground}"
-                                                   TextTrimming="CharacterEllipsis" Margin="0,2,0,0" />
+                                        <TextBlock x:Name="AiStatusText" Grid.Column="0" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Text="Ready" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock x:Name="AiChatTitleText" Grid.Column="1" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource TertiaryForeground}" FontSize="10" TextTrimming="CharacterEllipsis"
+                                                   MaxWidth="120" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
                                     </Grid>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                    </DockPanel>
-                </Border>
 
-                <!-- Bottom: Attachments + Input + Controls + Status -->
-                <DockPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
-                    <!-- Status bar at very bottom -->
-                    <Grid DockPanel.Dock="Bottom" Margin="0,4,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="Auto" />
-                        </Grid.ColumnDefinitions>
-                        <TextBlock x:Name="AiStatusText" Grid.Column="0" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource SecondaryForeground}" Text="Ready" FontSize="11" TextTrimming="CharacterEllipsis" />
-                        <TextBlock x:Name="AiChatTitleText" Grid.Column="1" VerticalAlignment="Center"
-                                   Foreground="{DynamicResource TertiaryForeground}" FontSize="10" TextTrimming="CharacterEllipsis"
-                                   MaxWidth="120" ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}" />
-                    </Grid>
+                                    <!-- Main input container -->
+                                    <Border CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                            Background="{DynamicResource PanelBackground}" Padding="0">
+                                        <DockPanel>
+                                            <!-- Attachment chips area (hidden when no attachments) -->
+                                            <ItemsControl x:Name="AttachmentChips" DockPanel.Dock="Top" Margin="12,8,12,0"
+                                                          Visibility="Collapsed">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel Orientation="Horizontal" />
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Border Background="{DynamicResource InputBackground}" CornerRadius="6"
+                                                                Padding="8,4" Margin="0,0,6,6" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                                                                MaxWidth="200" ToolTip="{Binding FullText}">
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <StackPanel Grid.Column="0" MaxWidth="160">
+                                                                    <TextBlock Text="{Binding Label}" FontSize="10" FontWeight="SemiBold"
+                                                                               Foreground="{DynamicResource PrimaryForeground}" TextTrimming="CharacterEllipsis" />
+                                                                    <TextBlock Text="{Binding Preview}" FontSize="9"
+                                                                               Foreground="{DynamicResource SecondaryForeground}" TextTrimming="CharacterEllipsis" />
+                                                                </StackPanel>
+                                                                <Button Grid.Column="1" Content="✕" FontSize="9" Padding="4,0" Margin="4,0,0,0"
+                                                                        Background="Transparent" Foreground="{DynamicResource SecondaryForeground}"
+                                                                        BorderThickness="0" Cursor="Hand" VerticalAlignment="Center"
+                                                                        Click="RemoveAttachment_Click" Tag="{Binding Id}" />
+                                                            </Grid>
+                                                        </Border>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
 
-                    <!-- Main input container -->
-                    <Border CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                            Background="{DynamicResource PanelBackground}" Padding="0">
-                        <DockPanel>
-                            <!-- Attachment chips area (hidden when no attachments) -->
-                            <ItemsControl x:Name="AttachmentChips" DockPanel.Dock="Top" Margin="12,8,12,0"
-                                          Visibility="Collapsed">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate>
-                                        <WrapPanel Orientation="Horizontal" />
-                                    </ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <Border Background="{DynamicResource InputBackground}" CornerRadius="6"
-                                                Padding="8,4" Margin="0,0,6,6" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
-                                                MaxWidth="200" ToolTip="{Binding FullText}">
-                                            <Grid>
+                                            <!-- Bottom controls bar -->
+                                            <Grid DockPanel.Dock="Bottom" Margin="8,4,8,8">
                                                 <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
-                                                <StackPanel Grid.Column="0" MaxWidth="160">
-                                                    <TextBlock Text="{Binding Label}" FontSize="10" FontWeight="SemiBold"
-                                                               Foreground="{DynamicResource PrimaryForeground}" TextTrimming="CharacterEllipsis" />
-                                                    <TextBlock Text="{Binding Preview}" FontSize="9"
-                                                               Foreground="{DynamicResource SecondaryForeground}" TextTrimming="CharacterEllipsis" />
-                                                </StackPanel>
-                                                <Button Grid.Column="1" Content="✕" FontSize="9" Padding="4,0" Margin="4,0,0,0"
+
+                                                <!-- + attach button -->
+                                                <Button Grid.Column="0" Content="＋" FontSize="16" Padding="6,0" Margin="0,0,4,0"
                                                         Background="Transparent" Foreground="{DynamicResource SecondaryForeground}"
-                                                        BorderThickness="0" Cursor="Hand" VerticalAlignment="Center"
-                                                        Click="RemoveAttachment_Click" Tag="{Binding Id}" />
+                                                        BorderThickness="0" Cursor="Hand" ToolTip="Attach context"
+                                                        Click="AttachContext_Click" VerticalAlignment="Center" />
+
+                                                <!-- Model selector dropdown -->
+                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                    <Button x:Name="ModelSelectorButton" Click="ModelSelector_Click"
+                                                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,2">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock x:Name="ModelSelectorText" Text="gpt-4o" FontSize="12"
+                                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" />
+                                                            <TextBlock Text=" ▾" FontSize="10" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Popup x:Name="ModelSelectorPopup" StaysOpen="False" Placement="Top"
+                                                           PlacementTarget="{Binding ElementName=ModelSelectorButton}" AllowsTransparency="True">
+                                                        <Border Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}"
+                                                                BorderThickness="1" CornerRadius="6" Padding="4" MaxHeight="300">
+                                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                                <StackPanel x:Name="ModelSelectorList" />
+                                                            </ScrollViewer>
+                                                        </Border>
+                                                    </Popup>
+                                                </StackPanel>
+
+                                                <!-- Send button (circular, accent color) -->
+                                                <Button Grid.Column="3" Click="SendAiMessage" ToolTip="Send message (Enter)"
+                                                        Width="32" Height="32" Cursor="Hand" Padding="0">
+                                                    <Button.Template>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border x:Name="SendBorder" Background="{DynamicResource ButtonBackground}"
+                                                                    CornerRadius="16" Width="32" Height="32">
+                                                                <TextBlock Text="↑" FontSize="16" FontWeight="Bold"
+                                                                           Foreground="{DynamicResource ButtonForeground}"
+                                                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter TargetName="SendBorder" Property="Background" Value="{DynamicResource ButtonHoverBackground}" />
+                                                                </Trigger>
+                                                                <Trigger Property="IsPressed" Value="True">
+                                                                    <Setter TargetName="SendBorder" Property="Background" Value="{DynamicResource ButtonPressedBackground}" />
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Button.Template>
+                                                </Button>
                                             </Grid>
-                                        </Border>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
 
-                            <!-- Bottom controls bar -->
-                            <Grid DockPanel.Dock="Bottom" Margin="8,4,8,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                <!-- + attach button -->
-                                <Button Grid.Column="0" Content="＋" FontSize="16" Padding="6,0" Margin="0,0,4,0"
-                                        Background="Transparent" Foreground="{DynamicResource SecondaryForeground}"
-                                        BorderThickness="0" Cursor="Hand" ToolTip="Attach context"
-                                        Click="AttachContext_Click" VerticalAlignment="Center" />
-
-                                <!-- Model selector dropdown -->
-                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
-                                    <Button x:Name="ModelSelectorButton" Click="ModelSelector_Click"
-                                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,2">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock x:Name="ModelSelectorText" Text="gpt-4o" FontSize="12"
-                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" />
-                                            <TextBlock Text=" ▾" FontSize="10" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
-                                        </StackPanel>
-                                    </Button>
-                                    <Popup x:Name="ModelSelectorPopup" StaysOpen="False" Placement="Top"
-                                           PlacementTarget="{Binding ElementName=ModelSelectorButton}" AllowsTransparency="True">
-                                        <Border Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}"
-                                                BorderThickness="1" CornerRadius="6" Padding="4" MaxHeight="300">
-                                            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                                <StackPanel x:Name="ModelSelectorList" />
-                                            </ScrollViewer>
-                                        </Border>
-                                    </Popup>
-                                </StackPanel>
-
-                                <!-- Send button (circular, accent color) -->
-                                <Button Grid.Column="3" Click="SendAiMessage" ToolTip="Send message (Enter)"
-                                        Width="32" Height="32" Cursor="Hand" Padding="0">
-                                    <Button.Template>
-                                        <ControlTemplate TargetType="Button">
-                                            <Border x:Name="SendBorder" Background="{DynamicResource ButtonBackground}"
-                                                    CornerRadius="16" Width="32" Height="32">
-                                                <TextBlock Text="↑" FontSize="16" FontWeight="Bold"
-                                                           Foreground="{DynamicResource ButtonForeground}"
-                                                           HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="SendBorder" Property="Background" Value="{DynamicResource ButtonHoverBackground}" />
-                                                </Trigger>
-                                                <Trigger Property="IsPressed" Value="True">
-                                                    <Setter TargetName="SendBorder" Property="Background" Value="{DynamicResource ButtonPressedBackground}" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </Button.Template>
-                                </Button>
-                            </Grid>
-
-                            <!-- TextBox input area with placeholder (multi-line, auto-grow) -->
-                            <Grid Margin="12,8,12,0">
-                                <TextBox x:Name="AiChatInputTextBox"
-                                         Padding="0,4" FontSize="13" AcceptsReturn="True" TextWrapping="Wrap"
-                                         MaxHeight="120" MinHeight="24"
-                                         VerticalScrollBarVisibility="Auto"
-                                         Background="Transparent" BorderThickness="0"
-                                         Foreground="{DynamicResource PrimaryForeground}"
-                                         CaretBrush="{DynamicResource InputCaret}"
-                                         PreviewKeyDown="OnAiChatPreviewKeyDown" />
-                                <TextBlock x:Name="AiChatPlaceholder" Text="How can I help you today?"
-                                           IsHitTestVisible="False" Padding="0,4" FontSize="13"
-                                           Foreground="{DynamicResource TertiaryForeground}" />
-                            </Grid>
-                        </DockPanel>
-                    </Border>
-                </DockPanel>
-
-                <!-- Chat messages -->
-                <ScrollViewer x:Name="AiChatScrollViewer" VerticalScrollBarVisibility="Auto" Margin="8,0,8,0">
-                    <StackPanel x:Name="AiChatContainer">
-                        <ItemsControl x:Name="AiChatList">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
-                                            Background="{Binding Background}">
-                                        <Border.ContextMenu>
-                                            <ContextMenu>
-                                                <MenuItem Header="Copy Message" Click="CopyAiMessage" />
-                                            </ContextMenu>
-                                        </Border.ContextMenu>
-                                        <StackPanel>
-                                            <Grid>
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <TextBlock Grid.Column="0" FontWeight="SemiBold" FontSize="10"
-                                                           Foreground="{DynamicResource SecondaryForeground}" Text="{Binding RoleLabel}" />
-                                                <TextBlock Grid.Column="1" FontSize="9" Foreground="{DynamicResource TertiaryForeground}"
-                                                           Text="{Binding Timestamp}" VerticalAlignment="Center" />
+                                            <!-- TextBox input area with placeholder (multi-line, auto-grow) -->
+                                            <Grid Margin="12,8,12,0">
+                                                <TextBox x:Name="AiChatInputTextBox"
+                                                         Padding="0,4" FontSize="13" AcceptsReturn="True" TextWrapping="Wrap"
+                                                         MaxHeight="120" MinHeight="24"
+                                                         VerticalScrollBarVisibility="Auto"
+                                                         Background="Transparent" BorderThickness="0"
+                                                         Foreground="{DynamicResource PrimaryForeground}"
+                                                         CaretBrush="{DynamicResource InputCaret}"
+                                                         PreviewKeyDown="OnAiChatPreviewKeyDown" />
+                                                <TextBlock x:Name="AiChatPlaceholder" Text="How can I help you today?"
+                                                           IsHitTestVisible="False" Padding="0,4" FontSize="13"
+                                                           Foreground="{DynamicResource TertiaryForeground}" />
                                             </Grid>
-                                            <TextBox Text="{Binding Content, Mode=OneWay}" FontSize="12"
-                                                     IsReadOnly="True" TextWrapping="Wrap"
-                                                     Background="Transparent" BorderThickness="0" Padding="0"
-                                                     Foreground="{DynamicResource PrimaryForeground}"
-                                                     Cursor="IBeam" IsTabStop="False" />
-                                        </StackPanel>
+                                        </DockPanel>
                                     </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </StackPanel>
-                </ScrollViewer>
-            </DockPanel>
-        </Grid>
+                                </DockPanel>
 
-        <!-- Row 3: Horizontal GridSplitter -->
-        <GridSplitter Grid.Row="3" Height="4" HorizontalAlignment="Stretch"
-                      VerticalAlignment="Center" ResizeDirection="Rows" />
+                                <!-- Chat messages -->
+                                <ScrollViewer x:Name="AiChatScrollViewer" VerticalScrollBarVisibility="Auto" Margin="8,0,8,0">
+                                    <StackPanel x:Name="AiChatContainer">
+                                        <ItemsControl x:Name="AiChatList">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
+                                                            Background="{Binding Background}">
+                                                        <Border.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="Copy Message" Click="CopyAiMessage" />
+                                                            </ContextMenu>
+                                                        </Border.ContextMenu>
+                                                        <StackPanel>
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0" FontWeight="SemiBold" FontSize="10"
+                                                                           Foreground="{DynamicResource SecondaryForeground}" Text="{Binding RoleLabel}" />
+                                                                <TextBlock Grid.Column="1" FontSize="9" Foreground="{DynamicResource TertiaryForeground}"
+                                                                           Text="{Binding Timestamp}" VerticalAlignment="Center" />
+                                                            </Grid>
+                                                            <TextBox Text="{Binding Content, Mode=OneWay}" FontSize="12"
+                                                                     IsReadOnly="True" TextWrapping="Wrap"
+                                                                     Background="Transparent" BorderThickness="0" Padding="0"
+                                                                     Foreground="{DynamicResource PrimaryForeground}"
+                                                                     Cursor="IBeam" IsTabStop="False" />
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </DockPanel>
+                        </avalonDock:LayoutAnchorable>
+                    </avalonDock:LayoutAnchorablePane>
 
-        <!-- Row 4: Address Table -->
-        <DockPanel Grid.Row="4" Background="{DynamicResource SidebarBackground}" Margin="0">
-            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
-                <TextBlock Text="ADDRESS TABLE" FontSize="11" FontWeight="SemiBold"
-                           Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshAddressTable" Content="Refresh" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RemoveSelectedAddress" Content="Remove" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ToggleLockAddress" Content="Lock" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="CreateAddressGroup" Content="Group" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ExportAddressTable" Content="Export" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ImportAddressTable" Content="Import" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="GenerateTrainerScript" Content="Trainer" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ViewSelectedScript" Content="View Script" />
-                <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ToggleSelectedScript" Content="Toggle Script" />
-                <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
-                           Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
-            </StackPanel>
-            <!-- Column headers -->
-            <Grid DockPanel.Dock="Top" Margin="22,0,0,2">
+                </avalonDock:LayoutPanel>
+            </avalonDock:LayoutRoot>
+        </avalonDock:DockingManager>
+
+        <!-- Row 3: Status bar -->
+        <Border Grid.Row="3" Background="{DynamicResource MenuBarBackground}"
+                BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="8,3">
+            <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="28" />
-                    <ColumnDefinition Width="24" />
-                    <ColumnDefinition Width="200" />
-                    <ColumnDefinition Width="160" />
-                    <ColumnDefinition Width="70" />
-                    <ColumnDefinition Width="140" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
-                <TextBlock Grid.Column="1" Text="" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
-                <TextBlock Grid.Column="2" Text="Description" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
-                <TextBlock Grid.Column="3" Text="Address" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
-                <TextBlock Grid.Column="4" Text="Type" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
-                <TextBlock Grid.Column="5" Text="Value" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                <TextBlock x:Name="StatusBarProcess" Text="No process attached" FontSize="11"
+                           Foreground="{DynamicResource SecondaryForeground}" />
+                <TextBlock x:Name="StatusBarCenter" Grid.Column="1" HorizontalAlignment="Center"
+                           FontSize="11" Foreground="{DynamicResource TertiaryForeground}" />
+                <TextBlock x:Name="StatusBarRight" Grid.Column="2" FontSize="11"
+                           Foreground="{DynamicResource SecondaryForeground}" />
             </Grid>
-            <TreeView x:Name="AddressTableTree"
-                      ItemsSource="{Binding AddressTableNodes}"
-                      FontFamily="Consolas" FontSize="12"
-                      Background="{DynamicResource PanelBackground}" BorderThickness="0"
-                      MouseDoubleClick="AddressTableTree_MouseDoubleClick"
-                      KeyDown="AddressTableTree_KeyDown"
-                      PreviewMouseLeftButtonDown="AddressTable_PreviewMouseLeftButtonDown"
-                      PreviewMouseMove="AddressTable_PreviewMouseMove">
-                <TreeView.Resources>
-                    <ContextMenu x:Key="NodeContextMenu" Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}">
-                        <MenuItem Header="Toggle Activate" Click="CtxToggleActivate" InputGestureText="Space" />
-                        <Separator />
-                        <MenuItem Header="Change Description" Click="CtxChangeDescription" />
-                        <MenuItem Header="Change Address" Click="CtxChangeAddress" />
-                        <MenuItem Header="Change Value" Click="CtxChangeValue" />
-                        <MenuItem Header="Change Type" Click="CtxChangeType" />
-                        <Separator />
-                        <MenuItem Header="Toggle Freeze" Click="CtxToggleFreeze" InputGestureText="Ctrl+F" />
-                        <MenuItem Header="Show as Hexadecimal" Click="CtxShowAsHex" IsCheckable="True" />
-                        <Separator />
-                        <MenuItem Header="View Script" Click="ViewSelectedScript" />
-                        <MenuItem Header="Toggle Script" Click="ToggleSelectedScript" />
-                        <Separator />
-                        <MenuItem Header="Browse Memory Region" Click="CtxBrowseMemory" />
-                        <MenuItem Header="Disassemble Here" Click="CtxDisassemble" />
-                        <MenuItem Header="Find What Writes" Click="CtxFindWhatWrites" />
-                        <MenuItem Header="View Write Log" Click="CtxViewWriteLog" />
-                        <Separator />
-                        <MenuItem Header="Create Group" Click="CreateAddressGroup" />
-                        <MenuItem Header="Move to Group..." Click="CtxMoveToGroup" />
-                        <MenuItem Header="Delete" Click="CtxDelete" InputGestureText="Del" />
-                        <Separator />
-                        <MenuItem Header="Cut" Click="CtxCut" InputGestureText="Ctrl+X" />
-                        <MenuItem Header="Copy" Click="CtxCopy" InputGestureText="Ctrl+C" />
-                        <MenuItem Header="Paste" Click="CtxPaste" InputGestureText="Ctrl+V" />
-                    </ContextMenu>
-                </TreeView.Resources>
-                <TreeView.ItemContainerStyle>
-                    <Style TargetType="TreeViewItem">
-                        <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
-                        <Setter Property="ContextMenu" Value="{StaticResource NodeContextMenu}" />
-                        <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
-                    </Style>
-                </TreeView.ItemContainerStyle>
-                <TreeView.ItemTemplate>
-                    <HierarchicalDataTemplate ItemsSource="{Binding Children}">
-                        <Grid Margin="2" ToolTip="{Binding StatusTooltip}">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="28" />
-                                <ColumnDefinition Width="24" />
-                                <ColumnDefinition Width="200" />
-                                <ColumnDefinition Width="160" />
-                                <ColumnDefinition Width="70" />
-                                <ColumnDefinition Width="140" />
-                            </Grid.ColumnDefinitions>
-                            <CheckBox Grid.Column="0"
-                                      IsChecked="{Binding IsActive, Mode=TwoWay}"
-                                      Click="ActiveCheckBox_Click"
-                                      VerticalAlignment="Center" />
-                            <TextBlock Grid.Column="1" Text="{Binding DisplayIcon}" />
-                            <TextBlock Grid.Column="2" Text="{Binding Label}" FontWeight="SemiBold" />
-                            <TextBlock Grid.Column="3" Text="{Binding DisplayAddress}" Foreground="{DynamicResource AccentForeground}" />
-                            <TextBlock Grid.Column="4" Text="{Binding DisplayType}" Foreground="{DynamicResource SecondaryForeground}" />
-                            <TextBlock Grid.Column="5"
-                                       Text="{Binding DisplayValue}"
-                                       Foreground="{Binding DisplayValueColor, Converter={StaticResource BrushConv}}"
-                                       FontWeight="{Binding DisplayValueWeight}" />
-                        </Grid>
-                    </HierarchicalDataTemplate>
-                </TreeView.ItemTemplate>
-            </TreeView>
-        </DockPanel>
+        </Border>
     </Grid>
 </Window>

@@ -745,6 +745,33 @@ public sealed class AiOperatorService
                     pendingApprovals.Clear();
                 }
 
+                // Inject any pending screenshots as image content for the model to analyze
+                if (_toolFunctions is not null)
+                {
+                    int imagesProcessed = 0;
+                    int maxImagesPerTurn = Limits.MaxImagesPerTurn;
+                    while (imagesProcessed < maxImagesPerTurn && _toolFunctions.PendingImages.TryDequeue(out var img))
+                    {
+                        imagesProcessed++;
+                        UpdateStatus($"Analyzing screenshot ({imagesProcessed})...");
+                        var imageMsg = new ChatMessage(ChatRole.User, new List<AIContent>
+                        {
+                            new TextContent($"[Screenshot: {img.Description}]"),
+                            new DataContent(img.PngData, "image/png")
+                        });
+
+                        // Stream the image analysis response
+                        await foreach (var update in _agent.RunStreamingAsync(
+                            [imageMsg], _session, cancellationToken: cancellationToken))
+                        {
+                            await ProcessStreamUpdate(update, channel, sw, state,
+                                toolCalls, toolResults, pendingApprovals, cancellationToken);
+                        }
+                    }
+                    while (_toolFunctions.PendingImages.TryDequeue(out _))
+                        Log("WARN", $"Discarded excess pending image (max {maxImagesPerTurn} per turn)");
+                }
+
                 sw.Stop();
                 if (string.IsNullOrWhiteSpace(state.AssistantText))
                     state.AssistantText = "(Tool calls executed — see action log for details)";

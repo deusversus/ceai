@@ -1094,6 +1094,7 @@ public sealed class AiOperatorService
         _session = await _agent.CreateSessionAsync();
         _displayHistory.Clear();
         _actionLog.Clear();
+        _lastContextSuffix = null;
     }
 
     /// <summary>Save the current chat to disk.</summary>

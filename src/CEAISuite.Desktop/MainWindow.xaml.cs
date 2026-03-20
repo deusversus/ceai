@@ -2684,6 +2684,13 @@ public partial class MainWindow : Window
             {
                 try
                 {
+                    var info = new FileInfo(file);
+                    if (info.Length > 100_000)
+                    {
+                        MessageBox.Show($"{info.Name} is too large ({info.Length / 1024}KB). Max 100KB.",
+                            "File Too Large", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        continue;
+                    }
                     var content = File.ReadAllText(file);
                     AddAttachment(Path.GetFileName(file), content);
                 }

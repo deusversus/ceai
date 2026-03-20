@@ -1256,8 +1256,9 @@ public sealed class AiToolFunctions(
     public async Task<string> BrowseMemory(
         [Description("Process ID")] int processId,
         [Description("Start address (hex string)")] string address,
-        [Description("Number of bytes to read (default 128)")] int length = 128)
+        [Description("Number of bytes to read (default 128, max 512)")] int length = 128)
     {
+        length = Math.Clamp(length, 1, 512);
         var addr = AddressTableService.ParseAddress(address);
         var result = await engineFacade.ReadMemoryAsync(processId, addr, length);
         var bytes = result.Bytes.ToArray();

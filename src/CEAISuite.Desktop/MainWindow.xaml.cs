@@ -5,6 +5,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using AvalonDock.Themes;
+using AvalonDock.Layout;
 using CEAISuite.Application;
 using CEAISuite.Engine.Abstractions;
 using CEAISuite.Engine.Windows;
@@ -321,6 +322,13 @@ public partial class MainWindow : Window
 
             // Start auto-refresh timer for address table values
             StartAutoRefresh();
+
+            // Auto-open Memory Browser tab if enabled
+            if (_appSettingsService.Settings.AutoOpenMemoryBrowser)
+            {
+                MemoryBrowserTab.AttachProcess(_engineFacade, selectedProcess.Id, selectedProcess.Name);
+                ActivateDocument("memoryBrowser");
+            }
         }
         catch (Exception exception)
         {
@@ -1621,7 +1629,7 @@ public partial class MainWindow : Window
         RefreshAddressTableUI();
     }
 
-    private void CtxBrowseMemory(object sender, RoutedEventArgs e)
+    private async void CtxBrowseMemory(object sender, RoutedEventArgs e)
     {
         var node = GetSelectedNode();
         if (node is null || node.IsGroup || node.IsScriptEntry) return;
@@ -1633,12 +1641,12 @@ public partial class MainWindow : Window
             try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
         }
 
-        var browser = new MemoryBrowserWindow(
-            _engineFacade,
+        MemoryBrowserTab.AttachProcess(_engineFacade,
             dashboard.CurrentInspection.ProcessId,
-            dashboard.CurrentInspection.ProcessName,
-            addr);
-        browser.Show();
+            dashboard.CurrentInspection.ProcessName);
+        ActivateDocument("memoryBrowser");
+        if (addr != nuint.Zero)
+            await MemoryBrowserTab.NavigateToAddress(addr);
     }
 
     private void CtxDisassemble(object sender, RoutedEventArgs e)
@@ -2323,11 +2331,10 @@ public partial class MainWindow : Window
             System.Windows.MessageBox.Show("Attach to a process first.", "Memory Browser");
             return;
         }
-        var browser = new MemoryBrowserWindow(
-            _engineFacade,
+        MemoryBrowserTab.AttachProcess(_engineFacade,
             dashboard.CurrentInspection.ProcessId,
             dashboard.CurrentInspection.ProcessName);
-        browser.Show();
+        ActivateDocument("memoryBrowser");
     }
 
     // ── Menu bar handlers ──
@@ -2793,6 +2800,17 @@ public partial class MainWindow : Window
         DockManager.Theme = resolved == AppTheme.Light
             ? new Vs2013LightTheme()
             : new Vs2013DarkTheme();
+    }
+
+    /// <summary>Activate a LayoutDocument tab by its ContentId.</summary>
+    private void ActivateDocument(string contentId)
+    {
+        var doc = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutDocument>()
+            .FirstOrDefault(d => d.ContentId == contentId);
+        if (doc is not null)
+            doc.IsActive = true;
     }
 }
 

@@ -96,6 +96,7 @@ public partial class SettingsWindow : Window
         RefreshSlider.Value = s.RefreshIntervalMs;
         ShowUnresolvedCheck.IsChecked = s.ShowUnresolvedAsQuestionMarks;
         StreamingCheck.IsChecked = s.UseStreaming;
+        AutoOpenMemoryBrowserCheck.IsChecked = s.AutoOpenMemoryBrowser;
 
         // Rate limiting
         RateLimitBox.Text = s.RateLimitSeconds.ToString();
@@ -426,6 +427,7 @@ public partial class SettingsWindow : Window
 
         s.ShowUnresolvedAsQuestionMarks = ShowUnresolvedCheck.IsChecked == true;
         s.UseStreaming = StreamingCheck.IsChecked == true;
+        s.AutoOpenMemoryBrowser = AutoOpenMemoryBrowserCheck.IsChecked == true;
 
         if (int.TryParse(RateLimitBox.Text, out var rateLimit) && rateLimit >= 0)
             s.RateLimitSeconds = rateLimit;

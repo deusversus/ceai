@@ -37,6 +37,9 @@ public sealed class AppSettings
     public bool AutoHideMenuBar { get; set; } = false;
     public string Theme { get; set; } = "System";
 
+    /// <summary>Automatically open Memory Browser tab when attaching to a process.</summary>
+    public bool AutoOpenMemoryBrowser { get; set; } = true;
+
     /// <summary>Maximum conversation messages (excluding system prompt) sent to the API. 0 = unlimited.</summary>
     public int MaxConversationMessages { get; set; } = 40;
 

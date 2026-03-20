@@ -532,6 +532,9 @@
                                     </StackPanel>
                                 </ScrollViewer>
                             </avalonDock:LayoutDocument>
+                            <avalonDock:LayoutDocument Title="Memory Browser" ContentId="memoryBrowser">
+                                <local:MemoryBrowserControl x:Name="MemoryBrowserTab" />
+                            </avalonDock:LayoutDocument>
                         </avalonDock:LayoutDocumentPane>
 
                         <avalonDock:LayoutAnchorablePane DockHeight="250">

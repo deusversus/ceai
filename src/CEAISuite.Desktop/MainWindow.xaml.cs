@@ -76,6 +76,8 @@ public partial class MainWindow : Window
     private readonly List<AttachmentChip> _attachments = new();
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
+    private CancellationTokenSource? _streamingCts;
+    private bool _isStreaming;
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -744,6 +746,13 @@ public partial class MainWindow : Window
 
     private async void SendAiMessage(object sender, RoutedEventArgs e)
     {
+        // If already streaming, cancel instead of sending
+        if (_isStreaming)
+        {
+            _streamingCts?.Cancel();
+            return;
+        }
+
         var inputText = AiChatInputTextBox.Text?.Trim();
 
         // Build message: attachments prepended as context blocks
@@ -766,11 +775,14 @@ public partial class MainWindow : Window
         _aiOperatorService.AddUserMessageToHistory(message);
         RefreshAiChatDisplay();
 
+        _streamingCts = new CancellationTokenSource();
+        SetStreamingMode(true);
+
         try
         {
             if (_appSettingsService.Settings.UseStreaming)
             {
-                var reader = _aiOperatorService.SendMessageStreamingAsync(message);
+                var reader = _aiOperatorService.SendMessageStreamingAsync(message, _streamingCts.Token);
 
                 // Add a placeholder for the streaming response
                 var streamItem = new AiChatDisplayItem
@@ -791,7 +803,7 @@ public partial class MainWindow : Window
                     }
                 });
 
-                await foreach (var evt in reader.ReadAllAsync())
+                await foreach (var evt in reader.ReadAllAsync(_streamingCts.Token))
                 {
                     switch (evt)
                     {
@@ -826,9 +838,13 @@ public partial class MainWindow : Window
             {
                 // Non-streaming: wait for full response
                 Dispatcher.Invoke(() => AiStatusText.Text = "Thinking...");
-                var response = await Task.Run(() => _aiOperatorService.SendMessageAsync(message));
+                var response = await Task.Run(() => _aiOperatorService.SendMessageAsync(message), _streamingCts.Token);
                 // RefreshAiChatDisplay in finally block will show the response
             }
+        }
+        catch (OperationCanceledException)
+        {
+            AiStatusText.Text = "Stopped";
         }
         catch (Exception ex)
         {
@@ -837,6 +853,10 @@ public partial class MainWindow : Window
         }
         finally
         {
+            SetStreamingMode(false);
+            _streamingCts?.Dispose();
+            _streamingCts = null;
+
             if (AiStatusText.Text.StartsWith("Thinking") || AiStatusText.Text.StartsWith("Tool:"))
                 AiStatusText.Text = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
             RefreshAiChatDisplay();
@@ -850,6 +870,19 @@ public partial class MainWindow : Window
                 };
             }
         }
+    }
+
+    /// <summary>Toggle the send button between send (↑) and stop (■) modes.</summary>
+    private void SetStreamingMode(bool streaming)
+    {
+        _isStreaming = streaming;
+        if (SendStopButton.Template.FindName("SendButtonIcon", SendStopButton) is TextBlock icon)
+        {
+            icon.Text = streaming ? "■" : "↑";
+            icon.Margin = streaming ? new Thickness(0) : new Thickness(0, -2, 0, 0);
+            icon.FontSize = streaming ? 14 : 16;
+        }
+        SendStopButton.ToolTip = streaming ? "Stop generation (click to cancel)" : "Send message (Enter)";
     }
 
     private void OnAiChatPreviewKeyDown(object sender, KeyEventArgs e)

@@ -64,18 +64,21 @@ public sealed class AiToolFunctions(
     public async Task<string> ListProcesses()
     {
         var processes = await engineFacade.ListProcessesAsync();
-        var lines = processes.Take(30).Select(p => $"PID {p.Id} | {p.Name} | {p.Architecture}");
-        return $"Found {processes.Count} processes. Top 30:\n{string.Join('\n', lines)}";
+        var cap = _limits.MaxListProcesses;
+        var lines = processes.Take(cap).Select(p => $"PID {p.Id} | {p.Name} | {p.Architecture}");
+        return $"Found {processes.Count} processes (showing {Math.Min(cap, processes.Count)}):\n{string.Join('\n', lines)}";
     }
 
     [Description("Inspect a process by PID. Returns loaded modules and architecture info.")]
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
         var inspection = await dashboardService.InspectProcessAsync(processId);
-        var modules = inspection.Modules
+        var cap = _limits.MaxInspectModules;
+        var modules = inspection.Modules.Take(cap)
             .Select(m => $"  {m.Name} @ {m.BaseAddress} ({m.Size})");
+        var extra = inspection.Modules.Count > cap ? $"\n  ... and {inspection.Modules.Count - cap} more modules" : "";
         return $"Process: {inspection.ProcessName} (PID {inspection.ProcessId})\n" +
-               $"Modules ({inspection.Modules.Count} total):\n{string.Join('\n', modules)}";
+               $"Modules ({inspection.Modules.Count} total, showing {Math.Min(cap, inspection.Modules.Count)}):\n{string.Join('\n', modules)}{extra}";
     }
 
     [Description("Read a typed value from process memory at the given address.")]
@@ -322,6 +325,10 @@ public sealed class AiToolFunctions(
             ? $"Resolved '{address.Trim()}' → {resolvedAddress}"
             : (string?)null;
 
+        var cap = _limits.MaxDisassemblyInstructions;
+        var capped = overview.Lines.Take(cap).ToList();
+        var wasTruncated = overview.Lines.Count > cap;
+
         if (execWarning is not null)
         {
             return ToJson(new
@@ -330,8 +337,10 @@ public sealed class AiToolFunctions(
                 protection = protectionString,
                 resolved = symbolicNote,
                 startAddress = overview.StartAddress,
-                instructions = overview.Lines.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
+                instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
                 count = overview.Lines.Count,
+                returned = capped.Count,
+                truncated = wasTruncated,
                 summary = overview.Summary
             });
         }
@@ -340,8 +349,10 @@ public sealed class AiToolFunctions(
         {
             resolved = symbolicNote,
             startAddress = overview.StartAddress,
-            instructions = overview.Lines.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
+            instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
             count = overview.Lines.Count,
+            returned = capped.Count,
+            truncated = wasTruncated,
             summary = overview.Summary
         });
     }
@@ -375,18 +386,19 @@ public sealed class AiToolFunctions(
 
             if (filtered.Count == 0) return $"No {filter} memory regions found.";
 
+            var cap = _limits.MaxListRegions;
             var totalSize = filtered.Sum(r => r.RegionSize);
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Memory regions ({filtered.Count} {filter}, {FormatBytes(totalSize)} total):");
-            foreach (var r in filtered.Take(100))
+            sb.AppendLine($"Memory regions ({filtered.Count} {filter}, {FormatBytes(totalSize)} total, showing {Math.Min(cap, filtered.Count)}):");
+            foreach (var r in filtered.Take(cap))
             {
                 var flags = $"{(r.IsReadable ? "R" : "-")}{(r.IsWritable ? "W" : "-")}{(r.IsExecutable ? "X" : "-")}";
                 var moduleName = FindOwningModule(r.BaseAddress, r.RegionSize, modules);
                 var moduleTag = moduleName is not null ? $" [{moduleName}]" : "";
                 sb.AppendLine($"  0x{r.BaseAddress:X} [{FormatBytes(r.RegionSize),-10}] {flags}{moduleTag}");
             }
-            if (filtered.Count > 100)
-                sb.AppendLine($"  ... and {filtered.Count - 100} more regions");
+            if (filtered.Count > cap)
+                sb.AppendLine($"  ... and {filtered.Count - cap} more regions (use filter to narrow)");
             return sb.ToString();
         }
         catch (Exception ex) { return $"ListMemoryRegions failed: {ex.Message}"; }
@@ -1386,16 +1398,20 @@ public sealed class AiToolFunctions(
 
         if (fields.Count == 0) return "No identifiable fields found in this region.";
 
+        var cap = _limits.MaxDissectFields;
+        var capped = fields.Take(cap).ToList();
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Structure analysis at 0x{addr:X} ({fields.Count} fields, hint={typeHint}):");
+        sb.AppendLine($"Structure analysis at 0x{addr:X} ({fields.Count} fields, showing {capped.Count}, hint={typeHint}):");
         if (clustersDetected > 0)
             sb.AppendLine($"  Detected {clustersDetected} integer cluster(s) — consecutive game-stat-like Int32 values.");
         sb.AppendLine("Offset  | Type     | Value                | Confidence");
         sb.AppendLine("--------|----------|----------------------|-----------");
-        foreach (var f in fields)
+        foreach (var f in capped)
         {
             sb.AppendLine($"+0x{f.Offset:X4} | {f.ProbableType,-8} | {f.DisplayValue,-20} | {f.Confidence:P0}");
         }
+        if (fields.Count > cap)
+            sb.AppendLine($"... {fields.Count - cap} more fields omitted — reduce regionSize or increase limits.");
         return sb.ToString();
     }
 
@@ -1941,9 +1957,9 @@ public sealed class AiToolFunctions(
     public async Task<string> HexDump(
         [Description("Process ID")] int processId,
         [Description("Start address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
-        [Description("Number of bytes to read (default 64, max 256)")] int length = 64)
+        [Description("Number of bytes to read (default 64)")] int length = 64)
     {
-        length = Math.Clamp(length, 1, 256);
+        length = Math.Clamp(length, 1, _limits.MaxHexDumpBytes);
         var resolvedAddress = await TryResolveToHex(processId, address);
         var addr = ParseAddress(resolvedAddress);
         var mem = await engineFacade.ReadMemoryAsync(processId, addr, length);
@@ -2323,10 +2339,12 @@ public sealed class AiToolFunctions(
             if (diff.Changes.Count == 0)
                 return $"No differences found ({diff.TotalBytesCompared} bytes compared).";
 
-            var lines = diff.Changes.Take(30).Select(c =>
+            var cap = _limits.MaxSnapshotDiffEntries;
+            var lines = diff.Changes.Take(cap).Select(c =>
                 $"  +0x{c.Offset:X4}: {BitConverter.ToString(c.OldBytes).Replace("-", " ")} → " +
                 $"{BitConverter.ToString(c.NewBytes).Replace("-", " ")} ({c.Interpretation})");
-            return $"Found {diff.Changes.Count} change(s), {diff.ChangedByteCount} byte(s) modified:\n{string.Join('\n', lines)}";
+            var extra = diff.Changes.Count > cap ? $"\n  ... and {diff.Changes.Count - cap} more changes" : "";
+            return $"Found {diff.Changes.Count} change(s), {diff.ChangedByteCount} byte(s) modified (showing {Math.Min(cap, diff.Changes.Count)}):\n{string.Join('\n', lines)}{extra}";
         }
         catch (Exception ex) { return $"CompareSnapshots failed: {ex.Message}"; }
     }
@@ -2342,10 +2360,12 @@ public sealed class AiToolFunctions(
             if (diff.Changes.Count == 0)
                 return $"Memory unchanged since snapshot ({diff.TotalBytesCompared} bytes compared).";
 
-            var lines = diff.Changes.Take(30).Select(c =>
+            var cap = _limits.MaxSnapshotDiffEntries;
+            var lines = diff.Changes.Take(cap).Select(c =>
                 $"  +0x{c.Offset:X4}: {BitConverter.ToString(c.OldBytes).Replace("-", " ")} → " +
                 $"{BitConverter.ToString(c.NewBytes).Replace("-", " ")} ({c.Interpretation})");
-            return $"Found {diff.Changes.Count} change(s) since snapshot:\n{string.Join('\n', lines)}";
+            var extra = diff.Changes.Count > cap ? $"\n  ... and {diff.Changes.Count - cap} more changes" : "";
+            return $"Found {diff.Changes.Count} change(s) since snapshot (showing {Math.Min(cap, diff.Changes.Count)}):\n{string.Join('\n', lines)}{extra}";
         }
         catch (Exception ex) { return $"CompareSnapshotWithLive failed: {ex.Message}"; }
     }
@@ -2797,9 +2817,10 @@ public sealed class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Module name (e.g., 'GameAssembly.dll') or 'all' to scan loaded modules")] string moduleName,
         [Description("The displacement/offset to search for (hex), e.g., '0x38' or '38'")] string offset,
-        [Description("Max results to return")] int maxResults = 30,
+        [Description("Max results to return")] int maxResults = 0,
         [Description("Also include instructions that READ from [reg+offset] (useful for tracing data flow)")] bool includeReads = false)
     {
+        if (maxResults <= 0) maxResults = _limits.MaxCodeSearchResults;
         var dispValue = (long)(ulong)ParseAddress(offset);
         var attachment = await engineFacade.AttachAsync(processId);
         var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
@@ -3026,8 +3047,9 @@ public sealed class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Target function address (hex)")] string targetAddress,
         [Description("Module to scan (or 'all')")] string moduleName,
-        [Description("Max results")] int maxResults = 30)
+        [Description("Max results")] int maxResults = 0)
     {
+        if (maxResults <= 0) maxResults = _limits.MaxCodeSearchResults;
         var target = (ulong)ParseAddress(targetAddress);
         var attachment = await engineFacade.AttachAsync(processId);
         var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
@@ -3120,8 +3142,9 @@ public sealed class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Module name (or 'all')")] string moduleName,
         [Description("Regex pattern to match against formatted instruction text (MASM syntax)")] string pattern,
-        [Description("Max results")] int maxResults = 30)
+        [Description("Max results")] int maxResults = 0)
     {
+        if (maxResults <= 0) maxResults = _limits.MaxCodeSearchResults;
         Regex regex;
         try { regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(5)); }
         catch (ArgumentException ex) { return $"Invalid regex pattern: {ex.Message}"; }
@@ -3270,8 +3293,9 @@ public sealed class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Address table entry ID or label (e.g., 'EXP' or 'ct-75')")] string entryIdOrLabel,
         [Description("Module to search (e.g., 'GameAssembly.dll'). If empty, searches all code modules.")] string moduleName = "",
-        [Description("Max results per search strategy")] int maxResults = 30)
+        [Description("Max results per search strategy")] int maxResults = 0)
     {
+        if (maxResults <= 0) maxResults = _limits.MaxTraceFieldResults;
         // Step 1: Resolve the table entry
         var node = ResolveNode(entryIdOrLabel);
         if (node is null)

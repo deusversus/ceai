@@ -877,3 +877,124 @@ public class CheatTableExporterTests
         Assert.Contains("[ENABLE]", reimported[2].AssemblerScript);
     }
 }
+
+public class TokenLimitsTests
+{
+    [Fact]
+    public void TruncateToolResult_ShortString_ReturnsUnchanged()
+    {
+        var limits = TokenLimits.Balanced;
+        var input = "Short result";
+        Assert.Equal(input, limits.TruncateToolResult(input));
+    }
+
+    [Fact]
+    public void TruncateToolResult_LongString_TruncatesWithNotice()
+    {
+        var limits = new TokenLimits { MaxToolResultChars = 100 };
+        var input = new string('x', 500);
+        var result = limits.TruncateToolResult(input);
+
+        Assert.True(result.Length <= 100, $"Result length {result.Length} exceeds limit 100");
+        Assert.Contains("truncated", result);
+        Assert.Contains("500", result); // original length mentioned
+    }
+
+    [Fact]
+    public void TruncateToolResult_ExactlyAtLimit_ReturnsUnchanged()
+    {
+        var limits = new TokenLimits { MaxToolResultChars = 50 };
+        var input = new string('a', 50);
+        Assert.Equal(input, limits.TruncateToolResult(input));
+    }
+
+    [Fact]
+    public void Truncate_Static_TruncatesAtExplicitLimit()
+    {
+        var input = new string('z', 200);
+        var result = TokenLimits.Truncate(input, 80);
+
+        Assert.True(result.Length <= 80);
+        Assert.Contains("truncated", result);
+    }
+
+    [Fact]
+    public void Truncate_Static_ShortString_ReturnsUnchanged()
+    {
+        var input = "hello";
+        Assert.Equal(input, TokenLimits.Truncate(input, 100));
+    }
+
+    [Theory]
+    [InlineData("saving")]
+    [InlineData("balanced")]
+    [InlineData("performance")]
+    public void ForProfile_ReturnsValidPreset(string profile)
+    {
+        var limits = TokenLimits.ForProfile(profile);
+        Assert.True(limits.MaxOutputTokens > 0);
+        Assert.True(limits.MaxToolResultChars > 0);
+        Assert.True(limits.MaxDisassemblyInstructions > 0);
+        Assert.True(limits.MaxListRegions > 0);
+        Assert.True(limits.MaxDissectFields > 0);
+        Assert.True(limits.MaxHexDumpBytes > 0);
+        Assert.True(limits.MaxCodeSearchResults > 0);
+        Assert.True(limits.MaxTraceFieldResults > 0);
+        Assert.True(limits.MaxInspectModules > 0);
+        Assert.True(limits.MaxListProcesses > 0);
+        Assert.True(limits.MaxSnapshotDiffEntries > 0);
+    }
+
+    [Fact]
+    public void SavingProfile_HasStricterLimitsThanBalanced()
+    {
+        var saving = TokenLimits.Saving;
+        var balanced = TokenLimits.Balanced;
+
+        Assert.True(saving.MaxToolResultChars < balanced.MaxToolResultChars);
+        Assert.True(saving.MaxDisassemblyInstructions < balanced.MaxDisassemblyInstructions);
+        Assert.True(saving.MaxListRegions < balanced.MaxListRegions);
+        Assert.True(saving.MaxCodeSearchResults < balanced.MaxCodeSearchResults);
+        Assert.True(saving.MaxHexDumpBytes < balanced.MaxHexDumpBytes);
+    }
+
+    [Fact]
+    public void PerformanceProfile_HasLoosestLimits()
+    {
+        var balanced = TokenLimits.Balanced;
+        var performance = TokenLimits.Performance;
+
+        Assert.True(performance.MaxToolResultChars > balanced.MaxToolResultChars);
+        Assert.True(performance.MaxDisassemblyInstructions > balanced.MaxDisassemblyInstructions);
+        Assert.True(performance.MaxListRegions > balanced.MaxListRegions);
+        Assert.True(performance.MaxCodeSearchResults > balanced.MaxCodeSearchResults);
+    }
+
+    [Fact]
+    public void Resolve_AppliesPerFieldOverrides()
+    {
+        var settings = new AppSettings
+        {
+            TokenProfile = "saving",
+            LimitMaxToolResultChars = 9999,
+        };
+
+        var limits = TokenLimits.Resolve(settings);
+
+        // Overridden field uses custom value
+        Assert.Equal(9999, limits.MaxToolResultChars);
+        // Non-overridden fields use "saving" profile defaults
+        Assert.Equal(TokenLimits.Saving.MaxOutputTokens, limits.MaxOutputTokens);
+        Assert.Equal(TokenLimits.Saving.MaxDisassemblyInstructions, limits.MaxDisassemblyInstructions);
+    }
+
+    [Fact]
+    public void Resolve_DefaultProfile_UsesBalanced()
+    {
+        var settings = new AppSettings(); // TokenProfile defaults to "balanced"
+        var limits = TokenLimits.Resolve(settings);
+
+        Assert.Equal(TokenLimits.Balanced.MaxOutputTokens, limits.MaxOutputTokens);
+        Assert.Equal(TokenLimits.Balanced.MaxToolResultChars, limits.MaxToolResultChars);
+    }
+}

@@ -318,9 +318,13 @@ public sealed class AiOperatorService
         // Build the MAF agent with compaction, skills, tools, and system prompt.
         // UseFunctionInvocation() inserts FunctionInvokingChatClient — required for
         // the agent to actually execute tool calls returned by the model.
+        // ToolResultCappingChatClient sits between function invocation and the LLM,
+        // truncating any tool result that exceeds MaxToolResultChars before it
+        // consumes API tokens. This is the universal safety net.
         return client
             .AsBuilder()
             .UseFunctionInvocation(configure: client => client.IncludeDetailedErrors = true)
+            .Use(inner => new ToolResultCappingChatClient(inner, Limits))
             .UseAIContextProviders(contextProviders.ToArray())
             .BuildAIAgent(new ChatClientAgentOptions
             {
@@ -1484,5 +1488,79 @@ public sealed class AiOperatorService
         public object? GetService(Type serviceType, object? serviceKey = null) => null;
 
         public void Dispose() { }
+    }
+
+    /// <summary>
+    /// Delegating chat client that intercepts all messages flowing to the LLM and
+    /// truncates any <see cref="FunctionResultContent"/> whose string representation
+    /// exceeds <see cref="TokenLimits.MaxToolResultChars"/>. Sits between the
+    /// <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/> and the
+    /// underlying LLM client so tool results are capped before consuming API tokens.
+    /// </summary>
+    private sealed class ToolResultCappingChatClient(IChatClient inner, TokenLimits limits) : DelegatingChatClient(inner)
+    {
+        public override Task<ChatResponse> GetResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var capped = CapToolResults(messages);
+            return base.GetResponseAsync(capped, options, cancellationToken);
+        }
+
+        public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> messages,
+            ChatOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            var capped = CapToolResults(messages);
+            return base.GetStreamingResponseAsync(capped, options, cancellationToken);
+        }
+
+        private IEnumerable<ChatMessage> CapToolResults(IEnumerable<ChatMessage> messages)
+        {
+            foreach (var msg in messages)
+            {
+                bool hasFunctionResult = false;
+                foreach (var content in msg.Contents)
+                {
+                    if (content is FunctionResultContent)
+                    {
+                        hasFunctionResult = true;
+                        break;
+                    }
+                }
+
+                if (!hasFunctionResult)
+                {
+                    yield return msg;
+                    continue;
+                }
+
+                // Rebuild the contents list with truncated tool results
+                var newContents = new List<AIContent>(msg.Contents.Count);
+                foreach (var content in msg.Contents)
+                {
+                    if (content is FunctionResultContent frc)
+                    {
+                        var resultStr = frc.Result?.ToString();
+                        if (resultStr is not null && resultStr.Length > limits.MaxToolResultChars)
+                        {
+                            var truncated = limits.TruncateToolResult(resultStr);
+                            newContents.Add(new FunctionResultContent(frc.CallId, truncated));
+                        }
+                        else
+                        {
+                            newContents.Add(content);
+                        }
+                    }
+                    else
+                    {
+                        newContents.Add(content);
+                    }
+                }
+                yield return new ChatMessage(msg.Role, newContents);
+            }
+        }
     }
 }

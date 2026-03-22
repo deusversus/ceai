@@ -3,6 +3,9 @@ namespace CEAISuite.Application;
 /// <summary>
 /// Configurable token-efficiency limits used by AiOperatorService and AiToolFunctions.
 /// Three presets (Saving, Balanced, Performance) plus per-field overrides via AppSettings.
+/// Every tool result is subject to <see cref="MaxToolResultChars"/> as a hard ceiling;
+/// individual tools also respect finer-grained caps (instructions, regions, etc.) so the
+/// AI never receives unbounded output from scans, disassembly, or memory dumps.
 /// </summary>
 public sealed class TokenLimits
 {
@@ -22,6 +25,35 @@ public sealed class TokenLimits
     public bool FilterRegisters { get; init; } = true;
     public bool DereferenceHookRegisters { get; init; } = false;
 
+    // ── Per-tool caps (new) ──
+
+    /// <summary>Max disassembly instructions returned by Disassemble.</summary>
+    public int MaxDisassemblyInstructions { get; init; } = 60;
+
+    /// <summary>Max memory regions returned by ListMemoryRegions.</summary>
+    public int MaxListRegions { get; init; } = 80;
+
+    /// <summary>Max structure fields returned by DissectStructure.</summary>
+    public int MaxDissectFields { get; init; } = 64;
+
+    /// <summary>Max bytes for a single HexDump call.</summary>
+    public int MaxHexDumpBytes { get; init; } = 256;
+
+    /// <summary>Max results for instruction-scanning tools (FindByMemoryOperand, SearchInstructionPattern, FindWritersToOffset).</summary>
+    public int MaxCodeSearchResults { get; init; } = 30;
+
+    /// <summary>Max results per strategy in TraceFieldWriters.</summary>
+    public int MaxTraceFieldResults { get; init; } = 20;
+
+    /// <summary>Max modules shown by InspectProcess.</summary>
+    public int MaxInspectModules { get; init; } = 40;
+
+    /// <summary>Max processes shown by ListProcesses.</summary>
+    public int MaxListProcesses { get; init; } = 30;
+
+    /// <summary>Max snapshots compared in CompareSnapshots.</summary>
+    public int MaxSnapshotDiffEntries { get; init; } = 50;
+
     // ── Presets ──
 
     public static TokenLimits Saving => new()
@@ -38,6 +70,15 @@ public sealed class TokenLimits
         MaxChatSearchResults = 10,
         FilterRegisters = true,
         DereferenceHookRegisters = false,
+        MaxDisassemblyInstructions = 30,
+        MaxListRegions = 40,
+        MaxDissectFields = 32,
+        MaxHexDumpBytes = 128,
+        MaxCodeSearchResults = 15,
+        MaxTraceFieldResults = 10,
+        MaxInspectModules = 20,
+        MaxListProcesses = 20,
+        MaxSnapshotDiffEntries = 25,
     };
 
     public static TokenLimits Balanced => new()
@@ -54,6 +95,15 @@ public sealed class TokenLimits
         MaxChatSearchResults = 20,
         FilterRegisters = true,
         DereferenceHookRegisters = false,
+        MaxDisassemblyInstructions = 60,
+        MaxListRegions = 80,
+        MaxDissectFields = 64,
+        MaxHexDumpBytes = 256,
+        MaxCodeSearchResults = 30,
+        MaxTraceFieldResults = 20,
+        MaxInspectModules = 40,
+        MaxListProcesses = 30,
+        MaxSnapshotDiffEntries = 50,
     };
 
     public static TokenLimits Performance => new()
@@ -70,6 +120,15 @@ public sealed class TokenLimits
         MaxChatSearchResults = 50,
         FilterRegisters = false,
         DereferenceHookRegisters = true,
+        MaxDisassemblyInstructions = 120,
+        MaxListRegions = 200,
+        MaxDissectFields = 128,
+        MaxHexDumpBytes = 512,
+        MaxCodeSearchResults = 60,
+        MaxTraceFieldResults = 40,
+        MaxInspectModules = 80,
+        MaxListProcesses = 50,
+        MaxSnapshotDiffEntries = 100,
     };
 
     /// <summary>
@@ -99,6 +158,16 @@ public sealed class TokenLimits
             MaxChatSearchResults = settings.LimitMaxChatSearchResults ?? profile.MaxChatSearchResults,
             FilterRegisters = settings.LimitFilterRegisters ?? profile.FilterRegisters,
             DereferenceHookRegisters = settings.LimitDereferenceHookRegisters ?? profile.DereferenceHookRegisters,
+            // New per-tool caps use profile defaults (no per-field AppSettings overrides yet)
+            MaxDisassemblyInstructions = profile.MaxDisassemblyInstructions,
+            MaxListRegions = profile.MaxListRegions,
+            MaxDissectFields = profile.MaxDissectFields,
+            MaxHexDumpBytes = profile.MaxHexDumpBytes,
+            MaxCodeSearchResults = profile.MaxCodeSearchResults,
+            MaxTraceFieldResults = profile.MaxTraceFieldResults,
+            MaxInspectModules = profile.MaxInspectModules,
+            MaxListProcesses = profile.MaxListProcesses,
+            MaxSnapshotDiffEntries = profile.MaxSnapshotDiffEntries,
         };
     }
 
@@ -109,4 +178,29 @@ public sealed class TokenLimits
         "performance" => Performance,
         _ => Balanced,
     };
+
+    // ── Truncation helpers ──
+
+    /// <summary>
+    /// Truncate a tool result string to <see cref="MaxToolResultChars"/>, appending a
+    /// notice so the AI knows data was elided. This is the universal safety net applied
+    /// to every tool result before it enters the LLM context window.
+    /// </summary>
+    public string TruncateToolResult(string result)
+    {
+        if (result.Length <= MaxToolResultChars) return result;
+        var suffix = $"\n... [truncated at {MaxToolResultChars:#,0} of {result.Length:#,0} chars — use narrower parameters to see full data]";
+        return string.Concat(result.AsSpan(0, MaxToolResultChars - suffix.Length), suffix);
+    }
+
+    /// <summary>
+    /// Truncate a tool result to an explicit character limit (for tool-specific caps
+    /// that are tighter than the global <see cref="MaxToolResultChars"/>).
+    /// </summary>
+    public static string Truncate(string result, int maxChars)
+    {
+        if (result.Length <= maxChars) return result;
+        var suffix = $"\n... [truncated at {maxChars:#,0} of {result.Length:#,0} chars]";
+        return string.Concat(result.AsSpan(0, maxChars - suffix.Length), suffix);
+    }
 }

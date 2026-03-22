@@ -998,3 +998,123 @@ public class TokenLimitsTests
         Assert.Equal(TokenLimits.Balanced.MaxToolResultChars, limits.MaxToolResultChars);
     }
 }
+
+public class ToolResultStoreTests
+{
+    [Fact]
+    public void Store_ReturnsUniqueHandles()
+    {
+        var store = new ToolResultStore();
+        var h1 = store.Store("Disassemble", "result1");
+        var h2 = store.Store("HexDump", "result2");
+
+        Assert.NotEqual(h1, h2);
+        Assert.StartsWith("tr_", h1);
+        Assert.StartsWith("tr_", h2);
+        Assert.Equal(2, store.Count);
+    }
+
+    [Fact]
+    public void Retrieve_ReturnsCorrectSlice()
+    {
+        var store = new ToolResultStore();
+        var fullText = new string('A', 1000) + new string('B', 1000);
+        var handle = store.Store("TestTool", fullText);
+
+        var page = store.Retrieve(handle, 0, 500);
+        Assert.NotNull(page);
+        Assert.StartsWith(new string('A', 500), page);
+        Assert.Contains("more chars remaining", page);
+    }
+
+    [Fact]
+    public void Retrieve_LastPage_NoRemainingNotice()
+    {
+        var store = new ToolResultStore();
+        var fullText = "Hello, world!";
+        var handle = store.Store("TestTool", fullText);
+
+        var page = store.Retrieve(handle, 0, 100);
+        Assert.Equal("Hello, world!", page);
+    }
+
+    [Fact]
+    public void Retrieve_WithOffset_SkipsCorrectly()
+    {
+        var store = new ToolResultStore();
+        var fullText = "AAAAABBBBB";
+        var handle = store.Store("TestTool", fullText);
+
+        var page = store.Retrieve(handle, 5, 100);
+        Assert.Equal("BBBBB", page);
+    }
+
+    [Fact]
+    public void Retrieve_InvalidHandle_ReturnsNull()
+    {
+        var store = new ToolResultStore();
+        Assert.Null(store.Retrieve("tr_9999", 0, 100));
+    }
+
+    [Fact]
+    public void Retrieve_OffsetPastEnd_ReturnsNotice()
+    {
+        var store = new ToolResultStore();
+        var handle = store.Store("TestTool", "short");
+
+        var page = store.Retrieve(handle, 999, 100);
+        Assert.Contains("past end", page);
+    }
+
+    [Fact]
+    public void Clear_RemovesAllEntries()
+    {
+        var store = new ToolResultStore();
+        store.Store("A", "data1");
+        store.Store("B", "data2");
+        Assert.Equal(2, store.Count);
+
+        store.Clear();
+        Assert.Equal(0, store.Count);
+    }
+
+    [Fact]
+    public void ListAll_ReturnsMetadataOrderedByTime()
+    {
+        var store = new ToolResultStore();
+        store.Store("First", "aaa");
+        store.Store("Second", "bbb");
+
+        var items = store.ListAll();
+        Assert.Equal(2, items.Count);
+        // Most recent first
+        Assert.Equal("Second", items[0].ToolName);
+        Assert.Equal("First", items[1].ToolName);
+    }
+
+    [Fact]
+    public void GetInfo_ReturnsMetadata()
+    {
+        var store = new ToolResultStore();
+        var handle = store.Store("Disassemble", "line1\nline2\nline3");
+
+        var info = store.GetInfo(handle);
+        Assert.NotNull(info);
+        Assert.Equal("Disassemble", info.ToolName);
+        Assert.Equal(3, info.TotalLines);
+        Assert.Equal(17, info.TotalChars);
+    }
+
+    [Fact]
+    public void Remove_DeletesSingleEntry()
+    {
+        var store = new ToolResultStore();
+        var h1 = store.Store("A", "data1");
+        var h2 = store.Store("B", "data2");
+
+        Assert.True(store.Remove(h1));
+        Assert.Equal(1, store.Count);
+        Assert.Null(store.Retrieve(h1, 0, 100));
+        Assert.NotNull(store.Retrieve(h2, 0, 100));
+    }
+}

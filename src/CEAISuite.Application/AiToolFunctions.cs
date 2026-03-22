@@ -36,9 +36,13 @@ public sealed class AiToolFunctions(
     OperationJournal? operationJournal = null,
     AiChatStore? chatStore = null,
     Func<IReadOnlyList<AiChatMessage>>? currentChatProvider = null,
-    TokenLimits? tokenLimits = null)
+    TokenLimits? tokenLimits = null,
+    ToolResultStore? toolResultStore = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
+
+    /// <summary>Store for large tool results that exceeded the context budget.</summary>
+    internal ToolResultStore ToolResultStore { get; } = toolResultStore ?? new ToolResultStore();
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
     public ConcurrentQueue<(string Description, byte[] PngData)> PendingImages { get; } = new();
 
@@ -3969,5 +3973,41 @@ public sealed class AiToolFunctions(
             }
         }
         return result;
+    }
+
+    // ── Spilled Result Retrieval ──
+
+    [Description("Retrieve a page of a large tool result that was spilled to storage. " +
+        "When a tool result is too large for the context window, it is stored and you receive a " +
+        "summary with a result_id. Use this tool to page through the full data.")]
+    public string RetrieveToolResult(
+        [Description("The result handle ID (e.g. 'tr_0001') from the spill notice")] string resultId,
+        [Description("Character offset to start reading from (0-based)")] int offset = 0,
+        [Description("Maximum characters to return in this page")] int maxChars = 0)
+    {
+        if (maxChars <= 0) maxChars = _limits.MaxToolResultChars;
+        var page = ToolResultStore.Retrieve(resultId, offset, maxChars);
+        if (page is null)
+            return $"No stored result found for '{resultId}'. Use ListStoredResults to see available handles.";
+        return page;
+    }
+
+    [Description("List all large tool results currently stored. Each entry shows the result ID, " +
+        "source tool name, total size, and when it was stored.")]
+    public string ListStoredResults()
+    {
+        var items = ToolResultStore.ListAll();
+        if (items.Count == 0)
+            return "No stored results. Results are stored automatically when a tool returns data " +
+                   "exceeding the context budget.";
+
+        return ToJson(items.Select(r => new
+        {
+            r.Id,
+            r.ToolName,
+            totalChars = r.TotalChars,
+            totalLines = r.TotalLines,
+            storedAt = r.StoredAt.ToString("HH:mm:ss"),
+        }));
     }
 }

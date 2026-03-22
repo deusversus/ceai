@@ -88,6 +88,8 @@ internal static class ToolCategories
         "GetCurrentContext", "SummarizeInvestigation",
         "SaveSession", "ListSessions", "LoadSession",
         "SearchChatHistory",
+        // Spilled-result retrieval (always available)
+        "RetrieveToolResult", "ListStoredResults",
         // Meta-tools (always available)
         "request_tools", "list_tool_categories", "unload_tools",
     };
@@ -151,6 +153,7 @@ public sealed class AiOperatorService
     private readonly Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore;
+    private readonly ToolResultStore _toolResultStore;
     private readonly List<AITool> _tools;
     private readonly Dictionary<string, AITool> _allToolsByName;
     private readonly HashSet<string> _loadedCategories = new(StringComparer.OrdinalIgnoreCase);
@@ -222,6 +225,7 @@ public sealed class AiOperatorService
         _contextProvider = contextProvider;
         _toolFunctions = toolFunctions;
         _chatStore = chatStore ?? new AiChatStore();
+        _toolResultStore = toolFunctions.ToolResultStore;
         var baseClient = chatClient ?? new StubChatClient();
         _baseChatClient = baseClient;
 
@@ -324,7 +328,7 @@ public sealed class AiOperatorService
         return client
             .AsBuilder()
             .UseFunctionInvocation(configure: client => client.IncludeDetailedErrors = true)
-            .Use(inner => new ToolResultCappingChatClient(inner, Limits))
+            .Use(inner => new ToolResultCappingChatClient(inner, Limits, _toolResultStore))
             .UseAIContextProviders(contextProviders.ToArray())
             .BuildAIAgent(new ChatClientAgentOptions
             {
@@ -1158,14 +1162,23 @@ public sealed class AiOperatorService
             }
             history.Add(new ChatMessage(ChatRole.Assistant, contents));
 
-            // Tool results as separate messages — truncate large results to save tokens
+            // Tool results as separate messages — spill large results to store
             if (msg.ToolResults is not null)
             {
                 foreach (var tr in msg.ToolResults)
                 {
                     var result = tr.Result ?? "";
                     if (result.Length > maxToolResultChars)
-                        result = result[..maxToolResultChars] + $"... [truncated, was {result.Length} chars]";
+                    {
+                        var handle = _toolResultStore.Store(tr.Name ?? "unknown", result);
+                        var previewLen = Math.Max(maxToolResultChars / 2, 500);
+                        var preview = result[..Math.Min(previewLen, result.Length)];
+                        result = $"{preview}\n\n" +
+                            $"--- RESULT SPILLED (too large for context) ---\n" +
+                            $"result_id: {handle}\n" +
+                            $"total_chars: {result.Length:#,0}\n" +
+                            $"Use RetrieveToolResult(resultId: \"{handle}\", offset: {preview.Length}) to read more.";
+                    }
                     history.Add(new ChatMessage(ChatRole.Tool,
                         [new FunctionResultContent(tr.CallId, result)]));
                 }
@@ -1248,6 +1261,7 @@ public sealed class AiOperatorService
         CurrentChatId = $"chat-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}";
         CurrentChatTitle = "New Chat";
         ClearHistory();
+        _toolResultStore.Clear(); // Discard spilled results from previous chat
         LoadCoreTools(); // Reset to core tools for fresh conversation
         ChatListChanged?.Invoke();
     }
@@ -1492,12 +1506,14 @@ public sealed class AiOperatorService
 
     /// <summary>
     /// Delegating chat client that intercepts all messages flowing to the LLM and
-    /// truncates any <see cref="FunctionResultContent"/> whose string representation
-    /// exceeds <see cref="TokenLimits.MaxToolResultChars"/>. Sits between the
+    /// spills any <see cref="FunctionResultContent"/> whose string representation
+    /// exceeds <see cref="TokenLimits.MaxToolResultChars"/> to a <see cref="ToolResultStore"/>.
+    /// The AI receives a summary with the result handle and can retrieve pages via
+    /// <c>RetrieveToolResult</c>. Sits between the
     /// <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/> and the
     /// underlying LLM client so tool results are capped before consuming API tokens.
     /// </summary>
-    private sealed class ToolResultCappingChatClient(IChatClient inner, TokenLimits limits) : DelegatingChatClient(inner)
+    private sealed class ToolResultCappingChatClient(IChatClient inner, TokenLimits limits, ToolResultStore store) : DelegatingChatClient(inner)
     {
         public override Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -1537,7 +1553,7 @@ public sealed class AiOperatorService
                     continue;
                 }
 
-                // Rebuild the contents list with truncated tool results
+                // Rebuild the contents list, spilling oversized tool results to the store
                 var newContents = new List<AIContent>(msg.Contents.Count);
                 foreach (var content in msg.Contents)
                 {
@@ -1546,8 +1562,18 @@ public sealed class AiOperatorService
                         var resultStr = frc.Result?.ToString();
                         if (resultStr is not null && resultStr.Length > limits.MaxToolResultChars)
                         {
-                            var truncated = limits.TruncateToolResult(resultStr);
-                            newContents.Add(new FunctionResultContent(frc.CallId, truncated));
+                            // Spill full result to store, return summary + handle
+                            var toolName = frc.CallId ?? "unknown";
+                            var handle = store.Store(toolName, resultStr);
+                            var previewLen = Math.Max(limits.MaxToolResultChars / 2, 500);
+                            var preview = resultStr[..Math.Min(previewLen, resultStr.Length)];
+                            var summary = $"{preview}\n\n" +
+                                $"--- RESULT SPILLED (too large for context) ---\n" +
+                                $"result_id: {handle}\n" +
+                                $"total_chars: {resultStr.Length:#,0}\n" +
+                                $"shown_chars: {preview.Length:#,0}\n" +
+                                $"Use RetrieveToolResult(resultId: \"{handle}\", offset: {preview.Length}) to read more.";
+                            newContents.Add(new FunctionResultContent(frc.CallId, summary));
                         }
                         else
                         {

@@ -83,11 +83,9 @@ internal static class ToolCategories
         "StartScan", "RefineScan", "GetScanResults",
         // Address table essentials
         "ListAddressTable", "AddToAddressTable", "RemoveFromAddressTable", "RefreshAddressTable",
-        "FreezeAddress", "UnfreezeAddress",
-        // Context & sessions
-        "GetCurrentContext", "SummarizeInvestigation",
-        "SaveSession", "ListSessions", "LoadSession",
-        "SearchChatHistory",
+        "FreezeAddress",
+        // Context
+        "GetCurrentContext",
         // Spilled-result retrieval (always available)
         "RetrieveToolResult", "ListStoredResults",
         // Meta-tools (always available)
@@ -97,12 +95,14 @@ internal static class ToolCategories
     /// <summary>Category name → tool names. Agent calls request_tools(category) to load these.</summary>
     public static readonly Dictionary<string, string[]> Categories = new(StringComparer.OrdinalIgnoreCase)
     {
+        ["sessions"] = [
+            "SummarizeInvestigation", "SaveSession", "ListSessions", "LoadSession", "SearchChatHistory" ],
         ["memory_advanced"] = [
             "HexDump", "ListMemoryRegions", "DissectStructure",
             "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection" ],
         ["address_table"] = [
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
-            "CreateAddressGroup", "MoveEntryToGroup", "FreezeAddressAtValue", "ToggleScript" ],
+            "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript" ],
         ["scanning_advanced"] = [
             "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths" ],
         ["breakpoints"] = [
@@ -118,7 +118,7 @@ internal static class ToolCategories
             "GetCodeCaveHookHits", "DryRunHookInstall" ],
         ["scripts"] = [
             "ListScripts", "ViewScript", "ValidateScript", "ValidateScriptDeep",
-            "EnableScript", "DisableScript", "EditScript", "CreateScriptEntry",
+            "EditScript", "CreateScriptEntry",
             "GenerateAutoAssemblerScript", "GenerateLuaScript", "GenerateTrainerScript" ],
         ["snapshots"] = [
             "CaptureSnapshot", "CompareSnapshots", "CompareSnapshotWithLive",
@@ -618,6 +618,7 @@ public sealed class AiOperatorService
                 ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
                 ToolResults = toolResults.Count > 0 ? toolResults : null
             });
+            PruneOldToolResults();
             SaveCurrentChat();
             return assistantText;
         }
@@ -833,6 +834,7 @@ public sealed class AiOperatorService
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
                     ToolResults = toolResults.Count > 0 ? toolResults : null
                 });
+                PruneOldToolResults();
                 SaveCurrentChat();
 
                 var usagePart = _totalRequests > 0
@@ -1244,6 +1246,63 @@ public sealed class AiOperatorService
         _lastContextSuffix = null;
     }
 
+    /// <summary>
+    /// Prune old tool results from the session's chat history to save tokens.
+    /// Keeps results from the last 2 user turns intact; replaces older ones with
+    /// compact summaries so the model retains awareness without full output.
+    /// </summary>
+    private void PruneOldToolResults()
+    {
+        if (!_session.TryGetInMemoryChatHistory(out var history)) return;
+
+        // Find the boundary: keep last 2 user turns intact
+        int userCount = 0;
+        int pruneBeforeIndex = -1;
+        for (int i = history.Count - 1; i >= 0; i--)
+        {
+            if (history[i].Role == ChatRole.User && ++userCount >= 3)
+            {
+                pruneBeforeIndex = i;
+                break;
+            }
+        }
+        if (pruneBeforeIndex < 0) return;
+
+        int pruned = 0;
+        for (int i = 0; i <= pruneBeforeIndex; i++)
+        {
+            var msg = history[i];
+            if (!msg.Contents.Any(c => c is FunctionResultContent)) continue;
+
+            var newContents = new List<AIContent>();
+            foreach (var content in msg.Contents)
+            {
+                if (content is FunctionResultContent frc)
+                {
+                    var result = frc.Result?.ToString() ?? "";
+                    if (result.Length > 120)
+                    {
+                        var summary = result[..100] + "...";
+                        newContents.Add(new FunctionResultContent(frc.CallId ?? "", $"[pruned] {summary}"));
+                        pruned++;
+                    }
+                    else
+                    {
+                        newContents.Add(content); // Short results kept as-is
+                    }
+                }
+                else
+                {
+                    newContents.Add(content);
+                }
+            }
+            history[i] = new ChatMessage(msg.Role, newContents);
+        }
+
+        if (pruned > 0)
+            Log("PRUNE", $"Pruned {pruned} old tool results (kept last 2 user turns)");
+    }
+
     /// <summary>Save the current chat to disk.</summary>
     public void SaveCurrentChat()
     {
@@ -1394,11 +1453,12 @@ public sealed class AiOperatorService
         • When you can't verify (e.g. in-game effects), ask the user specifically:
           "Please fight a battle and tell me the EXP you received" — not "try it out".
         • Load skills silently. Your first response should contain TOOL CALLS.
-        • If context was compacted, use SearchChatHistory("keyword") to recover lost findings.
+        • If context was compacted, call request_tools("sessions") then SearchChatHistory("keyword").
 
         ═══ TOOLS (PROGRESSIVE) ═══
         Core tools are always loaded. For specialized ops, call request_tools(category).
         Use list_tool_categories to see what's available and loaded.
+        Key categories: sessions (save/load/search), scripts, breakpoints, disassembly, hooks.
 
         ═══ ARTIFACT IDS ═══
         hook-* bp-* script-* addr-* group-* scan-* — use IdentifyArtifact(id) if unsure.

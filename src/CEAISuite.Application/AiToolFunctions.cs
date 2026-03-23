@@ -64,7 +64,7 @@ public sealed class AiToolFunctions(
         catch { return false; }
     }
 
-    [Description("List running processes on the system. Returns process ID, name, and architecture.")]
+    [Description("List running processes. Returns PID, name, architecture.")]
     public async Task<string> ListProcesses()
     {
         var processes = await engineFacade.ListProcessesAsync();
@@ -73,7 +73,7 @@ public sealed class AiToolFunctions(
         return $"Found {processes.Count} processes (showing {Math.Min(cap, processes.Count)}):\n{string.Join('\n', lines)}";
     }
 
-    [Description("Inspect a process by PID. Returns loaded modules and architecture info.")]
+    [Description("Inspect process by PID. Returns modules and architecture.")]
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
         var inspection = await dashboardService.InspectProcessAsync(processId);
@@ -85,10 +85,10 @@ public sealed class AiToolFunctions(
                $"Modules ({inspection.Modules.Count} total, showing {Math.Min(cap, inspection.Modules.Count)}):\n{string.Join('\n', modules)}{extra}";
     }
 
-    [Description("Read a typed value from process memory at the given address.")]
+    [Description("Read a typed value from process memory.")]
     public async Task<string> ReadMemory(
         [Description("Process ID")] int processId,
-        [Description("Memory address as hex (e.g. 0x7FF6A000), decimal, or symbolic (e.g. 'GameAssembly.dll+9A18E8')")] string address,
+        [Description("Address: hex (0x...), decimal, or symbolic (module+offset)")] string address,
         [Description("Data type: Int32, Int64, Float, Double, or Pointer")] string dataType)
     {
         try
@@ -105,10 +105,10 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Write a value to process memory. Records original value for undo (Ctrl+Z). CAUTION: This modifies the target process.")]
+    [Description("Write a value to process memory. Records original for undo.")]
     public async Task<string> WriteMemory(
         [Description("Process ID")] int processId,
-        [Description("Memory address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
+        [Description("Address: hex, decimal, or symbolic (module+offset)")] string address,
         [Description("Data type: Int32, Int64, Float, Double")] string dataType,
         [Description("Value to write")] string value)
     {
@@ -134,12 +134,12 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Start a new memory scan for a value in a process. Returns number of results found.")]
+    [Description("Start a new memory scan. Returns result count.")]
     public async Task<string> StartScan(
         [Description("Process ID to scan")] int processId,
         [Description("Data type: Int32, Int64, Float, Double")] string dataType,
         [Description("Scan type: ExactValue, UnknownInitialValue, ArrayOfBytes")] string scanType,
-        [Description("Value to search for. For ArrayOfBytes use hex pattern like '48 8B 05 ?? ?? ?? ??' where ?? is wildcard")] string? value)
+        [Description("Value to search for. ArrayOfBytes: '48 8B ?? ??' with ?? wildcards")] string? value)
     {
         try
         {
@@ -158,7 +158,7 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Refine the previous scan with a new constraint (e.g. value changed, increased, decreased, or new exact value).")]
+    [Description("Refine previous scan with a new constraint.")]
     public async Task<string> RefineScan(
         [Description("Scan type: ExactValue, Increased, Decreased, Changed, Unchanged")] string scanType,
         [Description("Value to match (for ExactValue) or empty")] string? value)
@@ -177,12 +177,10 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Resolve a symbolic expression like 'ModuleName.dll+offset' to a live virtual address. " +
-        "Useful for converting script define() addresses, CE-style module+offset notation, or any symbolic " +
-        "address into the current live address. Returns the resolved address, module base, and offset.")]
+    [Description("Resolve symbolic expression (module+offset) to live address.")]
     public async Task<string> ResolveSymbol(
         [Description("Process ID")] int processId,
-        [Description("Symbolic expression to resolve, e.g., 'GameAssembly.dll+9A18E8', 'kernel32.dll', or a raw hex address '0x7FF8...'")] string expression)
+        [Description("Expression: 'module.dll+offset', 'module.dll', or hex")] string expression)
     {
         var normalized = expression.Trim();
 
@@ -258,8 +256,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Identify what type of artifact an ID refers to (hook, breakpoint, script, address entry, group, scan). " +
-        "Use this when you have an opaque ID and need to know what it is before calling the right management tool.")]
+    [Description("Identify artifact type from an ID (hook, BP, script, etc).")]
     public Task<string> IdentifyArtifact(
         [Description("The artifact ID to look up")] string id)
     {
@@ -288,10 +285,10 @@ public sealed class AiToolFunctions(
         return Task.FromResult(ToJson(new { id, type = "unknown", description = "ID not recognized. It may be expired, removed, or from a different session." }));
     }
 
-    [Description("Disassemble machine code at an address in a process. Shows assembly instructions. Accepts raw hex (0x...) or symbolic addresses (module.dll+offset).")]
+    [Description("Disassemble code at an address. Accepts hex or symbolic.")]
     public async Task<string> Disassemble(
         [Description("Process ID")] int processId,
-        [Description("Memory address to start disassembling (hex like '0x7FF...' or symbolic like 'GameAssembly.dll+9A18E8')")] string address)
+        [Description("Start address (hex or symbolic like module+offset)")] string address)
     {
         // Resolve symbolic address (module+offset or bare module name) to raw hex
         var resolvedAddress = await TryResolveToHex(processId, address);
@@ -361,10 +358,10 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("List memory regions of a process. Shows base address, size, access flags (R/W/X), and owning module name.")]
+    [Description("List memory regions. Shows address, size, R/W/X flags.")]
     public async Task<string> ListMemoryRegions(
         [Description("Process ID")] int processId,
-        [Description("Filter: 'all', 'readable', 'writable', 'executable' (default: readable)")] string filter = "readable")
+        [Description("Filter: all, readable, writable, executable")] string filter = "readable")
     {
         try
         {
@@ -429,7 +426,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Added to address table: {entry.Label} at {entry.Address} ({entry.DataType})");
     }
 
-    [Description("List address table entries. Returns up to 50 entries with offset pagination.")]
+    [Description("List address table entries with pagination.")]
     public Task<string> ListAddressTable(
         [Description("Number of entries to skip (default 0). Use for pagination.")] int offset = 0,
         [Description("Max entries to return (default 50, max 100).")] int limit = 50)
@@ -502,7 +499,7 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Refresh all values in the address table by re-reading from process memory. Returns only entries that changed or have non-zero values.")]
+    [Description("Refresh address table values from process memory.")]
     public async Task<string> RefreshAddressTable([Description("Process ID")] int processId)
     {
         await addressTableService.RefreshAllAsync(processId);
@@ -528,7 +525,7 @@ public sealed class AiToolFunctions(
 
     // ── Artifact generation tools ──
 
-    [Description("Generate a C# trainer script from locked entries in the address table.")]
+    [Description("Generate C# trainer script from locked entries.")]
     public Task<string> GenerateTrainerScript([Description("Process name for the trainer target")] string processName)
     {
         var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
@@ -537,7 +534,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Generated C# trainer script ({locked.Count} entries):\n\n{script}");
     }
 
-    [Description("Generate an Auto Assembler (AA) script from locked entries in the address table.")]
+    [Description("Generate Auto Assembler script from locked entries.")]
     public Task<string> GenerateAutoAssemblerScript([Description("Process name")] string processName)
     {
         var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
@@ -546,7 +543,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Generated AA script ({locked.Count} entries):\n\n{script}");
     }
 
-    [Description("Generate a Lua script from locked entries in the address table.")]
+    [Description("Generate Lua script from locked entries.")]
     public Task<string> GenerateLuaScript([Description("Process name")] string processName)
     {
         var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
@@ -555,7 +552,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Generated Lua script ({locked.Count} entries):\n\n{script}");
     }
 
-    [Description("Summarize the current investigation including address table, scan results, and disassembly.")]
+    [Description("Summarize current investigation state.")]
     public Task<string> SummarizeInvestigation(
         [Description("Process name")] string processName,
         [Description("Process ID")] int processId)
@@ -575,7 +572,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult(summary);
     }
 
-    [Description("Attach to a process by PID for memory operations. Must be called before scans/reads/breakpoints.")]
+    [Description("Attach to a process by PID for memory operations.")]
     public async Task<string> AttachProcess([Description("Process ID")] int processId)
     {
         var inspection = await dashboardService.InspectProcessAsync(processId);
@@ -638,14 +635,14 @@ public sealed class AiToolFunctions(
 
     // ── Breakpoint tools ──
 
-    [Description("Set a breakpoint at an address. Modes: Auto, Stealth (code cave), PageGuard, Hardware (DR), Software (INT3). Use Stealth/Auto for anti-debug targets.")]
+    [Description("Set a breakpoint. Modes: Auto, Stealth, PageGuard, Hardware, Software.")]
     public async Task<string> SetBreakpoint(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex or decimal)")] string address,
-        [Description("Breakpoint type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
+        [Description("Type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
         [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue",
-        [Description("Intrusiveness mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto",
-        [Description("If true, breakpoint auto-removes after first hit (safer for risky targets)")] bool singleHit = false)
+        [Description("Mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto",
+        [Description("Auto-remove after first hit")] bool singleHit = false)
     {
         try
         {
@@ -787,7 +784,7 @@ public sealed class AiToolFunctions(
         return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
     }
 
-    [Description("EMERGENCY: Restore page guard protections without locks. Use when PageGuard breakpoint has hung the target.")]
+    [Description("EMERGENCY: Restore page guard protections for hung target.")]
     public async Task<string> EmergencyRestorePageProtection(
         [Description("Process ID of the hung process")] int processId)
     {
@@ -798,7 +795,7 @@ public sealed class AiToolFunctions(
             : "No active page guard breakpoints found to restore.";
     }
 
-    [Description("EMERGENCY: Force detach debugger and clean up all breakpoints. Nuclear option for hung targets.")]
+    [Description("EMERGENCY: Force detach debugger, clean up all BPs.")]
     public async Task<string> ForceDetachAndCleanup(
         [Description("Process ID of the hung process")] int processId)
     {
@@ -829,7 +826,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Get the hit log for a breakpoint. Shows when it was triggered, register state, and thread info.")]
+    [Description("Get breakpoint hit log with registers and thread info.")]
     public async Task<string> GetBreakpointHitLog(
         [Description("Breakpoint ID")] string breakpointId,
         [Description("Maximum entries to return")] int maxEntries = 0)
@@ -850,7 +847,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Get breakpoint health: lifecycle state, hit count, throttle status, page co-tenancy.")]
+    [Description("Get breakpoint health and lifecycle status.")]
     public async Task<string> GetBreakpointHealth(
         [Description("Breakpoint ID")] string breakpointId,
         [Description("Process ID")] int processId)
@@ -900,7 +897,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Get capability matrix for all breakpoint modes: execute/data support, debugger needs, stability.")]
+    [Description("Get breakpoint mode capability matrix.")]
     public string GetBreakpointModeCapabilities()
     {
         var caps = BreakpointService.GetModeCapabilities();
@@ -916,7 +913,7 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
-    [Description("Probe an address for risk before setting a breakpoint or hook. Returns region type, protection, recommended modes, risk level.")]
+    [Description("Probe address risk level and recommended BP modes.")]
     public async Task<string> ProbeTargetRisk(
         [Description("Process ID")] int processId,
         [Description("Memory address to probe (hex or decimal)")] string address)
@@ -1053,13 +1050,13 @@ public sealed class AiToolFunctions(
 
     // ── Script tools ──
 
-    [Description("List all script entries in the address table. Shows script name, enabled status, and type (Auto Assembler or LuaCall).")]
+    [Description("List all script entries with name, status, and type.")]
     public Task<string> ListScripts()
     {
         var scripts = new List<string>();
         CollectScripts(addressTableService.Roots, scripts, "");
         if (scripts.Count == 0) return Task.FromResult("No scripts in the address table.");
-        return Task.FromResult($"Found {scripts.Count} scripts:\n{string.Join('\n', scripts)}");
+        return Task.FromResult($"Found {scripts.Count} scripts:\n{string.Join('\n', scripts.Take(30))}");
     }
 
     private static void CollectScripts(IEnumerable<AddressTableNode> nodes, List<string> results, string prefix)
@@ -1088,7 +1085,7 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("View the source code of a script entry by its node ID or label. Use ListScripts first to find the ID.")]
+    [Description("View source code of a script entry by ID or label.")]
     public Task<string> ViewScript([Description("Node ID or label of the script entry")] string nodeId)
     {
         var node = ResolveNode(nodeId);
@@ -1111,7 +1108,7 @@ public sealed class AiToolFunctions(
             $"──────────────────────\n{node.AssemblerScript}");
     }
 
-    [Description("Validate a script entry by parsing it. Checks for syntax errors without executing.")]
+    [Description("Validate script syntax without executing.")]
     public Task<string> ValidateScript(
         [Description("Node ID or label of the script entry")] string nodeId)
     {
@@ -1131,7 +1128,7 @@ public sealed class AiToolFunctions(
             $"Warnings: {string.Join("; ", result.Warnings)}");
     }
 
-    [Description("Deep validation of a script against live process state. Verifies assert bytes, hook targets, detour space, and disable/enable symmetry.")]
+    [Description("Deep-validate script against live process state.")]
     public async Task<string> ValidateScriptDeep(
         [Description("Node ID or label of the script entry")] string nodeId,
         [Description("Process ID to validate against")] int processId)
@@ -1338,10 +1335,10 @@ public sealed class AiToolFunctions(
 
     // ── Pointer Scanner tools ──
 
-    [Description("Scan process memory for pointer chains leading to a target address. Returns potential static pointers.")]
+    [Description("Scan for pointer chains to a target address.")]
     public async Task<string> ScanForPointers(
         [Description("Process ID to scan")] int processId,
-        [Description("Target address to find pointers to (hex string like 0x1234ABCD)")] string targetAddress,
+        [Description("Target address (hex)")] string targetAddress,
         [Description("Maximum pointer chain depth (1-3, default 2)")] int maxDepth = 2)
     {
         var scanner = new PointerScannerService(engineFacade);
@@ -1354,7 +1351,7 @@ public sealed class AiToolFunctions(
         return $"Found {paths.Count} pointer path(s) to 0x{addr:X}:\n{string.Join('\n', lines)}";
     }
 
-    [Description("Browse raw memory at an address. Returns hex dump with ASCII. Accepts hex or symbolic addresses (module.dll+offset).")]
+    [Description("Browse raw memory as hex dump with ASCII.")]
     public async Task<string> BrowseMemory(
         [Description("Process ID")] int processId,
         [Description("Start address (hex, decimal, or symbolic like 'GameAssembly.dll+9A18E8')")] string address,
@@ -1388,12 +1385,12 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
-    [Description("Analyze memory at an address and identify probable data types at each offset (structure dissection). Returns fields with type, value, and confidence.")]
+    [Description("Dissect memory structure, identify field types and values.")]
     public async Task<string> DissectStructure(
         [Description("Process ID")] int processId,
         [Description("Base address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
         [Description("Region size in bytes (default 256)")] int regionSize = 256,
-        [Description("Type interpretation hint: 'auto' (default), 'int32' (prefer integers, good for stat blocks), 'float' (prefer floats, good for coordinates), 'pointers' (prefer pointer detection)")] string typeHint = "auto")
+        [Description("Hint: auto, int32, float, or pointers")] string typeHint = "auto")
     {
         var dissector = new StructureDissectorService(engineFacade);
         var resolvedAddress = await TryResolveToHex(processId, address);
@@ -1419,7 +1416,7 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
-    [Description("Register a global hotkey to toggle a specific address table entry's freeze lock or script activation. Hotkey works system-wide even when the game is focused.")]
+    [Description("Register a global hotkey to toggle freeze/script.")]
     public Task<string> SetHotkey(
         [Description("Node ID or label of the address table entry")] string nodeId,
         [Description("Hotkey combination like 'Ctrl+F1' or 'Alt+Shift+G'")] string hotkey)
@@ -1502,7 +1499,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult(sb.ToString().TrimEnd());
     }
 
-    [Description("Remove a registered global hotkey by its binding ID (from ListHotkeys).")]
+    [Description("Remove a registered global hotkey by binding ID.")]
     public Task<string> RemoveHotkey([Description("Binding ID to remove")] int bindingId)
     {
         if (hotkeyService is null) return Task.FromResult("Hotkey service not available.");
@@ -1540,8 +1537,8 @@ public sealed class AiToolFunctions(
 
     // ── State & control tools (agent needs these to act autonomously) ──
 
-    [Description("Find a running process by name (partial match). Returns PID and full name. Use this instead of ListProcesses when you know the game name.")]
-    public async Task<string> FindProcess([Description("Process name or partial name to search for")] string name)
+    [Description("Find a process by name (partial match). Returns PID.")]
+    public async Task<string> FindProcess([Description("Process name or partial name")] string name)
     {
         var processes = await engineFacade.ListProcessesAsync();
         var matches = processes
@@ -1553,47 +1550,40 @@ public sealed class AiToolFunctions(
         return $"Found {matches.Count} match(es) for '{name}':\n{string.Join('\n', lines)}";
     }
 
-    [Description("Freeze (lock) an address table entry so its value is continuously written back. The value is frozen at its current reading.")]
-    public Task<string> FreezeAddress([Description("Node ID or label of the address table entry")] string nodeId)
+    [Description("Freeze or unfreeze an address table entry's value.")]
+    public Task<string> FreezeAddress(
+        [Description("Node ID or label")] string nodeId,
+        [Description("'freeze', 'unfreeze', or 'set' (freeze at specific value)")] string action = "freeze",
+        [Description("Value for action='set'")] string? value = null)
     {
         var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
         if (node.IsGroup) return Task.FromResult("Cannot freeze a group.");
         if (node.IsScriptEntry) return Task.FromResult("Use ToggleScript for script entries.");
-        if (node.IsLocked) return Task.FromResult($"'{node.Label}' is already frozen at {node.LockedValue}.");
 
-        node.IsLocked = true;
-        node.LockedValue = node.CurrentValue;
-        return Task.FromResult($"Frozen '{node.Label}' at value {node.CurrentValue}. It will be continuously written back.");
+        switch (action.ToLowerInvariant())
+        {
+            case "unfreeze":
+                if (!node.IsLocked) return Task.FromResult($"'{node.Label}' is not frozen.");
+                node.IsLocked = false;
+                node.LockedValue = null;
+                return Task.FromResult($"Unfrozen '{node.Label}'. Value can now change freely.");
+
+            case "set":
+                if (string.IsNullOrEmpty(value)) return Task.FromResult("Value required for action='set'.");
+                node.IsLocked = true;
+                node.LockedValue = value;
+                return Task.FromResult($"Frozen '{node.Label}' at value {value}.");
+
+            default: // "freeze"
+                if (node.IsLocked) return Task.FromResult($"'{node.Label}' is already frozen at {node.LockedValue}.");
+                node.IsLocked = true;
+                node.LockedValue = node.CurrentValue;
+                return Task.FromResult($"Frozen '{node.Label}' at current value {node.CurrentValue}.");
+        }
     }
 
-    [Description("Unfreeze (unlock) an address table entry so it can change naturally again.")]
-    public Task<string> UnfreezeAddress([Description("Node ID or label of the address table entry")] string nodeId)
-    {
-        var node = ResolveNode(nodeId);
-        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
-        if (!node.IsLocked) return Task.FromResult($"'{node.Label}' is not frozen.");
-
-        node.IsLocked = false;
-        node.LockedValue = null;
-        return Task.FromResult($"Unfrozen '{node.Label}'. Value can now change freely.");
-    }
-
-    [Description("Freeze an address at a specific value (not just its current value). Useful for setting health to 9999, gold to max, etc.")]
-    public Task<string> FreezeAddressAtValue(
-        [Description("Node ID or label of the address table entry")] string nodeId,
-        [Description("Value to freeze at")] string value)
-    {
-        var node = ResolveNode(nodeId);
-        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
-        if (node.IsGroup || node.IsScriptEntry) return Task.FromResult("Can only freeze value entries.");
-
-        node.IsLocked = true;
-        node.LockedValue = value;
-        return Task.FromResult($"Frozen '{node.Label}' at value {value}. Will continuously write {value}.");
-    }
-
-    [Description("Enable or disable a script (Auto Assembler) entry in the address table. Actually executes the AA engine. Returns the execution result.")]
+    [Description("Toggle a script entry on/off via the AA engine.")]
     public async Task<string> ToggleScript([Description("Node ID or label of the script entry")] string nodeId)
     {
         var node = ResolveNode(nodeId);
@@ -1643,7 +1633,7 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Get detailed info about a specific address table node by its ID or label. Shows address, type, value, pointer chain, locked state, and children.")]
+    [Description("Get detailed info about an address table node.")]
     public Task<string> GetAddressTableNode([Description("Node ID or label (case-insensitive label match)")] string nodeId)
     {
         var node = ResolveNode(nodeId);
@@ -1680,7 +1670,7 @@ public sealed class AiToolFunctions(
         return Task.FromResult(sb.ToString());
     }
 
-    [Description("Get the current scan results (top N results from the last scan or refinement).")]
+    [Description("Get current scan results (top N).")]
     public Task<string> GetScanResults(
         [Description("Maximum results to return")] int maxResults = 0)
     {
@@ -1705,7 +1695,7 @@ public sealed class AiToolFunctions(
         }));
     }
 
-    [Description("Get current context: attached process, address table summary, scan state. Use this to orient yourself before taking action.")]
+    [Description("Get current context: process, table summary, scan state.")]
     public Task<string> GetCurrentContext()
     {
         var dashboard = dashboardService.CurrentDashboard;
@@ -1739,7 +1729,7 @@ public sealed class AiToolFunctions(
         }));
     }
 
-    [Description("Check if attached process is still alive and if session state may be stale. Returns process status, session generation, and staleness indicators.")]
+    [Description("Check if process is alive and session state freshness.")]
     public string CheckProcessLiveness([Description("Process ID")] int processId)
     {
         bool alive = IsProcessAlive(processId);
@@ -1757,7 +1747,7 @@ public sealed class AiToolFunctions(
         });
     }
 
-    [Description("Read memory at an address as multiple data types at once.Useful when you don't know the type — shows Int32, UInt32, Float, Int64, Double interpretations.")]
+    [Description("Probe address as multiple types (Int32, Float, Int64, etc).")]
     public async Task<string> ProbeAddress(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex string)")] string address)
@@ -1783,10 +1773,10 @@ public sealed class AiToolFunctions(
 
     // ── Script editing tools ──
 
-    [Description("Edit/replace the Auto Assembler script content of an existing script entry. Use this to fix or improve scripts. The script must have [ENABLE] and [DISABLE] sections.")]
+    [Description("Replace script content of an existing entry.")]
     public Task<string> EditScript(
         [Description("Node ID or label of the script entry")] string nodeId,
-        [Description("New complete script content (must include [ENABLE] and [DISABLE] sections)")] string newScript)
+        [Description("New script content with [ENABLE]/[DISABLE] sections")] string newScript)
     {
         var node = ResolveNode(nodeId);
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
@@ -1817,11 +1807,11 @@ public sealed class AiToolFunctions(
             $"New script is {newScript.Length} chars. Use ValidateScript to verify, then ToggleScript to enable.");
     }
 
-    [Description("Create a new Auto Assembler script entry in the address table. Use this to add entirely new scripts (hooks, patches, multipliers, etc.).")]
+    [Description("Create a new script entry in the address table.")]
     public Task<string> CreateScriptEntry(
         [Description("Label/name for the script entry")] string label,
-        [Description("Auto Assembler script content (must include [ENABLE] and [DISABLE] sections)")] string script,
-        [Description("Optional: parent group node ID to add the script under")] string? parentGroupId = null)
+        [Description("Script content with [ENABLE]/[DISABLE] sections")] string script,
+        [Description("Parent group ID (optional, omit for top-level)")] string? parentGroupId = null)
     {
         // Validate if possible
         if (autoAssemblerEngine is not null)
@@ -1858,85 +1848,11 @@ public sealed class AiToolFunctions(
             $"Script is {script.Length} chars. Use ToggleScript to enable it.");
     }
 
-    [Description("Enable a script by its node ID. Executes the [ENABLE] section of the Auto Assembler script.")]
-    public async Task<string> EnableScript([Description("Node ID or label of the script entry")] string nodeId)
-    {
-        var node = ResolveNode(nodeId);
-        if (node is null) return $"Node '{nodeId}' not found.";
-        if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry.";
-        if (node.IsScriptEnabled) return $"Script '{node.Label}' is already enabled.";
-
-        if (autoAssemblerEngine is null) return "Auto Assembler engine not available.";
-
-        var dashboard = dashboardService.CurrentDashboard;
-        if (dashboard?.CurrentInspection is null)
-            return "No process attached. Attach first.";
-
-        int pid = dashboard.CurrentInspection.ProcessId;
-        if (!IsProcessAlive(pid)) return $"Process {pid} is no longer running.";
-
-        try
-        {
-            var result = await autoAssemblerEngine.EnableAsync(pid, node.AssemblerScript!);
-            if (result.Success)
-            {
-                node.IsScriptEnabled = true;
-                node.ScriptStatus = $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)";
-                return $"Script '{node.Label}' ENABLED. {result.Allocations.Count} allocations, {result.Patches.Count} patches.";
-            }
-            else
-            {
-                node.ScriptStatus = $"FAILED: {result.Error}";
-                return $"Script '{node.Label}' FAILED: {result.Error}";
-            }
-        }
-        catch (Exception ex)
-        {
-            node.ScriptStatus = $"Error: {ex.Message}";
-            return $"EnableScript failed (game may have crashed): {ex.Message}";
-        }
-    }
-
-    [Description("Disable a script by its node ID. Executes the [DISABLE] section to restore original bytes.")]
-    public async Task<string> DisableScript([Description("Node ID or label of the script entry")] string nodeId)
-    {
-        var node = ResolveNode(nodeId);
-        if (node is null) return $"Node '{nodeId}' not found.";
-        if (!node.IsScriptEntry) return $"'{node.Label}' is not a script entry.";
-        if (!node.IsScriptEnabled) return $"Script '{node.Label}' is already disabled.";
-
-        if (autoAssemblerEngine is null) return "Auto Assembler engine not available.";
-
-        var dashboard = dashboardService.CurrentDashboard;
-        if (dashboard?.CurrentInspection is null) return "No process attached.";
-
-        int pid = dashboard.CurrentInspection.ProcessId;
-        if (!IsProcessAlive(pid)) 
-        {
-            node.IsScriptEnabled = false;
-            node.ScriptStatus = "Process exited";
-            return $"Process {pid} is no longer running. Script marked as disabled.";
-        }
-
-        try
-        {
-            var result = await autoAssemblerEngine.DisableAsync(
-                dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
-            node.IsScriptEnabled = false;
-            node.ScriptStatus = result.Success ? "Disabled" : $"Disable warning: {result.Error}";
-            return $"Script '{node.Label}' DISABLED. {(result.Success ? "Original bytes restored." : $"Warning: {result.Error}")}";
-        }
-        catch (Exception ex)
-        {
-            node.IsScriptEnabled = false;
-            node.ScriptStatus = $"Error: {ex.Message}";
-            return $"Disable error: {ex.Message}";
-        }
-    }
+    // EnableScript and DisableScript removed — use ToggleScript instead.
 
     // ── Screen capture tool ──
 
-    [Description("Capture a screenshot of the attached process's game window. The image will be sent to you for visual analysis. Use this to verify game state, check if scripts are working, or see what the user sees.")]
+    [Description("Capture screenshot of attached process window.")]
     public async Task<string> CaptureProcessWindow()
     {
         if (screenCaptureEngine is null)
@@ -1957,7 +1873,7 @@ public sealed class AiToolFunctions(
         return $"Screenshot captured: '{result.WindowTitle}' ({result.Width}x{result.Height}, {result.PngData.Length / 1024}KB). The image has been queued for your visual analysis.";
     }
 
-    [Description("Read a range of raw bytes from process memory and display as hex dump. Accepts hex or symbolic addresses. Useful for examining code bytes, data structures, or verifying patches.")]
+    [Description("Hex dump of raw bytes at an address.")]
     public async Task<string> HexDump(
         [Description("Process ID")] int processId,
         [Description("Start address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
@@ -2065,7 +1981,7 @@ public sealed class AiToolFunctions(
 
     // ── Session management tools ──
 
-    [Description("Save the current investigation session (address table + action log) to disk for later retrieval.")]
+    [Description("Save current session (address table + log) to disk.")]
     public async Task<string> SaveSession()
     {
         if (sessionService is null) return "Session service not available.";
@@ -2088,7 +2004,7 @@ public sealed class AiToolFunctions(
         return $"Sessions ({sessions.Count}):\n{string.Join('\n', lines)}";
     }
 
-    [Description("Load a saved investigation session by ID, restoring the address table.")]
+    [Description("Load a saved session by ID, restoring address table.")]
     public async Task<string> LoadSession([Description("Session ID to load")] string sessionId)
     {
         if (sessionService is null) return "Session service not available.";
@@ -2101,11 +2017,11 @@ public sealed class AiToolFunctions(
 
     // ── Chat History Search ──
 
-    [Description("Search all chat transcripts (current + saved) for a keyword or phrase. Use to recall past findings, addresses, or context lost to compaction.")]
+    [Description("Search chat transcripts for a keyword or phrase.")]
     public string SearchChatHistory(
         [Description("Search query (case-insensitive substring match)")] string query,
         [Description("Max results to return")] int maxResults = 0,
-        [Description("Search scope: 'all', 'current', or a specific chat ID")] string scope = "all")
+        [Description("Scope: all, current, or a chat ID")] string scope = "all")
     {
         if (string.IsNullOrWhiteSpace(query))
             return "Please provide a search query.";
@@ -2185,7 +2101,7 @@ public sealed class AiToolFunctions(
 
     // ── Signature / AOB tools ──
 
-    [Description("Generate an AOB (Array of Bytes) signature at a code address. Useful for creating patterns that survive game updates. Automatically wildcards relocatable offsets.")]
+    [Description("Generate AOB signature at a code address.")]
     public async Task<string> GenerateSignature(
         [Description("Process ID")] int processId,
         [Description("Address to generate signature at")] string address,
@@ -2205,11 +2121,11 @@ public sealed class AiToolFunctions(
         }
     }
 
-    [Description("Test if an AOB signature uniquely matches within a module. Returns match count — should be exactly 1 for a good signature.")]
+    [Description("Test AOB signature uniqueness within a module.")]
     public async Task<string> TestSignatureUniqueness(
         [Description("Process ID")] int processId,
         [Description("Module name to search (e.g. GameAssembly.dll)")] string moduleName,
-        [Description("AOB pattern (e.g. '48 8B 05 ?? ?? ?? ?? 48 85 C0')")] string pattern)
+        [Description("AOB pattern with ?? wildcards")] string pattern)
     {
         if (signatureService is null) return "Signature generator not available.";
         try
@@ -2232,12 +2148,12 @@ public sealed class AiToolFunctions(
 
     // ── Memory Protection Tools ──
 
-    [Description("Change memory page protection for a region in the target process. Used for making code pages writable or allocating executable memory.")]
+    [Description("Change memory page protection for a region.")]
     public async Task<string> ChangeMemoryProtection(
         [Description("Process ID")] int processId,
         [Description("Memory address as hex (e.g. 0x7FF6A000)")] string address,
         [Description("Region size in bytes")] int size,
-        [Description("New protection: ReadWrite, ExecuteReadWrite, ReadOnly, Execute, ExecuteRead")] string protection)
+        [Description("Protection: ReadWrite, ExecuteReadWrite, ReadOnly, etc.")] string protection)
     {
         if (memoryProtectionEngine is null) return "Memory protection engine not available.";
         try
@@ -2251,7 +2167,7 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"ChangeMemoryProtection failed: {ex.Message}"; }
     }
 
-    [Description("Allocate memory in the target process. Useful for code caves and injected scripts.")]
+    [Description("Allocate memory in the target process.")]
     public async Task<string> AllocateMemory(
         [Description("Process ID")] int processId,
         [Description("Size in bytes to allocate")] int size,
@@ -2286,7 +2202,7 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"FreeMemory failed: {ex.Message}"; }
     }
 
-    [Description("Query the memory protection state of an address. Returns base address, region size, and protection flags. Useful before and after applying hooks to verify protection hasn't been corrupted.")]
+    [Description("Query memory protection flags at an address.")]
     public async Task<string> QueryMemoryProtection(
         [Description("Process ID")] int processId,
         [Description("Memory address to query (hex)")] string address)
@@ -2381,7 +2297,7 @@ public sealed class AiToolFunctions(
         var snaps = snapshotService.ListSnapshots();
         if (snaps.Count == 0) return "No snapshots captured.";
 
-        var lines = snaps.Select(s =>
+        var lines = snaps.Take(50).Select(s =>
             $"  {s.Id}: \"{s.Label}\" — {s.Data.Length} bytes @ 0x{s.BaseAddress:X} ({s.CapturedAt.ToLocalTime():g})");
         return $"{snaps.Count} snapshot(s):\n{string.Join('\n', lines)}";
     }
@@ -3814,7 +3730,7 @@ public sealed class AiToolFunctions(
         var entries = operationJournal.GetEntries();
         return JsonSerializer.Serialize(new
         {
-            entries = entries.Select(e => new
+            entries = entries.Take(50).Select(e => new
             {
                 e.OperationId, e.OperationType, address = $"0x{e.Address:X}",
                 e.Mode, e.GroupId, status = e.Status.ToString(), timestamp = e.Timestamp.ToString("HH:mm:ss")
@@ -3902,7 +3818,7 @@ public sealed class AiToolFunctions(
         if (watchdogService is null) return "Watchdog not available.";
         var entries = watchdogService.GetUnsafeAddresses();
         if (entries.Count == 0) return "No addresses marked unsafe.";
-        var lines = entries.Select(e =>
+        var lines = entries.Take(50).Select(e =>
             $"  0x{e.Address:X} | {e.Mode} | {e.OperationType} | frozen: {e.FreezeDetectedUtc:HH:mm:ss} | rollback: {(e.RollbackSucceeded ? "OK" : "FAILED")}");
         return $"Unsafe addresses ({entries.Count}):\n{string.Join('\n', lines)}";
     }
@@ -3922,7 +3838,7 @@ public sealed class AiToolFunctions(
 
     private static readonly JsonSerializerOptions _jsonOpts = new()
     {
-        WriteIndented = true,
+        WriteIndented = false,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 
@@ -4001,7 +3917,7 @@ public sealed class AiToolFunctions(
             return "No stored results. Results are stored automatically when a tool returns data " +
                    "exceeding the context budget.";
 
-        return ToJson(items.Select(r => new
+        return ToJson(items.Take(20).Select(r => new
         {
             r.Id,
             r.ToolName,

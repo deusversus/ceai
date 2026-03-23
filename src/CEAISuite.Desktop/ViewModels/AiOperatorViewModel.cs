@@ -291,7 +291,8 @@ public partial class AiOperatorViewModel : ObservableObject
     [RelayCommand]
     private void ToggleChatHistory()
     {
-        IsChatHistoryVisible = !IsChatHistoryVisible;
+        // IsChatHistoryVisible is already toggled by the ToggleButton's two-way
+        // IsChecked binding before this command fires — don't toggle again.
         if (IsChatHistoryVisible) RefreshChatSwitcher();
     }
 

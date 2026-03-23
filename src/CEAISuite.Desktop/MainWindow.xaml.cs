@@ -84,9 +84,16 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _streamingCts;
     private bool _isStreaming;
 
+    // Bump this version whenever the default panel layout changes (e.g. new tabs added).
+    // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
+    private const int LayoutVersion = 2; // v1 = Phase 1, v2 = Phase 2 (6 new bottom tabs)
+
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "CEAISuite", "layout.xml");
+    private static readonly string LayoutVersionPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CEAISuite", "layout.version");
 
     public MainWindow()
     {
@@ -3162,6 +3169,7 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(dir);
             var serializer = new XmlLayoutSerializer(DockManager);
             serializer.Serialize(LayoutFilePath);
+            File.WriteAllText(LayoutVersionPath, LayoutVersion.ToString());
         }
         catch (Exception ex)
         {
@@ -3174,6 +3182,15 @@ public partial class MainWindow : Window
         try
         {
             if (!File.Exists(LayoutFilePath)) return;
+
+            // Auto-reset layout when the expected panel structure has changed
+            var savedVersion = 0;
+            try { if (File.Exists(LayoutVersionPath)) savedVersion = int.Parse(File.ReadAllText(LayoutVersionPath).Trim()); } catch { }
+            if (savedVersion < LayoutVersion)
+            {
+                File.Delete(LayoutFilePath);
+                return; // Use XAML defaults
+            }
 
             // Stash all XAML-defined panel content BEFORE deserialization replaces the layout tree.
             // This lets us re-inject panels the saved layout doesn't know about (e.g. newly added tabs).
@@ -3240,6 +3257,7 @@ public partial class MainWindow : Window
     private void ResetLayout(object sender, RoutedEventArgs e)
     {
         try { File.Delete(LayoutFilePath); } catch { }
+        try { File.Delete(LayoutVersionPath); } catch { }
         MessageBox.Show("Layout reset. Restart the application to apply the default layout.",
             "Reset Layout", MessageBoxButton.OK, MessageBoxImage.Information);
     }

@@ -3176,23 +3176,64 @@ public partial class MainWindow : Window
         try
         {
             if (!File.Exists(LayoutFilePath)) return;
+
+            // Stash all XAML-defined panel content BEFORE deserialization replaces the layout tree.
+            // This lets us re-inject panels the saved layout doesn't know about (e.g. newly added tabs).
+            var xamlContent = new Dictionary<string, object>();
+            foreach (var item in DockManager.Layout.Descendents().OfType<LayoutContent>())
+            {
+                if (item.ContentId is not null && item.Content is not null)
+                    xamlContent[item.ContentId] = item.Content;
+            }
+
+            var restoredIds = new HashSet<string>();
+
             var serializer = new XmlLayoutSerializer(DockManager);
             serializer.LayoutSerializationCallback += (_, args) =>
             {
                 // Preserve existing content controls — match by ContentId
-                if (args.Content != null) return;
+                if (args.Content != null)
+                {
+                    if (args.Model?.ContentId is not null)
+                        restoredIds.Add(args.Model.ContentId);
+                    return;
+                }
 
-                // Find the original content from the XAML-defined layout
                 var contentId = args.Model?.ContentId;
                 if (string.IsNullOrEmpty(contentId)) { args.Cancel = true; return; }
 
-                var existing = FindContentByContentId(contentId);
-                if (existing != null)
+                if (xamlContent.TryGetValue(contentId, out var existing))
+                {
                     args.Content = existing;
+                    restoredIds.Add(contentId);
+                }
                 else
-                    args.Cancel = true; // Unknown panel — skip it
+                    args.Cancel = true;
             };
             serializer.Deserialize(LayoutFilePath);
+
+            // Re-add any XAML-defined panels that weren't in the saved layout
+            // (i.e. newly added tabs since the layout was last saved).
+            foreach (var (contentId, content) in xamlContent)
+            {
+                if (restoredIds.Contains(contentId)) continue;
+
+                var anchorable = new LayoutAnchorable
+                {
+                    ContentId = contentId,
+                    Title = GetPanelTitle(contentId),
+                    Content = content
+                };
+
+                // Find a bottom anchorable pane to add it to
+                var targetPane = DockManager.Layout
+                    .Descendents()
+                    .OfType<LayoutAnchorablePane>()
+                    .FirstOrDefault();
+
+                if (targetPane is not null)
+                    targetPane.Children.Add(anchorable);
+            }
         }
         catch (Exception ex)
         {

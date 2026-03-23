@@ -1524,6 +1524,7 @@ public sealed class AiOperatorService
             CancellationToken cancellationToken = default)
         {
             var capped = CapToolResults(messages);
+            DeduplicateTools(options);
             return base.GetResponseAsync(capped, options, cancellationToken);
         }
 
@@ -1533,7 +1534,25 @@ public sealed class AiOperatorService
             CancellationToken cancellationToken = default)
         {
             var capped = CapToolResults(messages);
+            DeduplicateTools(options);
             return base.GetStreamingResponseAsync(capped, options, cancellationToken);
+        }
+
+        /// <summary>
+        /// Remove duplicate tool names from ChatOptions.Tools.
+        /// Context providers (e.g. FileAgentSkillsProvider) may inject tools that overlap
+        /// with our progressive tool list, and some APIs (Anthropic) reject duplicates.
+        /// </summary>
+        private static void DeduplicateTools(ChatOptions? options)
+        {
+            if (options?.Tools is not { Count: > 0 } tools) return;
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (int i = tools.Count - 1; i >= 0; i--)
+            {
+                var name = tools[i] is AIFunction f ? f.Name : tools[i].GetType().Name;
+                if (!seen.Add(name))
+                    tools.RemoveAt(i);
+            }
         }
 
         private IEnumerable<ChatMessage> CapToolResults(IEnumerable<ChatMessage> messages)

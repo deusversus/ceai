@@ -79,6 +79,7 @@ public partial class MainWindow : Window
     private readonly ObservableCollection<OutputLogEntry> _outputLog = new();
     private readonly List<AttachmentChip> _attachments = new();
     private readonly Dictionary<string, object> _closedPanelContent = new();
+    private readonly Dictionary<string, object> _xamlPanelContent = new();
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
     private CancellationTokenSource? _streamingCts;
     private bool _isStreaming;
@@ -3102,9 +3103,11 @@ public partial class MainWindow : Window
         var content = FindContentByContentId(contentId);
         if (content is null)
         {
-            // Content was lost (shouldn't happen) — try the preserved stash
+            // Try the user-closed stash first, then the XAML-defined content stash
             if (_closedPanelContent.TryGetValue(contentId, out var stashed))
                 content = stashed;
+            else if (_xamlPanelContent.TryGetValue(contentId, out var xamlStashed))
+                content = xamlStashed;
         }
 
         if (content is not null)
@@ -3179,12 +3182,13 @@ public partial class MainWindow : Window
 
             // Stash all XAML-defined panel content BEFORE deserialization replaces the layout tree.
             // This lets us re-inject panels the saved layout doesn't know about (e.g. newly added tabs).
-            var xamlContent = new Dictionary<string, object>();
+            // Also stored in _xamlPanelContent so ShowPanel can restore them later on demand.
             foreach (var item in DockManager.Layout.Descendents().OfType<LayoutContent>())
             {
                 if (item.ContentId is not null && item.Content is not null)
-                    xamlContent[item.ContentId] = item.Content;
+                    _xamlPanelContent[item.ContentId] = item.Content;
             }
+            var xamlContent = _xamlPanelContent;
 
             var restoredIds = new HashSet<string>();
 

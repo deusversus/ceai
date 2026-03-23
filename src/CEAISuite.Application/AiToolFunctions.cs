@@ -2127,7 +2127,7 @@ public sealed class AiToolFunctions(
         {
             var chats = scope == "all"
                 ? chatStore.ListAll()
-                : [chatStore.Load(scope)];
+                : [chatStore.Load(scope)!];
 
             foreach (var chat in chats)
             {

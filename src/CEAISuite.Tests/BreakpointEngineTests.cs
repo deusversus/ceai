@@ -44,7 +44,7 @@ public class CodeCaveFarJmpTests
     [Fact]
     public void BuildFarJmp_ProducesCorrect14BytePattern()
     {
-        var target = (nuint)0x00007FF6_12345678;
+        var target = unchecked((nuint)0x00007FF6_12345678);
         var jmp = WindowsCodeCaveEngine.BuildFarJmp(target);
 
         Assert.Equal(14, jmp.Length);
@@ -122,11 +122,11 @@ public class CodeCaveHookContractTests
     public void CodeCaveHook_Record_Properties()
     {
         var hook = new CodeCaveHook(
-            "hook-1", (nuint)0x140001000, (nuint)0x7FF600000000, 14, true, 0);
+            "hook-1", unchecked((nuint)0x140001000), unchecked((nuint)0x7FF600000000), 14, true, 0);
 
         Assert.Equal("hook-1", hook.Id);
-        Assert.Equal((nuint)0x140001000, hook.OriginalAddress);
-        Assert.Equal((nuint)0x7FF600000000, hook.CaveAddress);
+        Assert.Equal(unchecked((nuint)0x140001000), hook.OriginalAddress);
+        Assert.Equal(unchecked((nuint)0x7FF600000000), hook.CaveAddress);
         Assert.Equal(14, hook.OriginalBytesLength);
         Assert.True(hook.IsActive);
         Assert.Equal(0, hook.HitCount);
@@ -160,7 +160,7 @@ public class RipRelativeRelocationTests
     public void EmptyBytes_ReturnsEmpty()
     {
         var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
-            [], (nuint)0x140001000, (nuint)0x7FF600000000);
+            [], unchecked((nuint)0x140001000), unchecked((nuint)0x7FF600000000));
         Assert.Empty(result);
     }
 
@@ -170,7 +170,7 @@ public class RipRelativeRelocationTests
         // push rbp; mov rbp, rsp (common prologue — no RIP-relative)
         byte[] prologue = [0x55, 0x48, 0x89, 0xE5];
         var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
-            prologue, (nuint)0x140001000, (nuint)0x7FF600000000);
+            prologue, unchecked((nuint)0x140001000), unchecked((nuint)0x7FF600000000));
         Assert.Equal(prologue, result);
     }
 
@@ -181,9 +181,9 @@ public class RipRelativeRelocationTests
         // Target = 0x140001007 + 0x1000 = 0x140002007
         // Encoded as: 48 8B 05 00100000
         byte[] movRipRel = [0x48, 0x8B, 0x05, 0x00, 0x10, 0x00, 0x00];
-        var originalAddr = (nuint)0x140001000;
+        var originalAddr = unchecked((nuint)0x140001000);
         // Use a new address within ±2GB so displacement still fits int32
-        var newAddr = (nuint)0x140010000;
+        var newAddr = unchecked((nuint)0x140010000);
 
         var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
             movRipRel, originalAddr, newAddr);
@@ -207,9 +207,9 @@ public class RipRelativeRelocationTests
         // lea rcx, [rip+0x500] at 0x140001000
         // Encoded as: 48 8D 0D 00050000
         byte[] leaRipRel = [0x48, 0x8D, 0x0D, 0x00, 0x05, 0x00, 0x00];
-        var originalAddr = (nuint)0x140001000;
+        var originalAddr = unchecked((nuint)0x140001000);
         // Put new address close enough for displacement to still fit in int32
-        var newAddr = (nuint)0x140002000;
+        var newAddr = unchecked((nuint)0x140002000);
 
         var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
             leaRipRel, originalAddr, newAddr);
@@ -234,8 +234,8 @@ public class RipRelativeRelocationTests
     {
         // push rbp (55) + mov rax,[rip+0x100] (48 8B 05 00010000) = 8 bytes total
         byte[] mixed = [0x55, 0x48, 0x8B, 0x05, 0x00, 0x01, 0x00, 0x00];
-        var originalAddr = (nuint)0x140001000;
-        var newAddr = (nuint)0x140005000;
+        var originalAddr = unchecked((nuint)0x140001000);
+        var newAddr = unchecked((nuint)0x140005000);
 
         var result = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
             mixed, originalAddr, newAddr);

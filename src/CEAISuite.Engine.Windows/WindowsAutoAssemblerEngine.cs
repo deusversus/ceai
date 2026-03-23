@@ -1073,7 +1073,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         var (pattern, mask) = ParseAobPattern(patternStr);
         var mbiSize = Marshal.SizeOf<MemoryBasicInformation>();
         var address = (nuint)0x10000;
-        var maxAddr = ctx.Is64Bit ? (nuint)0x7FFFFFFEFFFF : (nuint)0x7FFEFFFF;
+        var maxAddr = ctx.Is64Bit ? unchecked((nuint)0x7FFFFFFEFFFF) : (nuint)0x7FFEFFFF;
 
         while (address < maxAddr)
         {

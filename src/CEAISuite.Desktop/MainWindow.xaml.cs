@@ -145,7 +145,7 @@ public partial class MainWindow : Window
         var chatStore = new AiChatStore();
         var tokenLimits = TokenLimits.Resolve(_appSettingsService.Settings);
         var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), _codeCaveEngine, processWatchdog, _operationJournal, chatStore,
-            currentChatProvider: () => _aiOperatorService.DisplayHistory,
+            currentChatProvider: () => _aiOperatorService?.DisplayHistory ?? Array.Empty<AiChatMessage>(),
             tokenLimits: tokenLimits);
         IChatClient? chatClient = null;
         try
@@ -3453,7 +3453,7 @@ public partial class MainWindow : Window
                 ? nuint.Parse(text[2..], System.Globalization.NumberStyles.HexNumber)
                 : nuint.Parse(text, System.Globalization.NumberStyles.HexNumber);
             var result = await _codeCaveEngine.InstallHookAsync(pid, addr);
-            AppendOutputLog("System", "Info", $"Hook installed at 0x{addr:X} → cave 0x{result.Hook.CaveAddress:X}");
+            AppendOutputLog("System", "Info", $"Hook installed at 0x{addr:X} → cave 0x{result.Hook?.CaveAddress:X}");
             RefreshCodeCaveHooks(sender, e);
         }
         catch (Exception ex) { AppendOutputLog("System", "Error", $"Install hook: {ex.Message}"); }

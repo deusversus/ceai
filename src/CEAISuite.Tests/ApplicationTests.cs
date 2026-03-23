@@ -78,7 +78,7 @@ public class AddressTableServiceTests
         engine.WriteMemoryDirect((nuint)0x100, BitConverter.GetBytes(999));
         sut.AddEntry("0x100", MemoryDataType.Int32, "0", "TestAddr");
 
-        await sut.RefreshAllAsync(1000);
+        await sut.RefreshAllAsync(1000, TestContext.Current.CancellationToken);
 
         Assert.Equal("999", sut.Entries[0].CurrentValue);
         Assert.Equal("0", sut.Entries[0].PreviousValue);
@@ -152,7 +152,7 @@ public class AddressTableServiceTests
         };
         sut.Roots.Add(node);
 
-        await sut.RefreshAllAsync(1000);
+        await sut.RefreshAllAsync(1000, TestContext.Current.CancellationToken);
 
         Assert.Equal("42", node.CurrentValue);
         Assert.Equal((nuint)0x400100, node.ResolvedAddress);
@@ -185,7 +185,7 @@ public class AddressTableServiceTests
         };
         sut.Roots.Add(node);
 
-        await sut.RefreshAllAsync(1000);
+        await sut.RefreshAllAsync(1000, TestContext.Current.CancellationToken);
 
         Assert.Equal("99", node.CurrentValue);
         Assert.Equal((nuint)0x20000030, node.ResolvedAddress);
@@ -223,7 +223,7 @@ public class AddressTableServiceTests
         };
         sut.Roots.Add(node);
 
-        await sut.RefreshAllAsync(1000);
+        await sut.RefreshAllAsync(1000, TestContext.Current.CancellationToken);
 
         Assert.Equal("777", node.CurrentValue);
         Assert.Equal((nuint)0x40000008, node.ResolvedAddress);
@@ -419,7 +419,7 @@ public class SessionServiceTests
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"ceai_test_{Guid.NewGuid():N}.db");
         var repo = new CEAISuite.Persistence.Sqlite.SqliteInvestigationSessionRepository(dbPath);
-        await repo.InitializeAsync();
+        await repo.InitializeAsync(TestContext.Current.CancellationToken);
         var sut = new SessionService(repo);
 
         var entries = new[]
@@ -427,13 +427,13 @@ public class SessionServiceTests
             new AddressTableEntry("a1", "TestAddr", "0x1000", MemoryDataType.Int32, "42", null, "note", false, null)
         };
 
-        var sessionId = await sut.SaveSessionAsync("game.exe", 1234, entries, Array.Empty<AiActionLogEntry>());
+        var sessionId = await sut.SaveSessionAsync("game.exe", 1234, entries, Array.Empty<AiActionLogEntry>(), cancellationToken: TestContext.Current.CancellationToken);
         Assert.NotNull(sessionId);
 
-        var sessions = await sut.ListSessionsAsync();
+        var sessions = await sut.ListSessionsAsync(cancellationToken: TestContext.Current.CancellationToken);
         Assert.True(sessions.Count >= 1);
 
-        var loaded = await sut.LoadSessionAsync(sessionId);
+        var loaded = await sut.LoadSessionAsync(sessionId, TestContext.Current.CancellationToken);
         Assert.NotNull(loaded);
         Assert.Single(loaded.Value.Entries);
         Assert.Equal("TestAddr", loaded.Value.Entries[0].Label);

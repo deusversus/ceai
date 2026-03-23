@@ -1573,7 +1573,7 @@ public sealed class AiOperatorService
                                 $"total_chars: {resultStr.Length:#,0}\n" +
                                 $"shown_chars: {preview.Length:#,0}\n" +
                                 $"Use RetrieveToolResult(resultId: \"{handle}\", offset: {preview.Length}) to read more.";
-                            newContents.Add(new FunctionResultContent(frc.CallId, summary));
+                            newContents.Add(new FunctionResultContent(frc.CallId ?? "", summary));
                         }
                         else
                         {

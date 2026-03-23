@@ -141,6 +141,10 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IProcessContext, ProcessContext>();
         services.AddSingleton<IOutputLog, OutputLogService>();
         services.AddSingleton<IDialogService, DialogService>();
+        services.AddSingleton<IDispatcherService, DispatcherService>();
+        services.AddSingleton<IThemeService, ThemeService>();
+        services.AddSingleton<NavigationService>();
+        services.AddSingleton<INavigationService>(sp => sp.GetRequiredService<NavigationService>());
 
         // ── Bottom-panel ViewModels ──
         services.AddSingleton<OutputLogViewModel>();
@@ -166,7 +170,9 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<DisassemblyService>(),
                 sp.GetRequiredService<ScriptGenerationService>(),
                 sp.GetRequiredService<IDialogService>(),
-                sp.GetRequiredService<IOutputLog>()));
+                sp.GetRequiredService<IOutputLog>(),
+                sp.GetRequiredService<IDispatcherService>(),
+                sp.GetRequiredService<INavigationService>()));
 
         // ── Main ViewModel + Window ──
         services.AddSingleton<MainViewModel>();

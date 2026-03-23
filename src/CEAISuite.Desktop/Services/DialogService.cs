@@ -51,6 +51,9 @@ public sealed class DialogService : IDialogService
     public void ShowError(string title, string message) =>
         MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Error);
 
+    public void ShowWarning(string title, string message) =>
+        MessageBox.Show(message, title, MessageBoxButton.OK, MessageBoxImage.Warning);
+
     public string? ShowSaveFileDialog(string filter, string defaultName = "")
     {
         var dialog = new SaveFileDialog { Filter = filter, FileName = defaultName };
@@ -61,5 +64,11 @@ public sealed class DialogService : IDialogService
     {
         var dialog = new OpenFileDialog { Filter = filter };
         return dialog.ShowDialog() == true ? dialog.FileName : null;
+    }
+
+    public string[]? ShowOpenFilesDialog(string filter)
+    {
+        var dialog = new OpenFileDialog { Filter = filter, Multiselect = true };
+        return dialog.ShowDialog() == true ? dialog.FileNames : null;
     }
 }

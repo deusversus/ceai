@@ -82,6 +82,9 @@ public partial class MainViewModel : ObservableObject
         _aiOperatorVm = aiOperatorVm;
         _findResultsVm = findResultsVm;
 
+        // Sync toolbar combo selection when process attach/detach state changes
+        _processContext.ProcessChanged += OnProcessContextChanged;
+
         // Wire AI operator with dynamic context injection
         _aiOperatorService.SetContextProvider(BuildAiContext);
 
@@ -113,6 +116,9 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private ObservableCollection<ProcessComboItem> _processComboItems = new();
+
+    [ObservableProperty]
+    private ProcessComboItem? _selectedProcessComboItem;
 
     /// <summary>Raised when MainViewModel needs MainWindow to perform a UI-specific action.</summary>
     public event Action<string, object?>? UiActionRequested;
@@ -234,6 +240,22 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    private void OnProcessContextChanged()
+    {
+        if (_processContext.AttachedProcessId is { } pid)
+        {
+            // Select the matching item in the toolbar combo
+            var match = ProcessComboItems.FirstOrDefault(c => c.Pid == pid);
+            SelectedProcessComboItem = match;
+            StatusBarProcessText = $"Attached: {_processContext.AttachedProcessName} ({pid})";
+        }
+        else
+        {
+            SelectedProcessComboItem = null;
+            StatusBarProcessText = "No process attached";
+        }
+    }
+
     public void StartAutoRefresh()
     {
         _addressTableVm.StartAutoRefresh(_appSettingsService.Settings.RefreshIntervalMs > 0
@@ -269,6 +291,7 @@ public partial class MainViewModel : ObservableObject
 
             // 3. Detach engine facade + clear dashboard state
             _dashboardService.DetachProcess();
+            _processContext.Detach();
 
             // 4. Update dashboard to reflect detach
             Dashboard = dashboard with

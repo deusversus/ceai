@@ -24,6 +24,8 @@ public partial class AiOperatorViewModel : ObservableObject
     private readonly AddressTableService _addressTableService;
     private readonly IDialogService _dialogService;
     private readonly IOutputLog _outputLog;
+    private readonly IDispatcherService _dispatcher;
+    private readonly IThemeService _themeService;
 
     private CancellationTokenSource? _streamingCts;
     private bool _suppressChatSwitch;
@@ -41,7 +43,9 @@ public partial class AiOperatorViewModel : ObservableObject
         IProcessContext processContext,
         AddressTableService addressTableService,
         IDialogService dialogService,
-        IOutputLog outputLog)
+        IOutputLog outputLog,
+        IDispatcherService dispatcher,
+        IThemeService themeService)
     {
         _aiOperatorService = aiOperatorService;
         _appSettingsService = appSettingsService;
@@ -49,6 +53,8 @@ public partial class AiOperatorViewModel : ObservableObject
         _addressTableService = addressTableService;
         _dialogService = dialogService;
         _outputLog = outputLog;
+        _dispatcher = dispatcher;
+        _themeService = themeService;
 
         _selectedModel = appSettingsService.Settings.Model;
     }
@@ -81,6 +87,9 @@ public partial class AiOperatorViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isChatHistoryVisible;
+
+    [ObservableProperty]
+    private ObservableCollection<string> _availableModels = new();
 
     [ObservableProperty]
     private string _chatSearchText = "";
@@ -156,7 +165,7 @@ public partial class AiOperatorViewModel : ObservableObject
                     Background = FindThemeBrush("ChatAiBubble")
                 };
 
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                _dispatcher.Invoke(() =>
                 {
                     ChatMessages.Add(streamItem);
                     StreamingTextUpdated?.Invoke();
@@ -169,7 +178,7 @@ public partial class AiOperatorViewModel : ObservableObject
                     {
                         case AgentStreamEvent.TextDelta delta:
                             streamItem.Content += delta.Text;
-                            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                            _dispatcher.Invoke(() =>
                             {
                                 StreamingTextUpdated?.Invoke();
                                 ScrollToBottomRequested?.Invoke();
@@ -177,12 +186,12 @@ public partial class AiOperatorViewModel : ObservableObject
                             break;
 
                         case AgentStreamEvent.ToolCallStarted tool:
-                            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                            _dispatcher.Invoke(() =>
                                 StatusText = $"Tool: {tool.ToolName}");
                             break;
 
                         case AgentStreamEvent.ApprovalRequested approval:
-                            await System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
+                            await _dispatcher.InvokeAsync(() =>
                             {
                                 HandleApprovalRequest(approval);
                             });
@@ -190,7 +199,7 @@ public partial class AiOperatorViewModel : ObservableObject
 
                         case AgentStreamEvent.Error err:
                             streamItem.Content = err.Message;
-                            System.Windows.Application.Current.Dispatcher.Invoke(() =>
+                            _dispatcher.Invoke(() =>
                                 StreamingTextUpdated?.Invoke());
                             break;
                     }
@@ -245,22 +254,16 @@ public partial class AiOperatorViewModel : ObservableObject
         var markdown = _aiOperatorService.ExportChatToMarkdown();
         if (string.IsNullOrWhiteSpace(markdown) || markdown.Split('\n').Length <= 5)
         {
-            MessageBox.Show("No messages to export.", "Export Chat", MessageBoxButton.OK, MessageBoxImage.Information);
+            _dialogService.ShowInfo("Export Chat", "No messages to export.");
             return;
         }
 
-        var dlg = new Microsoft.Win32.SaveFileDialog
+        var defaultName = $"{_aiOperatorService.CurrentChatTitle.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd}";
+        var path = _dialogService.ShowSaveFileDialog("Markdown (*.md)|*.md|Text (*.txt)|*.txt", defaultName);
+        if (path is not null)
         {
-            Title = "Export Chat History",
-            Filter = "Markdown (*.md)|*.md|Text (*.txt)|*.txt",
-            DefaultExt = ".md",
-            FileName = $"{_aiOperatorService.CurrentChatTitle.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd}"
-        };
-
-        if (dlg.ShowDialog() == true)
-        {
-            File.WriteAllText(dlg.FileName, markdown);
-            StatusText = $"Exported to {Path.GetFileName(dlg.FileName)}";
+            File.WriteAllText(path, markdown);
+            StatusText = $"Exported to {Path.GetFileName(path)}";
         }
     }
 
@@ -277,15 +280,12 @@ public partial class AiOperatorViewModel : ObservableObject
     {
         if (selected is null) return;
 
-        var result = MessageBox.Show(
-            $"Delete chat \"{selected.Title}\"?",
-            "Delete Chat", MessageBoxButton.YesNo, MessageBoxImage.Question);
-        if (result == MessageBoxResult.Yes)
-        {
-            _aiOperatorService.DeleteChat(selected.Id);
-            RefreshChatDisplay();
-            RefreshChatSwitcher();
-        }
+        if (!_dialogService.Confirm("Delete Chat", $"Delete chat \"{selected.Title}\"?"))
+            return;
+
+        _aiOperatorService.DeleteChat(selected.Id);
+        RefreshChatDisplay();
+        RefreshChatSwitcher();
     }
 
     [RelayCommand]
@@ -310,33 +310,27 @@ public partial class AiOperatorViewModel : ObservableObject
     [RelayCommand]
     private void AttachContext()
     {
-        var dlg = new Microsoft.Win32.OpenFileDialog
+        var files = _dialogService.ShowOpenFilesDialog(
+            "Text files|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv|All files|*.*");
+        if (files is null) return;
+
+        foreach (var file in files)
         {
-            Title = "Attach Context File",
-            Filter = "Text files|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv|All files|*.*",
-            Multiselect = true
-        };
-        if (dlg.ShowDialog() == true)
-        {
-            foreach (var file in dlg.FileNames)
+            try
             {
-                try
+                var info = new FileInfo(file);
+                if (info.Length > 100_000)
                 {
-                    var info = new FileInfo(file);
-                    if (info.Length > 100_000)
-                    {
-                        MessageBox.Show($"{info.Name} is too large ({info.Length / 1024}KB). Max 100KB.",
-                            "File Too Large", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        continue;
-                    }
-                    var content = File.ReadAllText(file);
-                    AddAttachment(Path.GetFileName(file), content);
+                    _dialogService.ShowWarning("File Too Large",
+                        $"{info.Name} is too large ({info.Length / 1024}KB). Max 100KB.");
+                    continue;
                 }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Failed to read {file}: {ex.Message}", "Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
+                var content = File.ReadAllText(file);
+                AddAttachment(Path.GetFileName(file), content);
+            }
+            catch (Exception ex)
+            {
+                _dialogService.ShowError("Error", $"Failed to read {file}: {ex.Message}");
             }
         }
     }
@@ -489,28 +483,50 @@ public partial class AiOperatorViewModel : ObservableObject
             ChatHistory.Add(item);
     }
 
-    /// <summary>Fetch available models for the model selector popup.</summary>
+    [RelayCommand]
+    private async Task RefreshAvailableModelsAsync()
+    {
+        var models = await GetAvailableModelsAsync();
+        AvailableModels = new ObservableCollection<string>(models);
+    }
+
+    /// <summary>Fetch available models for the model selector popup, filtered by the active provider.</summary>
     public async Task<List<string>> GetAvailableModelsAsync()
     {
-        var currentModel = _appSettingsService.Settings.Model;
+        var settings = _appSettingsService.Settings;
+        var currentModel = settings.Model;
+        var provider = (settings.Provider ?? "openai").ToLowerInvariant();
 
         List<string> models = new();
-        if (_appSettingsService.Settings.Provider.Equals("copilot", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(_appSettingsService.Settings.GitHubToken))
+
+        switch (provider)
         {
-            try
-            {
-                var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(_appSettingsService.Settings.GitHubToken);
-                models.AddRange(copilotModels.Select(m => m.Id));
-            }
-            catch { }
+            case "copilot":
+                if (!string.IsNullOrWhiteSpace(settings.GitHubToken))
+                {
+                    try
+                    {
+                        var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(settings.GitHubToken);
+                        models.AddRange(copilotModels.Select(m => m.Id));
+                    }
+                    catch { }
+                }
+                break;
+
+            case "anthropic":
+                models.AddRange(new[] { "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5" });
+                break;
+
+            case "openai":
+                models.AddRange(new[] { "gpt-5.4", "gpt-4.1", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini" });
+                break;
+
+            case "openai-compatible":
+                // Custom endpoints — no predefined list; just show the current model.
+                break;
         }
 
-        if (models.Count == 0)
-        {
-            models.AddRange(new[] { "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-5.4", "claude-sonnet-4", "claude-sonnet-4.5", "o4-mini" });
-        }
-
+        // Always include the current model so the user sees what's active
         if (!models.Contains(currentModel))
             models.Insert(0, currentModel);
 
@@ -562,8 +578,7 @@ public partial class AiOperatorViewModel : ObservableObject
 
     // ── Helpers ──
 
-    internal static Brush FindThemeBrush(string key) =>
-        System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
+    internal Brush FindThemeBrush(string key) => _themeService.FindBrush(key);
 
     private static string FormatTimeAgo(DateTimeOffset dt)
     {

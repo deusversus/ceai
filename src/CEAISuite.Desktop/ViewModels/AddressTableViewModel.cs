@@ -20,8 +20,11 @@ public partial class AddressTableViewModel : ObservableObject
     private readonly ScriptGenerationService _scriptGenerationService;
     private readonly IDialogService _dialogService;
     private readonly IOutputLog _outputLog;
+    private readonly IDispatcherService _dispatcher;
+    private readonly INavigationService _navigationService;
 
-    private System.Windows.Threading.DispatcherTimer? _refreshTimer;
+    private System.Threading.Timer? _refreshTimer;
+    private int _refreshIntervalMs = 500;
     private AddressTableNode? _clipboard;
     private string? _lastWriteBreakpointId;
 
@@ -48,7 +51,9 @@ public partial class AddressTableViewModel : ObservableObject
         DisassemblyService disassemblyService,
         ScriptGenerationService scriptGenerationService,
         IDialogService dialogService,
-        IOutputLog outputLog)
+        IOutputLog outputLog,
+        IDispatcherService dispatcher,
+        INavigationService navigationService)
     {
         _addressTableService = addressTableService;
         _addressTableExportService = addressTableExportService;
@@ -59,6 +64,8 @@ public partial class AddressTableViewModel : ObservableObject
         _scriptGenerationService = scriptGenerationService;
         _dialogService = dialogService;
         _outputLog = outputLog;
+        _dispatcher = dispatcher;
+        _navigationService = navigationService;
 
         Roots = _addressTableService.Roots;
     }
@@ -67,7 +74,9 @@ public partial class AddressTableViewModel : ObservableObject
 
     private void RefreshUI(string? statusMessage = null)
     {
-        Roots = _addressTableService.Roots;
+        // Force PropertyChanged even when the reference is the same ObservableCollection,
+        // since CommunityToolkit.Mvvm skips notification on equal references.
+        OnPropertyChanged(nameof(Roots));
         AddressTableStatus = $"{_addressTableService.Entries.Count} entries";
         if (statusMessage is not null)
             _outputLog.Append("AddressTable", "Info", statusMessage);
@@ -77,38 +86,45 @@ public partial class AddressTableViewModel : ObservableObject
 
     public void StartAutoRefresh(int intervalMs = 500)
     {
-        _refreshTimer?.Stop();
-        _refreshTimer = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(intervalMs)
-        };
-        _refreshTimer.Tick += async (_, _) =>
-        {
-            var pid = _processContext.AttachedProcessId;
-            if (pid is null) return;
-            if (_addressTableService.Roots.Count == 0) return;
-            try
-            {
-                _refreshTimer!.Stop();
-                await _addressTableService.RefreshAllAsync(pid.Value);
-                Roots = _addressTableService.Roots;
-                AddressTableStatus = $"{_addressTableService.Entries.Count} entries (live)";
-            }
-            catch { /* non-fatal */ }
-            finally
-            {
-                _refreshTimer?.Start();
-            }
-        };
-        _refreshTimer.Start();
+        StopAutoRefresh();
+        _refreshIntervalMs = intervalMs;
+        _refreshTimer = new System.Threading.Timer(OnRefreshTimerTick, null, intervalMs, Timeout.Infinite);
     }
 
-    public void StopAutoRefresh() => _refreshTimer?.Stop();
+    private async void OnRefreshTimerTick(object? state)
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null || _addressTableService.Roots.Count == 0)
+        {
+            _refreshTimer?.Change(_refreshIntervalMs, Timeout.Infinite);
+            return;
+        }
+        try
+        {
+            await _addressTableService.RefreshAllAsync(pid.Value);
+            _dispatcher.Invoke(() =>
+            {
+                OnPropertyChanged(nameof(Roots));
+                AddressTableStatus = $"{_addressTableService.Entries.Count} entries (live)";
+            });
+        }
+        catch { /* non-fatal */ }
+        finally
+        {
+            _refreshTimer?.Change(_refreshIntervalMs, Timeout.Infinite);
+        }
+    }
+
+    public void StopAutoRefresh()
+    {
+        _refreshTimer?.Dispose();
+        _refreshTimer = null;
+    }
 
     public void SetRefreshInterval(int intervalMs)
     {
-        if (_refreshTimer is not null)
-            _refreshTimer.Interval = TimeSpan.FromMilliseconds(intervalMs);
+        _refreshIntervalMs = intervalMs;
+        _refreshTimer?.Change(intervalMs, Timeout.Infinite);
     }
 
     // ── Refresh / Remove / Lock (toolbar buttons) ──
@@ -126,7 +142,7 @@ public partial class AddressTableViewModel : ObservableObject
         try
         {
             await _addressTableService.RefreshAllAsync(pid.Value);
-            Roots = _addressTableService.Roots;
+            OnPropertyChanged(nameof(Roots));
             AddressTableStatus = $"{_addressTableService.Entries.Count} entries (refreshed)";
             _outputLog.Append("AddressTable", "Info", "Address table refreshed.");
         }
@@ -278,6 +294,22 @@ public partial class AddressTableViewModel : ObservableObject
             var path = _dialogService.ShowOpenFileDialog(
                 "Cheat Tables (*.ct;*.CT)|*.ct;*.CT|XML Files (*.xml)|*.xml|All Files (*.*)|*.*");
             if (path is null) return;
+
+            // If the table already has entries, ask whether to merge or replace
+            if (_addressTableService.Entries.Count > 0)
+            {
+                if (!_dialogService.Confirm("Load Cheat Table",
+                    "The address table already has entries.\n\n" +
+                    "Click Yes to replace the current table, or No to merge."))
+                {
+                    // User chose No → merge (just import on top)
+                }
+                else
+                {
+                    // User chose Yes → replace (clear first)
+                    _addressTableService.ClearAll();
+                }
+            }
 
             var parser = new CheatTableParser();
             var ctFile = parser.ParseFile(path);
@@ -659,7 +691,7 @@ public partial class AddressTableViewModel : ObservableObject
                     : $"Enable failed: {result.Error}";
             }
 
-            Roots = _addressTableService.Roots;
+            OnPropertyChanged(nameof(Roots));
             _outputLog.Append("AddressTable", "Info",
                 $"Script '{SelectedNode.Label}': {SelectedNode.ScriptStatus}");
         }

@@ -51,6 +51,7 @@ public partial class MainWindow : Window
         AppSettingsService appSettingsService,
         AiOperatorService aiOperatorService,
         IOutputLog outputLog,
+        NavigationService navigationService,
         MainViewModel mainVm,
         OutputLogViewModel outputLogVm,
         HotkeysViewModel hotkeysVm,
@@ -80,6 +81,11 @@ public partial class MainWindow : Window
         _inspectionVm = inspectionVm;
         _processListVm = processListVm;
         _aiOperatorVm = aiOperatorVm;
+
+        // Wire NavigationService to AvalonDock
+        navigationService.Configure(
+            (contentId, _) => ActivateDocument(contentId),
+            contentId => ActivateAnchorable(contentId));
 
         // Apply saved theme
         var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)
@@ -199,6 +205,8 @@ public partial class MainWindow : Window
                 StatusBarCenter.Text = _mainVm.StatusBarCenterText;
             else if (args.PropertyName == nameof(MainViewModel.ProcessComboItems))
                 ProcessComboBox.ItemsSource = _mainVm.ProcessComboItems;
+            else if (args.PropertyName == nameof(MainViewModel.SelectedProcessComboItem))
+                ProcessComboBox.SelectedItem = _mainVm.SelectedProcessComboItem;
         };
 
         DataContext = _mainVm.Dashboard;
@@ -216,7 +224,6 @@ public partial class MainWindow : Window
                 break;
             case "DetachCleanup":
                 MemoryBrowserTab.Clear();
-                ProcessComboBox.SelectedItem = null;
                 break;
         }
     }
@@ -364,7 +371,7 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
-            Background = AiOperatorViewModel.FindThemeBrush("SidebarBackground"),
+            Background = FindThemeBrush("SidebarBackground"),
         };
         var sp = new StackPanel { Margin = new Thickness(12) };
         var tb = new TextBox
@@ -393,7 +400,7 @@ public partial class MainWindow : Window
         if (ChatSearchBox.Text == (string)ChatSearchBox.Tag)
         {
             ChatSearchBox.Text = "";
-            ChatSearchBox.Foreground = AiOperatorViewModel.FindThemeBrush("PrimaryForeground");
+            ChatSearchBox.Foreground = FindThemeBrush("PrimaryForeground");
         }
     }
 
@@ -402,7 +409,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(ChatSearchBox.Text))
         {
             ChatSearchBox.Text = (string)ChatSearchBox.Tag;
-            ChatSearchBox.Foreground = AiOperatorViewModel.FindThemeBrush("SecondaryForeground");
+            ChatSearchBox.Foreground = FindThemeBrush("SecondaryForeground");
         }
     }
 
@@ -616,68 +623,14 @@ public partial class MainWindow : Window
         var sessions = await _mainVm.ListSessionsAsync();
         if (sessions is null) return;
 
-        var sessionList = sessions.ToList();
+        var dialog = new LoadSessionWindow(
+            sessions,
+            _mainVm.DeleteSessionAsync,
+            _mainVm.RefreshSessionListAsync)
+        { Owner = this };
 
-        var dialogWindow = new Window
-        {
-            Title = "Load Session", Width = 480, Height = 340,
-            WindowStartupLocation = WindowStartupLocation.CenterOwner, Owner = this
-        };
-
-        var panel = new DockPanel { Margin = new Thickness(12) };
-        var listBox = new ListBox { Margin = new Thickness(0, 0, 0, 8) };
-        DockPanel.SetDock(listBox, Dock.Top);
-
-        foreach (var s in sessionList)
-            listBox.Items.Add($"{s.Id}  \u2014  {s.ProcessName}  ({s.AddressEntryCount} addresses, {s.CreatedAtUtc:g})");
-        listBox.SelectedIndex = 0;
-
-        var buttonPanel = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            HorizontalAlignment = HorizontalAlignment.Right
-        };
-        DockPanel.SetDock(buttonPanel, Dock.Bottom);
-
-        var loadBtn = new Button { Content = "Load", Padding = new Thickness(16, 6, 16, 6), IsDefault = true };
-        loadBtn.Click += (_, _) => { dialogWindow.DialogResult = true; dialogWindow.Close(); };
-
-        var deleteBtn = new Button
-        {
-            Content = "Delete", Padding = new Thickness(16, 6, 16, 6), Margin = new Thickness(8, 0, 0, 0),
-            Foreground = Brushes.OrangeRed
-        };
-        deleteBtn.Click += async (_, _) =>
-        {
-            if (listBox.SelectedIndex < 0) return;
-            var idx = listBox.SelectedIndex;
-            var target = sessionList[idx];
-            var confirm = MessageBox.Show(
-                $"Delete session \"{target.Id}\"?\nThis cannot be undone.",
-                "Delete Session", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-            if (confirm != MessageBoxResult.Yes) return;
-
-            await _mainVm.DeleteSessionAsync(target.Id);
-            sessionList = (await _mainVm.RefreshSessionListAsync()).ToList();
-            listBox.Items.Clear();
-            foreach (var s in sessionList)
-                listBox.Items.Add($"{s.Id}  \u2014  {s.ProcessName}  ({s.AddressEntryCount} addresses, {s.CreatedAtUtc:g})");
-            if (sessionList.Count > 0) listBox.SelectedIndex = 0;
-        };
-
-        var cancelBtn = new Button { Content = "Cancel", Padding = new Thickness(16, 6, 16, 6), Margin = new Thickness(8, 0, 0, 0), IsCancel = true };
-        cancelBtn.Click += (_, _) => { dialogWindow.DialogResult = false; dialogWindow.Close(); };
-
-        buttonPanel.Children.Add(loadBtn);
-        buttonPanel.Children.Add(deleteBtn);
-        buttonPanel.Children.Add(cancelBtn);
-        panel.Children.Add(buttonPanel);
-        panel.Children.Add(listBox);
-        dialogWindow.Content = panel;
-
-        if (dialogWindow.ShowDialog() != true || listBox.SelectedIndex < 0) return;
-        var selected = sessionList[listBox.SelectedIndex];
-        await _mainVm.RestoreSession(selected.Id);
+        if (dialog.ShowDialog() == true && dialog.SelectedSessionId is not null)
+            await _mainVm.RestoreSession(dialog.SelectedSessionId);
     }
 
     // ── Memory Browser ──
@@ -761,15 +714,13 @@ public partial class MainWindow : Window
     {
         if (ProcessComboBox.SelectedItem is ProcessComboItem item)
         {
-            if (DataContext is WorkspaceDashboard dashboard)
+            // Find the matching process in the Processes tab list and select it
+            var match = _processListVm.Processes.FirstOrDefault(p => p.Id == item.Pid);
+            if (match is not null)
             {
-                var process = dashboard.RunningProcesses?.FirstOrDefault(p => p.Id == item.Pid);
-                if (process != null)
-                {
-                    RunningProcessesList.SelectedItem = process;
-                    InspectSelectedProcess(sender, e);
-                    return;
-                }
+                _processListVm.SelectedProcess = match;
+                InspectSelectedProcess(sender, e);
+                return;
             }
         }
         StatusBarCenter.Text = "Select a process from the dropdown first";
@@ -927,27 +878,17 @@ public partial class MainWindow : Window
     private async void ModelSelector_Click(object sender, RoutedEventArgs e)
     {
         if (ModelSelectorPopup.IsOpen) { ModelSelectorPopup.IsOpen = false; return; }
-        ModelSelectorList.Children.Clear();
-        var currentModel = _appSettingsService.Settings.Model;
-        var models = await _aiOperatorVm.GetAvailableModelsAsync();
-        foreach (var model in models)
-        {
-            var btn = new Button
-            {
-                Content = model, FontSize = 12,
-                Padding = new Thickness(12, 6, 12, 6),
-                HorizontalContentAlignment = HorizontalAlignment.Left,
-                Background = Brushes.Transparent,
-                Foreground = (Brush)FindResource(model == currentModel ? "AccentForeground" : "PrimaryForeground"),
-                BorderThickness = new Thickness(0),
-                Cursor = Cursors.Hand,
-                FontWeight = model == currentModel ? FontWeights.SemiBold : FontWeights.Normal,
-                Tag = model
-            };
-            btn.Click += ModelSelectorItem_Click;
-            ModelSelectorList.Children.Add(btn);
-        }
+        await _aiOperatorVm.RefreshAvailableModelsCommand.ExecuteAsync(null);
+        ModelSelectorList.ItemsSource = _aiOperatorVm.AvailableModels;
         ModelSelectorPopup.IsOpen = true;
+    }
+
+    private void ModelSelectorItem_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn || btn.Tag is not string model) return;
+        var isCurrent = model == _appSettingsService.Settings.Model;
+        btn.Foreground = (Brush)FindResource(isCurrent ? "AccentForeground" : "PrimaryForeground");
+        btn.FontWeight = isCurrent ? FontWeights.SemiBold : FontWeights.Normal;
     }
 
     private void ModelSelectorItem_Click(object sender, RoutedEventArgs e)

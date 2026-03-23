@@ -261,7 +261,7 @@
                                         <TextBlock Grid.Column="5" Text="Value" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
                                     </Grid>
                                     <TreeView x:Name="AddressTableTree"
-                                              ItemsSource="{Binding AddressTableNodes}"
+                                              ItemsSource="{Binding Roots}"
                                               FontFamily="Consolas" FontSize="12"
                                               Background="{DynamicResource PanelBackground}" BorderThickness="0"
                                               MouseDoubleClick="AddressTableTree_MouseDoubleClick"
@@ -1006,7 +1006,17 @@
                                                         <Border Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}"
                                                                 BorderThickness="1" CornerRadius="6" Padding="4" MaxHeight="300">
                                                             <ScrollViewer VerticalScrollBarVisibility="Auto">
-                                                                <StackPanel x:Name="ModelSelectorList" />
+                                                                <ItemsControl x:Name="ModelSelectorList">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate>
+                                                                            <Button Content="{Binding}" FontSize="12"
+                                                                                    Padding="12,6" HorizontalContentAlignment="Left"
+                                                                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                                                    Click="ModelSelectorItem_Click" Tag="{Binding}"
+                                                                                    Loaded="ModelSelectorItem_Loaded" />
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
                                                             </ScrollViewer>
                                                         </Border>
                                                     </Popup>

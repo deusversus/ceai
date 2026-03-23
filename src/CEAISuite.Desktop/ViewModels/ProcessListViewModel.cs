@@ -20,6 +20,8 @@ public partial class ProcessListViewModel : ObservableObject
         _dashboardService = dashboardService;
         _processContext = processContext;
         _outputLog = outputLog;
+
+        _processContext.ProcessChanged += OnProcessChanged;
     }
 
     [ObservableProperty]
@@ -27,6 +29,30 @@ public partial class ProcessListViewModel : ObservableObject
 
     [ObservableProperty]
     private RunningProcessOverview? _selectedProcess;
+
+    [ObservableProperty]
+    private string? _attachedProcessName;
+
+    [ObservableProperty]
+    private bool _isAttached;
+
+    private void OnProcessChanged()
+    {
+        IsAttached = _processContext.AttachedProcessId is not null;
+        AttachedProcessName = _processContext.AttachedProcessName;
+
+        // Auto-select the attached process in the list if present
+        if (_processContext.AttachedProcessId is { } pid)
+        {
+            var match = Processes.FirstOrDefault(p => p.Id == pid);
+            if (match is not null)
+                SelectedProcess = match;
+        }
+        else
+        {
+            SelectedProcess = null;
+        }
+    }
 
     [RelayCommand]
     private async Task RefreshAsync()

@@ -843,19 +843,24 @@
                                             Style="{StaticResource ToolbarButton}" />
                                     <ToggleButton x:Name="ChatHistoryToggle" Grid.Column="4" Content="History"
                                                   Padding="8,2" FontSize="10" ToolTip="Toggle chat history"
-                                                  IsChecked="{Binding IsChatHistoryVisible}" Click="ToggleChatHistory"
+                                                  IsChecked="{Binding IsChatHistoryVisible}"
                                                   Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}" />
                                 </Grid>
 
-                                <!-- Chat History Panel (collapsible) -->
-                                <Border x:Name="ChatHistoryPanel" DockPanel.Dock="Top"
-                                        Visibility="{Binding IsChatHistoryVisible, Converter={StaticResource BoolToVisibility}}"
-                                        Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1"
-                                        MaxHeight="260" Margin="0,0,0,4">
+                                <!-- Chat History Popup (floaty overlay) -->
+                                <Popup x:Name="ChatHistoryPanel" StaysOpen="False" Placement="Bottom"
+                                       PlacementTarget="{Binding ElementName=ChatHistoryToggle}" AllowsTransparency="True"
+                                       IsOpen="{Binding IsChatHistoryVisible, Mode=TwoWay}"
+                                       Opened="ChatHistoryPanel_Opened">
+                                <Border Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1" CornerRadius="8" Padding="0" Width="340" MaxHeight="520">
+                                    <Border.Effect>
+                                        <DropShadowEffect BlurRadius="16" ShadowDepth="4" Opacity="0.3" />
+                                    </Border.Effect>
                                     <DockPanel>
                                         <TextBlock DockPanel.Dock="Top" Text="RECENT CHATS" FontSize="10" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="8,6,8,4" />
-                                        <TextBox x:Name="ChatSearchBox" DockPanel.Dock="Top" Margin="8,0,8,4"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="12,10,12,4" />
+                                        <TextBox x:Name="ChatSearchBox" DockPanel.Dock="Top" Margin="12,0,12,6"
                                                  Padding="6,4" FontSize="11" Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
                                                  BorderBrush="{DynamicResource BorderBrush}" Tag="Search chats..."
                                                  GotFocus="ChatSearchBox_GotFocus" LostFocus="ChatSearchBox_LostFocus"
@@ -922,6 +927,7 @@
                                         </ListView>
                                     </DockPanel>
                                 </Border>
+                                </Popup>
 
                                 <!-- Bottom: Attachments + Input + Controls + Status -->
                                 <DockPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">

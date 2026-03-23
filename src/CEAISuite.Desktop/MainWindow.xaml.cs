@@ -346,8 +346,8 @@ public partial class MainWindow : Window
             _aiOperatorVm.DeleteChatCommand.Execute(selected);
     }
 
-    private void ToggleChatHistory(object sender, RoutedEventArgs e) =>
-        _aiOperatorVm.ToggleChatHistoryCommand.Execute(null);
+    private void ChatHistoryPanel_Opened(object? sender, EventArgs e) =>
+        _aiOperatorVm.RefreshChatSwitcher();
 
     private void ChatHistoryList_DoubleClick(object sender, MouseButtonEventArgs e)
     {

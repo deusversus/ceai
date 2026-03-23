@@ -516,7 +516,7 @@
                             </avalonDock:LayoutAnchorable>
                             <!-- ═══ Output Log ═══ -->
                             <avalonDock:LayoutAnchorable Title="Output" ContentId="output">
-                                <Grid Background="{DynamicResource SidebarBackground}">
+                                <Grid x:Name="OutputContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
@@ -525,7 +525,7 @@
                                         <TextBlock Text="OUTPUT LOG" FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource SecondaryForeground}" />
                                         <Button DockPanel.Dock="Right" Content="Clear" FontSize="11"
-                                                Style="{StaticResource ToolbarButton}" Click="ClearOutputLog"
+                                                Style="{StaticResource ToolbarButton}" Command="{Binding ClearCommand}"
                                                 HorizontalAlignment="Right" />
                                     </DockPanel>
                                     <ListView Grid.Row="1" x:Name="OutputLogList"
@@ -551,7 +551,7 @@
 
                             <!-- ═══ Breakpoints (3 sub-tabs) ═══ -->
                             <avalonDock:LayoutAnchorable Title="Breakpoints" ContentId="breakpoints">
-                                <TabControl Background="{DynamicResource SidebarBackground}" BorderThickness="0">
+                                <TabControl x:Name="BreakpointsContent" Background="{DynamicResource SidebarBackground}" BorderThickness="0">
                                     <TabItem Header="Breakpoints">
                                         <Grid>
                                             <Grid.RowDefinitions>
@@ -559,11 +559,11 @@
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
                                             <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshBreakpointsTab" />
-                                                <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RemoveSelectedBreakpoint" />
-                                                <Button Content="Remove All" FontSize="11" Style="{StaticResource ToolbarButton}" Click="RemoveAllBreakpoints" />
+                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshBreakpointsCommand}" />
+                                                <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RemoveSelectedCommand}" />
+                                                <Button Content="Remove All" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RemoveAllCommand}" />
                                             </StackPanel>
-                                            <ListView Grid.Row="1" x:Name="BreakpointsTabList"
+                                            <ListView Grid.Row="1" ItemsSource="{Binding Breakpoints}" SelectedItem="{Binding SelectedBreakpoint}"
                                                       Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                                 <ListView.View>
                                                     <GridView>
@@ -584,11 +584,11 @@
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
                                             <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshHitLog" />
-                                                <TextBlock x:Name="HitLogStatus" VerticalAlignment="Center" FontSize="11"
-                                                           Foreground="{DynamicResource SecondaryForeground}" Text="Select a breakpoint, then refresh" />
+                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshHitLogCommand}" />
+                                                <TextBlock Text="{Binding HitLogStatus}" VerticalAlignment="Center" FontSize="11"
+                                                           Foreground="{DynamicResource SecondaryForeground}" />
                                             </StackPanel>
-                                            <ListView Grid.Row="1" x:Name="HitLogList"
+                                            <ListView Grid.Row="1" ItemsSource="{Binding HitLog}"
                                                       Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                                 <ListView.View>
                                                     <GridView>
@@ -607,12 +607,12 @@
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
                                             <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                                <TextBox x:Name="CodeCaveAddressBox" Width="140" FontSize="11" VerticalContentAlignment="Center" ToolTip="Address to hook (hex)" />
-                                                <Button Content="Install Hook" FontSize="11" Margin="4,0,4,0" Click="InstallCodeCaveHook" />
-                                                <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RemoveSelectedCodeCaveHook" />
-                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Click="RefreshCodeCaveHooks" />
+                                                <TextBox Text="{Binding CodeCaveAddress, UpdateSourceTrigger=PropertyChanged}" Width="140" FontSize="11" VerticalContentAlignment="Center" ToolTip="Address to hook (hex)" />
+                                                <Button Content="Install Hook" FontSize="11" Margin="4,0,4,0" Command="{Binding InstallHookCommand}" />
+                                                <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RemoveSelectedHookCommand}" />
+                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RefreshHooksCommand}" />
                                             </StackPanel>
-                                            <ListView Grid.Row="1" x:Name="CodeCaveHooksList"
+                                            <ListView Grid.Row="1" ItemsSource="{Binding CodeCaveHooks}" SelectedItem="{Binding SelectedCodeCaveHook}"
                                                       Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                                 <ListView.View>
                                                     <GridView>
@@ -630,18 +630,18 @@
 
                             <!-- ═══ Scripts ═══ -->
                             <avalonDock:LayoutAnchorable Title="Scripts" ContentId="scripts">
-                                <Grid Background="{DynamicResource SidebarBackground}">
+                                <Grid x:Name="ScriptsContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
                                     <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                        <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshScriptsTab" />
-                                        <Button Content="Enable" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="EnableSelectedScriptTab" />
-                                        <Button Content="Disable" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="DisableSelectedScriptTab" />
-                                        <Button Content="Toggle" FontSize="11" Style="{StaticResource ToolbarButton}" Click="ToggleSelectedScriptTab" />
+                                        <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshCommand}" />
+                                        <Button Content="Enable" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding EnableSelectedCommand}" />
+                                        <Button Content="Disable" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding DisableSelectedCommand}" />
+                                        <Button Content="Toggle" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding ToggleSelectedCommand}" />
                                     </StackPanel>
-                                    <ListView Grid.Row="1" x:Name="ScriptsTabList"
+                                    <ListView Grid.Row="1" ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
                                         <ListView.View>
                                             <GridView>
@@ -656,22 +656,22 @@
 
                             <!-- ═══ Snapshots ═══ -->
                             <avalonDock:LayoutAnchorable Title="Snapshots" ContentId="snapshots">
-                                <Grid Background="{DynamicResource SidebarBackground}">
+                                <Grid x:Name="SnapshotsContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
                                     <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                        <TextBox x:Name="SnapshotAddress" Width="120" FontSize="11" VerticalContentAlignment="Center" ToolTip="Base address (hex)" />
-                                        <TextBox x:Name="SnapshotLength" Width="60" FontSize="11" VerticalContentAlignment="Center" Text="256" ToolTip="Length (bytes)" Margin="4,0,0,0" />
-                                        <TextBox x:Name="SnapshotLabel" Width="100" FontSize="11" VerticalContentAlignment="Center" ToolTip="Label (optional)" Margin="4,0,0,0" />
-                                        <Button Content="Capture" FontSize="11" Margin="4,0,4,0" Click="CaptureSnapshot" />
-                                        <Button Content="Compare" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="CompareSnapshots" ToolTip="Select two snapshots" />
-                                        <Button Content="Compare Live" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="CompareSnapshotWithLive" />
-                                        <Button Content="Delete" FontSize="11" Style="{StaticResource ToolbarButton}" Click="DeleteSelectedSnapshot" />
+                                        <TextBox Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" Width="120" FontSize="11" VerticalContentAlignment="Center" ToolTip="Base address (hex)" />
+                                        <TextBox Text="{Binding Length, UpdateSourceTrigger=PropertyChanged}" Width="60" FontSize="11" VerticalContentAlignment="Center" ToolTip="Length (bytes)" Margin="4,0,0,0" />
+                                        <TextBox Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Width="100" FontSize="11" VerticalContentAlignment="Center" ToolTip="Label (optional)" Margin="4,0,0,0" />
+                                        <Button Content="Capture" FontSize="11" Margin="4,0,4,0" Command="{Binding CaptureCommand}" />
+                                        <Button Content="Compare" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding CompareCommand}" ToolTip="Select two snapshots" />
+                                        <Button Content="Compare Live" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding CompareWithLiveCommand}" />
+                                        <Button Content="Delete" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding DeleteSelectedCommand}" />
                                     </StackPanel>
-                                    <ListView Grid.Row="1" x:Name="SnapshotList" MaxHeight="120"
+                                    <ListView Grid.Row="1" x:Name="SnapshotList" ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}" MaxHeight="120"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0" SelectionMode="Extended">
                                         <ListView.View>
                                             <GridView>
@@ -682,7 +682,7 @@
                                             </GridView>
                                         </ListView.View>
                                     </ListView>
-                                    <ListView Grid.Row="2" x:Name="SnapshotDiffList"
+                                    <ListView Grid.Row="2" ItemsSource="{Binding DiffItems}"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                         <ListView.View>
                                             <GridView>
@@ -698,7 +698,7 @@
 
                             <!-- ═══ Find Results ═══ -->
                             <avalonDock:LayoutAnchorable Title="Find Results" ContentId="findResults">
-                                <Grid Background="{DynamicResource SidebarBackground}">
+                                <Grid x:Name="FindResultsContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
@@ -707,11 +707,11 @@
                                         <TextBlock Text="FIND RESULTS" FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource SecondaryForeground}" />
                                         <Button DockPanel.Dock="Right" Content="Clear" FontSize="11"
-                                                Style="{StaticResource ToolbarButton}" Click="ClearFindResults" HorizontalAlignment="Right" />
-                                        <TextBlock DockPanel.Dock="Right" x:Name="FindResultsStatus" FontSize="11"
+                                                Style="{StaticResource ToolbarButton}" Command="{Binding ClearCommand}" HorizontalAlignment="Right" />
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding StatusText}" FontSize="11"
                                                    Foreground="{DynamicResource SecondaryForeground}" HorizontalAlignment="Right" Margin="0,0,8,0" />
                                     </DockPanel>
-                                    <ListView Grid.Row="1" x:Name="FindResultsList"
+                                    <ListView Grid.Row="1" ItemsSource="{Binding Results}"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                         <ListView.View>
                                             <GridView>
@@ -727,16 +727,16 @@
 
                             <!-- ═══ Hotkeys ═══ -->
                             <avalonDock:LayoutAnchorable Title="Hotkeys" ContentId="hotkeys">
-                                <Grid Background="{DynamicResource SidebarBackground}">
+                                <Grid x:Name="HotkeysContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
                                     <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                        <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshHotkeys" />
-                                        <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Click="RemoveSelectedHotkey" />
+                                        <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshCommand}" />
+                                        <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RemoveSelectedCommand}" />
                                     </StackPanel>
-                                    <ListView Grid.Row="1" x:Name="HotkeysList"
+                                    <ListView Grid.Row="1" ItemsSource="{Binding Hotkeys}" SelectedItem="{Binding SelectedHotkey}"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
                                         <ListView.View>
                                             <GridView>
@@ -751,7 +751,7 @@
 
                             <!-- ═══ Journal (2 sub-tabs) ═══ -->
                             <avalonDock:LayoutAnchorable Title="Journal" ContentId="journal">
-                                <TabControl Background="{DynamicResource SidebarBackground}" BorderThickness="0">
+                                <TabControl x:Name="JournalContent" Background="{DynamicResource SidebarBackground}" BorderThickness="0">
                                     <TabItem Header="Patch History">
                                         <Grid>
                                             <Grid.RowDefinitions>
@@ -759,11 +759,11 @@
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
                                             <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshPatchHistory" />
-                                                <Button Content="Undo Last" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="UndoPatchFromJournal" />
-                                                <Button Content="Rollback All" FontSize="11" Style="{StaticResource ToolbarButton}" Click="RollbackAllPatches" Foreground="OrangeRed" />
+                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshPatchHistoryCommand}" />
+                                                <Button Content="Undo Last" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding UndoPatchCommand}" />
+                                                <Button Content="Rollback All" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RollbackAllCommand}" Foreground="OrangeRed" />
                                             </StackPanel>
-                                            <ListView Grid.Row="1" x:Name="PatchHistoryList"
+                                            <ListView Grid.Row="1" ItemsSource="{Binding PatchHistory}"
                                                       Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                                 <ListView.View>
                                                     <GridView>
@@ -783,10 +783,10 @@
                                                 <RowDefinition Height="*" />
                                             </Grid.RowDefinitions>
                                             <StackPanel Orientation="Horizontal" Margin="8,6,8,4">
-                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshJournalEntries" />
-                                                <Button Content="Rollback Selected" FontSize="11" Style="{StaticResource ToolbarButton}" Click="RollbackSelectedJournalEntry" />
+                                                <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshJournalCommand}" />
+                                                <Button Content="Rollback Selected" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RollbackSelectedEntryCommand}" />
                                             </StackPanel>
-                                            <ListView Grid.Row="1" x:Name="JournalEntriesList"
+                                            <ListView Grid.Row="1" ItemsSource="{Binding JournalEntries}" SelectedItem="{Binding SelectedJournalEntry}"
                                                       Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
                                                 <ListView.View>
                                                     <GridView>

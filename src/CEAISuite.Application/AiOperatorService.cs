@@ -150,7 +150,7 @@ public sealed class AiOperatorService
     private AgentSession _session = null!;
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
-    private readonly Func<string>? _contextProvider;
+    private Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore;
     private readonly ToolResultStore _toolResultStore;
@@ -364,6 +364,9 @@ public sealed class AiOperatorService
     /// Hot-swap the AI provider without restarting the app.
     /// Preserves display history and action log; creates a new MAF agent session.
     /// </summary>
+    /// <summary>Set the dynamic context provider delegate (for late-binding in DI scenarios).</summary>
+    public void SetContextProvider(Func<string> provider) => _contextProvider = provider;
+
     public void Reconfigure(IChatClient? newClient)
     {
         var baseClient = newClient ?? new StubChatClient();

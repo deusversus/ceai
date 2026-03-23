@@ -8,10 +8,12 @@
 
   <ItemGroup>
     <PackageReference Include="Anthropic" Version="12.9.0" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.1" />
     <PackageReference Include="Dirkster.AvalonDock" Version="4.72.1" />
     <PackageReference Include="Dirkster.AvalonDock.Themes.VS2013" Version="4.72.1" />
     <PackageReference Include="Microsoft.Agents.AI.OpenAI" Version="1.0.0-rc4" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.5" />
   </ItemGroup>
 
   <!-- Copy agent skills to build output for FileAgentSkillsProvider -->

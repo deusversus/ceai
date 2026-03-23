@@ -1824,63 +1824,43 @@ public partial class MainWindow : Window
             }
 
             var pid = dashboard.CurrentInspection.ProcessId;
-            var lines = new List<string>();
+            var results = new List<FindResultDisplayItem>();
 
             foreach (var hit in hits)
             {
-                lines.Add($"[{hit.Timestamp}] Thread {hit.ThreadId} — Instruction at {hit.Address}");
-
-                // Try to disassemble the instruction that caused the write
+                string instruction = "(disassembly unavailable)";
                 try
                 {
                     var disasm = await _disassemblyService.DisassembleAtAsync(pid, hit.Address, 1);
                     if (disasm.Lines.Count > 0)
                     {
                         var instr = disasm.Lines[0];
-                        lines.Add($"  {instr.Address}: {instr.Mnemonic} {instr.Operands}");
+                        instruction = $"{instr.Mnemonic} {instr.Operands}";
                     }
                 }
-                catch
-                {
-                    lines.Add("  (disassembly unavailable)");
-                }
+                catch { /* disassembly unavailable */ }
 
-                // Show register snapshot
-                if (hit.Registers.Count > 0)
-                {
-                    var regs = string.Join("  ", hit.Registers.Select(r => $"{r.Key}={r.Value}"));
-                    lines.Add($"  Registers: {regs}");
-                }
+                var context = hit.Registers.Count > 0
+                    ? string.Join("  ", hit.Registers.Take(6).Select(r => $"{r.Key}={r.Value}"))
+                    : "";
 
-                lines.Add("");
+                results.Add(new FindResultDisplayItem
+                {
+                    Address = hit.Address,
+                    Instruction = instruction,
+                    Module = $"TID={hit.ThreadId}",
+                    Context = context
+                });
             }
 
-            var logWindow = new System.Windows.Window
-            {
-                Title = $"Write Log — Breakpoint {_lastWriteBreakpointId}",
-                Width = 700,
-                Height = 450,
-                WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-                Owner = this
-            };
+            PopulateFindResults(results, $"Write log — BP {_lastWriteBreakpointId}");
 
-            var textBox = new System.Windows.Controls.TextBox
-            {
-                Text = string.Join(Environment.NewLine, lines),
-                IsReadOnly = true,
-                FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-                FontSize = 12,
-                VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
-                HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
-                TextWrapping = System.Windows.TextWrapping.NoWrap
-            };
-
-            logWindow.Content = textBox;
-            logWindow.Show();
+            // Activate the Find Results tab
+            ActivateAnchorable("findResults");
 
             DataContext = dashboard with
             {
-                StatusMessage = $"Showing {hits.Count} write hit(s) for breakpoint {_lastWriteBreakpointId}."
+                StatusMessage = $"Found {hits.Count} write hit(s) — see Find Results tab."
             };
         }
         catch (Exception ex)
@@ -2756,7 +2736,8 @@ public partial class MainWindow : Window
                 dashboard.CurrentInspection.ProcessId,
                 BpAddressTextBox.Text,
                 type);
-            await RefreshBreakpointList(dashboard);
+            DataContext = dashboard with { BreakpointStatus = $"Breakpoint {bp.Id} set at {bp.Address}" };
+            RefreshBreakpointsTab(sender, e);
         }
         catch (Exception ex)
         {
@@ -2764,74 +2745,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private async void RemoveBreakpoint(object sender, RoutedEventArgs e)
-    {
-        var dashboard = DataContext as WorkspaceDashboard;
-        if (dashboard?.CurrentInspection is null) return;
-        if (BreakpointListView.SelectedItem is not BreakpointDisplayItem selected) return;
-        try
-        {
-            await _breakpointService.RemoveBreakpointAsync(dashboard.CurrentInspection.ProcessId, selected.Id);
-            await RefreshBreakpointList(dashboard);
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with { StatusMessage = $"Remove BP error: {ex.Message}" };
-        }
-    }
-
-    private async void RefreshBreakpoints(object sender, RoutedEventArgs e)
-    {
-        var dashboard = DataContext as WorkspaceDashboard;
-        if (dashboard?.CurrentInspection is null) return;
-        try
-        {
-            await RefreshBreakpointList(dashboard);
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with { StatusMessage = $"Refresh BP error: {ex.Message}" };
-        }
-    }
-
-    private async void ViewHitLog(object sender, RoutedEventArgs e)
-    {
-        var dashboard = DataContext as WorkspaceDashboard;
-        if (BreakpointListView.SelectedItem is not BreakpointDisplayItem selected) return;
-        try
-        {
-            var hits = await _breakpointService.GetHitLogAsync(selected.Id);
-            var lines = hits.Select(h =>
-            {
-                var regs = string.Join(", ", h.Registers.Take(6).Select(r => $"{r.Key}={r.Value}"));
-                return $"[{h.Timestamp}] TID={h.ThreadId} @ {h.Address}  {regs}";
-            });
-            System.Windows.MessageBox.Show(
-                hits.Count == 0
-                    ? "No hits recorded for this breakpoint."
-                    : string.Join("\n", lines),
-                $"Hit Log — {selected.Id}",
-                MessageBoxButton.OK);
-        }
-        catch (Exception ex)
-        {
-            System.Windows.MessageBox.Show($"Error: {ex.Message}", "Hit Log", MessageBoxButton.OK);
-        }
-    }
-
-    private async Task RefreshBreakpointList(WorkspaceDashboard dashboard)
-    {
-        var bps = await _breakpointService.ListBreakpointsAsync(dashboard.CurrentInspection!.ProcessId);
-        BreakpointListView.ItemsSource = bps.Select(b => new BreakpointDisplayItem
-        {
-            Id = b.Id,
-            Address = b.Address,
-            Type = b.Type,
-            HitCount = b.HitCount,
-            Status = b.IsEnabled ? "Active" : "Disabled"
-        }).ToArray();
-        DataContext = dashboard with { BreakpointStatus = $"{bps.Count} breakpoint(s) active" };
-    }
+    // Breakpoint list/hit log/remove moved to dedicated Breakpoints bottom tab (Phase 2).
+    // Set BP controls remain in Inspection panel for inline use.
 
     // ── Drag and Drop: Sources ──
 
@@ -3135,6 +3050,19 @@ public partial class MainWindow : Window
             .FirstOrDefault(d => d.ContentId == contentId);
         if (doc is not null)
             doc.IsActive = true;
+    }
+
+    private void ActivateAnchorable(string contentId)
+    {
+        var anc = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutAnchorable>()
+            .FirstOrDefault(a => a.ContentId == contentId);
+        if (anc is not null)
+        {
+            anc.IsVisible = true;
+            anc.IsActive = true;
+        }
     }
 
     /// <summary>Show/restore a panel by ContentId (from Windows menu Tag).</summary>

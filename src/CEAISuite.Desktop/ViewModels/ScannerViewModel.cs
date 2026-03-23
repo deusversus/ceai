@@ -1,0 +1,139 @@
+using System.Collections.ObjectModel;
+using CEAISuite.Application;
+using CEAISuite.Desktop.Services;
+using CEAISuite.Engine.Abstractions;
+using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
+
+namespace CEAISuite.Desktop.ViewModels;
+
+public partial class ScannerViewModel : ObservableObject
+{
+    private readonly ScanService _scanService;
+    private readonly AddressTableService _addressTableService;
+    private readonly IProcessContext _processContext;
+    private readonly IOutputLog _outputLog;
+
+    public ScannerViewModel(
+        ScanService scanService,
+        AddressTableService addressTableService,
+        IProcessContext processContext,
+        IOutputLog outputLog)
+    {
+        _scanService = scanService;
+        _addressTableService = addressTableService;
+        _processContext = processContext;
+        _outputLog = outputLog;
+    }
+
+    [ObservableProperty]
+    private string _scanValue = "";
+
+    [ObservableProperty]
+    private ScanResultOverview? _selectedScanResult;
+
+    [ObservableProperty]
+    private ObservableCollection<ScanResultOverview> _scanResults = new();
+
+    [ObservableProperty]
+    private string? _scanStatus;
+
+    [ObservableProperty]
+    private string? _scanDetails;
+
+    [ObservableProperty]
+    private ScanType _selectedScanType = ScanType.ExactValue;
+
+    [ObservableProperty]
+    private MemoryDataType _selectedDataType = MemoryDataType.Int32;
+
+    [RelayCommand]
+    private async Task StartNewScanAsync()
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null)
+        {
+            ScanStatus = "No process attached";
+            _outputLog.Append("Scanner", "Warn", "Select and inspect a process before scanning.");
+            return;
+        }
+
+        try
+        {
+            _scanService.ResetScan();
+            ScanStatus = "Scanning...";
+            ScanDetails = "Initial scan in progress.";
+            ScanResults.Clear();
+
+            var overview = await _scanService.StartScanAsync(
+                pid.Value,
+                SelectedDataType,
+                SelectedScanType,
+                ScanValue);
+
+            ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
+            ScanStatus = $"{overview.ResultCount:N0} results found";
+            ScanDetails = $"Scanned {overview.TotalRegionsScanned} regions ({overview.TotalBytesScanned}), type={overview.DataType}, scan={overview.ScanType}";
+            _outputLog.Append("Scanner", "Info", $"Scan complete: {overview.ResultCount:N0} results across {overview.TotalRegionsScanned} regions.");
+        }
+        catch (Exception ex)
+        {
+            ScanStatus = "Scan failed";
+            _outputLog.Append("Scanner", "Error", $"Scan failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private async Task RefineScanAsync()
+    {
+        if (_processContext.AttachedProcessId is null) return;
+
+        if (_scanService.LastScanResults is null)
+        {
+            _outputLog.Append("Scanner", "Warn", "No active scan to refine. Start a new scan first.");
+            return;
+        }
+
+        try
+        {
+            ScanStatus = "Refining...";
+            ScanDetails = "Next scan in progress.";
+
+            var overview = await _scanService.RefineScanAsync(
+                SelectedScanType,
+                ScanValue);
+
+            ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
+            ScanStatus = $"{overview.ResultCount:N0} results remaining";
+            ScanDetails = $"Refined with {overview.ScanType}, type={overview.DataType}";
+            _outputLog.Append("Scanner", "Info", $"Refinement complete: {overview.ResultCount:N0} results remaining.");
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Append("Scanner", "Error", $"Refinement failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void ResetScan()
+    {
+        _scanService.ResetScan();
+        ScanResults.Clear();
+        ScanStatus = null;
+        ScanDetails = null;
+        _outputLog.Append("Scanner", "Info", "Scan reset. Ready for a new scan.");
+    }
+
+    [RelayCommand]
+    private void AddSelectedToTable()
+    {
+        if (SelectedScanResult is not { } selected)
+        {
+            _outputLog.Append("Scanner", "Warn", "Select a scan result to add to the address table.");
+            return;
+        }
+
+        _addressTableService.AddFromScanResult(selected, SelectedDataType);
+        _outputLog.Append("Scanner", "Info", $"Added {selected.Address} to address table.");
+    }
+}

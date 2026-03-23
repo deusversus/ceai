@@ -146,15 +146,18 @@
                                 ToolTip="Detach from process" />
                         <Separator />
 
-                        <!-- Quick scan -->
+                        <!-- Quick scan (bound to ScannerViewModel via ScannerContent) -->
                         <TextBox x:Name="ToolbarScanValue" Width="120" FontSize="11" VerticalContentAlignment="Center"
-                                 ToolTip="Scan value" TextChanged="ToolbarScanValue_Changed" />
+                                 ToolTip="Scan value"
+                                 Text="{Binding DataContext.ScanValue, ElementName=ScannerContent, UpdateSourceTrigger=PropertyChanged}" />
                         <ComboBox x:Name="ToolbarScanType" Width="70" FontSize="11"
                                   ToolTip="Data type" Loaded="OnToolbarScanTypeLoaded"
-                                  SelectionChanged="ToolbarScanType_Changed" />
-                        <Button Content="🔍 Scan" Padding="8,3" FontSize="11" Click="StartNewScan"
+                                  SelectedItem="{Binding DataContext.SelectedDataType, ElementName=ScannerContent, Mode=TwoWay}" />
+                        <Button Content="🔍 Scan" Padding="8,3" FontSize="11"
+                                Command="{Binding DataContext.StartNewScanCommand, ElementName=ScannerContent}"
                                 ToolTip="New scan (uses value and type above)" />
-                        <Button Content="🔎 Next" Padding="8,3" FontSize="11" Click="RefineScan"
+                        <Button Content="🔎 Next" Padding="8,3" FontSize="11"
+                                Command="{Binding DataContext.RefineScanCommand, ElementName=ScannerContent}"
                                 ToolTip="Refine/next scan" />
                         <Separator />
 
@@ -181,7 +184,7 @@
                     <!-- Left sidebar: Process List -->
                     <avalonDock:LayoutAnchorablePane DockWidth="250">
                         <avalonDock:LayoutAnchorable Title="Processes" ContentId="processes">
-                            <DockPanel Background="{DynamicResource SidebarBackground}">
+                            <DockPanel x:Name="ProcessesContent" Background="{DynamicResource SidebarBackground}">
                                 <TextBlock DockPanel.Dock="Top" Text="PROCESSES" FontSize="11" FontWeight="SemiBold"
                                            Foreground="{DynamicResource SecondaryForeground}" Margin="8,8,8,4" />
                                 <TextBlock DockPanel.Dock="Top" Text="{Binding StatusMessage}"
@@ -189,10 +192,11 @@
                                 <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,8,6">
                                     <Button Padding="8,3" Margin="0,0,6,0" Click="InspectSelectedProcess"
                                             Content="Inspect" FontSize="11" />
-                                    <Button Padding="8,3" Click="RefreshProcessList" Content="Refresh"
+                                    <Button Padding="8,3" Command="{Binding RefreshCommand}" Content="Refresh"
                                             FontSize="11" Style="{StaticResource ToolbarButton}" />
                                 </StackPanel>
-                                <ListView x:Name="RunningProcessesList" ItemsSource="{Binding RunningProcesses}"
+                                <ListView x:Name="RunningProcessesList" ItemsSource="{Binding Processes}"
+                                          SelectedItem="{Binding SelectedProcess, Mode=TwoWay}"
                                           Background="{DynamicResource SidebarBackground}" BorderThickness="0"
                                           PreviewMouseLeftButtonDown="ProcessList_PreviewMouseLeftButtonDown"
                                           PreviewMouseMove="ProcessList_PreviewMouseMove">
@@ -329,7 +333,7 @@
                                 </DockPanel>
                             </avalonDock:LayoutDocument>
                             <avalonDock:LayoutDocument Title="Inspection" ContentId="inspection">
-                                <ScrollViewer VerticalScrollBarVisibility="Auto" Background="{DynamicResource SidebarBackground}">
+                                <ScrollViewer x:Name="InspectionContent" VerticalScrollBarVisibility="Auto" Background="{DynamicResource SidebarBackground}">
                                     <StackPanel Margin="8">
                                         <!-- Process Inspection -->
                                         <TextBlock Text="PROCESS INSPECTION" FontSize="11" FontWeight="SemiBold"
@@ -358,18 +362,19 @@
                                                         <RowDefinition Height="Auto" />
                                                     </Grid.RowDefinitions>
                                                     <TextBlock Text="Address" Margin="0,0,10,6" VerticalAlignment="Center" FontSize="12" />
-                                                    <TextBox x:Name="AddressTextBox" Grid.Column="1" Text="0x0" FontSize="12" />
+                                                    <TextBox x:Name="AddressTextBox" Grid.Column="1" Text="{Binding Address, UpdateSourceTrigger=PropertyChanged}" FontSize="12" />
                                                     <TextBlock Grid.Row="1" Text="Type" Margin="0,6,10,6" VerticalAlignment="Center" FontSize="12" />
                                                     <ComboBox x:Name="TypeComboBox" Grid.Row="1" Grid.Column="1"
-                                                              Margin="0,4,0,0" Loaded="OnTypeComboBoxLoaded" FontSize="12" />
+                                                              Margin="0,4,0,0" Loaded="OnTypeComboBoxLoaded"
+                                                              SelectedItem="{Binding SelectedDataType, Mode=TwoWay}" FontSize="12" />
                                                     <TextBlock Grid.Row="2" Text="Value" Margin="0,6,10,0" VerticalAlignment="Center" FontSize="12" />
                                                     <TextBox x:Name="ValueTextBox" Grid.Row="2" Grid.Column="1"
-                                                             Text="0" Margin="0,4,0,0" FontSize="12" />
+                                                             Text="{Binding Value, UpdateSourceTrigger=PropertyChanged}" Margin="0,4,0,0" FontSize="12" />
                                                 </Grid>
                                                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
-                                                    <Button Padding="8,3" Margin="0,0,6,0" Click="ReadAddress" Content="Read" FontSize="11" />
-                                                    <Button Padding="8,3" Margin="0,0,6,0" Click="WriteAddress" Content="Write" FontSize="11" />
-                                                    <Button Padding="8,3" Click="AddManualToTable" Content="Add to table" FontSize="11"
+                                                    <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding ReadAddressCommand}" Content="Read" FontSize="11" />
+                                                    <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding WriteAddressCommand}" Content="Write" FontSize="11" />
+                                                    <Button Padding="8,3" Command="{Binding AddManualToTableCommand}" Content="Add to table" FontSize="11"
                                                             Style="{StaticResource ToolbarButton}" />
                                                 </StackPanel>
 
@@ -408,8 +413,8 @@
                                                    Foreground="{DynamicResource SecondaryForeground}" Margin="0,10,0,6" />
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                             <TextBox x:Name="DisasmAddressTextBox" Width="180" Margin="0,0,6,0"
-                                                     Text="0x0" FontSize="12" />
-                                            <Button Padding="8,3" Click="DisassembleAtAddress" Content="Disassemble" FontSize="11" />
+                                                     Text="{Binding DisassemblyAddress, UpdateSourceTrigger=PropertyChanged}" FontSize="12" />
+                                            <Button Padding="8,3" Command="{Binding DisassembleAtAddressCommand}" Content="Disassemble" FontSize="11" />
                                         </StackPanel>
                                         <TextBlock Margin="0,0,0,6" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
                                                    Text="{Binding Disassembly.Summary, TargetNullValue=Enter an address and click Disassemble.}" />
@@ -434,10 +439,11 @@
                                                    Foreground="{DynamicResource SecondaryForeground}" Margin="0,10,0,6" />
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                             <TextBox x:Name="BpAddressTextBox" Width="150" Margin="0,0,6,0"
-                                                     Text="0x0" FontSize="12" />
+                                                     Text="{Binding BpAddress, UpdateSourceTrigger=PropertyChanged}" FontSize="12" />
                                             <ComboBox x:Name="BpTypeComboBox" Width="130" Margin="0,0,6,0"
-                                                      Loaded="OnBpTypeComboBoxLoaded" FontSize="12" />
-                                            <Button Padding="8,3" Click="SetBreakpoint" Content="Set BP" FontSize="11" />
+                                                      Loaded="OnBpTypeComboBoxLoaded"
+                                                      SelectedItem="{Binding SelectedBpType, Mode=TwoWay}" FontSize="12" />
+                                            <Button Padding="8,3" Command="{Binding SetBreakpointCommand}" Content="Set BP" FontSize="11" />
                                         </StackPanel>
                                         <TextBlock Margin="0,0,0,4" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
                                                    Text="{Binding BreakpointStatus, TargetNullValue=No breakpoints set. Use the Breakpoints tab to manage.}" />
@@ -451,7 +457,7 @@
 
                         <avalonDock:LayoutAnchorablePane DockHeight="472">
                             <avalonDock:LayoutAnchorable Title="Scanner" ContentId="scanner">
-                                <Grid Background="{DynamicResource SidebarBackground}">
+                                <Grid x:Name="ScannerContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
@@ -466,21 +472,23 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Margin="0,0,6,0">
                                                 <TextBlock Text="Scan type" FontSize="11" Margin="0,0,0,3" />
-                                                <ComboBox x:Name="ScanTypeComboBox" Loaded="OnScanTypeComboBoxLoaded" FontSize="12" />
+                                                <ComboBox x:Name="ScanTypeComboBox" Loaded="OnScanTypeComboBoxLoaded"
+                                                         SelectedItem="{Binding SelectedScanType, Mode=TwoWay}" FontSize="12" />
                                             </StackPanel>
                                             <StackPanel Grid.Column="1">
                                                 <TextBlock Text="Data type" FontSize="11" Margin="0,0,0,3" />
-                                                <ComboBox x:Name="ScanDataTypeComboBox" Loaded="OnScanDataTypeComboBoxLoaded" FontSize="12" />
+                                                <ComboBox x:Name="ScanDataTypeComboBox" Loaded="OnScanDataTypeComboBoxLoaded"
+                                                         SelectedItem="{Binding SelectedDataType, Mode=TwoWay}" FontSize="12" />
                                             </StackPanel>
                                         </Grid>
                                         <TextBlock Text="Value" FontSize="11" Margin="0,6,0,3" />
-                                        <TextBox x:Name="ScanValueTextBox" Text="" FontSize="12" />
+                                        <TextBox x:Name="ScanValueTextBox" Text="{Binding ScanValue, UpdateSourceTrigger=PropertyChanged}" FontSize="12" />
                                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                            <Button Padding="8,3" Margin="0,0,6,0" Click="StartNewScan" Content="New scan" FontSize="11" />
-                                            <Button Padding="8,3" Margin="0,0,6,0" Click="RefineScan" Content="Next scan" FontSize="11" />
-                                            <Button Padding="8,3" Margin="0,0,6,0" Click="ResetScan" Content="Reset"
+                                            <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding StartNewScanCommand}" Content="New scan" FontSize="11" />
+                                            <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding RefineScanCommand}" Content="Next scan" FontSize="11" />
+                                            <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding ResetScanCommand}" Content="Reset"
                                                     FontSize="11" Style="{StaticResource ToolbarButton}" />
-                                            <Button Padding="8,3" Click="AddSelectedScanResultToTable" Content="Add to table"
+                                            <Button Padding="8,3" Command="{Binding AddSelectedToTableCommand}" Content="Add to table"
                                                     FontSize="11" Style="{StaticResource ToolbarButton}" />
                                         </StackPanel>
                                         <Border Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
@@ -494,6 +502,7 @@
                                         </Border>
                                     </StackPanel>
                                     <ListView Grid.Row="1" x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
+                                              SelectedItem="{Binding SelectedScanResult, Mode=TwoWay}"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0"
                                               VirtualizingPanel.IsVirtualizing="True"
                                               VirtualizingPanel.VirtualizationMode="Recycling"

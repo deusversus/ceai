@@ -90,6 +90,11 @@ public partial class MainWindow : Window
     private readonly JournalViewModel _journalVm;
     private readonly BreakpointsViewModel _breakpointsVm;
     private readonly ScriptsViewModel _scriptsVm;
+
+    // ── Phase 2.5 panel ViewModels ──
+    private readonly ScannerViewModel _scannerVm;
+    private readonly ProcessListViewModel _processListVm;
+    private readonly InspectionViewModel _inspectionVm;
     private readonly List<AttachmentChip> _attachments = new();
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private readonly Dictionary<string, object> _xamlPanelContent = new();
@@ -138,7 +143,10 @@ public partial class MainWindow : Window
         SnapshotsViewModel snapshotsVm,
         JournalViewModel journalVm,
         BreakpointsViewModel breakpointsVm,
-        ScriptsViewModel scriptsVm)
+        ScriptsViewModel scriptsVm,
+        ScannerViewModel scannerVm,
+        ProcessListViewModel processListVm,
+        InspectionViewModel inspectionVm)
     {
         InitializeComponent();
         _databasePath = Path.Combine(
@@ -179,6 +187,11 @@ public partial class MainWindow : Window
         _journalVm = journalVm;
         _breakpointsVm = breakpointsVm;
         _scriptsVm = scriptsVm;
+
+        // Assign Phase 2.5 panel ViewModels
+        _scannerVm = scannerVm;
+        _processListVm = processListVm;
+        _inspectionVm = inspectionVm;
 
         // Apply saved theme
         var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)
@@ -238,6 +251,11 @@ public partial class MainWindow : Window
         FindResultsContent.DataContext = _findResultsVm;
         HotkeysContent.DataContext = _hotkeysVm;
         JournalContent.DataContext = _journalVm;
+
+        // Wire Phase 2.5 panel DataContexts
+        ScannerContent.DataContext = _scannerVm;
+        ProcessesContent.DataContext = _processListVm;
+        InspectionContent.DataContext = _inspectionVm;
 
         // Refresh chat switcher when chats change
         _aiOperatorService.ChatListChanged += () =>
@@ -331,6 +349,8 @@ public partial class MainWindow : Window
         source?.AddHook(WndProc);
 
         DataContext = await _dashboardService.BuildAsync(_databasePath);
+        if (DataContext is WorkspaceDashboard dash)
+            _processListVm.SetProcesses(dash.RunningProcesses);
         PopulateProcessCombo();
         RefreshChatSwitcher();
         // Init search box placeholder
@@ -366,32 +386,6 @@ public partial class MainWindow : Window
         base.OnClosed(e);
     }
 
-    private async void RefreshProcessList(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-        try
-        {
-            var updated = await _dashboardService.BuildAsync(_databasePath);
-            DataContext = updated with
-            {
-                CurrentInspection = dashboard.CurrentInspection,
-                ScanResults = dashboard.ScanResults,
-                ScanStatus = dashboard.ScanStatus,
-                ScanDetails = dashboard.ScanDetails,
-                AddressTableNodes = _addressTableService.Roots,
-                AddressTableStatus = dashboard.AddressTableStatus,
-                Disassembly = dashboard.Disassembly,
-                BreakpointStatus = dashboard.BreakpointStatus,
-                StatusMessage = $"Refreshed: {updated.RunningProcesses.Count} processes found."
-            };
-            PopulateProcessCombo();
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with { StatusMessage = $"Refresh failed: {ex.Message}" };
-        }
-    }
-
     private async void InspectSelectedProcess(object sender, RoutedEventArgs e)
     {
         if (DataContext is not WorkspaceDashboard dashboard)
@@ -399,7 +393,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (RunningProcessesList.SelectedItem is not RunningProcessOverview selectedProcess)
+        var selectedProcess = _processListVm.SelectedProcess;
+        if (selectedProcess is null)
         {
             DataContext = dashboard with { StatusMessage = "Select a process to inspect." };
             return;
@@ -413,6 +408,10 @@ public partial class MainWindow : Window
                 CurrentInspection = inspection,
                 StatusMessage = inspection.StatusMessage
             };
+
+            // Update InspectionViewModel and process context
+            _inspectionVm.SetInspection(inspection);
+            _processContext.Attach(inspection);
 
             // Set process context for pointer chain resolution
             try
@@ -470,90 +469,6 @@ public partial class MainWindow : Window
         _refreshTimer.Start();
     }
 
-    private async void ReadAddress(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-        {
-            return;
-        }
-
-        try
-        {
-            var dataType = GetSelectedDataType();
-            var probe = await _dashboardService.ReadAddressAsync(
-                dashboard.CurrentInspection.ProcessId,
-                AddressTextBox.Text,
-                dataType);
-
-            DataContext = dashboard with
-            {
-                CurrentInspection = dashboard.CurrentInspection with
-                {
-                    ManualProbe = probe,
-                    LastWriteMessage = null,
-                    StatusMessage = $"Read {probe.DataType} from {probe.Address}."
-                },
-                StatusMessage = $"Read {probe.DataType} from {probe.Address}."
-            };
-        }
-        catch (Exception exception)
-        {
-            DataContext = dashboard with { StatusMessage = exception.Message };
-        }
-    }
-
-    private async void WriteAddress(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-        {
-            return;
-        }
-
-        var confirmation = MessageBox.Show(
-            $"Write {ValueTextBox.Text} as {GetSelectedDataType()} to {AddressTextBox.Text} in process {dashboard.CurrentInspection.ProcessName}?",
-            "Confirm memory write",
-            MessageBoxButton.YesNo,
-            MessageBoxImage.Warning);
-
-        if (confirmation != MessageBoxResult.Yes)
-        {
-            return;
-        }
-
-        try
-        {
-            var dataType = GetSelectedDataType();
-            var message = await _dashboardService.WriteAddressAsync(
-                dashboard.CurrentInspection.ProcessId,
-                AddressTextBox.Text,
-                dataType,
-                ValueTextBox.Text);
-
-            DataContext = dashboard with
-            {
-                CurrentInspection = dashboard.CurrentInspection with
-                {
-                    LastWriteMessage = message,
-                    StatusMessage = message
-                },
-                StatusMessage = message
-            };
-        }
-        catch (Exception exception)
-        {
-            DataContext = dashboard with { StatusMessage = exception.Message };
-        }
-    }
-
-    private MemoryDataType GetSelectedDataType() =>
-        TypeComboBox.SelectedItem is MemoryDataType dataType ? dataType : MemoryDataType.Int32;
-
-    private MemoryDataType GetScanDataType() =>
-        ScanDataTypeComboBox.SelectedItem is MemoryDataType dataType ? dataType : MemoryDataType.Int32;
-
-    private ScanType GetScanType() =>
-        ScanTypeComboBox.SelectedItem is ScanType scanType ? scanType : ScanType.ExactValue;
-
     private void OnTypeComboBoxLoaded(object sender, RoutedEventArgs e)
     {
         TypeComboBox.ItemsSource = Enum.GetValues<MemoryDataType>();
@@ -576,150 +491,6 @@ public partial class MainWindow : Window
     {
         ToolbarScanType.ItemsSource = Enum.GetValues<MemoryDataType>();
         ToolbarScanType.SelectedItem = MemoryDataType.Int32;
-    }
-
-    private bool _syncingToolbar;
-
-    private void ToolbarScanValue_Changed(object sender, TextChangedEventArgs e)
-    {
-        if (_syncingToolbar) return;
-        _syncingToolbar = true;
-        ScanValueTextBox.Text = ToolbarScanValue.Text;
-        _syncingToolbar = false;
-    }
-
-    private void ToolbarScanType_Changed(object sender, SelectionChangedEventArgs e)
-    {
-        if (_syncingToolbar || ToolbarScanType.SelectedItem is not MemoryDataType dt) return;
-        _syncingToolbar = true;
-        ScanDataTypeComboBox.SelectedItem = dt;
-        _syncingToolbar = false;
-    }
-
-    private async void StartNewScan(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-        {
-            if (DataContext is WorkspaceDashboard db)
-            {
-                DataContext = db with { StatusMessage = "Select and inspect a process before scanning." };
-            }
-
-            return;
-        }
-
-        try
-        {
-            _scanService.ResetScan();
-            DataContext = dashboard with { ScanStatus = "Scanning...", ScanDetails = "Initial scan in progress.", ScanResults = null };
-
-            var overview = await _scanService.StartScanAsync(
-                dashboard.CurrentInspection.ProcessId,
-                GetScanDataType(),
-                GetScanType(),
-                ScanValueTextBox.Text);
-
-            DataContext = (DataContext as WorkspaceDashboard ?? dashboard) with
-            {
-                ScanResults = overview.Results,
-                ScanStatus = $"{overview.ResultCount:N0} results found",
-                ScanDetails = $"Scanned {overview.TotalRegionsScanned} regions ({overview.TotalBytesScanned}), type={overview.DataType}, scan={overview.ScanType}",
-                StatusMessage = $"Scan complete: {overview.ResultCount:N0} results across {overview.TotalRegionsScanned} regions."
-            };
-        }
-        catch (Exception exception)
-        {
-            DataContext = dashboard with { StatusMessage = $"Scan failed: {exception.Message}", ScanStatus = "Scan failed" };
-        }
-    }
-
-    private async void RefineScan(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-        {
-            return;
-        }
-
-        if (_scanService.LastScanResults is null)
-        {
-            DataContext = dashboard with { StatusMessage = "No active scan to refine. Start a new scan first." };
-            return;
-        }
-
-        try
-        {
-            DataContext = dashboard with { ScanStatus = "Refining...", ScanDetails = "Next scan in progress." };
-
-            var overview = await _scanService.RefineScanAsync(
-                GetScanType(),
-                ScanValueTextBox.Text);
-
-            DataContext = (DataContext as WorkspaceDashboard ?? dashboard) with
-            {
-                ScanResults = overview.Results,
-                ScanStatus = $"{overview.ResultCount:N0} results remaining",
-                ScanDetails = $"Refined with {overview.ScanType}, type={overview.DataType}",
-                StatusMessage = $"Refinement complete: {overview.ResultCount:N0} results remaining."
-            };
-        }
-        catch (Exception exception)
-        {
-            DataContext = dashboard with { StatusMessage = $"Refinement failed: {exception.Message}" };
-        }
-    }
-
-    private void ResetScan(object sender, RoutedEventArgs e)
-    {
-        _scanService.ResetScan();
-        if (DataContext is WorkspaceDashboard dashboard)
-        {
-            DataContext = dashboard with
-            {
-                ScanResults = null,
-                ScanStatus = null,
-                ScanDetails = null,
-                StatusMessage = "Scan reset. Ready for a new scan."
-            };
-        }
-    }
-
-    private void AddSelectedScanResultToTable(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard)
-        {
-            return;
-        }
-
-        if (ScanResultsList.SelectedItem is not ScanResultOverview selected)
-        {
-            DataContext = dashboard with { StatusMessage = "Select a scan result to add to the address table." };
-            return;
-        }
-
-        _addressTableService.AddFromScanResult(selected, GetScanDataType());
-        DataContext = dashboard with
-        {
-            AddressTableNodes = _addressTableService.Roots,
-            AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
-            StatusMessage = $"Added {selected.Address} to address table."
-        };
-    }
-
-    private void AddManualToTable(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection?.ManualProbe is null)
-        {
-            return;
-        }
-
-        var probe = dashboard.CurrentInspection.ManualProbe;
-        _addressTableService.AddEntry(probe.Address, GetSelectedDataType(), probe.DisplayValue);
-        DataContext = dashboard with
-        {
-            AddressTableNodes = _addressTableService.Roots,
-            AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
-            StatusMessage = $"Added {probe.Address} to address table."
-        };
     }
 
     private async void RefreshAddressTable(object sender, RoutedEventArgs e)
@@ -786,36 +557,6 @@ public partial class MainWindow : Window
             AddressTableNodes = _addressTableService.Roots,
             StatusMessage = $"Toggled lock on {selected.Label}."
         };
-    }
-
-    private async void DisassembleAtAddress(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-        {
-            if (DataContext is WorkspaceDashboard db)
-            {
-                DataContext = db with { StatusMessage = "Inspect a process before disassembling." };
-            }
-
-            return;
-        }
-
-        try
-        {
-            var overview = await _disassemblyService.DisassembleAtAsync(
-                dashboard.CurrentInspection.ProcessId,
-                DisasmAddressTextBox.Text);
-
-            DataContext = dashboard with
-            {
-                Disassembly = overview,
-                StatusMessage = overview.Summary
-            };
-        }
-        catch (Exception exception)
-        {
-            DataContext = dashboard with { StatusMessage = $"Disassembly failed: {exception.Message}" };
-        }
     }
 
     // ─── AI Operator ───────────────────────────────────────────────────────
@@ -1819,8 +1560,8 @@ public partial class MainWindow : Window
             try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
         }
 
-        DisasmAddressTextBox.Text = $"0x{addr:X}";
-        DisassembleAtAddress(sender, e);
+        _inspectionVm.DisassemblyAddress = $"0x{addr:X}";
+        _inspectionVm.DisassembleAtAddressCommand.Execute(null);
     }
 
     private async void CtxFindWhatWrites(object sender, RoutedEventArgs e)
@@ -2787,32 +2528,13 @@ public partial class MainWindow : Window
     private void OnBpTypeComboBoxLoaded(object sender, RoutedEventArgs e)
     {
         var combo = (System.Windows.Controls.ComboBox)sender;
-        combo.ItemsSource = Enum.GetNames<BreakpointType>();
-        combo.SelectedIndex = 0;
-    }
-
-    private async void SetBreakpoint(object sender, RoutedEventArgs e)
-    {
-        var dashboard = DataContext as WorkspaceDashboard;
-        if (dashboard?.CurrentInspection is null) return;
-        try
-        {
-            var type = Enum.Parse<BreakpointType>(BpTypeComboBox.SelectedItem?.ToString() ?? "Software");
-            var bp = await _breakpointService.SetBreakpointAsync(
-                dashboard.CurrentInspection.ProcessId,
-                BpAddressTextBox.Text,
-                type);
-            DataContext = dashboard with { BreakpointStatus = $"Breakpoint {bp.Id} set at {bp.Address}" };
-            _breakpointsVm.RefreshBreakpointsCommand.Execute(null);
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with { StatusMessage = $"Breakpoint error: {ex.Message}" };
-        }
+        combo.ItemsSource = Enum.GetValues<BreakpointType>();
+        combo.SelectedItem = BreakpointType.Software;
     }
 
     // Breakpoint list/hit log/remove moved to dedicated Breakpoints bottom tab (Phase 2).
     // Set BP controls remain in Inspection panel for inline use.
+    // SetBreakpoint moved to InspectionViewModel (Phase 2.5).
 
     // ── Drag and Drop: Sources ──
 

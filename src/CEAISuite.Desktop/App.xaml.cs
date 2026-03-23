@@ -151,6 +151,11 @@ public partial class App : System.Windows.Application
         services.AddTransient<BreakpointsViewModel>();
         services.AddTransient<ScriptsViewModel>();
 
+        // ── Phase 2.5 panel ViewModels ──
+        services.AddTransient<ScannerViewModel>();
+        services.AddTransient<ProcessListViewModel>();
+        services.AddTransient<InspectionViewModel>();
+
         // ── MainWindow ──
         services.AddSingleton<MainWindow>();
     }

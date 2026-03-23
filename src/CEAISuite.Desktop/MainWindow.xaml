@@ -220,7 +220,7 @@
 
                     <!-- Center panels -->
                     <avalonDock:LayoutPanel Orientation="Vertical" DockWidth="*">
-                        <avalonDock:LayoutDocumentPane DockHeight="55*">
+                        <avalonDock:LayoutDocumentPane DockHeight="40*">
                             <avalonDock:LayoutDocument Title="Address Table" ContentId="addressTable">
                                 <DockPanel Background="{DynamicResource SidebarBackground}">
                                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
@@ -449,7 +449,7 @@
                             </avalonDock:LayoutDocument>
                         </avalonDock:LayoutDocumentPane>
 
-                        <avalonDock:LayoutAnchorablePane DockHeight="45*">
+                        <avalonDock:LayoutAnchorablePane DockHeight="60*" DockMinHeight="200">
                             <avalonDock:LayoutAnchorable Title="Scanner" ContentId="scanner">
                                 <Grid Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>

@@ -86,7 +86,7 @@ public partial class MainWindow : Window
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 8; // v8 = 40*/60* top/bottom with DockMinHeight to prevent collapse
+    private const int LayoutVersion = 9; // v9 = 2*/3* with DockMinHeight=300 to fight DocumentPane priority
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

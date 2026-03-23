@@ -86,7 +86,7 @@ public partial class MainWindow : Window
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 5; // v5 = match actual saved layout: 23* top, 472px fixed bottom
+    private const int LayoutVersion = 6; // v6 = proportional 40*/60* top/bottom (resolution-independent)
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

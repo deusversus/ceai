@@ -54,6 +54,20 @@ public sealed class TokenLimits
     /// <summary>Max snapshots compared in CompareSnapshots.</summary>
     public int MaxSnapshotDiffEntries { get; init; } = 50;
 
+    // ── Compaction pipeline ──
+
+    /// <summary>Collapse old tool-call groups after this many messages.</summary>
+    public int CompactionToolResultMessages { get; init; } = 12;
+
+    /// <summary>LLM-powered summarization when token count exceeds this.</summary>
+    public int CompactionSummarizationTokens { get; init; } = 32_000;
+
+    /// <summary>Sliding window: keep most recent N user turns.</summary>
+    public int CompactionSlidingWindowTurns { get; init; } = 15;
+
+    /// <summary>Emergency truncation backstop token threshold.</summary>
+    public int CompactionTruncationTokens { get; init; } = 64_000;
+
     // ── Presets ──
 
     public static TokenLimits Saving => new()
@@ -79,6 +93,10 @@ public sealed class TokenLimits
         MaxInspectModules = 20,
         MaxListProcesses = 20,
         MaxSnapshotDiffEntries = 25,
+        CompactionToolResultMessages = 8,
+        CompactionSummarizationTokens = 16_000,
+        CompactionSlidingWindowTurns = 8,
+        CompactionTruncationTokens = 32_000,
     };
 
     public static TokenLimits Balanced => new()
@@ -104,6 +122,10 @@ public sealed class TokenLimits
         MaxInspectModules = 40,
         MaxListProcesses = 30,
         MaxSnapshotDiffEntries = 50,
+        CompactionToolResultMessages = 12,
+        CompactionSummarizationTokens = 32_000,
+        CompactionSlidingWindowTurns = 15,
+        CompactionTruncationTokens = 64_000,
     };
 
     public static TokenLimits Performance => new()
@@ -129,6 +151,10 @@ public sealed class TokenLimits
         MaxInspectModules = 80,
         MaxListProcesses = 50,
         MaxSnapshotDiffEntries = 100,
+        CompactionToolResultMessages = 20,
+        CompactionSummarizationTokens = 64_000,
+        CompactionSlidingWindowTurns = 30,
+        CompactionTruncationTokens = 120_000,
     };
 
     /// <summary>
@@ -168,6 +194,10 @@ public sealed class TokenLimits
             MaxInspectModules = profile.MaxInspectModules,
             MaxListProcesses = profile.MaxListProcesses,
             MaxSnapshotDiffEntries = profile.MaxSnapshotDiffEntries,
+            CompactionToolResultMessages = profile.CompactionToolResultMessages,
+            CompactionSummarizationTokens = profile.CompactionSummarizationTokens,
+            CompactionSlidingWindowTurns = profile.CompactionSlidingWindowTurns,
+            CompactionTruncationTokens = profile.CompactionTruncationTokens,
         };
     }
 

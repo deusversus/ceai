@@ -95,10 +95,11 @@ public partial class MainWindow : Window
     private readonly ScannerViewModel _scannerVm;
     private readonly ProcessListViewModel _processListVm;
     private readonly InspectionViewModel _inspectionVm;
+    private readonly AddressTableViewModel _addressTableVm;
     private readonly List<AttachmentChip> _attachments = new();
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private readonly Dictionary<string, object> _xamlPanelContent = new();
-    private System.Windows.Threading.DispatcherTimer? _refreshTimer;
+    // _refreshTimer moved to AddressTableViewModel
     private CancellationTokenSource? _streamingCts;
     private bool _isStreaming;
 
@@ -146,7 +147,8 @@ public partial class MainWindow : Window
         ScriptsViewModel scriptsVm,
         ScannerViewModel scannerVm,
         ProcessListViewModel processListVm,
-        InspectionViewModel inspectionVm)
+        InspectionViewModel inspectionVm,
+        AddressTableViewModel addressTableVm)
     {
         InitializeComponent();
         _databasePath = Path.Combine(
@@ -192,6 +194,7 @@ public partial class MainWindow : Window
         _scannerVm = scannerVm;
         _processListVm = processListVm;
         _inspectionVm = inspectionVm;
+        _addressTableVm = addressTableVm;
 
         // Apply saved theme
         var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)
@@ -256,6 +259,31 @@ public partial class MainWindow : Window
         ScannerContent.DataContext = _scannerVm;
         ProcessesContent.DataContext = _processListVm;
         InspectionContent.DataContext = _inspectionVm;
+        AddressTableContent.DataContext = _addressTableVm;
+
+        // Subscribe to AddressTableViewModel navigation events
+        _addressTableVm.NavigateToMemoryBrowser += addr =>
+        {
+            if (DataContext is WorkspaceDashboard dashboard && dashboard.CurrentInspection is not null)
+            {
+                MemoryBrowserTab.AttachProcess(_engineFacade,
+                    dashboard.CurrentInspection.ProcessId,
+                    dashboard.CurrentInspection.ProcessName);
+                ActivateDocument("memoryBrowser");
+                if (addr != nuint.Zero)
+                    _ = MemoryBrowserTab.NavigateToAddress(addr);
+            }
+        };
+        _addressTableVm.NavigateToDisassembly += addrStr =>
+        {
+            _inspectionVm.DisassemblyAddress = addrStr;
+            _inspectionVm.DisassembleAtAddressCommand.Execute(null);
+        };
+        _addressTableVm.PopulateFindResults += (items, desc) =>
+        {
+            PopulateFindResults(items, desc);
+            ActivateAnchorable("findResults");
+        };
 
         // Refresh chat switcher when chats change
         _aiOperatorService.ChatListChanged += () =>
@@ -275,8 +303,10 @@ public partial class MainWindow : Window
         {
             Dispatcher.Invoke(() =>
             {
-                if (_refreshTimer is not null)
-                    _refreshTimer.Interval = TimeSpan.FromMilliseconds(_appSettingsService.Settings.RefreshIntervalMs);
+                _addressTableVm.SetRefreshInterval(
+                    _appSettingsService.Settings.RefreshIntervalMs > 0
+                        ? _appSettingsService.Settings.RefreshIntervalMs
+                        : 500);
 
                 // Hot-swap AI provider when settings change
                 try
@@ -380,7 +410,7 @@ public partial class MainWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         SaveLayout();
-        _refreshTimer?.Stop();
+        _addressTableVm.StopAutoRefresh();
         _hotkeyService.Dispose();
         _aiOperatorService.SaveCurrentChat();
         base.OnClosed(e);
@@ -441,32 +471,9 @@ public partial class MainWindow : Window
 
     private void StartAutoRefresh()
     {
-        _refreshTimer?.Stop();
-        _refreshTimer = new System.Windows.Threading.DispatcherTimer
-        {
-            Interval = TimeSpan.FromMilliseconds(500)
-        };
-        _refreshTimer.Tick += async (_, _) =>
-        {
-            if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
-            if (_addressTableService.Roots.Count == 0) return;
-            try
-            {
-                _refreshTimer!.Stop(); // pause during refresh
-                await _addressTableService.RefreshAllAsync(dashboard.CurrentInspection.ProcessId);
-                DataContext = dashboard with
-                {
-                    AddressTableNodes = _addressTableService.Roots,
-                    AddressTableStatus = $"{_addressTableService.Entries.Count} entries (live)"
-                };
-            }
-            catch { /* non-fatal */ }
-            finally
-            {
-                _refreshTimer?.Start(); // resume
-            }
-        };
-        _refreshTimer.Start();
+        _addressTableVm.StartAutoRefresh(_appSettingsService.Settings.RefreshIntervalMs > 0
+            ? _appSettingsService.Settings.RefreshIntervalMs
+            : 500);
     }
 
     private void OnTypeComboBoxLoaded(object sender, RoutedEventArgs e)
@@ -493,71 +500,7 @@ public partial class MainWindow : Window
         ToolbarScanType.SelectedItem = MemoryDataType.Int32;
     }
 
-    private async void RefreshAddressTable(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-        {
-            return;
-        }
-
-        try
-        {
-            await _addressTableService.RefreshAllAsync(dashboard.CurrentInspection.ProcessId);
-            DataContext = dashboard with
-            {
-                AddressTableNodes = _addressTableService.Roots,
-                AddressTableStatus = $"{_addressTableService.Entries.Count} entries (refreshed)",
-                StatusMessage = "Address table refreshed."
-            };
-        }
-        catch (Exception exception)
-        {
-            DataContext = dashboard with { StatusMessage = $"Refresh failed: {exception.Message}" };
-        }
-    }
-
-    private void RemoveSelectedAddress(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard)
-        {
-            return;
-        }
-
-        if (AddressTableTree.SelectedItem is not AddressTableNode selected)
-        {
-            DataContext = dashboard with { StatusMessage = "Select an address to remove." };
-            return;
-        }
-
-        _addressTableService.RemoveEntry(selected.Id);
-        DataContext = dashboard with
-        {
-            AddressTableNodes = _addressTableService.Roots,
-            AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
-            StatusMessage = $"Removed {selected.Label} from address table."
-        };
-    }
-
-    private void ToggleLockAddress(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard)
-        {
-            return;
-        }
-
-        if (AddressTableTree.SelectedItem is not AddressTableNode selected)
-        {
-            DataContext = dashboard with { StatusMessage = "Select an address to toggle lock." };
-            return;
-        }
-
-        _addressTableService.ToggleLock(selected.Id);
-        DataContext = dashboard with
-        {
-            AddressTableNodes = _addressTableService.Roots,
-            StatusMessage = $"Toggled lock on {selected.Label}."
-        };
-    }
+    // RefreshAddressTable, RemoveSelectedAddress, ToggleLockAddress → AddressTableViewModel commands
 
     // ─── AI Operator ───────────────────────────────────────────────────────
 
@@ -1141,98 +1084,14 @@ public partial class MainWindow : Window
         AiChatTitleText.Text = _aiOperatorService.CurrentChatTitle;
     }
 
-    // ─── Address Table Export / Import / Trainer ────────────────────────
+    // ─── Address Table Export / Import / Trainer → AddressTableViewModel commands ──
 
-    private void ExportAddressTable(object sender, RoutedEventArgs e)
+    // ─── Address Table thin wrappers (logic in AddressTableViewModel) ──
+
+    private void SyncAddressTableSelection()
     {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-        var entries = _addressTableService.Entries;
-        if (entries.Count == 0)
-        {
-            DataContext = dashboard with { StatusMessage = "No entries to export." };
-            return;
-        }
-
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Filter = "JSON files|*.json",
-            FileName = "address_table.json"
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            var json = _addressTableExportService.ExportToJson(entries.ToArray());
-            File.WriteAllText(dialog.FileName, json);
-            DataContext = dashboard with { StatusMessage = $"Exported {entries.Count} entries to {dialog.FileName}" };
-        }
+        _addressTableVm.SelectedNode = AddressTableTree.SelectedItem as AddressTableNode;
     }
-
-    private void ImportAddressTable(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Filter = "JSON files|*.json"
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            try
-            {
-                var json = File.ReadAllText(dialog.FileName);
-                var imported = _addressTableExportService.ImportFromJson(json);
-                foreach (var entry in imported)
-                {
-                    _addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
-                }
-
-                DataContext = dashboard with
-                {
-                    AddressTableNodes = _addressTableService.Roots,
-                    AddressTableStatus = $"{_addressTableService.Entries.Count} entries",
-                    StatusMessage = $"Imported {imported.Count} entries from {Path.GetFileName(dialog.FileName)}"
-                };
-            }
-            catch (Exception ex)
-            {
-                DataContext = dashboard with { StatusMessage = $"Import failed: {ex.Message}" };
-            }
-        }
-    }
-
-    private void GenerateTrainerScript(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-        var entries = _addressTableService.Entries;
-        var lockedEntries = entries.Where(x => x.IsLocked).ToArray();
-
-        if (lockedEntries.Length == 0)
-        {
-            DataContext = dashboard with { StatusMessage = "No locked entries to generate trainer from. Lock some addresses first." };
-            return;
-        }
-
-        var processName = dashboard.CurrentInspection?.ProcessName ?? "Unknown";
-        var script = _scriptGenerationService.GenerateTrainerScript(lockedEntries, processName);
-
-        var dialog = new Microsoft.Win32.SaveFileDialog
-        {
-            Filter = "C# files|*.cs",
-            FileName = $"Trainer_{processName.Replace(".exe", "")}.cs"
-        };
-
-        if (dialog.ShowDialog() == true)
-        {
-            File.WriteAllText(dialog.FileName, script);
-            DataContext = dashboard with { StatusMessage = $"Trainer script saved to {dialog.FileName}" };
-        }
-    }
-
-    // ─── Address Table Context Menu & Editing (CE 7.5 style) ─────────
-
-    private AddressTableNode? GetSelectedNode()
-        => AddressTableTree.SelectedItem as AddressTableNode;
 
     private void RefreshAddressTableUI(string? statusMessage = null)
     {
@@ -1249,157 +1108,62 @@ public partial class MainWindow : Window
     {
         if (sender is not System.Windows.Controls.CheckBox cb ||
             cb.DataContext is not AddressTableNode node) return;
-
-        if (node.IsScriptEntry)
-        {
-            // Actually execute/disable the script via the AA engine
-            if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null)
-            {
-                node.IsScriptEnabled = false; // revert — can't run without attached process
-                if (DataContext is WorkspaceDashboard d)
-                    DataContext = d with { StatusMessage = "Attach to a process before toggling scripts." };
-                return;
-            }
-
-            if (_autoAssemblerEngine is null)
-            {
-                node.IsScriptEnabled = false;
-                return;
-            }
-
-            try
-            {
-                if (node.IsScriptEnabled)
-                {
-                    var result = await _autoAssemblerEngine.EnableAsync(
-                        dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
-                    if (!result.Success)
-                    {
-                        node.IsScriptEnabled = false;
-                        node.ScriptStatus = $"FAILED: {result.Error}";
-                    }
-                    else
-                    {
-                        node.ScriptStatus = $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)";
-                    }
-                }
-                else
-                {
-                    var result = await _autoAssemblerEngine.DisableAsync(
-                        dashboard.CurrentInspection.ProcessId, node.AssemblerScript!);
-                    node.ScriptStatus = result.Success ? "Disabled" : $"Disable failed: {result.Error}";
-                }
-
-                DataContext = dashboard with
-                {
-                    StatusMessage = $"Script '{node.Label}': {node.ScriptStatus}"
-                };
-            }
-            catch (Exception ex)
-            {
-                node.IsScriptEnabled = false;
-                node.ScriptStatus = $"Error: {ex.Message}";
-                DataContext = dashboard with { StatusMessage = $"Script error: {ex.Message}" };
-            }
-        }
-        else
-        {
-            // Value entry: toggle freeze and capture current value
-            node.LockedValue = node.IsLocked ? node.CurrentValue : null;
-        }
+        await _addressTableVm.HandleActiveCheckBoxClickAsync(node);
     }
 
     private void AddressTableTree_MouseDoubleClick(object sender, MouseButtonEventArgs e)
     {
-        var node = GetSelectedNode();
-        if (node is null) return;
-
-        // Determine which column was clicked via hit-test position
-        // CE behavior: double-click description = edit desc, value = edit value, address = edit addr
-        // For simplicity: non-group, non-script → edit value; script → view script
-        if (node.IsScriptEntry)
-        {
-            ViewSelectedScript(sender, e);
-            return;
-        }
-        if (node.IsGroup) return;
-
-        // Edit value dialog
-        EditNodeValue(node);
-    }
-
-    private void EditNodeValue(AddressTableNode node)
-    {
-        var result = ShowInputDialog("Change Value", "New value:", node.CurrentValue);
-        if (result is null) return;
-
-        node.PreviousValue = node.CurrentValue;
-        node.CurrentValue = result;
-        if (node.IsLocked) node.LockedValue = result;
-
-        // Attempt write if attached
-        if (DataContext is WorkspaceDashboard dashboard && dashboard.CurrentInspection is not null)
-        {
-            try
-            {
-                var addr = AddressTableService.ParseAddress(node.Address);
-                _ = _addressTableService.WriteValueAsync(
-                    dashboard.CurrentInspection.ProcessId, node);
-            }
-            catch { /* best effort */ }
-        }
-
-        RefreshAddressTableUI($"Value changed: {node.Label} = {result}");
+        SyncAddressTableSelection();
+        _addressTableVm.EditSelectedNode();
     }
 
     private void AddressTableTree_KeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
-        var node = GetSelectedNode();
-        if (node is null) return;
+        SyncAddressTableSelection();
+        if (_addressTableVm.SelectedNode is null) return;
 
         switch (e.Key)
         {
             case System.Windows.Input.Key.Delete:
-                CtxDelete(sender, e);
+                _addressTableVm.DeleteCommand.Execute(null);
                 e.Handled = true;
                 break;
             case System.Windows.Input.Key.Space:
-                CtxToggleActivate(sender, e);
+                _addressTableVm.ToggleActivateCommand.Execute(null);
                 e.Handled = true;
                 break;
             case System.Windows.Input.Key.F2:
-                CtxChangeDescription(sender, e);
+                _addressTableVm.ChangeDescriptionCommand.Execute(null);
                 e.Handled = true;
                 break;
-            case System.Windows.Input.Key.Enter when !node.IsGroup && !node.IsScriptEntry:
-                EditNodeValue(node);
+            case System.Windows.Input.Key.Enter when !_addressTableVm.SelectedNode.IsGroup && !_addressTableVm.SelectedNode.IsScriptEntry:
+                _addressTableVm.EditNodeValue(_addressTableVm.SelectedNode);
                 e.Handled = true;
                 break;
             case System.Windows.Input.Key.F5:
-                RefreshAddressTable(sender, e);
+                _addressTableVm.RefreshCommand.Execute(null);
                 e.Handled = true;
                 break;
         }
 
-        // Ctrl shortcuts
         if (Keyboard.Modifiers == ModifierKeys.Control)
         {
             switch (e.Key)
             {
                 case System.Windows.Input.Key.C:
-                    CtxCopy(sender, e);
+                    _addressTableVm.CopyCommand.Execute(null);
                     e.Handled = true;
                     break;
                 case System.Windows.Input.Key.X:
-                    CtxCut(sender, e);
+                    _addressTableVm.CutCommand.Execute(null);
                     e.Handled = true;
                     break;
                 case System.Windows.Input.Key.V:
-                    CtxPaste(sender, e);
+                    _addressTableVm.PasteCommand.Execute(null);
                     e.Handled = true;
                     break;
                 case System.Windows.Input.Key.F:
-                    CtxToggleFreeze(sender, e);
+                    _addressTableVm.ToggleFreezeCommand.Execute(null);
                     e.Handled = true;
                     break;
                 case System.Windows.Input.Key.Z:
@@ -1414,27 +1178,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void CtxToggleActivate(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null) return;
-        node.IsActive = !node.IsActive;
-        if (!node.IsScriptEntry)
-            node.LockedValue = node.IsLocked ? node.CurrentValue : null;
-        RefreshAddressTableUI($"{node.Label}: {(node.IsActive ? "Activated" : "Deactivated")}");
-    }
-
-    private void CtxChangeDescription(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null) return;
-        var result = ShowInputDialog("Change Description", "New description:", node.Label);
-        if (result is not null)
-        {
-            _addressTableService.UpdateLabel(node.Id, result);
-            RefreshAddressTableUI($"Renamed to '{result}'");
-        }
-    }
+    // Ctx* context menu handlers → delegated to AddressTableViewModel via XAML Command bindings
 
     private async Task PerformUndoAsync()
     {
@@ -1448,646 +1192,8 @@ public partial class MainWindow : Window
         RefreshAddressTableUI(msg);
     }
 
-    private void CtxChangeAddress(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        var result = ShowInputDialog("Change Address", "New address (hex):", node.Address);
-        if (result is not null)
-        {
-            node.Address = result;
-            RefreshAddressTableUI($"Address changed: {node.Label} → {result}");
-        }
-    }
-
-    private void CtxChangeValue(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        EditNodeValue(node);
-    }
-
-    private void CtxChangeType(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-
-        var typeDialog = new System.Windows.Window
-        {
-            Title = "Change Type",
-            Width = 260,
-            Height = 180,
-            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-            Owner = this,
-            ResizeMode = System.Windows.ResizeMode.NoResize
-        };
-        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = "Select data type:" });
-        var combo = new System.Windows.Controls.ComboBox { Margin = new Thickness(0, 6, 0, 8) };
-        foreach (var t in Enum.GetValues<MemoryDataType>())
-            combo.Items.Add(t.ToString());
-        combo.SelectedItem = node.DataType.ToString();
-        panel.Children.Add(combo);
-        var okBtn = new System.Windows.Controls.Button
-        {
-            Content = "OK",
-            Padding = new Thickness(16, 4, 16, 4),
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
-        };
-        okBtn.Click += (_, _) => { typeDialog.DialogResult = true; };
-        panel.Children.Add(okBtn);
-        typeDialog.Content = panel;
-
-        if (typeDialog.ShowDialog() == true && combo.SelectedItem is string selected)
-        {
-            node.DataType = Enum.Parse<MemoryDataType>(selected);
-            RefreshAddressTableUI($"Type changed: {node.Label} → {selected}");
-        }
-    }
-
-    private void CtxToggleFreeze(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        _addressTableService.ToggleLock(node.Id);
-        RefreshAddressTableUI($"{node.Label}: {(node.IsLocked ? "Frozen" : "Unfrozen")}");
-    }
-
-    private void CtxShowAsHex(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        // Toggle hex display in notes
-        if (node.Notes?.Contains("[HEX]") == true)
-        {
-            node.Notes = node.Notes.Replace("[HEX] ", "");
-        }
-        else
-        {
-            node.Notes = $"[HEX] {node.Notes ?? ""}".Trim();
-        }
-        RefreshAddressTableUI();
-    }
-
-    private async void CtxBrowseMemory(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
-
-        var addr = node.ResolvedAddress ?? nuint.Zero;
-        if (addr == nuint.Zero)
-        {
-            try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
-        }
-
-        MemoryBrowserTab.AttachProcess(_engineFacade,
-            dashboard.CurrentInspection.ProcessId,
-            dashboard.CurrentInspection.ProcessName);
-        ActivateDocument("memoryBrowser");
-        if (addr != nuint.Zero)
-            await MemoryBrowserTab.NavigateToAddress(addr);
-    }
-
-    private void CtxDisassemble(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-
-        var addr = node.ResolvedAddress ?? nuint.Zero;
-        if (addr == nuint.Zero)
-        {
-            try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
-        }
-
-        _inspectionVm.DisassemblyAddress = $"0x{addr:X}";
-        _inspectionVm.DisassembleAtAddressCommand.Execute(null);
-    }
-
-    private async void CtxFindWhatWrites(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null || node.IsGroup || node.IsScriptEntry) return;
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
-
-        var addr = node.ResolvedAddress ?? nuint.Zero;
-        if (addr == nuint.Zero)
-        {
-            try { addr = AddressTableService.ParseAddress(node.Address); } catch { }
-        }
-
-        if (addr == nuint.Zero) return;
-
-        var pid = dashboard.CurrentInspection.ProcessId;
-
-        try
-        {
-            var bp = await _breakpointService.SetBreakpointAsync(
-                pid,
-                $"0x{addr:X}",
-                BreakpointType.HardwareWrite,
-                BreakpointHitAction.LogAndContinue);
-
-            _lastWriteBreakpointId = bp.Id;
-
-            DataContext = dashboard with
-            {
-                StatusMessage = $"Breakpoint set on {node.Label} (0x{addr:X}). Trigger a write in-game, then right-click → 'View Write Log'."
-            };
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with
-            {
-                StatusMessage = $"Failed to set write breakpoint: {ex.Message}"
-            };
-        }
-    }
-
-    private async void CtxViewWriteLog(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard || dashboard.CurrentInspection is null) return;
-
-        if (string.IsNullOrEmpty(_lastWriteBreakpointId))
-        {
-            DataContext = dashboard with
-            {
-                StatusMessage = "No write breakpoint active. Use 'Find What Writes to This Address' first."
-            };
-            return;
-        }
-
-        try
-        {
-            var hits = await _breakpointService.GetHitLogAsync(_lastWriteBreakpointId);
-
-            if (hits.Count == 0)
-            {
-                DataContext = dashboard with
-                {
-                    StatusMessage = "No writes detected yet. Trigger a write in-game and try again."
-                };
-                return;
-            }
-
-            var pid = dashboard.CurrentInspection.ProcessId;
-            var results = new List<FindResultDisplayItem>();
-
-            foreach (var hit in hits)
-            {
-                string instruction = "(disassembly unavailable)";
-                try
-                {
-                    var disasm = await _disassemblyService.DisassembleAtAsync(pid, hit.Address, 1);
-                    if (disasm.Lines.Count > 0)
-                    {
-                        var instr = disasm.Lines[0];
-                        instruction = $"{instr.Mnemonic} {instr.Operands}";
-                    }
-                }
-                catch { /* disassembly unavailable */ }
-
-                var context = hit.Registers.Count > 0
-                    ? string.Join("  ", hit.Registers.Take(6).Select(r => $"{r.Key}={r.Value}"))
-                    : "";
-
-                results.Add(new FindResultDisplayItem
-                {
-                    Address = hit.Address,
-                    Instruction = instruction,
-                    Module = $"TID={hit.ThreadId}",
-                    Context = context
-                });
-            }
-
-            PopulateFindResults(results, $"Write log — BP {_lastWriteBreakpointId}");
-
-            // Activate the Find Results tab
-            ActivateAnchorable("findResults");
-
-            DataContext = dashboard with
-            {
-                StatusMessage = $"Found {hits.Count} write hit(s) — see Find Results tab."
-            };
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with
-            {
-                StatusMessage = $"Failed to retrieve write log: {ex.Message}"
-            };
-        }
-    }
-
-    private void CtxMoveToGroup(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null) return;
-
-        var groups = new List<AddressTableNode>();
-        CollectGroups(_addressTableService.Roots, groups);
-
-        if (groups.Count == 0)
-        {
-            if (DataContext is WorkspaceDashboard d)
-                DataContext = d with { StatusMessage = "No groups exist. Create a group first." };
-            return;
-        }
-
-        var dialog = new System.Windows.Window
-        {
-            Title = "Move to Group",
-            Width = 300,
-            Height = 160,
-            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-            Owner = this,
-            ResizeMode = System.Windows.ResizeMode.NoResize
-        };
-        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = "Select target group:" });
-        var combo = new System.Windows.Controls.ComboBox { Margin = new Thickness(0, 6, 0, 8) };
-        combo.Items.Add("(Root level)");
-        foreach (var g in groups) combo.Items.Add(g.Label);
-        combo.SelectedIndex = 0;
-        panel.Children.Add(combo);
-        var okBtn = new System.Windows.Controls.Button
-        {
-            Content = "Move",
-            Padding = new Thickness(16, 4, 16, 4),
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
-        };
-        okBtn.Click += (_, _) => { dialog.DialogResult = true; };
-        panel.Children.Add(okBtn);
-        dialog.Content = panel;
-
-        if (dialog.ShowDialog() != true) return;
-
-        var targetGroupId = combo.SelectedIndex == 0 ? null : groups[combo.SelectedIndex - 1].Id;
-        _addressTableService.MoveToGroup(node.Id, targetGroupId);
-        RefreshAddressTableUI($"Moved '{node.Label}' to {(targetGroupId is null ? "root" : combo.SelectedItem)}");
-    }
-
-    private static void CollectGroups(
-        System.Collections.ObjectModel.ObservableCollection<AddressTableNode> nodes,
-        List<AddressTableNode> results)
-    {
-        foreach (var n in nodes)
-        {
-            if (n.IsGroup) results.Add(n);
-            CollectGroups(n.Children, results);
-        }
-    }
-
-    private void CtxDelete(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null) return;
-        _addressTableService.RemoveEntry(node.Id);
-        RefreshAddressTableUI($"Deleted '{node.Label}'");
-    }
-
-    private AddressTableNode? _clipboard;
-    private string? _lastWriteBreakpointId;
-
-    private void CtxCut(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null) return;
-        _clipboard = node;
-        _addressTableService.RemoveEntry(node.Id);
-        RefreshAddressTableUI($"Cut '{node.Label}'");
-    }
-
-    private void CtxCopy(object sender, RoutedEventArgs e)
-    {
-        var node = GetSelectedNode();
-        if (node is null) return;
-        _clipboard = node;
-        if (DataContext is WorkspaceDashboard d)
-            DataContext = d with { StatusMessage = $"Copied '{node.Label}'" };
-    }
-
-    private void CtxPaste(object sender, RoutedEventArgs e)
-    {
-        if (_clipboard is null)
-        {
-            if (DataContext is WorkspaceDashboard d)
-                DataContext = d with { StatusMessage = "Nothing to paste." };
-            return;
-        }
-
-        // Clone the node
-        var prefix = _clipboard.IsGroup ? "group" : (_clipboard.AssemblerScript != null ? "script" : "addr");
-        var clone = new AddressTableNode(
-            $"{prefix}-{Guid.NewGuid().ToString("N")[..8]}",
-            _clipboard.Label + " (copy)",
-            _clipboard.IsGroup)
-        {
-            Address = _clipboard.Address,
-            DataType = _clipboard.DataType,
-            CurrentValue = _clipboard.CurrentValue,
-            Notes = _clipboard.Notes,
-            AssemblerScript = _clipboard.AssemblerScript
-        };
-
-        var selected = GetSelectedNode();
-        if (selected?.IsGroup == true)
-        {
-            selected.Children.Add(clone);
-        }
-        else
-        {
-            _addressTableService.Roots.Add(clone);
-        }
-
-        RefreshAddressTableUI($"Pasted '{clone.Label}'");
-    }
-
-    private string? ShowInputDialog(string title, string prompt, string defaultValue)
-    {
-        var dialog = new System.Windows.Window
-        {
-            Title = title,
-            Width = 340,
-            Height = 150,
-            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-            Owner = this,
-            ResizeMode = System.Windows.ResizeMode.NoResize
-        };
-        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = prompt });
-        var textBox = new System.Windows.Controls.TextBox
-        {
-            Text = defaultValue,
-            Margin = new Thickness(0, 6, 0, 8),
-            SelectionStart = 0,
-            SelectionLength = defaultValue.Length
-        };
-        panel.Children.Add(textBox);
-        var okBtn = new System.Windows.Controls.Button
-        {
-            Content = "OK",
-            Padding = new Thickness(16, 4, 16, 4),
-            HorizontalAlignment = System.Windows.HorizontalAlignment.Right
-        };
-        okBtn.Click += (_, _) => { dialog.DialogResult = true; };
-        panel.Children.Add(okBtn);
-        dialog.Content = panel;
-
-        textBox.Focus();
-        return dialog.ShowDialog() == true ? textBox.Text : null;
-    }
-
-    // ─── Address Table Grouping ──────────────────────────────────────
-
-    private void CreateAddressGroup(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-
-        var inputDialog = new System.Windows.Window
-        {
-            Title = "New Group",
-            Width = 320,
-            Height = 140,
-            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-            Owner = this,
-            ResizeMode = System.Windows.ResizeMode.NoResize
-        };
-
-        var panel = new System.Windows.Controls.StackPanel { Margin = new Thickness(12) };
-        panel.Children.Add(new System.Windows.Controls.TextBlock { Text = "Group name:" });
-        var textBox = new System.Windows.Controls.TextBox { Margin = new Thickness(0, 6, 0, 8) };
-        panel.Children.Add(textBox);
-        var okBtn = new System.Windows.Controls.Button { Content = "Create", Padding = new Thickness(16, 4, 16, 4), HorizontalAlignment = System.Windows.HorizontalAlignment.Right };
-        okBtn.Click += (_, _) => { inputDialog.DialogResult = true; };
-        panel.Children.Add(okBtn);
-        inputDialog.Content = panel;
-
-        if (inputDialog.ShowDialog() != true || string.IsNullOrWhiteSpace(textBox.Text)) return;
-
-        _addressTableService.CreateGroup(textBox.Text.Trim());
-        DataContext = dashboard with
-        {
-            AddressTableNodes = _addressTableService.Roots,
-            AddressTableStatus = $"{_addressTableService.Entries.Count} entries in {_addressTableService.Roots.Count} nodes",
-            StatusMessage = $"Created group '{textBox.Text.Trim()}'."
-        };
-    }
-
-    // ─── Script Viewing & Toggling ──────────────────────────────────
-
-    private void ViewSelectedScript(object sender, RoutedEventArgs e)
-    {
-        var selected = AddressTableTree.SelectedItem as AddressTableNode;
-        if (selected?.AssemblerScript is null)
-        {
-            if (DataContext is WorkspaceDashboard d)
-                DataContext = d with { StatusMessage = "Select a script entry first (marked with 📜)." };
-            return;
-        }
-
-        var viewer = new System.Windows.Window
-        {
-            Title = $"Script: {selected.Label}",
-            Width = 720,
-            Height = 520,
-            WindowStartupLocation = System.Windows.WindowStartupLocation.CenterOwner,
-            Owner = this
-        };
-
-        var panel = new System.Windows.Controls.DockPanel();
-
-        var toolbar = new System.Windows.Controls.StackPanel
-        {
-            Orientation = System.Windows.Controls.Orientation.Horizontal,
-            Margin = new Thickness(8)
-        };
-        System.Windows.Controls.DockPanel.SetDock(toolbar, System.Windows.Controls.Dock.Top);
-
-        var statusText = new System.Windows.Controls.TextBlock
-        {
-            VerticalAlignment = System.Windows.VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 0, 0),
-            Text = selected.IsScriptEnabled ? "Status: ✅ Enabled" : "Status: ❌ Disabled",
-            Foreground = selected.IsScriptEnabled
-                ? FindThemeBrush("SuccessForeground")
-                : FindThemeBrush("SecondaryForeground")
-        };
-        toolbar.Children.Add(statusText);
-
-        if (selected.ScriptStatus is not null)
-        {
-            toolbar.Children.Add(new System.Windows.Controls.TextBlock
-            {
-                VerticalAlignment = System.Windows.VerticalAlignment.Center,
-                Margin = new Thickness(12, 0, 0, 0),
-                Text = selected.ScriptStatus,
-                Foreground = FindThemeBrush("ErrorForeground")
-            });
-        }
-
-        panel.Children.Add(toolbar);
-
-        var scriptBox = new System.Windows.Controls.TextBox
-        {
-            Text = selected.AssemblerScript,
-            FontFamily = new System.Windows.Media.FontFamily("Consolas"),
-            FontSize = 13,
-            IsReadOnly = true,
-            AcceptsReturn = true,
-            VerticalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = System.Windows.Controls.ScrollBarVisibility.Auto,
-            Margin = new Thickness(8),
-            Background = FindThemeBrush("InputBackground"),
-            Foreground = FindThemeBrush("SuccessForeground"),
-            Padding = new Thickness(8)
-        };
-        panel.Children.Add(scriptBox);
-
-        viewer.Content = panel;
-        viewer.ShowDialog();
-    }
-
-    private async void ToggleSelectedScript(object sender, RoutedEventArgs e)
-    {
-        var selected = AddressTableTree.SelectedItem as AddressTableNode;
-        if (selected?.AssemblerScript is null)
-        {
-            if (DataContext is WorkspaceDashboard d)
-                DataContext = d with { StatusMessage = "Select a script entry first (marked with 📜)." };
-            return;
-        }
-
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-
-        // Check if we have an attached process
-        var processId = dashboard.CurrentInspection?.ProcessId ?? 0;
-        if (processId == 0)
-        {
-            DataContext = dashboard with { StatusMessage = "Attach to a process before toggling scripts." };
-            return;
-        }
-
-        if (_autoAssemblerEngine is null)
-        {
-            DataContext = dashboard with { StatusMessage = "Auto Assembler engine not available." };
-            return;
-        }
-
-        try
-        {
-            if (selected.IsScriptEnabled)
-            {
-                // Disable
-                var result = await _autoAssemblerEngine.DisableAsync(processId, selected.AssemblerScript);
-                selected.IsScriptEnabled = false;
-                selected.ScriptStatus = result.Success ? "Disabled successfully" : $"Disable failed: {result.Error}";
-            }
-            else
-            {
-                // Enable
-                var result = await _autoAssemblerEngine.EnableAsync(processId, selected.AssemblerScript);
-                selected.IsScriptEnabled = result.Success;
-                selected.ScriptStatus = result.Success
-                    ? $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)"
-                    : $"Enable failed: {result.Error}";
-            }
-
-            DataContext = dashboard with
-            {
-                AddressTableNodes = _addressTableService.Roots,
-                StatusMessage = $"Script '{selected.Label}': {selected.ScriptStatus}"
-            };
-        }
-        catch (Exception ex)
-        {
-            selected.ScriptStatus = $"Error: {ex.Message}";
-            DataContext = dashboard with { StatusMessage = $"Script error: {ex.Message}" };
-        }
-    }
-
-    // ─── Cheat Table Import ──────────────────────────────────────────
-
-    private void SaveCheatTable(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-        try
-        {
-            if (_addressTableService.Roots.Count == 0)
-            {
-                DataContext = dashboard with { StatusMessage = "Address table is empty. Nothing to save." };
-                return;
-            }
-
-            var dialog = new Microsoft.Win32.SaveFileDialog
-            {
-                Title = "Save Cheat Engine Table",
-                Filter = "Cheat Tables (*.ct)|*.ct|All Files (*.*)|*.*",
-                DefaultExt = ".ct"
-            };
-
-            if (dialog.ShowDialog(this) != true) return;
-
-            var exporter = new CheatTableExporter();
-            exporter.SaveToFile(_addressTableService.Roots, dialog.FileName);
-
-            DataContext = dashboard with
-            {
-                StatusMessage = $"Saved {_addressTableService.Roots.Count} top-level entries to {System.IO.Path.GetFileName(dialog.FileName)}"
-            };
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with { StatusMessage = $"CT save failed: {ex.Message}" };
-        }
-    }
-
-    private void LoadCheatTable(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is not WorkspaceDashboard dashboard) return;
-        try
-        {
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Title = "Load Cheat Engine Table",
-                Filter = "Cheat Tables (*.ct;*.CT)|*.ct;*.CT|XML Files (*.xml)|*.xml|All Files (*.*)|*.*",
-                DefaultExt = ".ct"
-            };
-
-            if (dialog.ShowDialog(this) != true) return;
-
-            var parser = new CheatTableParser();
-            var ctFile = parser.ParseFile(dialog.FileName);
-            var nodes = parser.ToAddressTableNodes(ctFile);
-            _addressTableService.ImportNodes(nodes);
-
-            var scriptCount = CountScripts(ctFile.Entries);
-            var leafCount = _addressTableService.Entries.Count;
-
-            DataContext = dashboard with
-            {
-                AddressTableNodes = _addressTableService.Roots,
-                AddressTableStatus = $"{leafCount} entries in {_addressTableService.Roots.Count} nodes",
-                StatusMessage = $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries imported with hierarchy, {scriptCount} scripts" +
-                                (ctFile.LuaScript is not null ? " (has Lua script)" : "")
-            };
-        }
-        catch (Exception ex)
-        {
-            DataContext = dashboard with { StatusMessage = $"CT load failed: {ex.Message}" };
-        }
-    }
-
-    private static int CountScripts(IReadOnlyList<CheatTableEntry> entries)
-    {
-        var count = 0;
-        foreach (var entry in entries)
-        {
-            if (entry.AssemblerScript is not null) count++;
-            count += CountScripts(entry.Children);
-        }
-        return count;
-    }
+    private void OnLoadCheatTable(object sender, RoutedEventArgs e) => _addressTableVm.LoadCheatTableCommand.Execute(null);
+    private void OnSaveCheatTable(object sender, RoutedEventArgs e) => _addressTableVm.SaveCheatTableCommand.Execute(null);
 
     // ─── Session Save / Load ───────────────────────────────────────────
 
@@ -2367,7 +1473,7 @@ public partial class MainWindow : Window
         try
         {
             // 1. Stop auto-refresh so we don't read from a detached process
-            _refreshTimer?.Stop();
+            _addressTableVm.StopAutoRefresh();
 
             // 2. Remove all breakpoints for this process
             try
@@ -2422,7 +1528,8 @@ public partial class MainWindow : Window
     private void CmdRunScript(object sender, RoutedEventArgs e)
     {
         // Toggle the currently selected script in the address table
-        ToggleSelectedScript(sender, e);
+        SyncAddressTableSelection();
+        _addressTableVm.ToggleSelectedScriptCommand.Execute(null);
     }
 
     private async void CmdEmergencyStop(object sender, RoutedEventArgs e)
@@ -2436,7 +1543,7 @@ public partial class MainWindow : Window
         try
         {
             // 1. Stop everything immediately
-            _refreshTimer?.Stop();
+            _addressTableVm.StopAutoRefresh();
 
             // 2. Rollback ALL patches (restores original bytes)
             var rolled = await _patchUndoService.RollbackAllAsync();

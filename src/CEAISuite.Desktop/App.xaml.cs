@@ -155,6 +155,17 @@ public partial class App : System.Windows.Application
         services.AddTransient<ScannerViewModel>();
         services.AddTransient<ProcessListViewModel>();
         services.AddTransient<InspectionViewModel>();
+        services.AddTransient<AddressTableViewModel>(sp =>
+            new AddressTableViewModel(
+                sp.GetRequiredService<AddressTableService>(),
+                sp.GetRequiredService<AddressTableExportService>(),
+                sp.GetRequiredService<IProcessContext>(),
+                sp.GetService<IAutoAssemblerEngine>(),
+                sp.GetRequiredService<BreakpointService>(),
+                sp.GetRequiredService<DisassemblyService>(),
+                sp.GetRequiredService<ScriptGenerationService>(),
+                sp.GetRequiredService<IDialogService>(),
+                sp.GetRequiredService<IOutputLog>()));
 
         // ── MainWindow ──
         services.AddSingleton<MainWindow>();

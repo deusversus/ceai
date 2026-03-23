@@ -128,9 +128,9 @@
                                 ToolTip="Load session" />
                         <Button Content="💾 Save" Padding="8,3" FontSize="11" Click="SaveSession"
                                 ToolTip="Save session (Ctrl+S)" />
-                        <Button Content="📥 Load CT" Padding="8,3" FontSize="11" Click="LoadCheatTable"
+                        <Button Content="📥 Load CT" Padding="8,3" FontSize="11" Click="OnLoadCheatTable"
                                 ToolTip="Load Cheat Table (.CT)" />
-                        <Button Content="📤 Export CT" Padding="8,3" FontSize="11" Click="SaveCheatTable"
+                        <Button Content="📤 Export CT" Padding="8,3" FontSize="11" Click="OnSaveCheatTable"
                                 ToolTip="Export Cheat Table (.CT)" />
                         <Separator />
 
@@ -226,19 +226,19 @@
                     <avalonDock:LayoutPanel Orientation="Vertical" DockWidth="*">
                         <avalonDock:LayoutDocumentPane DockHeight="*">
                             <avalonDock:LayoutDocument Title="Address Table" ContentId="addressTable">
-                                <DockPanel Background="{DynamicResource SidebarBackground}">
+                                <DockPanel x:Name="AddressTableContent" Background="{DynamicResource SidebarBackground}">
                                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
                                         <TextBlock Text="ADDRESS TABLE" FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RefreshAddressTable" Content="Refresh" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="RemoveSelectedAddress" Content="Remove" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ToggleLockAddress" Content="Lock" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="CreateAddressGroup" Content="Group" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ExportAddressTable" Content="Export" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ImportAddressTable" Content="Import" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="GenerateTrainerScript" Content="Trainer" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ViewSelectedScript" Content="View Script" />
-                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Click="ToggleSelectedScript" Content="Toggle Script" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RefreshCommand}" Content="Refresh" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RemoveSelectedCommand}" Content="Remove" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding ToggleLockCommand}" Content="Lock" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding CreateGroupCommand}" Content="Group" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding ExportCommand}" Content="Export" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding ImportCommand}" Content="Import" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding GenerateTrainerCommand}" Content="Trainer" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding ViewSelectedScriptCommand}" Content="View Script" />
+                                        <Button Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding ToggleSelectedScriptCommand}" Content="Toggle Script" />
                                         <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
                                     </StackPanel>
@@ -268,32 +268,33 @@
                                               PreviewMouseLeftButtonDown="AddressTable_PreviewMouseLeftButtonDown"
                                               PreviewMouseMove="AddressTable_PreviewMouseMove">
                                         <TreeView.Resources>
-                                            <ContextMenu x:Key="NodeContextMenu" Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}">
-                                                <MenuItem Header="Toggle Activate" Click="CtxToggleActivate" InputGestureText="Space" />
+                                            <ContextMenu x:Key="NodeContextMenu" Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderBrush="{DynamicResource BorderBrush}"
+                                                         DataContext="{Binding DataContext, ElementName=AddressTableContent}">
+                                                <MenuItem Header="Toggle Activate" Command="{Binding ToggleActivateCommand}" InputGestureText="Space" />
                                                 <Separator />
-                                                <MenuItem Header="Change Description" Click="CtxChangeDescription" />
-                                                <MenuItem Header="Change Address" Click="CtxChangeAddress" />
-                                                <MenuItem Header="Change Value" Click="CtxChangeValue" />
-                                                <MenuItem Header="Change Type" Click="CtxChangeType" />
+                                                <MenuItem Header="Change Description" Command="{Binding ChangeDescriptionCommand}" />
+                                                <MenuItem Header="Change Address" Command="{Binding ChangeAddressCommand}" />
+                                                <MenuItem Header="Change Value" Command="{Binding ChangeValueCommand}" />
+                                                <MenuItem Header="Change Type" Command="{Binding ChangeTypeCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="Toggle Freeze" Click="CtxToggleFreeze" InputGestureText="Ctrl+F" />
-                                                <MenuItem Header="Show as Hexadecimal" Click="CtxShowAsHex" IsCheckable="True" />
+                                                <MenuItem Header="Toggle Freeze" Command="{Binding ToggleFreezeCommand}" InputGestureText="Ctrl+F" />
+                                                <MenuItem Header="Show as Hexadecimal" Command="{Binding ShowAsHexCommand}" IsCheckable="True" />
                                                 <Separator />
-                                                <MenuItem Header="View Script" Click="ViewSelectedScript" />
-                                                <MenuItem Header="Toggle Script" Click="ToggleSelectedScript" />
+                                                <MenuItem Header="View Script" Command="{Binding ViewSelectedScriptCommand}" />
+                                                <MenuItem Header="Toggle Script" Command="{Binding ToggleSelectedScriptCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="Browse Memory Region" Click="CtxBrowseMemory" />
-                                                <MenuItem Header="Disassemble Here" Click="CtxDisassemble" />
-                                                <MenuItem Header="Find What Writes" Click="CtxFindWhatWrites" />
-                                                <MenuItem Header="View Write Log" Click="CtxViewWriteLog" />
+                                                <MenuItem Header="Browse Memory Region" Command="{Binding BrowseMemoryCommand}" />
+                                                <MenuItem Header="Disassemble Here" Command="{Binding DisassembleCommand}" />
+                                                <MenuItem Header="Find What Writes" Command="{Binding FindWhatWritesCommand}" />
+                                                <MenuItem Header="View Write Log" Command="{Binding ViewWriteLogCommand}" />
                                                 <Separator />
-                                                <MenuItem Header="Create Group" Click="CreateAddressGroup" />
-                                                <MenuItem Header="Move to Group..." Click="CtxMoveToGroup" />
-                                                <MenuItem Header="Delete" Click="CtxDelete" InputGestureText="Del" />
+                                                <MenuItem Header="Create Group" Command="{Binding CreateGroupCommand}" />
+                                                <MenuItem Header="Move to Group..." Command="{Binding MoveToGroupCommand}" />
+                                                <MenuItem Header="Delete" Command="{Binding DeleteCommand}" InputGestureText="Del" />
                                                 <Separator />
-                                                <MenuItem Header="Cut" Click="CtxCut" InputGestureText="Ctrl+X" />
-                                                <MenuItem Header="Copy" Click="CtxCopy" InputGestureText="Ctrl+C" />
-                                                <MenuItem Header="Paste" Click="CtxPaste" InputGestureText="Ctrl+V" />
+                                                <MenuItem Header="Cut" Command="{Binding CutCommand}" InputGestureText="Ctrl+X" />
+                                                <MenuItem Header="Copy" Command="{Binding CopyCommand}" InputGestureText="Ctrl+C" />
+                                                <MenuItem Header="Paste" Command="{Binding PasteCommand}" InputGestureText="Ctrl+V" />
                                             </ContextMenu>
                                         </TreeView.Resources>
                                         <TreeView.ItemContainerStyle>

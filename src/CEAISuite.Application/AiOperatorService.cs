@@ -1539,9 +1539,9 @@ public sealed class AiOperatorService
         }
 
         /// <summary>
-        /// Remove duplicate tool names from ChatOptions.Tools.
-        /// Context providers (e.g. FileAgentSkillsProvider) may inject tools that overlap
-        /// with our progressive tool list, and some APIs (Anthropic) reject duplicates.
+        /// Remove duplicate tool names from ChatOptions.Tools and log collisions.
+        /// Context providers may inject tools that overlap with our progressive tool list,
+        /// and some APIs (Anthropic) reject duplicates with a 400 error.
         /// </summary>
         private static void DeduplicateTools(ChatOptions? options)
         {
@@ -1551,7 +1551,11 @@ public sealed class AiOperatorService
             {
                 var name = tools[i] is AIFunction f ? f.Name : tools[i].GetType().Name;
                 if (!seen.Add(name))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[TOOLS] Duplicate tool removed: '{name}' (index {i} of {tools.Count})");
                     tools.RemoveAt(i);
+                }
             }
         }
 

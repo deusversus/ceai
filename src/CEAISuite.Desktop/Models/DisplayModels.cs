@@ -1,4 +1,43 @@
+using System.Windows.Media;
+
 namespace CEAISuite.Desktop.Models;
+
+/// <summary>Display model for AI chat messages in the ItemsControl.</summary>
+public sealed class AiChatDisplayItem
+{
+    public string RoleLabel { get; init; } = "";
+    public string Content { get; set; } = "";
+    public string Timestamp { get; init; } = "";
+    public Brush Background { get; init; } = Brushes.Transparent;
+}
+
+/// <summary>Display model for process selection in the command bar ComboBox.</summary>
+public sealed class ProcessComboItem
+{
+    public int Pid { get; init; }
+    public string Name { get; init; } = "";
+    public string Label => $"{Name} (PID {Pid})";
+    public override string ToString() => Label;
+}
+
+/// <summary>Display model for chat history list items.</summary>
+public sealed class ChatHistoryDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string Title { get; init; } = "";
+    public string TimeAgo { get; init; } = "";
+    public string Preview { get; init; } = "";
+    public bool IsCurrent { get; init; }
+}
+
+/// <summary>Display model for attachment chips in the chat input.</summary>
+public sealed class AttachmentChip
+{
+    public string Id { get; init; } = Guid.NewGuid().ToString("N");
+    public string Label { get; init; } = "Pasted";
+    public string Preview { get; init; } = "";
+    public string FullText { get; init; } = "";
+}
 
 public sealed class OutputLogEntry
 {

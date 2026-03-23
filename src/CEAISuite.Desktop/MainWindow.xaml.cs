@@ -18,43 +18,6 @@ using OpenAI;
 
 namespace CEAISuite.Desktop;
 
-/// <summary>Display model for AI chat messages in the ItemsControl.</summary>
-public sealed class AiChatDisplayItem
-{
-    public string RoleLabel { get; init; } = "";
-    public string Content { get; set; } = "";
-    public string Timestamp { get; init; } = "";
-    public Brush Background { get; init; } = Brushes.Transparent;
-}
-
-/// <summary>Display model for process selection in the command bar ComboBox.</summary>
-public sealed class ProcessComboItem
-{
-    public int Pid { get; init; }
-    public string Name { get; init; } = "";
-    public string Label => $"{Name} (PID {Pid})";
-    public override string ToString() => Label;
-}
-
-/// <summary>Display model for chat history list items.</summary>
-public sealed class ChatHistoryDisplayItem
-{
-    public string Id { get; init; } = "";
-    public string Title { get; init; } = "";
-    public string TimeAgo { get; init; } = "";
-    public string Preview { get; init; } = "";
-    public bool IsCurrent { get; init; }
-}
-
-/// <summary>Display model for attachment chips in the chat input.</summary>
-public sealed class AttachmentChip
-{
-    public string Id { get; init; } = Guid.NewGuid().ToString("N");
-    public string Label { get; init; } = "Pasted";
-    public string Preview { get; init; } = "";
-    public string FullText { get; init; } = "";
-}
-
 public partial class MainWindow : Window
 {
     private readonly string _databasePath;
@@ -96,12 +59,9 @@ public partial class MainWindow : Window
     private readonly ProcessListViewModel _processListVm;
     private readonly InspectionViewModel _inspectionVm;
     private readonly AddressTableViewModel _addressTableVm;
-    private readonly List<AttachmentChip> _attachments = new();
+    private readonly AiOperatorViewModel _aiOperatorVm;
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private readonly Dictionary<string, object> _xamlPanelContent = new();
-    // _refreshTimer moved to AddressTableViewModel
-    private CancellationTokenSource? _streamingCts;
-    private bool _isStreaming;
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
@@ -148,7 +108,8 @@ public partial class MainWindow : Window
         ScannerViewModel scannerVm,
         ProcessListViewModel processListVm,
         InspectionViewModel inspectionVm,
-        AddressTableViewModel addressTableVm)
+        AddressTableViewModel addressTableVm,
+        AiOperatorViewModel aiOperatorVm)
     {
         InitializeComponent();
         _databasePath = Path.Combine(
@@ -195,6 +156,7 @@ public partial class MainWindow : Window
         _processListVm = processListVm;
         _inspectionVm = inspectionVm;
         _addressTableVm = addressTableVm;
+        _aiOperatorVm = aiOperatorVm;
 
         // Apply saved theme
         var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)
@@ -240,7 +202,7 @@ public partial class MainWindow : Window
         {
             Dispatcher.BeginInvoke(() =>
             {
-                AiStatusText.Text = status;
+                _aiOperatorVm.StatusText = status;
                 AppendOutputLog("Agent", "Info", status);
             });
         };
@@ -260,6 +222,21 @@ public partial class MainWindow : Window
         ProcessesContent.DataContext = _processListVm;
         InspectionContent.DataContext = _inspectionVm;
         AddressTableContent.DataContext = _addressTableVm;
+
+        // Wire AI Operator ViewModel
+        AiOperatorContent.DataContext = _aiOperatorVm;
+        _aiOperatorVm.ScrollToBottomRequested += () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd());
+        _aiOperatorVm.StreamingTextUpdated += () => Dispatcher.BeginInvoke(() => AiChatList.Items.Refresh());
+        _aiOperatorVm.ChatDisplayRefreshed += () => Dispatcher.BeginInvoke(() =>
+        {
+            // Remove any approval cards that were injected during streaming
+            for (int i = AiChatContainer.Children.Count - 1; i >= 0; i--)
+            {
+                if (AiChatContainer.Children[i] != AiChatList)
+                    AiChatContainer.Children.RemoveAt(i);
+            }
+        });
+        _aiOperatorVm.ApprovalCardRequested += approval => ShowInlineApprovalCard(approval);
 
         // Subscribe to AddressTableViewModel navigation events
         _addressTableVm.NavigateToMemoryBrowser += addr =>
@@ -288,14 +265,14 @@ public partial class MainWindow : Window
         // Refresh chat switcher when chats change
         _aiOperatorService.ChatListChanged += () =>
         {
-            Dispatcher.BeginInvoke(RefreshChatSwitcher);
+            Dispatcher.BeginInvoke(() => _aiOperatorVm.RefreshChatSwitcher());
         };
 
         // Wire up non-streaming approval handler (shows inline UI, waits for user decision)
         _aiOperatorService.ApprovalRequested += async (toolName, argsStr) =>
         {
             var approval = new AgentStreamEvent.ApprovalRequested(toolName, argsStr);
-            await Dispatcher.InvokeAsync(() => ShowInlineApprovalCard(approval));
+            await Dispatcher.InvokeAsync(() => _aiOperatorVm.HandleApprovalRequest(approval));
             return await approval.UserDecision;
         };
 
@@ -382,17 +359,22 @@ public partial class MainWindow : Window
         if (DataContext is WorkspaceDashboard dash)
             _processListVm.SetProcesses(dash.RunningProcesses);
         PopulateProcessCombo();
-        RefreshChatSwitcher();
-        // Init search box placeholder
-        ChatSearchBox.Text = (string)ChatSearchBox.Tag;
-        ChatSearchBox.Foreground = FindThemeBrush("SecondaryForeground");
+        _aiOperatorVm.RefreshChatSwitcher();
 
-        // Wire up chat input placeholder and paste handler
-        ModelSelectorText.Text = _appSettingsService.Settings.Model;
+        // Wire up paste handler (thin wrapper — ViewModel handles attachment logic)
         DataObject.AddPastingHandler(AiChatInputTextBox, OnChatInputPaste);
+
+        // Placeholder visibility for chat input
         AiChatInputTextBox.TextChanged += (_, _) =>
         {
             AiChatPlaceholder.Visibility = string.IsNullOrEmpty(AiChatInputTextBox.Text)
+                ? Visibility.Visible : Visibility.Collapsed;
+        };
+
+        // Attachment chips visibility
+        _aiOperatorVm.Attachments.CollectionChanged += (_, _) =>
+        {
+            AttachmentChips.Visibility = _aiOperatorVm.Attachments.Count > 0
                 ? Visibility.Visible : Visibility.Collapsed;
         };
     }
@@ -502,163 +484,22 @@ public partial class MainWindow : Window
 
     // RefreshAddressTable, RemoveSelectedAddress, ToggleLockAddress → AddressTableViewModel commands
 
-    // ─── AI Operator ───────────────────────────────────────────────────────
+    // ─── AI Operator (thin wrappers — logic in AiOperatorViewModel) ──────
 
-    private async void SendAiMessage(object sender, RoutedEventArgs e)
-    {
-        // If already streaming, cancel instead of sending
-        if (_isStreaming)
-        {
-            _streamingCts?.Cancel();
-            return;
-        }
-
-        var inputText = AiChatInputTextBox.Text?.Trim();
-
-        // Build message: attachments prepended as context blocks
-        var parts = new List<string>();
-        foreach (var att in _attachments)
-        {
-            parts.Add($"<context label=\"{att.Label}\">\n{att.FullText}\n</context>");
-        }
-        if (!string.IsNullOrEmpty(inputText))
-            parts.Add(inputText);
-
-        var message = string.Join("\n\n", parts);
-        if (string.IsNullOrEmpty(message)) return;
-
-        AiChatInputTextBox.Text = "";
-        _attachments.Clear();
-        RefreshAttachmentChips();
-
-        // Show user message immediately before starting AI work
-        _aiOperatorService.AddUserMessageToHistory(message);
-        RefreshAiChatDisplay();
-
-        _streamingCts = new CancellationTokenSource();
-        SetStreamingMode(true);
-
-        try
-        {
-            if (_appSettingsService.Settings.UseStreaming)
-            {
-                var reader = _aiOperatorService.SendMessageStreamingAsync(message, _streamingCts.Token);
-
-                // Add a placeholder for the streaming response
-                var streamItem = new AiChatDisplayItem
-                {
-                    RoleLabel = "AI Operator",
-                    Content = "",
-                    Timestamp = DateTime.Now.ToString("h:mm tt"),
-                    Background = FindThemeBrush("ChatAiBubble")
-                };
-
-                Dispatcher.Invoke(() =>
-                {
-                    if (AiChatList.ItemsSource is List<AiChatDisplayItem> items)
-                    {
-                        items.Add(streamItem);
-                        AiChatList.Items.Refresh();
-                        AiChatScrollViewer.ScrollToEnd();
-                    }
-                });
-
-                await foreach (var evt in reader.ReadAllAsync(_streamingCts.Token))
-                {
-                    switch (evt)
-                    {
-                        case AgentStreamEvent.TextDelta delta:
-                            streamItem.Content += delta.Text;
-                            Dispatcher.Invoke(() =>
-                            {
-                                AiChatList.Items.Refresh();
-                                AiChatScrollViewer.ScrollToEnd();
-                            });
-                            break;
-
-                        case AgentStreamEvent.ToolCallStarted tool:
-                            Dispatcher.Invoke(() => AiStatusText.Text = $"Tool: {tool.ToolName}");
-                            break;
-
-                        case AgentStreamEvent.ApprovalRequested approval:
-                            await Dispatcher.InvokeAsync(() =>
-                            {
-                                ShowInlineApprovalCard(approval);
-                            });
-                            break;
-
-                        case AgentStreamEvent.Error err:
-                            streamItem.Content = err.Message;
-                            Dispatcher.Invoke(() => AiChatList.Items.Refresh());
-                            break;
-                    }
-                }
-            }
-            else
-            {
-                // Non-streaming: wait for full response
-                Dispatcher.Invoke(() => AiStatusText.Text = "Thinking...");
-                var response = await Task.Run(() => _aiOperatorService.SendMessageAsync(message), _streamingCts.Token);
-                // RefreshAiChatDisplay in finally block will show the response
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            AiStatusText.Text = "Stopped";
-        }
-        catch (Exception ex)
-        {
-            if (DataContext is WorkspaceDashboard db)
-                DataContext = db with { StatusMessage = $"AI error: {ex.Message}" };
-        }
-        finally
-        {
-            SetStreamingMode(false);
-            _streamingCts?.Dispose();
-            _streamingCts = null;
-
-            if (AiStatusText.Text.StartsWith("Thinking") || AiStatusText.Text.StartsWith("Tool:"))
-                AiStatusText.Text = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
-            RefreshAiChatDisplay();
-            RefreshChatSwitcher();
-            if (DataContext is WorkspaceDashboard dashboard)
-            {
-                DataContext = dashboard with
-                {
-                    AddressTableNodes = _addressTableService.Roots,
-                    AddressTableStatus = $"{_addressTableService.Entries.Count} entries"
-                };
-            }
-        }
-    }
-
-    /// <summary>Toggle the send button between send (↑) and stop (■) modes.</summary>
-    private void SetStreamingMode(bool streaming)
-    {
-        _isStreaming = streaming;
-        if (SendStopButton.Template.FindName("SendButtonIcon", SendStopButton) is TextBlock icon)
-        {
-            icon.Text = streaming ? "■" : "↑";
-            icon.Margin = streaming ? new Thickness(0) : new Thickness(0, -2, 0, 0);
-            icon.FontSize = streaming ? 14 : 16;
-        }
-        SendStopButton.ToolTip = streaming ? "Stop generation (click to cancel)" : "Send message (Enter)";
-    }
+    private void SendAiMessage(object sender, RoutedEventArgs e) =>
+        _aiOperatorVm.SendMessageCommand.Execute(null);
 
     private void OnAiChatPreviewKeyDown(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter && Keyboard.Modifiers == ModifierKeys.None)
         {
-            SendAiMessage(sender, e);
+            _aiOperatorVm.SendMessageCommand.Execute(null);
             e.Handled = true;
         }
     }
 
-    private void ClearAiChat(object sender, RoutedEventArgs e)
-    {
-        _aiOperatorService.ClearHistory();
-        RefreshAiChatDisplay();
-    }
+    private void ClearAiChat(object sender, RoutedEventArgs e) =>
+        _aiOperatorVm.ClearChatCommand.Execute(null);
 
     private void CopyAiMessage(object sender, RoutedEventArgs e)
     {
@@ -668,153 +509,43 @@ public partial class MainWindow : Window
             && ctx.PlacementTarget is FrameworkElement fe
             && fe.DataContext is AiChatDisplayItem item)
         {
-            try { Clipboard.SetText(item.Content); }
-            catch { /* clipboard locked */ }
+            _aiOperatorVm.CopyMessageCommand.Execute(item);
         }
     }
 
-    private void ExportAiChat(object sender, RoutedEventArgs e)
-    {
-        var markdown = _aiOperatorService.ExportChatToMarkdown();
-        if (string.IsNullOrWhiteSpace(markdown) || markdown.Split('\n').Length <= 5)
-        {
-            MessageBox.Show("No messages to export.", "Export Chat", MessageBoxButton.OK, MessageBoxImage.Information);
-            return;
-        }
+    private void ExportAiChat(object sender, RoutedEventArgs e) =>
+        _aiOperatorVm.ExportChatCommand.Execute(null);
 
-        var dlg = new Microsoft.Win32.SaveFileDialog
-        {
-            Title = "Export Chat History",
-            Filter = "Markdown (*.md)|*.md|Text (*.txt)|*.txt",
-            DefaultExt = ".md",
-            FileName = $"{_aiOperatorService.CurrentChatTitle.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd}"
-        };
-
-        if (dlg.ShowDialog() == true)
-        {
-            File.WriteAllText(dlg.FileName, markdown);
-            AiStatusText.Text = $"Exported to {Path.GetFileName(dlg.FileName)}";
-        }
-    }
-
-    private bool _suppressChatSwitch;
-    private List<ChatHistoryDisplayItem> _allChatItems = new();
-
-    private static string FormatTimeAgo(DateTimeOffset dt)
-    {
-        var diff = DateTimeOffset.UtcNow - dt;
-        if (diff.TotalMinutes < 1) return "just now";
-        if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
-        if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
-        if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
-        return dt.ToLocalTime().ToString("MMM d");
-    }
-
-    private void RefreshChatSwitcher()
-    {
-        _suppressChatSwitch = true;
-        var chats = _aiOperatorService.ListChats();
-        var currentId = _aiOperatorService.CurrentChatId;
-
-        _allChatItems = chats.Select(c => new ChatHistoryDisplayItem
-        {
-            Id = c.Id,
-            Title = c.Title,
-            TimeAgo = FormatTimeAgo(c.UpdatedAt),
-            Preview = c.Messages.LastOrDefault(m => m.Role == "assistant")?.Content is string last
-                ? (last.Length > 80 ? last[..80] + "…" : last)
-                : c.Messages.Count > 0 ? $"{c.Messages.Count} messages" : "Empty",
-            IsCurrent = c.Id == currentId
-        }).ToList();
-
-        // Insert current unsaved chat at top if not already listed
-        if (!_allChatItems.Any(c => c.Id == currentId))
-        {
-            _allChatItems.Insert(0, new ChatHistoryDisplayItem
-            {
-                Id = currentId,
-                Title = _aiOperatorService.CurrentChatTitle,
-                TimeAgo = "now",
-                Preview = _aiOperatorService.DisplayHistory.Count > 0
-                    ? $"{_aiOperatorService.DisplayHistory.Count} messages"
-                    : "Active chat",
-                IsCurrent = true
-            });
-        }
-
-        ChatHistoryList.ItemsSource = _allChatItems;
-
-        // Select current
-        var currentItem = _allChatItems.FirstOrDefault(c => c.Id == currentId);
-        if (currentItem is not null)
-            ChatHistoryList.SelectedItem = currentItem;
-
-        _suppressChatSwitch = false;
-    }
-
-    private void ToggleChatHistory(object sender, RoutedEventArgs e)
-    {
-        bool show = ChatHistoryToggle.IsChecked == true;
-        ChatHistoryPanel.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        if (show) RefreshChatSwitcher();
-    }
-
-    private void ChatHistoryList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        // Only switch on explicit double-click or context menu, not on selection change
-    }
-
-    private void ChatHistoryList_DoubleClick(object sender, MouseButtonEventArgs e)
-    {
-        if (_suppressChatSwitch) return;
-        if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected &&
-            selected.Id != _aiOperatorService.CurrentChatId)
-        {
-            _aiOperatorService.SwitchChat(selected.Id);
-            RefreshAiChatDisplay();
-            RefreshChatSwitcher();
-        }
-    }
-
-    private void NewAiChat(object sender, RoutedEventArgs e)
-    {
-        _aiOperatorService.NewChat();
-        RefreshAiChatDisplay();
-        RefreshChatSwitcher();
-    }
+    private void NewAiChat(object sender, RoutedEventArgs e) =>
+        _aiOperatorVm.NewChatCommand.Execute(null);
 
     private void DeleteAiChat(object sender, RoutedEventArgs e)
     {
         if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected)
-        {
-            var result = MessageBox.Show(
-                $"Delete chat \"{selected.Title}\"?",
-                "Delete Chat", MessageBoxButton.YesNo, MessageBoxImage.Question);
-            if (result == MessageBoxResult.Yes)
-            {
-                _aiOperatorService.DeleteChat(selected.Id);
-                RefreshAiChatDisplay();
-                RefreshChatSwitcher();
-            }
-        }
+            _aiOperatorVm.DeleteChatCommand.Execute(selected);
+    }
+
+    private void ToggleChatHistory(object sender, RoutedEventArgs e) =>
+        _aiOperatorVm.ToggleChatHistoryCommand.Execute(null);
+
+    private void ChatHistoryList_DoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected)
+            _aiOperatorVm.SwitchChatCommand.Execute(selected);
     }
 
     // Context menu handlers for chat history
     private void ChatCtx_Open(object sender, RoutedEventArgs e)
     {
         if (ChatHistoryList.SelectedItem is ChatHistoryDisplayItem selected)
-        {
-            _aiOperatorService.SwitchChat(selected.Id);
-            RefreshAiChatDisplay();
-            RefreshChatSwitcher();
-        }
+            _aiOperatorVm.OpenChat(selected);
     }
 
     private void ChatCtx_Rename(object sender, RoutedEventArgs e)
     {
         if (ChatHistoryList.SelectedItem is not ChatHistoryDisplayItem selected) return;
 
-        // Simple rename dialog
+        // Simple rename dialog (WPF-specific, stays in code-behind)
         var dlg = new Window
         {
             Title = "Rename Chat",
@@ -822,7 +553,7 @@ public partial class MainWindow : Window
             WindowStartupLocation = WindowStartupLocation.CenterOwner,
             Owner = this,
             ResizeMode = ResizeMode.NoResize,
-            Background = FindThemeBrush("SidebarBackground"),
+            Background = AiOperatorViewModel.FindThemeBrush("SidebarBackground"),
         };
         var sp = new StackPanel { Margin = new Thickness(12) };
         var tb = new TextBox
@@ -842,16 +573,12 @@ public partial class MainWindow : Window
 
         if (dlg.ShowDialog() == true && !string.IsNullOrWhiteSpace(tb.Text))
         {
-            _aiOperatorService.RenameChat(selected.Id, tb.Text.Trim());
-            RefreshAiChatDisplay();
-            RefreshChatSwitcher();
+            _aiOperatorVm.RenameChat(selected, tb.Text.Trim());
         }
     }
 
-    private void ChatCtx_Delete(object sender, RoutedEventArgs e)
-    {
+    private void ChatCtx_Delete(object sender, RoutedEventArgs e) =>
         DeleteAiChat(sender, e);
-    }
 
     // Search box placeholder + filtering
     private void ChatSearchBox_GotFocus(object sender, RoutedEventArgs e)
@@ -859,7 +586,7 @@ public partial class MainWindow : Window
         if (ChatSearchBox.Text == (string)ChatSearchBox.Tag)
         {
             ChatSearchBox.Text = "";
-            ChatSearchBox.Foreground = FindThemeBrush("PrimaryForeground");
+            ChatSearchBox.Foreground = AiOperatorViewModel.FindThemeBrush("PrimaryForeground");
         }
     }
 
@@ -868,7 +595,7 @@ public partial class MainWindow : Window
         if (string.IsNullOrWhiteSpace(ChatSearchBox.Text))
         {
             ChatSearchBox.Text = (string)ChatSearchBox.Tag;
-            ChatSearchBox.Foreground = FindThemeBrush("SecondaryForeground");
+            ChatSearchBox.Foreground = AiOperatorViewModel.FindThemeBrush("SecondaryForeground");
         }
     }
 
@@ -877,44 +604,21 @@ public partial class MainWindow : Window
         var query = ChatSearchBox.Text?.Trim();
         if (string.IsNullOrEmpty(query) || query == (string)ChatSearchBox.Tag)
         {
-            ChatHistoryList.ItemsSource = _allChatItems;
+            _aiOperatorVm.FilterChatHistory(null);
             return;
         }
-
-        var filtered = _allChatItems
-            .Where(c => c.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                        c.Preview.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        ChatHistoryList.ItemsSource = filtered;
+        _aiOperatorVm.FilterChatHistory(query);
     }
-
-    // Track pending approval events so "Allow All" / "Deny All" can resolve them
-    private readonly List<AgentStreamEvent.ApprovalRequested> _pendingApprovals = new();
-    // Tools the user has approved for this session (skip future prompts)
-    private readonly HashSet<string> _sessionTrustedTools = new(StringComparer.OrdinalIgnoreCase);
 
     private static Brush FindThemeBrush(string key) =>
         System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
 
     /// <summary>
     /// Shows an inline approval card in the chat with Allow/Deny/Allow All buttons.
-    /// When the user clicks a button, it resolves the approval event's TaskCompletionSource
-    /// so the agent can continue or abort the tool call.
-    /// If the tool was already trusted this session, auto-approves immediately.
+    /// Remains in code-behind because it dynamically creates WPF elements.
     /// </summary>
     private void ShowInlineApprovalCard(AgentStreamEvent.ApprovalRequested approval)
     {
-        // Auto-approve tools the user already trusted this session
-        if (_sessionTrustedTools.Contains(approval.ToolName))
-        {
-            AiStatusText.Text = $"✓ Auto-approved: {approval.ToolName}";
-            approval.Resolve(true);
-            return;
-        }
-
-        _pendingApprovals.Add(approval);
-        AiStatusText.Text = $"⚠ Awaiting approval: {approval.ToolName} ({_pendingApprovals.Count} pending)";
-
         var card = new Border
         {
             CornerRadius = new CornerRadius(6),
@@ -933,7 +637,7 @@ public partial class MainWindow : Window
             FontWeight = FontWeights.SemiBold,
             FontSize = 12,
             Foreground = FindThemeBrush("WarningForeground"),
-            Text = "⚠ Tool Approval Required",
+            Text = "\u26a0 Tool Approval Required",
             Margin = new Thickness(0, 0, 0, 4)
         };
         stack.Children.Add(header);
@@ -957,7 +661,7 @@ public partial class MainWindow : Window
 
         var allowBtn = new Button
         {
-            Content = "✓ Allow",
+            Content = "\u2713 Allow",
             Padding = new Thickness(12, 4, 12, 4),
             Margin = new Thickness(0, 0, 6, 0),
             Background = new SolidColorBrush(Color.FromRgb(34, 139, 34)),
@@ -969,7 +673,7 @@ public partial class MainWindow : Window
 
         var allowAllBtn = new Button
         {
-            Content = "✓ Allow All",
+            Content = "\u2713 Allow All",
             Padding = new Thickness(12, 4, 12, 4),
             Margin = new Thickness(0, 0, 6, 0),
             Background = new SolidColorBrush(Color.FromRgb(26, 110, 26)),
@@ -982,7 +686,7 @@ public partial class MainWindow : Window
 
         var denyBtn = new Button
         {
-            Content = "✗ Deny",
+            Content = "\u2717 Deny",
             Padding = new Thickness(12, 4, 12, 4),
             Background = new SolidColorBrush(Color.FromRgb(180, 50, 50)),
             Foreground = Brushes.White,
@@ -1011,37 +715,23 @@ public partial class MainWindow : Window
 
         void ResolveThis(bool approved)
         {
-            _pendingApprovals.Remove(approval);
             var label = approved
-                ? $"✓ Approved: {approval.ToolName}"
-                : $"✗ Denied: {approval.ToolName}";
+                ? $"\u2713 Approved: {approval.ToolName}"
+                : $"\u2717 Denied: {approval.ToolName}";
             CollapseCard(card, label, approved);
-            AiStatusText.Text = approved
-                ? $"Executing {approval.ToolName}..."
-                : $"Denied: {approval.ToolName}";
-            approval.Resolve(approved);
+            _aiOperatorVm.ResolveApproval(approval, approved);
         }
 
         void ResolveAllPending(bool approved)
         {
-            foreach (var pending in _pendingApprovals.ToList())
-            {
-                if (approved) _sessionTrustedTools.Add(pending.ToolName);
-                pending.Resolve(approved);
-            }
-            _pendingApprovals.Clear();
-
-            // Collapse all approval cards
+            // Collapse all approval cards in the UI
             var suffix = approved ? "Approved" : "Denied";
             foreach (var child in AiChatContainer.Children.OfType<Border>().ToList())
             {
                 if (child.Tag as string != "approval-card") continue;
-                CollapseCard(child, $"✓ {suffix} (Allow All)", approved);
+                CollapseCard(child, $"\u2713 {suffix} (Allow All)", approved);
             }
-
-            AiStatusText.Text = approved
-                ? "Executing approved tools..."
-                : "Denied all pending tools";
+            _aiOperatorVm.ResolveAllPending(approved);
         }
 
         allowBtn.Click += (_, _) => ResolveThis(true);
@@ -1056,32 +746,6 @@ public partial class MainWindow : Window
 
         AiChatContainer.Children.Add(card);
         AiChatScrollViewer.ScrollToEnd();
-    }
-
-    private void RefreshAiChatDisplay()
-    {
-        var userBrush = FindThemeBrush("ChatUserBubble");
-        var aiBrush = FindThemeBrush("ChatAiBubble");
-
-        var items = _aiOperatorService.DisplayHistory.Select(msg => new AiChatDisplayItem
-        {
-            RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
-            Content = msg.Content,
-            Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt"),
-            Background = msg.Role == "user" ? userBrush : aiBrush
-        }).ToList();
-
-        AiChatList.ItemsSource = items;
-
-        // Remove any approval cards that were injected during streaming
-        for (int i = AiChatContainer.Children.Count - 1; i >= 0; i--)
-        {
-            if (AiChatContainer.Children[i] != AiChatList)
-                AiChatContainer.Children.RemoveAt(i);
-        }
-
-        AiChatScrollViewer.ScrollToEnd();
-        AiChatTitleText.Text = _aiOperatorService.CurrentChatTitle;
     }
 
     // ─── Address Table Export / Import / Trainer → AddressTableViewModel commands ──
@@ -1717,7 +1381,7 @@ public partial class MainWindow : Window
         }
     }
 
-    // ── Drag and Drop: AI Panel Target ──
+    // ── Drag and Drop: AI Panel Target (thin wrappers — needs DragEventArgs) ──
 
     private void AiPanel_DragOver(object sender, DragEventArgs e)
     {
@@ -1731,13 +1395,12 @@ public partial class MainWindow : Window
         var context = e.Data.GetData("CEAIContext") as string;
         if (string.IsNullOrWhiteSpace(context)) return;
 
-        // Add as attachment chip instead of raw text
-        AddAttachment("Context", context);
+        _aiOperatorVm.AddAttachment("Context", context);
         AiChatInputTextBox.Focus();
         e.Handled = true;
     }
 
-    // ── Attachment Management ──
+    // ── Paste Handler (thin wrapper — needs DataObjectPastingEventArgs) ──
 
     private void OnChatInputPaste(object sender, DataObjectPastingEventArgs e)
     {
@@ -1747,77 +1410,25 @@ public partial class MainWindow : Window
             if (text is not null && (text.Contains('\n') || text.Length > 300))
             {
                 e.CancelCommand();
-                AddAttachment(text.Contains('\n') ? "Pasted" : "Pasted text", text);
+                _aiOperatorVm.AddAttachment(text.Contains('\n') ? "Pasted" : "Pasted text", text);
             }
         }
-    }
-
-    private void AddAttachment(string label, string fullText)
-    {
-        var lines = fullText.Split('\n');
-        var preview = lines[0].Trim();
-        if (preview.Length > 60) preview = preview[..57] + "…";
-        if (lines.Length > 1) preview += $" (+{lines.Length - 1} lines)";
-
-        _attachments.Add(new AttachmentChip
-        {
-            Label = label,
-            Preview = preview,
-            FullText = fullText
-        });
-        RefreshAttachmentChips();
-    }
-
-    private void RefreshAttachmentChips()
-    {
-        AttachmentChips.ItemsSource = null;
-        AttachmentChips.ItemsSource = _attachments.ToList();
-        AttachmentChips.Visibility = _attachments.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void RemoveAttachment_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button btn && btn.Tag is string id)
         {
-            _attachments.RemoveAll(a => a.Id == id);
-            RefreshAttachmentChips();
+            var chip = _aiOperatorVm.Attachments.FirstOrDefault(a => a.Id == id);
+            if (chip is not null)
+                _aiOperatorVm.RemoveAttachmentCommand.Execute(chip);
         }
     }
 
-    private void AttachContext_Click(object sender, RoutedEventArgs e)
-    {
-        var dlg = new Microsoft.Win32.OpenFileDialog
-        {
-            Title = "Attach Context File",
-            Filter = "Text files|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv|All files|*.*",
-            Multiselect = true
-        };
-        if (dlg.ShowDialog() == true)
-        {
-            foreach (var file in dlg.FileNames)
-            {
-                try
-                {
-                    var info = new FileInfo(file);
-                    if (info.Length > 100_000)
-                    {
-                        MessageBox.Show($"{info.Name} is too large ({info.Length / 1024}KB). Max 100KB.",
-                            "File Too Large", MessageBoxButton.OK, MessageBoxImage.Warning);
-                        continue;
-                    }
-                    var content = File.ReadAllText(file);
-                    AddAttachment(Path.GetFileName(file), content);
-                }
-                catch (Exception ex)
-                {
-                    MessageBox.Show($"Failed to read {file}: {ex.Message}", "Error",
-                        MessageBoxButton.OK, MessageBoxImage.Error);
-                }
-            }
-        }
-    }
+    private void AttachContext_Click(object sender, RoutedEventArgs e) =>
+        _aiOperatorVm.AttachContextCommand.Execute(null);
 
-    // ── Model Selector ──
+    // ── Model Selector (popup is WPF-specific, stays in code-behind) ──
 
     private async void ModelSelector_Click(object sender, RoutedEventArgs e)
     {
@@ -1830,26 +1441,7 @@ public partial class MainWindow : Window
         ModelSelectorList.Children.Clear();
 
         var currentModel = _appSettingsService.Settings.Model;
-
-        List<string> models = new();
-        if (_appSettingsService.Settings.Provider.Equals("copilot", StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(_appSettingsService.Settings.GitHubToken))
-        {
-            try
-            {
-                var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(_appSettingsService.Settings.GitHubToken);
-                models.AddRange(copilotModels.Select(m => m.Id));
-            }
-            catch { }
-        }
-
-        if (models.Count == 0)
-        {
-            models.AddRange(new[] { "gpt-4o", "gpt-4o-mini", "gpt-4.1", "gpt-5.4", "claude-sonnet-4", "claude-sonnet-4.5", "o4-mini" });
-        }
-
-        if (!models.Contains(currentModel))
-            models.Insert(0, currentModel);
+        var models = await _aiOperatorVm.GetAvailableModelsAsync();
 
         foreach (var model in models)
         {
@@ -1877,20 +1469,7 @@ public partial class MainWindow : Window
     {
         if (sender is not Button btn || btn.Tag is not string model) return;
         ModelSelectorPopup.IsOpen = false;
-
-        _appSettingsService.Settings.Model = model;
-        _appSettingsService.Save();
-        ModelSelectorText.Text = model;
-
-        try
-        {
-            var newClient = CreateChatClient();
-            _aiOperatorService.Reconfigure(newClient);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Model switch failed: {ex.Message}");
-        }
+        _aiOperatorVm.SelectModelCommand.Execute(model);
     }
 
     private void ApplyDockTheme(AppTheme resolved)

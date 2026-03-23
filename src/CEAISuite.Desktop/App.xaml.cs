@@ -155,6 +155,7 @@ public partial class App : System.Windows.Application
         services.AddTransient<ScannerViewModel>();
         services.AddTransient<ProcessListViewModel>();
         services.AddTransient<InspectionViewModel>();
+        services.AddTransient<AiOperatorViewModel>();
         services.AddTransient<AddressTableViewModel>(sp =>
             new AddressTableViewModel(
                 sp.GetRequiredService<AddressTableService>(),

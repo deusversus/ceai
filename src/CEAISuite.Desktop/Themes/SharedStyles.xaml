@@ -343,80 +343,18 @@
         <Setter Property="Foreground" Value="{DynamicResource MenuForeground}" />
     </Style>
 
-    <!-- ── MenuItem — Full ControlTemplate for correct hover/popup theming ── -->
+    <!-- ── MenuItem — Theme colors only, preserve built-in template for submenu popups ── -->
     <Style TargetType="MenuItem">
         <Setter Property="Foreground" Value="{DynamicResource MenuForeground}" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Padding" Value="8,4" />
-        <Setter Property="Template">
-            <Setter.Value>
-                <ControlTemplate TargetType="MenuItem">
-                    <Border x:Name="Bd" Background="{TemplateBinding Background}"
-                            Padding="{TemplateBinding Padding}" BorderThickness="0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIconColumnGroup" />
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" SharedSizeGroup="MenuItemIGTColumnGroup" />
-                                <ColumnDefinition Width="14" />
-                            </Grid.ColumnDefinitions>
-
-                            <!-- Icon / Checkmark -->
-                            <ContentPresenter x:Name="Icon" Grid.Column="0"
-                                              ContentSource="Icon" Margin="0,0,6,0"
-                                              VerticalAlignment="Center" Width="16" Height="16" />
-
-                            <!-- Header text -->
-                            <ContentPresenter Grid.Column="1" ContentSource="Header"
-                                              RecognizesAccessKey="True" VerticalAlignment="Center" />
-
-                            <!-- Input gesture text (keyboard shortcut) -->
-                            <TextBlock Grid.Column="2" Text="{TemplateBinding InputGestureText}"
-                                       Foreground="{DynamicResource SecondaryForeground}"
-                                       Margin="24,0,0,0" VerticalAlignment="Center" />
-
-                            <!-- Submenu arrow -->
-                            <Path x:Name="SubMenuArrow" Grid.Column="3"
-                                  Fill="{DynamicResource PrimaryForeground}"
-                                  Data="M 0 0 L 4 3.5 L 0 7 Z"
-                                  VerticalAlignment="Center" HorizontalAlignment="Center"
-                                  Visibility="Collapsed" />
-                        </Grid>
-                    </Border>
-                    <ControlTemplate.Triggers>
-                        <!-- Show submenu arrow when has items -->
-                        <Trigger Property="Role" Value="SubmenuItem" />
-                        <Trigger Property="Role" Value="SubmenuHeader">
-                            <Setter TargetName="SubMenuArrow" Property="Visibility" Value="Visible" />
-                        </Trigger>
-
-                        <!-- Highlight on hover -->
-                        <Trigger Property="IsHighlighted" Value="True">
-                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource MenuItemHoverBackground}" />
-                        </Trigger>
-
-                        <!-- Disabled -->
-                        <Trigger Property="IsEnabled" Value="False">
-                            <Setter Property="Foreground" Value="{DynamicResource SecondaryForeground}" />
-                        </Trigger>
-
-                        <!-- Checkable -->
-                        <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="Icon" Property="Content">
-                                <Setter.Value>
-                                    <TextBlock Text="✓" FontWeight="Bold" />
-                                </Setter.Value>
-                            </Setter>
-                        </Trigger>
-
-                        <!-- Hide icon placeholder when no icon -->
-                        <Trigger Property="Icon" Value="{x:Null}">
-                            <Setter TargetName="Icon" Property="Visibility" Value="Collapsed" />
-                        </Trigger>
-                    </ControlTemplate.Triggers>
-                </ControlTemplate>
-            </Setter.Value>
-        </Setter>
+        <Style.Triggers>
+            <Trigger Property="IsHighlighted" Value="True">
+                <Setter Property="Background" Value="{DynamicResource MenuItemHoverBackground}" />
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Foreground" Value="{DynamicResource SecondaryForeground}" />
+            </Trigger>
+        </Style.Triggers>
     </Style>
 
     <!-- ── Separator ── -->

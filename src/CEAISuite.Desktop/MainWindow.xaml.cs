@@ -1,4 +1,5 @@
-﻿using System.IO;
+﻿using System.Collections.ObjectModel;
+using System.IO;
 using System.Threading.Channels;
 using System.Windows;
 using System.Windows.Controls;
@@ -73,6 +74,9 @@ public partial class MainWindow : Window
     private readonly MemorySnapshotService _snapshotService;
     private readonly PointerRescanService _pointerRescanService;
     private readonly AppSettingsService _appSettingsService;
+    private readonly OperationJournal _operationJournal;
+    private readonly ICodeCaveEngine _codeCaveEngine;
+    private readonly ObservableCollection<OutputLogEntry> _outputLog = new();
     private readonly List<AttachmentChip> _attachments = new();
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private System.Windows.Threading.DispatcherTimer? _refreshTimer;
@@ -136,10 +140,11 @@ public partial class MainWindow : Window
         // Wire up AI operator with dynamic context injection
         var signatureService = new SignatureGeneratorService(engineFacade);
         var processWatchdog = new ProcessWatchdogService();
-        var operationJournal = new OperationJournal();
+        _operationJournal = new OperationJournal();
+        _codeCaveEngine = new WindowsCodeCaveEngine();
         var chatStore = new AiChatStore();
         var tokenLimits = TokenLimits.Resolve(_appSettingsService.Settings);
-        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), new WindowsCodeCaveEngine(), processWatchdog, operationJournal, chatStore,
+        var toolFunctions = new AiToolFunctions(engineFacade, _dashboardService, _scanService, _addressTableService, _disassemblyService, _scriptGenerationService, _breakpointService, _autoAssemblerEngine, new WindowsScreenCaptureEngine(), _hotkeyService, _patchUndoService, _sessionService, signatureService, _memoryProtectionEngine, _snapshotService, _pointerRescanService, new WindowsCallStackEngine(), _codeCaveEngine, processWatchdog, _operationJournal, chatStore,
             currentChatProvider: () => _aiOperatorService.DisplayHistory,
             tokenLimits: tokenLimits);
         IChatClient? chatClient = null;
@@ -160,8 +165,13 @@ public partial class MainWindow : Window
         // Live status updates from AI agent
         _aiOperatorService.StatusChanged += status =>
         {
-            Dispatcher.BeginInvoke(() => AiStatusText.Text = status);
+            Dispatcher.BeginInvoke(() =>
+            {
+                AiStatusText.Text = status;
+                AppendOutputLog("Agent", "Info", status);
+            });
         };
+        OutputLogList.ItemsSource = _outputLog;
 
         // Refresh chat switcher when chats change
         _aiOperatorService.ChatListChanged += () =>
@@ -3207,6 +3217,12 @@ public partial class MainWindow : Window
         "addressTable" => "Address Table",
         "inspection" => "Inspection",
         "memoryBrowser" => "Memory Browser",
+        "breakpoints" => "Breakpoints",
+        "scripts" => "Scripts",
+        "snapshots" => "Snapshots",
+        "findResults" => "Find Results",
+        "hotkeys" => "Hotkeys",
+        "journal" => "Journal",
         _ => contentId
     };
 
@@ -3347,14 +3363,442 @@ public partial class MainWindow : Window
     }
 
     #endregion
+
+    #region Phase 2 — Bottom Panel Handlers
+
+    // ── Output Log ──
+
+    private void AppendOutputLog(string source, string level, string message)
+    {
+        _outputLog.Add(new OutputLogEntry
+        {
+            Timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            Source = source,
+            Level = level,
+            Message = message
+        });
+        if (_outputLog.Count > 1000)
+            _outputLog.RemoveAt(0);
+    }
+
+    private void ClearOutputLog(object sender, RoutedEventArgs e) => _outputLog.Clear();
+
+    // ── Breakpoints Tab ──
+
+    private async void RefreshBreakpointsTab(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        try
+        {
+            var bps = await _breakpointService.ListBreakpointsAsync(pid);
+            BreakpointsTabList.ItemsSource = bps.Select(b => new BreakpointDisplayItem
+            {
+                Id = b.Id, Address = b.Address, Type = b.Type,
+                HitCount = b.HitCount, Status = b.IsEnabled ? "Active" : "Disabled",
+                Mode = b.Mode
+            }).ToList();
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Refresh breakpoints: {ex.Message}"); }
+    }
+
+    private async void RemoveSelectedBreakpoint(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        if (BreakpointsTabList.SelectedItem is not BreakpointDisplayItem item) return;
+        try
+        {
+            await _breakpointService.RemoveBreakpointAsync(pid, item.Id);
+            RefreshBreakpointsTab(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Remove breakpoint: {ex.Message}"); }
+    }
+
+    private async void RemoveAllBreakpoints(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        try
+        {
+            var bps = await _breakpointService.ListBreakpointsAsync(pid);
+            foreach (var bp in bps)
+                await _breakpointService.RemoveBreakpointAsync(pid, bp.Id);
+            RefreshBreakpointsTab(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Remove all breakpoints: {ex.Message}"); }
+    }
+
+    private async void RefreshHitLog(object sender, RoutedEventArgs e)
+    {
+        if (BreakpointsTabList.SelectedItem is not BreakpointDisplayItem bp) { HitLogStatus.Text = "Select a breakpoint first"; return; }
+        try
+        {
+            var hits = await _breakpointService.GetHitLogAsync(bp.Id);
+            HitLogList.ItemsSource = hits.Select(h => new HitLogDisplayItem
+            {
+                BreakpointId = h.BreakpointId, Address = h.Address,
+                ThreadId = h.ThreadId, Timestamp = h.Timestamp
+            }).ToList();
+            HitLogStatus.Text = $"{hits.Count} hits for {bp.Address}";
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Refresh hit log: {ex.Message}"); }
+    }
+
+    private async void InstallCodeCaveHook(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        var text = CodeCaveAddressBox.Text.Trim();
+        if (string.IsNullOrEmpty(text)) return;
+        try
+        {
+            var addr = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                ? nuint.Parse(text[2..], System.Globalization.NumberStyles.HexNumber)
+                : nuint.Parse(text, System.Globalization.NumberStyles.HexNumber);
+            var result = await _codeCaveEngine.InstallHookAsync(pid, addr);
+            AppendOutputLog("System", "Info", $"Hook installed at 0x{addr:X} → cave 0x{result.Hook.CaveAddress:X}");
+            RefreshCodeCaveHooks(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Install hook: {ex.Message}"); }
+    }
+
+    private async void RemoveSelectedCodeCaveHook(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        if (CodeCaveHooksList.SelectedItem is not CodeCaveHookDisplayItem item) return;
+        try
+        {
+            await _codeCaveEngine.RemoveHookAsync(pid, item.Id);
+            RefreshCodeCaveHooks(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Remove hook: {ex.Message}"); }
+    }
+
+    private async void RefreshCodeCaveHooks(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        try
+        {
+            var hooks = await _codeCaveEngine.ListHooksAsync(pid);
+            CodeCaveHooksList.ItemsSource = hooks.Select(h => new CodeCaveHookDisplayItem
+            {
+                Id = h.Id, OriginalAddress = $"0x{h.OriginalAddress:X}",
+                CaveAddress = $"0x{h.CaveAddress:X}", IsActive = h.IsActive, HitCount = h.HitCount
+            }).ToList();
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Refresh hooks: {ex.Message}"); }
+    }
+
+    // ── Scripts Tab ──
+
+    private static IEnumerable<AddressTableNode> FlattenNodes(IEnumerable<AddressTableNode> nodes)
+    {
+        foreach (var n in nodes)
+        {
+            yield return n;
+            foreach (var child in FlattenNodes(n.Children))
+                yield return child;
+        }
+    }
+
+    private void RefreshScriptsTab(object sender, RoutedEventArgs e)
+    {
+        var scripts = FlattenNodes(_addressTableService.Roots)
+            .Where(n => n.IsScriptEntry)
+            .Select(n => new ScriptDisplayItem
+            {
+                Id = n.Id, Label = n.Label,
+                StatusText = n.IsScriptEnabled ? "ENABLED" : "DISABLED",
+                IsEnabled = n.IsScriptEnabled
+            }).ToList();
+        ScriptsTabList.ItemsSource = scripts;
+    }
+
+    private async void EnableSelectedScriptTab(object sender, RoutedEventArgs e) => await ToggleScriptFromTab(true);
+    private async void DisableSelectedScriptTab(object sender, RoutedEventArgs e) => await ToggleScriptFromTab(false);
+    private async void ToggleSelectedScriptTab(object sender, RoutedEventArgs e)
+    {
+        if (ScriptsTabList.SelectedItem is ScriptDisplayItem item)
+            await ToggleScriptFromTab(!item.IsEnabled);
+    }
+
+    private async Task ToggleScriptFromTab(bool enable)
+    {
+        if (ScriptsTabList.SelectedItem is not ScriptDisplayItem item) return;
+        if (_autoAssemblerEngine is null || _engineFacade.AttachedProcessId is not { } pid) return;
+        var node = FlattenNodes(_addressTableService.Roots).FirstOrDefault(n => n.Id == item.Id);
+        if (node?.AssemblerScript is null) return;
+        try
+        {
+            if (enable)
+                await _autoAssemblerEngine.EnableAsync(pid, node.AssemblerScript);
+            else
+                await _autoAssemblerEngine.DisableAsync(pid, node.AssemblerScript);
+            node.IsScriptEnabled = enable;
+            RefreshScriptsTab(this, new RoutedEventArgs());
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Script toggle: {ex.Message}"); }
+    }
+
+    // ── Snapshots Tab ──
+
+    private async void CaptureSnapshot(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is not { } pid) return;
+        var addrText = SnapshotAddress.Text.Trim();
+        if (string.IsNullOrEmpty(addrText)) return;
+        try
+        {
+            var addr = addrText.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                ? nuint.Parse(addrText[2..], System.Globalization.NumberStyles.HexNumber)
+                : nuint.Parse(addrText, System.Globalization.NumberStyles.HexNumber);
+            var length = int.TryParse(SnapshotLength.Text, out var l) ? l : 256;
+            var label = string.IsNullOrWhiteSpace(SnapshotLabel.Text) ? null : SnapshotLabel.Text.Trim();
+            await _snapshotService.CaptureAsync(pid, addr, length, label);
+            RefreshSnapshotList();
+            AppendOutputLog("System", "Info", $"Snapshot captured: 0x{addr:X}, {length} bytes");
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Capture snapshot: {ex.Message}"); }
+    }
+
+    private void CompareSnapshots(object sender, RoutedEventArgs e)
+    {
+        var selected = SnapshotList.SelectedItems.Cast<SnapshotDisplayItem>().ToList();
+        if (selected.Count != 2) { AppendOutputLog("System", "Warn", "Select exactly two snapshots to compare"); return; }
+        try
+        {
+            var diff = _snapshotService.Compare(selected[0].Id, selected[1].Id);
+            PopulateSnapshotDiff(diff);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Compare snapshots: {ex.Message}"); }
+    }
+
+    private async void CompareSnapshotWithLive(object sender, RoutedEventArgs e)
+    {
+        if (_engineFacade.AttachedProcessId is null) return;
+        if (SnapshotList.SelectedItem is not SnapshotDisplayItem item) return;
+        try
+        {
+            var diff = await _snapshotService.CompareWithLiveAsync(item.Id);
+            PopulateSnapshotDiff(diff);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Compare with live: {ex.Message}"); }
+    }
+
+    private void DeleteSelectedSnapshot(object sender, RoutedEventArgs e)
+    {
+        if (SnapshotList.SelectedItem is not SnapshotDisplayItem item) return;
+        _snapshotService.DeleteSnapshot(item.Id);
+        RefreshSnapshotList();
+    }
+
+    private void RefreshSnapshotList()
+    {
+        var snapshots = _snapshotService.ListSnapshots();
+        SnapshotList.ItemsSource = snapshots.Select(s => new SnapshotDisplayItem
+        {
+            Id = s.Id, Label = s.Label, Address = $"0x{s.BaseAddress:X}",
+            Size = $"{s.Data.Length}", CapturedAt = s.CapturedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+        }).ToList();
+    }
+
+    private void PopulateSnapshotDiff(SnapshotDiff diff)
+    {
+        SnapshotDiffList.ItemsSource = diff.Changes.Select(c => new SnapshotDiffDisplayItem
+        {
+            Offset = $"+0x{c.Offset:X}",
+            OldValue = BitConverter.ToString(c.OldBytes).Replace("-", " "),
+            NewValue = BitConverter.ToString(c.NewBytes).Replace("-", " "),
+            Interpretation = c.Interpretation ?? ""
+        }).ToList();
+    }
+
+    // ── Find Results Tab ──
+
+    private void ClearFindResults(object sender, RoutedEventArgs e)
+    {
+        FindResultsList.ItemsSource = null;
+        FindResultsStatus.Text = "";
+    }
+
+    public void PopulateFindResults(IReadOnlyList<FindResultDisplayItem> items, string description)
+    {
+        FindResultsList.ItemsSource = items;
+        FindResultsStatus.Text = $"{items.Count} results — {description}";
+    }
+
+    // ── Hotkeys Tab ──
+
+    private void RefreshHotkeys(object sender, RoutedEventArgs e)
+    {
+        HotkeysList.ItemsSource = _hotkeyService.Bindings
+            .Select(b => new HotkeyDisplayItem
+            {
+                Id = b.Id, KeyCombo = b.Description, Description = b.Description
+            }).ToList();
+    }
+
+    private void RemoveSelectedHotkey(object sender, RoutedEventArgs e)
+    {
+        if (HotkeysList.SelectedItem is not HotkeyDisplayItem item) return;
+        _hotkeyService.Unregister(item.Id);
+        RefreshHotkeys(sender, e);
+    }
+
+    // ── Journal Tab ──
+
+    private void RefreshPatchHistory(object sender, RoutedEventArgs e)
+    {
+        PatchHistoryList.ItemsSource = _patchUndoService.GetHistory(50)
+            .Select(p => new PatchHistoryDisplayItem
+            {
+                Timestamp = p.Timestamp.LocalDateTime.ToString("HH:mm:ss"),
+                Address = $"0x{p.Address:X}",
+                DataType = p.DataType.ToString(),
+                NewValue = p.NewValue
+            }).ToList();
+    }
+
+    private async void UndoPatchFromJournal(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            var msg = await _patchUndoService.UndoAsync();
+            AppendOutputLog("System", "Info", msg ?? "Nothing to undo");
+            RefreshPatchHistory(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Undo: {ex.Message}"); }
+    }
+
+    private async void RollbackAllPatches(object sender, RoutedEventArgs e)
+    {
+        if (MessageBox.Show("Rollback ALL memory patches?", "Confirm", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        try
+        {
+            await _patchUndoService.RollbackAllAsync();
+            AppendOutputLog("System", "Info", "All patches rolled back");
+            RefreshPatchHistory(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Rollback all: {ex.Message}"); }
+    }
+
+    private void RefreshJournalEntries(object sender, RoutedEventArgs e)
+    {
+        JournalEntriesList.ItemsSource = _operationJournal.GetEntries()
+            .Select(j => new JournalEntryDisplayItem
+            {
+                OperationId = j.OperationId,
+                Timestamp = j.Timestamp.LocalDateTime.ToString("HH:mm:ss"),
+                OperationType = j.OperationType,
+                Address = $"0x{j.Address:X}",
+                Mode = j.Mode,
+                Status = j.Status.ToString()
+            }).ToList();
+    }
+
+    private async void RollbackSelectedJournalEntry(object sender, RoutedEventArgs e)
+    {
+        if (JournalEntriesList.SelectedItem is not JournalEntryDisplayItem item) return;
+        try
+        {
+            var result = await _operationJournal.RollbackOperationAsync(item.OperationId);
+            AppendOutputLog("System", "Info", result.Message);
+            RefreshJournalEntries(sender, e);
+        }
+        catch (Exception ex) { AppendOutputLog("System", "Error", $"Rollback: {ex.Message}"); }
+    }
+
+    #endregion
 }
 
-/// <summary>Display model for breakpoint list items.</summary>
+// ═══ Phase 2 Display Models ═══
+
+public sealed class OutputLogEntry
+{
+    public string Timestamp { get; init; } = "";
+    public string Source { get; init; } = "";
+    public string Level { get; init; } = "";
+    public string Message { get; init; } = "";
+}
+
 public sealed class BreakpointDisplayItem
 {
     public string Id { get; init; } = "";
     public string Address { get; init; } = "";
     public string Type { get; init; } = "";
+    public string Mode { get; init; } = "";
     public int HitCount { get; init; }
+    public string Status { get; init; } = "";
+}
+
+public sealed class HitLogDisplayItem
+{
+    public string BreakpointId { get; init; } = "";
+    public string Address { get; init; } = "";
+    public int ThreadId { get; init; }
+    public string Timestamp { get; init; } = "";
+}
+
+public sealed class CodeCaveHookDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string OriginalAddress { get; init; } = "";
+    public string CaveAddress { get; init; } = "";
+    public bool IsActive { get; init; }
+    public int HitCount { get; init; }
+}
+
+public sealed class ScriptDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string Label { get; init; } = "";
+    public string StatusText { get; init; } = "";
+    public bool IsEnabled { get; init; }
+}
+
+public sealed class SnapshotDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string Label { get; init; } = "";
+    public string Address { get; init; } = "";
+    public string Size { get; init; } = "";
+    public string CapturedAt { get; init; } = "";
+}
+
+public sealed class SnapshotDiffDisplayItem
+{
+    public string Offset { get; init; } = "";
+    public string OldValue { get; init; } = "";
+    public string NewValue { get; init; } = "";
+    public string Interpretation { get; init; } = "";
+}
+
+public sealed class HotkeyDisplayItem
+{
+    public int Id { get; init; }
+    public string KeyCombo { get; init; } = "";
+    public string Description { get; init; } = "";
+}
+
+public sealed class FindResultDisplayItem
+{
+    public string Address { get; init; } = "";
+    public string Instruction { get; init; } = "";
+    public string Module { get; init; } = "";
+    public string Context { get; init; } = "";
+}
+
+public sealed class PatchHistoryDisplayItem
+{
+    public string Timestamp { get; init; } = "";
+    public string Address { get; init; } = "";
+    public string DataType { get; init; } = "";
+    public string NewValue { get; init; } = "";
+}
+
+public sealed class JournalEntryDisplayItem
+{
+    public string OperationId { get; init; } = "";
+    public string Timestamp { get; init; } = "";
+    public string OperationType { get; init; } = "";
+    public string Address { get; init; } = "";
+    public string Mode { get; init; } = "";
     public string Status { get; init; } = "";
 }

@@ -143,20 +143,20 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IDialogService, DialogService>();
 
         // ── Bottom-panel ViewModels ──
-        services.AddTransient<OutputLogViewModel>();
-        services.AddTransient<HotkeysViewModel>();
-        services.AddTransient<FindResultsViewModel>();
-        services.AddTransient<SnapshotsViewModel>();
-        services.AddTransient<JournalViewModel>();
-        services.AddTransient<BreakpointsViewModel>();
-        services.AddTransient<ScriptsViewModel>();
+        services.AddSingleton<OutputLogViewModel>();
+        services.AddSingleton<HotkeysViewModel>();
+        services.AddSingleton<FindResultsViewModel>();
+        services.AddSingleton<SnapshotsViewModel>();
+        services.AddSingleton<JournalViewModel>();
+        services.AddSingleton<BreakpointsViewModel>();
+        services.AddSingleton<ScriptsViewModel>();
 
         // ── Phase 2.5 panel ViewModels ──
-        services.AddTransient<ScannerViewModel>();
-        services.AddTransient<ProcessListViewModel>();
-        services.AddTransient<InspectionViewModel>();
-        services.AddTransient<AiOperatorViewModel>();
-        services.AddTransient<AddressTableViewModel>(sp =>
+        services.AddSingleton<ScannerViewModel>();
+        services.AddSingleton<ProcessListViewModel>();
+        services.AddSingleton<InspectionViewModel>();
+        services.AddSingleton<AiOperatorViewModel>();
+        services.AddSingleton<AddressTableViewModel>(sp =>
             new AddressTableViewModel(
                 sp.GetRequiredService<AddressTableService>(),
                 sp.GetRequiredService<AddressTableExportService>(),
@@ -168,7 +168,8 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<IDialogService>(),
                 sp.GetRequiredService<IOutputLog>()));
 
-        // ── MainWindow ──
+        // ── Main ViewModel + Window ──
+        services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
     }
 

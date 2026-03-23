@@ -86,7 +86,7 @@ public partial class MainWindow : Window
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 2; // v1 = Phase 1, v2 = Phase 2 (6 new bottom tabs)
+    private const int LayoutVersion = 3; // v1 = Phase 1, v2 = Phase 2 tabs, v3 = 55/45 bottom/top split
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

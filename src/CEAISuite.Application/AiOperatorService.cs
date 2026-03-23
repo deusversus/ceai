@@ -328,7 +328,7 @@ public sealed class AiOperatorService
         return client
             .AsBuilder()
             .UseFunctionInvocation(configure: client => client.IncludeDetailedErrors = true)
-            .Use(inner => new ToolResultCappingChatClient(inner, Limits, _toolResultStore))
+            .Use(inner => new ToolResultCappingChatClient(inner, Limits, _toolResultStore, _tools))
             .UseAIContextProviders(contextProviders.ToArray())
             .BuildAIAgent(new ChatClientAgentOptions
             {
@@ -1516,7 +1516,7 @@ public sealed class AiOperatorService
     /// <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/> and the
     /// underlying LLM client so tool results are capped before consuming API tokens.
     /// </summary>
-    private sealed class ToolResultCappingChatClient(IChatClient inner, TokenLimits limits, ToolResultStore store) : DelegatingChatClient(inner)
+    private sealed class ToolResultCappingChatClient(IChatClient inner, TokenLimits limits, ToolResultStore store, List<AITool> baseline) : DelegatingChatClient(inner)
     {
         public override Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,
@@ -1524,7 +1524,7 @@ public sealed class AiOperatorService
             CancellationToken cancellationToken = default)
         {
             var capped = CapToolResults(messages);
-            DeduplicateTools(options);
+            ResetToolsFromBaseline(options);
             return base.GetResponseAsync(capped, options, cancellationToken);
         }
 
@@ -1534,29 +1534,23 @@ public sealed class AiOperatorService
             CancellationToken cancellationToken = default)
         {
             var capped = CapToolResults(messages);
-            DeduplicateTools(options);
+            ResetToolsFromBaseline(options);
             return base.GetStreamingResponseAsync(capped, options, cancellationToken);
         }
 
         /// <summary>
-        /// Remove duplicate tool names from ChatOptions.Tools and log collisions.
-        /// Context providers may inject tools that overlap with our progressive tool list,
-        /// and some APIs (Anthropic) reject duplicates with a 400 error.
+        /// Reset ChatOptions.Tools to a fresh copy of our progressive tool list.
+        /// The MAF framework's UseAIContextProviders merges context provider tools
+        /// (e.g. load_skill, read_skill_resource) into ChatOptions.Tools on every call,
+        /// but never clears previous injections. Since ChatOptions.Tools is a shared
+        /// mutable list reference, tools accumulate across calls. We fix this by
+        /// replacing the list with a clean snapshot of our _tools each call, so the
+        /// framework's merge always starts from a known-good baseline.
         /// </summary>
-        private static void DeduplicateTools(ChatOptions? options)
+        private void ResetToolsFromBaseline(ChatOptions? options)
         {
-            if (options?.Tools is not { Count: > 0 } tools) return;
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            for (int i = tools.Count - 1; i >= 0; i--)
-            {
-                var name = tools[i] is AIFunction f ? f.Name : tools[i].GetType().Name;
-                if (!seen.Add(name))
-                {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[TOOLS] Duplicate tool removed: '{name}' (index {i} of {tools.Count})");
-                    tools.RemoveAt(i);
-                }
-            }
+            if (options is null) return;
+            options.Tools = new List<AITool>(baseline);
         }
 
         private IEnumerable<ChatMessage> CapToolResults(IEnumerable<ChatMessage> messages)

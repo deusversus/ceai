@@ -3119,12 +3119,7 @@ public partial class MainWindow : Window
                 Content = content
             };
 
-            // Find an appropriate pane to add it to, or create one
-            var targetPane = DockManager.Layout
-                .Descendents()
-                .OfType<LayoutAnchorablePane>()
-                .FirstOrDefault();
-
+            var targetPane = FindTargetPaneForContentId(contentId);
             if (targetPane is not null)
             {
                 targetPane.Children.Add(restored);
@@ -3229,12 +3224,7 @@ public partial class MainWindow : Window
                     Content = content
                 };
 
-                // Find a bottom anchorable pane to add it to
-                var targetPane = DockManager.Layout
-                    .Descendents()
-                    .OfType<LayoutAnchorablePane>()
-                    .FirstOrDefault();
-
+                var targetPane = FindTargetPaneForContentId(contentId);
                 if (targetPane is not null)
                     targetPane.Children.Add(anchorable);
             }
@@ -3255,6 +3245,35 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Lookup the original XAML-defined content control by ContentId.</summary>
+    /// <summary>
+    /// Find the correct LayoutAnchorablePane to place a panel based on its role:
+    /// - "processes" → left sidebar (pane containing "processes")
+    /// - "aiOperator" → right sidebar (pane containing "aiOperator")
+    /// - Everything else → bottom pane (pane containing "scanner" or "output")
+    /// Falls back to any available pane if the preferred one isn't found.
+    /// </summary>
+    private LayoutAnchorablePane? FindTargetPaneForContentId(string contentId)
+    {
+        var allPanes = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutAnchorablePane>()
+            .ToList();
+
+        // Determine which sibling ContentId to look for in existing panes
+        var siblingId = contentId switch
+        {
+            "processes" => "processes",
+            "aiOperator" => "aiOperator",
+            _ => "scanner" // all Phase 2 tabs belong alongside Scanner/Output
+        };
+
+        // Find the pane that already contains the sibling
+        var preferred = allPanes.FirstOrDefault(pane =>
+            pane.Children.Any(c => c.ContentId == siblingId));
+
+        return preferred ?? allPanes.FirstOrDefault();
+    }
+
     private object? FindContentByContentId(string contentId)
     {
         // Walk all current layout elements to find one with matching ContentId that has Content

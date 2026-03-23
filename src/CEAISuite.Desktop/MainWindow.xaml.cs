@@ -3080,7 +3080,7 @@ public partial class MainWindow : Window
             : new Vs2013DarkTheme();
     }
 
-    /// <summary>Update system selection colors from current theme resources.</summary>
+    /// <summary>Update system selection colors and text colors from current theme resources.</summary>
     private void UpdateSystemSelectionColors()
     {
         if (TryFindResource("SelectionHighlight") is SolidColorBrush highlight)
@@ -3093,6 +3093,26 @@ public partial class MainWindow : Window
         {
             Resources[SystemColors.HighlightTextBrushKey] = new SolidColorBrush(highlightText.Color);
             Resources[SystemColors.InactiveSelectionHighlightTextBrushKey] = new SolidColorBrush(highlightText.Color);
+        }
+
+        // Override system text colors so native WPF controls (menus, tooltips, etc.)
+        // use our theme foreground instead of OS defaults.
+        if (TryFindResource("PrimaryForeground") is SolidColorBrush fg)
+        {
+            var fgBrush = new SolidColorBrush(fg.Color);
+            Resources[SystemColors.ControlTextBrushKey] = fgBrush;
+            Resources[SystemColors.WindowTextBrushKey] = fgBrush;
+            Resources[SystemColors.MenuTextBrushKey] = fgBrush;
+            Resources[SystemColors.InfoTextBrushKey] = fgBrush;
+        }
+        if (TryFindResource("WindowBackground") is SolidColorBrush bg)
+        {
+            Resources[SystemColors.WindowBrushKey] = new SolidColorBrush(bg.Color);
+        }
+        if (TryFindResource("MenuBackground") is SolidColorBrush menuBg)
+        {
+            Resources[SystemColors.MenuBrushKey] = new SolidColorBrush(menuBg.Color);
+            Resources[SystemColors.MenuBarBrushKey] = new SolidColorBrush(menuBg.Color);
         }
     }
 

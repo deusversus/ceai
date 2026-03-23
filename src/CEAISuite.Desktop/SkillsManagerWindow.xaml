@@ -6,57 +6,7 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         Background="{DynamicResource WindowBackground}">
-    <Window.Resources>
-        <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
-        </Style>
-        <Style TargetType="TextBox">
-            <Setter Property="Background" Value="{DynamicResource InputBackground}" />
-            <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
-            <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
-            <Setter Property="Padding" Value="6,4" />
-            <Setter Property="BorderThickness" Value="1" />
-        </Style>
-        <Style TargetType="Button">
-            <Setter Property="Background" Value="{DynamicResource ButtonBackground}" />
-            <Setter Property="Foreground" Value="{DynamicResource ButtonForeground}" />
-            <Setter Property="BorderThickness" Value="0" />
-            <Setter Property="Padding" Value="10,5" />
-            <Setter Property="Cursor" Value="Hand" />
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border Background="{TemplateBinding Background}"
-                                Padding="{TemplateBinding Padding}"
-                                CornerRadius="2">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource ButtonHoverBackground}" />
-                </Trigger>
-                <Trigger Property="IsPressed" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource ButtonPressedBackground}" />
-                </Trigger>
-                <Trigger Property="IsEnabled" Value="False">
-                    <Setter Property="Opacity" Value="0.4" />
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <Style TargetType="Separator">
-            <Setter Property="Background" Value="{DynamicResource BorderBrush}" />
-        </Style>
-        <Style TargetType="ListBox">
-            <Setter Property="Background" Value="{DynamicResource InputBackground}" />
-            <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
-            <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
-            <Setter Property="BorderThickness" Value="1" />
-        </Style>
-    </Window.Resources>
+    <!-- All default styles inherited from Themes/SharedStyles.xaml (merged at App level) -->
 
     <Grid Margin="16">
         <Grid.RowDefinitions>

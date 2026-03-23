@@ -35,7 +35,7 @@ public static class ThemeManager
 
         var mergedDictionaries = System.Windows.Application.Current.Resources.MergedDictionaries;
 
-        // Remove ALL existing theme dictionaries (including the App.xaml default)
+        // Remove only theme color dictionaries (preserve SharedStyles and other dictionaries)
         for (int i = mergedDictionaries.Count - 1; i >= 0; i--)
         {
             var src = mergedDictionaries[i].Source;
@@ -43,8 +43,9 @@ public static class ThemeManager
                 mergedDictionaries.RemoveAt(i);
         }
 
-        // Add at end so it takes precedence over any remaining dictionaries
-        mergedDictionaries.Add(dict);
+        // Insert theme colors at position 0 so SharedStyles (which depends on these
+        // via DynamicResource) picks them up correctly.
+        mergedDictionaries.Insert(0, dict);
         _currentThemeDictionary = dict;
 
         CurrentTheme = theme;

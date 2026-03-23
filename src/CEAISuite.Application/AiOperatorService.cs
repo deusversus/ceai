@@ -982,6 +982,12 @@ public sealed class AiOperatorService
                 _totalRequests++;
                 var cacheRate = _totalPromptTokens > 0 ? _totalCachedTokens * 100 / _totalPromptTokens : 0;
                 Log("USAGE", $"Streaming cumulative prompt: {_totalPromptTokens}, completion: {_totalCompletionTokens}, cached: {_totalCachedTokens} ({cacheRate}%), requests: {_totalRequests}");
+
+                // Prompt caching verification
+                if (_totalCachedTokens > 0 && _totalRequests == 2)
+                    Log("CACHE", $"✓ Prompt caching active! {_totalCachedTokens} tokens cached on 2nd request.");
+                else if (_totalCachedTokens == 0 && _totalRequests == 5)
+                    Log("CACHE", "⚠ Prompt caching may be inactive — check if AdditionalProperties flows through IChatClient adapter.");
             }
         }
     }
@@ -1454,6 +1460,9 @@ public sealed class AiOperatorService
           "Please fight a battle and tell me the EXP you received" — not "try it out".
         • Load skills silently. Your first response should contain TOOL CALLS.
         • If context was compacted, call request_tools("sessions") then SearchChatHistory("keyword").
+        • After completing a sub-task (found an address, wrote a script, set breakpoints),
+          briefly summarize what you accomplished and key findings. This helps context
+          compaction preserve important data when conversation gets long.
 
         ═══ TOOLS (PROGRESSIVE) ═══
         Core tools are always loaded. For specialized ops, call request_tools(category).

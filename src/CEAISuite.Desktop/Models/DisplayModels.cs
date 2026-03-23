@@ -1,14 +1,75 @@
 using System.Windows.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CEAISuite.Desktop.Models;
 
-/// <summary>Display model for AI chat messages in the ItemsControl.</summary>
+/// <summary>Display model for AI chat messages in the ItemsControl (used for history).</summary>
 public sealed class AiChatDisplayItem
 {
     public string RoleLabel { get; init; } = "";
     public string Content { get; set; } = "";
     public string Timestamp { get; init; } = "";
     public Brush Background { get; init; } = Brushes.Transparent;
+}
+
+// ── Structured content blocks for live streaming display ──
+
+/// <summary>Base type for chat display content blocks (OpenCode-style part model).</summary>
+public abstract partial class ChatContentBlock : ObservableObject
+{
+    public string Timestamp { get; init; } = "";
+}
+
+/// <summary>Text content from user or assistant.</summary>
+public sealed partial class TextContentBlock : ChatContentBlock
+{
+    [ObservableProperty]
+    private string _content = "";
+
+    public string RoleLabel { get; init; } = "";
+    public Brush Background { get; init; } = Brushes.Transparent;
+}
+
+/// <summary>Tool call with execution state and collapsible result.</summary>
+public sealed partial class ToolCallBlock : ChatContentBlock
+{
+    public string ToolName { get; init; } = "";
+    public string Arguments { get; init; } = "";
+
+    [ObservableProperty]
+    private string _status = "running";  // running, completed, error
+
+    [ObservableProperty]
+    private string? _result;
+
+    [ObservableProperty]
+    private bool _isExpanded;
+
+    /// <summary>Icon based on tool type.</summary>
+    public string Icon => ToolName switch
+    {
+        "ReadMemory" or "BrowseMemory" or "HexDump" => "📖",
+        "WriteMemory" => "✏️",
+        "StartScan" or "RefineScan" or "GetScanResults" => "🔍",
+        "Disassemble" or "FindWritersToOffset" => "🔬",
+        "SetBreakpoint" or "RemoveBreakpoint" => "🛑",
+        "InstallCodeCaveHook" => "🪝",
+        "ListProcesses" or "AttachProcess" or "InspectProcess" => "📋",
+        _ => "🔧"
+    };
+}
+
+/// <summary>Tool approval request with inline resolution buttons.</summary>
+public sealed partial class ApprovalBlock : ChatContentBlock
+{
+    public string ToolName { get; init; } = "";
+    public string Arguments { get; init; } = "";
+
+    [ObservableProperty]
+    private string _status = "pending";  // pending, approved, denied
+
+    /// <summary>Callback to resolve the approval. Set by the ViewModel.</summary>
+    public Action<bool>? Resolve { get; set; }
 }
 
 /// <summary>Display model for process selection in the command bar ComboBox.</summary>

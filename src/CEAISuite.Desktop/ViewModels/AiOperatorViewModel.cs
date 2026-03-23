@@ -94,6 +94,14 @@ public partial class AiOperatorViewModel : ObservableObject
     [ObservableProperty]
     private string _chatSearchText = "";
 
+    /// <summary>Structured content blocks for the currently-streaming response (OpenCode-style).</summary>
+    [ObservableProperty]
+    private ObservableCollection<ChatContentBlock> _streamingBlocks = new();
+
+    /// <summary>Whether the streaming blocks area is visible (active response in progress).</summary>
+    [ObservableProperty]
+    private bool _isStreamingBlocksVisible;
+
     // ── Events for MainWindow to subscribe (UI-specific actions) ──
 
     /// <summary>Raised when the chat display needs to scroll to bottom.</summary>
@@ -101,6 +109,9 @@ public partial class AiOperatorViewModel : ObservableObject
 
     /// <summary>Raised when the chat list items have been refreshed and need a visual refresh.</summary>
     public event Action? ChatDisplayRefreshed;
+
+    /// <summary>Raised when a streaming content block is added or updated.</summary>
+    public event Action? StreamingBlocksUpdated;
 
     /// <summary>Raised when an approval card needs to be shown (WPF-specific UI).</summary>
     public event Action<AgentStreamEvent.ApprovalRequested>? ApprovalCardRequested;
@@ -156,54 +167,132 @@ public partial class AiOperatorViewModel : ObservableObject
             {
                 var reader = _aiOperatorService.SendMessageStreamingAsync(message, _streamingCts.Token);
 
-                // Add a placeholder for the streaming response
-                var streamItem = new AiChatDisplayItem
-                {
-                    RoleLabel = "AI Operator",
-                    Content = "",
-                    Timestamp = DateTime.Now.ToString("h:mm tt"),
-                    Background = FindThemeBrush("ChatAiBubble")
-                };
-
+                // Initialize streaming blocks display
                 _dispatcher.Invoke(() =>
                 {
-                    ChatMessages.Add(streamItem);
-                    StreamingTextUpdated?.Invoke();
+                    StreamingBlocks.Clear();
+                    IsStreamingBlocksVisible = true;
                     ScrollToBottomRequested?.Invoke();
                 });
+
+                TextContentBlock? currentTextBlock = null;
 
                 await foreach (var evt in reader.ReadAllAsync(_streamingCts.Token))
                 {
                     switch (evt)
                     {
                         case AgentStreamEvent.TextDelta delta:
-                            streamItem.Content += delta.Text;
                             _dispatcher.Invoke(() =>
                             {
-                                StreamingTextUpdated?.Invoke();
+                                if (currentTextBlock is null)
+                                {
+                                    currentTextBlock = new TextContentBlock
+                                    {
+                                        RoleLabel = "AI Operator",
+                                        Timestamp = DateTime.Now.ToString("h:mm tt"),
+                                        Background = FindThemeBrush("ChatAiBubble")
+                                    };
+                                    StreamingBlocks.Add(currentTextBlock);
+                                }
+                                currentTextBlock.Content += delta.Text;
+                                StreamingBlocksUpdated?.Invoke();
                                 ScrollToBottomRequested?.Invoke();
                             });
                             break;
 
                         case AgentStreamEvent.ToolCallStarted tool:
                             _dispatcher.Invoke(() =>
-                                StatusText = $"Tool: {tool.ToolName}");
+                            {
+                                currentTextBlock = null; // Next text starts a new block
+                                var block = new ToolCallBlock
+                                {
+                                    ToolName = tool.ToolName,
+                                    Arguments = tool.Arguments,
+                                    Timestamp = DateTime.Now.ToString("h:mm:ss"),
+                                    Status = "running"
+                                };
+                                StreamingBlocks.Add(block);
+                                StatusText = $"Tool: {tool.ToolName}";
+                                StreamingBlocksUpdated?.Invoke();
+                                ScrollToBottomRequested?.Invoke();
+                            });
+                            break;
+
+                        case AgentStreamEvent.ToolCallCompleted completed:
+                            _dispatcher.Invoke(() =>
+                            {
+                                // Find the matching running tool block (search backwards)
+                                for (int i = StreamingBlocks.Count - 1; i >= 0; i--)
+                                {
+                                    if (StreamingBlocks[i] is ToolCallBlock tb && tb.Status == "running")
+                                    {
+                                        tb.Status = "completed";
+                                        tb.Result = completed.Result;
+                                        break;
+                                    }
+                                }
+                                StreamingBlocksUpdated?.Invoke();
+                            });
                             break;
 
                         case AgentStreamEvent.ApprovalRequested approval:
                             await _dispatcher.InvokeAsync(() =>
                             {
-                                HandleApprovalRequest(approval);
+                                currentTextBlock = null;
+                                var block = new ApprovalBlock
+                                {
+                                    ToolName = approval.ToolName,
+                                    Arguments = approval.Arguments,
+                                    Timestamp = DateTime.Now.ToString("h:mm:ss"),
+                                };
+                                block.Resolve = approved =>
+                                {
+                                    block.Status = approved ? "approved" : "denied";
+                                    ResolveApproval(approval, approved);
+                                };
+                                StreamingBlocks.Add(block);
+                                _pendingApprovals.Add(approval);
+                                StatusText = $"⚠ Awaiting approval: {approval.ToolName}";
+                                StreamingBlocksUpdated?.Invoke();
+                                ScrollToBottomRequested?.Invoke();
                             });
                             break;
 
                         case AgentStreamEvent.Error err:
-                            streamItem.Content = err.Message;
                             _dispatcher.Invoke(() =>
-                                StreamingTextUpdated?.Invoke());
+                            {
+                                currentTextBlock = null;
+                                StreamingBlocks.Add(new TextContentBlock
+                                {
+                                    RoleLabel = "Error",
+                                    Content = err.Message,
+                                    Timestamp = DateTime.Now.ToString("h:mm tt"),
+                                    Background = FindThemeBrush("ChatAiBubble")
+                                });
+                                StreamingBlocksUpdated?.Invoke();
+                            });
                             break;
                     }
                 }
+
+                // Convert streaming blocks to a flat history item
+                _dispatcher.Invoke(() =>
+                {
+                    var fullText = string.Join("\n\n", StreamingBlocks
+                        .OfType<TextContentBlock>()
+                        .Select(b => b.Content)
+                        .Where(c => !string.IsNullOrWhiteSpace(c)));
+                    // Tool calls get appended as compact summaries
+                    var toolSummaries = StreamingBlocks
+                        .OfType<ToolCallBlock>()
+                        .Select(b => $"[{b.Icon} {b.ToolName}: {b.Status}]");
+                    var combined = string.IsNullOrWhiteSpace(fullText)
+                        ? string.Join(" ", toolSummaries)
+                        : fullText;
+
+                    IsStreamingBlocksVisible = false;
+                    // The history item is added by RefreshChatDisplay below
+                });
             }
             else
             {

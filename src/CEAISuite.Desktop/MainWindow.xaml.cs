@@ -138,11 +138,17 @@ public partial class MainWindow : Window
         AiOperatorContent.DataContext = aiOperatorVm;
         _aiOperatorVm.ScrollToBottomRequested += () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd());
         _aiOperatorVm.StreamingTextUpdated += () => Dispatcher.BeginInvoke(() => AiChatList.Items.Refresh());
+        _aiOperatorVm.StreamingBlocksUpdated += () => Dispatcher.BeginInvoke(() =>
+        {
+            StreamingBlocksList.Items.Refresh();
+            AiChatScrollViewer.ScrollToEnd();
+        });
         _aiOperatorVm.ChatDisplayRefreshed += () => Dispatcher.BeginInvoke(() =>
         {
             for (int i = AiChatContainer.Children.Count - 1; i >= 0; i--)
             {
-                if (AiChatContainer.Children[i] != AiChatList)
+                var child = AiChatContainer.Children[i];
+                if (child != AiChatList && child != StreamingBlocksList)
                     AiChatContainer.Children.RemoveAt(i);
             }
         });
@@ -426,6 +432,20 @@ public partial class MainWindow : Window
 
     private static Brush FindThemeBrush(string key) =>
         System.Windows.Application.Current.FindResource(key) as Brush ?? Brushes.Transparent;
+
+    // ── Inline approval block handlers (streaming content blocks) ──
+
+    private void ApprovalBlock_Allow(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: Models.ApprovalBlock block })
+            block.Resolve?.Invoke(true);
+    }
+
+    private void ApprovalBlock_Deny(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: Models.ApprovalBlock block })
+            block.Resolve?.Invoke(false);
+    }
 
     /// <summary>
     /// Shows an inline approval card in the chat with Allow/Deny/Allow All buttons.

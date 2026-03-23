@@ -1234,6 +1234,7 @@ public sealed class AiOperatorService
     public void SaveCurrentChat()
     {
         if (string.IsNullOrEmpty(CurrentChatId)) return;
+        if (_displayHistory.Count == 0) return; // Don't persist empty chats
 
         // Auto-title from first user message if still "New Chat"
         if (CurrentChatTitle == "New Chat" && _displayHistory.Count > 0)

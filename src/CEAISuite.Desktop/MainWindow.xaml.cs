@@ -38,7 +38,7 @@ public partial class MainWindow : Window
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 16; // v16 = Phase 3 center tabs (disasm, struct, ptr, script, debug)
+    private const int LayoutVersion = 17; // v17 = Phase 4 explorer sidebar (modules, threads, memory map, workspace)
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -71,7 +71,11 @@ public partial class MainWindow : Window
         StructureDissectorViewModel structureDissectorVm,
         PointerScannerViewModel pointerScannerVm,
         ScriptEditorViewModel scriptEditorVm,
-        DebuggerViewModel debuggerVm)
+        DebuggerViewModel debuggerVm,
+        ModuleListViewModel moduleListVm,
+        ThreadListViewModel threadListVm,
+        MemoryRegionsViewModel memoryRegionsVm,
+        WorkspaceViewModel workspaceVm)
     {
         InitializeComponent();
 
@@ -148,6 +152,15 @@ public partial class MainWindow : Window
         ScriptEditorContent.DataContext = scriptEditorVm;
         SetupScriptEditorHighlighting(scriptEditorVm);
         DebuggerContent.DataContext = debuggerVm;
+
+        // Wire Phase 4 sidebar DataContexts
+        ModulesContent.DataContext = moduleListVm;
+        ThreadsContent.DataContext = threadListVm;
+        MemoryRegionsContent.DataContext = memoryRegionsVm;
+        WorkspaceContent.DataContext = workspaceVm;
+
+        // Wire Workspace events to MainViewModel session logic
+        workspaceVm.LoadSessionRequested += sessionId => _ = _mainVm.RestoreSession(sessionId);
 
         // Wire AI Operator ViewModel
         AiOperatorContent.DataContext = aiOperatorVm;

@@ -273,3 +273,42 @@ public sealed class BreakpointHitDetailItem
     public string Timestamp { get; init; } = "";
     public IReadOnlyList<RegisterDisplayItem> Registers { get; init; } = [];
 }
+
+// ── Phase 4 display models ──
+
+public sealed class ModuleDisplayItem
+{
+    public string Name { get; init; } = "";
+    public string BaseAddress { get; init; } = "";
+    public string Size { get; init; } = "";
+    public string Path { get; init; } = "";
+}
+
+public sealed class ThreadDisplayItem
+{
+    public int ThreadId { get; init; }
+    public string State { get; init; } = "Running";
+    public string CurrentInstruction { get; init; } = "";
+    public string Module { get; init; } = "";
+}
+
+public sealed class MemoryRegionDisplayItem
+{
+    public string BaseAddress { get; init; } = "";
+    public string Size { get; init; } = "";
+    public string Protection { get; init; } = "";
+    public string OwnerModule { get; init; } = "";
+    public bool IsReadable { get; init; }
+    public bool IsWritable { get; init; }
+    public bool IsExecutable { get; init; }
+}
+
+public sealed class SessionDisplayItem
+{
+    public string Id { get; init; } = "";
+    public string ProcessName { get; init; } = "";
+    public int? ProcessId { get; init; }
+    public string CreatedAt { get; init; } = "";
+    public int AddressCount { get; init; }
+    public int ActionCount { get; init; }
+}

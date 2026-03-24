@@ -9,10 +9,11 @@ public sealed class StubScanEngine : IScanEngine
 {
     public ScanResultSet? NextScanResult { get; set; }
     public ScanResultSet? NextRefineResult { get; set; }
+    public IReadOnlyList<MemoryRegionDescriptor>? NextRegions { get; set; }
 
     public Task<IReadOnlyList<MemoryRegionDescriptor>> EnumerateRegionsAsync(
         int processId, CancellationToken cancellationToken = default) =>
-        Task.FromResult<IReadOnlyList<MemoryRegionDescriptor>>(Array.Empty<MemoryRegionDescriptor>());
+        Task.FromResult(NextRegions ?? (IReadOnlyList<MemoryRegionDescriptor>)Array.Empty<MemoryRegionDescriptor>());
 
     public Task<ScanResultSet> StartScanAsync(
         int processId, ScanConstraints constraints, CancellationToken cancellationToken = default)

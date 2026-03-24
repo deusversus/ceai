@@ -193,17 +193,19 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-## Phase 4: Explorer Sidebar & Process Intelligence
+## Phase 4: Explorer Sidebar & Process Intelligence ✅ COMPLETE
 
 **Goal:** Build the left sidebar into a proper process exploration tool. Addresses Process & Attachment (20% parity) and Memory (10% parity).
 
-| Item | Tools Surfaced | Details |
-|------|---------------|---------|
-| Module list (filterable) | `ListModules` via engine | Sortable list with base address, size, path. Expandable to show exports/imports. |
-| Thread list with status | `GetAllThreadStacks`, `GetCallStack` | Thread ID, state, current instruction, expandable stack |
-| Memory regions overview | `QueryMemoryProtection` | Visual memory map with protection flags, module ownership |
-| Process details panel | `InspectProcess` | Enhanced info: arch, parent, command line, modules count |
-| Workspace panel | `ListSessions`, `LoadCheatTable` | Recent sessions + cheat tables (SQLite-backed persistence) |
+**Result:** 4 new sidebar tabs (Modules, Threads, Memory Map, Workspace) + enhanced Processes panel with process details. All auto-refresh on process attach. 168 tests passing, 16 new tests added.
+
+| Item | Tools Surfaced | Status |
+|------|---------------|--------|
+| Module list (filterable) | `AttachAsync` → Modules | ✅ Done — filterable list with base address, size; copy address, navigate to disassembler |
+| Thread list with status | `WalkAllThreadsAsync`, `WalkStackAsync` | ✅ Done — thread list with expandable call stack, navigate to instruction |
+| Memory regions overview | `EnumerateRegionsAsync` | ✅ Done — protection flags (R/RW/RWX/X), module ownership, filterable by protection |
+| Process details panel | `IProcessContext.CurrentInspection` | ✅ Done — enhanced Processes panel shows "x64 \| 47 modules" when attached |
+| Workspace panel | `SessionService`, `CheatTableParser` | ✅ Done — list/load/delete sessions + import .CT files |
 
 ---
 
@@ -433,24 +435,24 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 2 ✅ | After Ph 2.5 ✅ | After Ph 3 ✅ | After Ph 5 | After Ph 7 | Target |
-|----------|-------------|-------------|-----------|-----------|-----------|--------|
-| Process & Attachment | 20% | 20% | 20% | 20% | 20% | 80%* |
-| Memory Read/Write | 10% | 10% | 10% | 80% | 80% | 90% |
-| Scanning | 67% | 67% | 67% | 67% | 90% | 95% |
-| Disassembly & Analysis | 20% | 20% | 70% | 70% | 70% | 85% |
-| Breakpoints & Hooks | 50% | 50% | 55% | 55% | 80% | 90% |
-| Address Table | 67% | 67% | 67% | 67% | 90% | 95% |
-| Scripting | 40% | 40% | 80% | 80% | 80% | 95%** |
-| Pointer Resolution | 0% | 0% | 60% | 60% | 70% | 80% |
-| Structure Discovery | 0% | 0% | 100% | 100% | 100% | 100% |
-| Snapshots | 100% | 100% | 100% | 100% | 100% | 100% |
-| Session & History | 60% | 60% | 60% | 60% | 60% | 80% |
-| Safety & Watchdog | 30% | 30% | 30% | 30% | 50% | 80% |
-| Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% |
-| **Overall** | **~42%** | **~42%** | **~62%** | **~72%** | **~82%** | **90%+** |
+| Category | After Ph 2 ✅ | After Ph 2.5 ✅ | After Ph 3 ✅ | After Ph 4 ✅ | After Ph 5 | After Ph 7 | Target |
+|----------|-------------|-------------|-----------|-----------|-----------|-----------|--------|
+| Process & Attachment | 20% | 20% | 20% | 45% | 45% | 45% | 80%* |
+| Memory Read/Write | 10% | 10% | 10% | 15% | 80% | 80% | 90% |
+| Scanning | 67% | 67% | 67% | 67% | 67% | 90% | 95% |
+| Disassembly & Analysis | 20% | 20% | 70% | 70% | 70% | 70% | 85% |
+| Breakpoints & Hooks | 50% | 50% | 55% | 55% | 55% | 80% | 90% |
+| Address Table | 67% | 67% | 67% | 67% | 67% | 90% | 95% |
+| Scripting | 40% | 40% | 80% | 80% | 80% | 80% | 95%** |
+| Pointer Resolution | 0% | 0% | 60% | 60% | 60% | 70% | 80% |
+| Structure Discovery | 0% | 0% | 100% | 100% | 100% | 100% | 100% |
+| Snapshots | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+| Session & History | 60% | 60% | 60% | 75% | 75% | 75% | 80% |
+| Safety & Watchdog | 30% | 30% | 30% | 30% | 30% | 50% | 80% |
+| Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+| **Overall** | **~42%** | **~42%** | **~62%** | **~65%** | **~72%** | **~82%** | **90%+** |
 
-*Process & Attachment parity improves with Phase 4 (Explorer Sidebar).  
+*Process & Attachment parity improves further with future engine enhancements (parent process, command line).
 **Scripting reaches 95% after Phase 8 (Lua Engine).
 
 ---
@@ -473,8 +475,9 @@ Phase 1 ✅ (Foundation)
     │       ├── Phase 3D ✅ Pointer Scanner (cross-restart validation, stability ranking)
     │       └── Phase 3E ✅ Debugger UI (register change highlighting; stepping deferred to Phase 7)
     │
-    ├── Phase 4 (Explorer Sidebar) ⬅ NEXT
-    ├── Phase 5 (Memory Browser+)
+    Phase 4 ✅ (Explorer Sidebar) ← modules, threads, memory map, workspace, process details
+    │
+    ├── Phase 5 (Memory Browser+) ⬅ NEXT
     │
     ├── Phase 6 (Command Bar & UX) ← 6A ~90% done, 6C ~60% done; remaining items depend on Phases 4-5
     │       └── remaining: token display, progress indicators, first-run UX
@@ -495,10 +498,10 @@ Phase 1 ✅ (Foundation)
 2. ✅ Phase 2 — Done (Snapshots, Hotkeys at 100%; 7 new bottom tabs)
 3. ✅ Phase 2.5 — Done (18 ViewModels, DI container, MVVM infrastructure)
 4. ✅ Phase 3 — Done (5 center tabs + full gap closure; 152 tests)
-5. **Phase 9B — CI/CD (should be set up now that Phase 3 is complete)**
-6. Phase 4 — Explorer Sidebar (module list, thread list, memory map)
-7. Phase 7A — Multi-threaded scanning (performance critical)
-8. Phase 5 — Memory Browser+ (hex editing, data inspector)
+5. ✅ Phase 4 — Done (4 explorer sidebar tabs + process details; 168 tests)
+6. **Phase 9B — CI/CD (should be set up now)**
+7. Phase 5 — Memory Browser+ (hex editing, data inspector)
+8. Phase 7A — Multi-threaded scanning (performance critical)
 9. Phase 8 — Lua (CE's killer feature)
 
 ---
@@ -511,8 +514,8 @@ Phase 1 ✅ (Foundation)
 | **2** | Bottom Panels | ✅ Complete | 10 new tabs/panels; Snapshots, Hotkeys at 100% parity; token budgeting |
 | **2.5** | MVVM + DI Refactor | ✅ Complete | 18 ViewModels, DI container, CommunityToolkit.Mvvm, INavigationService, IDialogService |
 | **3** | Core Windows | ✅ Complete | Disassembler (xrefs, symbols, tooltips, inline edit), Script Editor (AvalonEdit), Structure Dissector (CE export, compare), Pointer Scanner (validation), Debugger (register highlighting); 152 tests |
-| **4** | Explorer Sidebar | **⬅ Next** | Module list (w/ exports), thread list, memory map |
-| **5** | Memory Browser+ | Planned | Hex editing, data inspector, protection tools, structure spider |
+| **4** | Explorer Sidebar | ✅ Complete | Modules (filterable), Threads (expandable stacks), Memory Map (protection flags), Workspace (sessions + CT import), Process details; 168 tests |
+| **5** | Memory Browser+ | **⬅ Next** | Hex editing, data inspector, protection tools, structure spider |
 | **6** | UX Polish | ~70% done | Command bar ~90%, status bar ~60%; remaining: token display, progress indicators, first-run |
 | **7** | Engine Gaps | Planned | Multi-threaded scan, bit-level scan, conditional BPs, AA directives, debugger stepping |
 | **8** | Lua | Planned | Full Lua 5.4 scripting engine with CE API bindings |

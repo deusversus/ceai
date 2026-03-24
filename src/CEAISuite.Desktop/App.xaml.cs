@@ -192,6 +192,12 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<IOutputLog>()));
         services.AddSingleton<DebuggerViewModel>();
 
+        // ── Phase 4 Explorer ViewModels ──
+        services.AddSingleton<ModuleListViewModel>();
+        services.AddSingleton<ThreadListViewModel>();
+        services.AddSingleton<MemoryRegionsViewModel>();
+        services.AddSingleton<WorkspaceViewModel>();
+
         // ── Main ViewModel + Window ──
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();

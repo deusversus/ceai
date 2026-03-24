@@ -36,10 +36,34 @@ public partial class ProcessListViewModel : ObservableObject
     [ObservableProperty]
     private bool _isAttached;
 
+    [ObservableProperty]
+    private string? _architecture;
+
+    [ObservableProperty]
+    private int _moduleCount;
+
+    [ObservableProperty]
+    private string? _processDetails;
+
     private void OnProcessChanged()
     {
         IsAttached = _processContext.AttachedProcessId is not null;
         AttachedProcessName = _processContext.AttachedProcessName;
+
+        // Phase 4: populate process details from inspection
+        var inspection = _processContext.CurrentInspection;
+        if (inspection is not null)
+        {
+            Architecture = inspection.Architecture;
+            ModuleCount = inspection.Modules.Count;
+            ProcessDetails = $"{inspection.Architecture} | {inspection.Modules.Count} modules";
+        }
+        else
+        {
+            Architecture = null;
+            ModuleCount = 0;
+            ProcessDetails = null;
+        }
 
         // Auto-select the attached process in the list if present
         if (_processContext.AttachedProcessId is { } pid)

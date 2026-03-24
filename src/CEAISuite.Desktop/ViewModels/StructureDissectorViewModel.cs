@@ -13,15 +13,18 @@ public partial class StructureDissectorViewModel : ObservableObject
     private readonly StructureDissectorService _dissectorService;
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
+    private readonly IClipboardService _clipboard;
 
     public StructureDissectorViewModel(
         StructureDissectorService dissectorService,
         IProcessContext processContext,
-        IOutputLog outputLog)
+        IOutputLog outputLog,
+        IClipboardService clipboard)
     {
         _dissectorService = dissectorService;
         _processContext = processContext;
         _outputLog = outputLog;
+        _clipboard = clipboard;
     }
 
     [ObservableProperty] private string _baseAddress = "";
@@ -102,7 +105,7 @@ public partial class StructureDissectorViewModel : ObservableObject
             sb.AppendLine($"    {cType} {name}; // offset {f.OffsetHex}, confidence {f.ConfidencePercent}");
         }
         sb.AppendLine("};");
-        System.Windows.Clipboard.SetText(sb.ToString());
+        _clipboard.SetText(sb.ToString());
         StatusText = "C struct copied to clipboard.";
     }
 

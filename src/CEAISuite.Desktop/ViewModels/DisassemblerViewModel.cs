@@ -19,6 +19,7 @@ public partial class DisassemblerViewModel : ObservableObject
     private readonly INavigationService _navigationService;
     private readonly IOutputLog _outputLog;
     private readonly IDialogService _dialogService;
+    private readonly IClipboardService _clipboard;
 
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
@@ -36,7 +37,8 @@ public partial class DisassemblerViewModel : ObservableObject
         IProcessContext processContext,
         INavigationService navigationService,
         IOutputLog outputLog,
-        IDialogService dialogService)
+        IDialogService dialogService,
+        IClipboardService clipboard)
     {
         _disassemblyService = disassemblyService;
         _breakpointService = breakpointService;
@@ -46,6 +48,7 @@ public partial class DisassemblerViewModel : ObservableObject
         _navigationService = navigationService;
         _outputLog = outputLog;
         _dialogService = dialogService;
+        _clipboard = clipboard;
     }
 
     [ObservableProperty] private string _goToAddress = "";
@@ -133,7 +136,7 @@ public partial class DisassemblerViewModel : ObservableObject
         {
             sb.AppendLine($"{line.Address}  {line.HexBytes,-24} {line.Mnemonic,-8} {line.Operands}");
         }
-        System.Windows.Clipboard.SetText(sb.ToString());
+        _clipboard.SetText(sb.ToString());
         StatusText = $"Copied {Lines.Count} lines to clipboard.";
     }
 

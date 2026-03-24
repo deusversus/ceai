@@ -26,6 +26,7 @@ public partial class AiOperatorViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private readonly IDispatcherService _dispatcher;
     private readonly IThemeService _themeService;
+    private readonly IClipboardService _clipboard;
 
     private CancellationTokenSource? _streamingCts;
     private bool _suppressChatSwitch;
@@ -45,11 +46,13 @@ public partial class AiOperatorViewModel : ObservableObject
         IDialogService dialogService,
         IOutputLog outputLog,
         IDispatcherService dispatcher,
-        IThemeService themeService)
+        IThemeService themeService,
+        IClipboardService clipboard)
     {
         _aiOperatorService = aiOperatorService;
         _appSettingsService = appSettingsService;
         _processContext = processContext;
+        _clipboard = clipboard;
         _addressTableService = addressTableService;
         _dialogService = dialogService;
         _outputLog = outputLog;
@@ -333,7 +336,7 @@ public partial class AiOperatorViewModel : ObservableObject
     private void CopyMessage(AiChatDisplayItem? item)
     {
         if (item is null) return;
-        try { Clipboard.SetText(item.Content); }
+        try { _clipboard.SetText(item.Content); }
         catch { /* clipboard locked */ }
     }
 

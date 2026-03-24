@@ -174,6 +174,23 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<IDispatcherService>(),
                 sp.GetRequiredService<INavigationService>()));
 
+        // ── Phase 3 services (not yet in DI) ──
+        services.AddSingleton<StructureDissectorService>();
+        services.AddSingleton<PointerScannerService>();
+
+        // ── Phase 3 center-tab ViewModels ──
+        services.AddSingleton<StructureDissectorViewModel>();
+        services.AddSingleton<PointerScannerViewModel>();
+        services.AddSingleton<DisassemblerViewModel>();
+        services.AddSingleton<ScriptEditorViewModel>(sp =>
+            new ScriptEditorViewModel(
+                sp.GetRequiredService<AddressTableService>(),
+                sp.GetService<IAutoAssemblerEngine>(),
+                sp.GetRequiredService<ScriptGenerationService>(),
+                sp.GetRequiredService<IProcessContext>(),
+                sp.GetRequiredService<IOutputLog>()));
+        services.AddSingleton<DebuggerViewModel>();
+
         // ── Main ViewModel + Window ──
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();

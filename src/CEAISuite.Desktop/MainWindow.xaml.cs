@@ -36,7 +36,7 @@ public partial class MainWindow : Window
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 11; // v11 = */ 472px fixed bottom (matches serializer output)
+    private const int LayoutVersion = 16; // v16 = Phase 3 center tabs (disasm, struct, ptr, script, debug)
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -64,7 +64,12 @@ public partial class MainWindow : Window
         ProcessListViewModel processListVm,
         InspectionViewModel inspectionVm,
         AddressTableViewModel addressTableVm,
-        AiOperatorViewModel aiOperatorVm)
+        AiOperatorViewModel aiOperatorVm,
+        DisassemblerViewModel disassemblerVm,
+        StructureDissectorViewModel structureDissectorVm,
+        PointerScannerViewModel pointerScannerVm,
+        ScriptEditorViewModel scriptEditorVm,
+        DebuggerViewModel debuggerVm)
     {
         InitializeComponent();
 
@@ -134,6 +139,13 @@ public partial class MainWindow : Window
         InspectionContent.DataContext = inspectionVm;
         AddressTableContent.DataContext = addressTableVm;
 
+        // Wire Phase 3 center-tab DataContexts
+        DisassemblerContent.DataContext = disassemblerVm;
+        StructureDissectorContent.DataContext = structureDissectorVm;
+        PointerScannerContent.DataContext = pointerScannerVm;
+        ScriptEditorContent.DataContext = scriptEditorVm;
+        DebuggerContent.DataContext = debuggerVm;
+
         // Wire AI Operator ViewModel
         AiOperatorContent.DataContext = aiOperatorVm;
         _aiOperatorVm.ScrollToBottomRequested += () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd());
@@ -169,8 +181,8 @@ public partial class MainWindow : Window
         };
         _addressTableVm.NavigateToDisassembly += addrStr =>
         {
-            _inspectionVm.DisassemblyAddress = addrStr;
-            _inspectionVm.DisassembleAtAddressCommand.Execute(null);
+            disassemblerVm.NavigateToAddress(addrStr);
+            ActivateDocument("disassembler");
         };
         _addressTableVm.PopulateFindResults += (items, desc) =>
         {

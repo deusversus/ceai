@@ -50,6 +50,11 @@
                                 <MenuItem Header="_Address Table" Click="ShowPanel" Tag="addressTable" />
                                 <MenuItem Header="_Inspection" Click="ShowPanel" Tag="inspection" />
                                 <MenuItem Header="Memory _Browser" Click="ShowPanel" Tag="memoryBrowser" />
+                                <MenuItem Header="_Disassembler" Click="ShowPanel" Tag="disassembler" />
+                                <MenuItem Header="S_tructure Dissector" Click="ShowPanel" Tag="structureDissector" />
+                                <MenuItem Header="_Pointer Scanner" Click="ShowPanel" Tag="pointerScanner" />
+                                <MenuItem Header="Script _Editor" Click="ShowPanel" Tag="scriptEditor" />
+                                <MenuItem Header="De_bugger" Click="ShowPanel" Tag="debugger" />
                                 <Separator />
                                 <MenuItem Header="_Breakpoints" Click="ShowPanel" Tag="breakpoints" />
                                 <MenuItem Header="S_cripts" Click="ShowPanel" Tag="scripts" />
@@ -456,6 +461,272 @@
                             </avalonDock:LayoutDocument>
                             <avalonDock:LayoutDocument Title="Memory Browser" ContentId="memoryBrowser">
                                 <local:MemoryBrowserControl x:Name="MemoryBrowserTab" />
+                            </avalonDock:LayoutDocument>
+
+                            <!-- Phase 3: Disassembler -->
+                            <avalonDock:LayoutDocument Title="Disassembler" ContentId="disassembler">
+                                <DockPanel x:Name="DisassemblerContent" Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
+                                        <TextBlock Text="DISASSEMBLER" FontWeight="SemiBold" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <Button Command="{Binding GoBackCommand}" Content="&#x25C0;" Padding="6,2" Style="{StaticResource ToolbarButton}" ToolTip="Back" />
+                                        <Button Command="{Binding GoForwardCommand}" Content="&#x25B6;" Padding="6,2" Style="{StaticResource ToolbarButton}" ToolTip="Forward" Margin="2,0,8,0" />
+                                        <TextBox Width="200" Text="{Binding GoToAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" CaretBrush="{DynamicResource InputCaret}" VerticalContentAlignment="Center" Padding="4,2" />
+                                        <Button Command="{Binding GoToAddressCommand}" Content="Go" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <TextBlock Text="{Binding CurrentFunctionLabel}" Foreground="{DynamicResource AccentForeground}" VerticalAlignment="Center" Margin="12,0,0,0" FontFamily="Consolas" FontSize="11" />
+                                    </StackPanel>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,8,4">
+                                        <TextBox Width="250" Text="{Binding SearchPattern, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="11"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" CaretBrush="{DynamicResource InputCaret}" VerticalContentAlignment="Center" Padding="4,2" />
+                                        <Button Command="{Binding SearchInstructionsCommand}" Content="Search" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,8,0" />
+                                        <Button Command="{Binding CopySelectedRangeCommand}" Content="Copy All" Padding="8,2" Style="{StaticResource ToolbarButton}" />
+                                        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
+                                    </StackPanel>
+                                    <ListView ItemsSource="{Binding Lines}" SelectedItem="{Binding SelectedLine}" FontFamily="Consolas" FontSize="12"
+                                              Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                              BorderThickness="0">
+                                        <ListView.View>
+                                            <GridView>
+                                                <GridViewColumn Header="Address" Width="130" DisplayMemberBinding="{Binding Address}" />
+                                                <GridViewColumn Header="Bytes" Width="140" DisplayMemberBinding="{Binding HexBytes}" />
+                                                <GridViewColumn Header="Mnemonic" Width="80" DisplayMemberBinding="{Binding Mnemonic}" />
+                                                <GridViewColumn Header="Operands" Width="220" DisplayMemberBinding="{Binding Operands}" />
+                                                <GridViewColumn Header="Comment" Width="200" DisplayMemberBinding="{Binding Comment}" />
+                                            </GridView>
+                                        </ListView.View>
+                                        <ListView.ContextMenu>
+                                            <ContextMenu Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}">
+                                                <MenuItem Header="Set Breakpoint" Command="{Binding SetBreakpointAtSelectedCommand}" />
+                                                <MenuItem Header="Follow Jump/Call" Command="{Binding FollowJumpCallCommand}" />
+                                                <Separator />
+                                                <MenuItem Header="Copy All" Command="{Binding CopySelectedRangeCommand}" />
+                                            </ContextMenu>
+                                        </ListView.ContextMenu>
+                                    </ListView>
+                                </DockPanel>
+                            </avalonDock:LayoutDocument>
+
+                            <!-- Phase 3: Structure Dissector -->
+                            <avalonDock:LayoutDocument Title="Structure Dissector" ContentId="structureDissector">
+                                <DockPanel x:Name="StructureDissectorContent" Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
+                                        <TextBlock Text="STRUCTURE DISSECTOR" FontWeight="SemiBold" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <TextBox Width="180" Text="{Binding BaseAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" CaretBrush="{DynamicResource InputCaret}" VerticalContentAlignment="Center" Padding="4,2" />
+                                        <Button Command="{Binding DissectCommand}" Content="Dissect" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <TextBlock Text="Size:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,4,0" />
+                                        <TextBox Width="60" Text="{Binding RegionSize, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" VerticalContentAlignment="Center" Padding="4,2" />
+                                        <TextBlock Text="Hint:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,4,0" />
+                                        <ComboBox ItemsSource="{Binding TypeHints}" SelectedItem="{Binding SelectedTypeHint}" Width="90"
+                                                  Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}" />
+                                        <Button Command="{Binding FollowPointerCommand}" Content="Follow Ptr" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="8,0,0,0" />
+                                        <Button Command="{Binding ExportCStructCommand}" Content="Export C" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                    </StackPanel>
+                                    <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}"
+                                               FontSize="11" Margin="8,0,8,4" />
+                                    <DataGrid ItemsSource="{Binding Fields}" AutoGenerateColumns="False" SelectedItem="{Binding SelectedField}"
+                                              FontFamily="Consolas" FontSize="12" Background="{DynamicResource PanelBackground}"
+                                              Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
+                                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                                              RowBackground="{DynamicResource PanelBackground}" AlternatingRowBackground="{DynamicResource SidebarBackground}"
+                                              HeadersVisibility="Column" CanUserAddRows="False" SelectionMode="Single">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" IsReadOnly="True" Width="80" />
+                                            <DataGridTextColumn Header="Type" Binding="{Binding ProbableType}" IsReadOnly="True" Width="100" />
+                                            <DataGridTextColumn Header="Value" Binding="{Binding DisplayValue}" IsReadOnly="True" Width="200" />
+                                            <DataGridTextColumn Header="Conf." Binding="{Binding ConfidencePercent}" IsReadOnly="True" Width="60" />
+                                            <DataGridTextColumn Header="Name" Binding="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Width="*" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+                                </DockPanel>
+                            </avalonDock:LayoutDocument>
+
+                            <!-- Phase 3: Pointer Scanner -->
+                            <avalonDock:LayoutDocument Title="Pointer Scanner" ContentId="pointerScanner">
+                                <DockPanel x:Name="PointerScannerContent" Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel DockPanel.Dock="Top" Margin="8,6,8,4">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Text="POINTER SCANNER" FontWeight="SemiBold" FontSize="11"
+                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                            <TextBlock Text="Target:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                            <TextBox Width="180" Text="{Binding TargetAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
+                                                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                     BorderBrush="{DynamicResource InputBorder}" CaretBrush="{DynamicResource InputCaret}" VerticalContentAlignment="Center" Padding="4,2" />
+                                            <TextBlock Text="Depth:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,4,0" />
+                                            <TextBox Width="40" Text="{Binding MaxDepth}" FontFamily="Consolas" FontSize="12"
+                                                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                     BorderBrush="{DynamicResource InputBorder}" VerticalContentAlignment="Center" Padding="4,2" />
+                                            <TextBlock Text="Max Offset:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,4,0" />
+                                            <TextBox Width="80" Text="{Binding MaxOffset}" FontFamily="Consolas" FontSize="12"
+                                                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                     BorderBrush="{DynamicResource InputBorder}" VerticalContentAlignment="Center" Padding="4,2" />
+                                            <Button Command="{Binding ScanCommand}" Content="Scan" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="8,0,0,0" />
+                                            <Button Command="{Binding CancelScanCommand}" Content="Cancel" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                    Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <Button Command="{Binding AddSelectedToTableCommand}" Content="Add to Table" Padding="8,2" Style="{StaticResource ToolbarButton}" />
+                                            <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                    <ListView ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}" FontFamily="Consolas" FontSize="12"
+                                              Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                              BorderThickness="0">
+                                        <ListView.View>
+                                            <GridView>
+                                                <GridViewColumn Header="Pointer Chain" Width="400" DisplayMemberBinding="{Binding Chain}" />
+                                                <GridViewColumn Header="Resolved" Width="160" DisplayMemberBinding="{Binding ResolvedAddress}" />
+                                                <GridViewColumn Header="Module" Width="120" DisplayMemberBinding="{Binding ModuleName}" />
+                                                <GridViewColumn Header="Status" Width="80" DisplayMemberBinding="{Binding Status}" />
+                                            </GridView>
+                                        </ListView.View>
+                                    </ListView>
+                                </DockPanel>
+                            </avalonDock:LayoutDocument>
+
+                            <!-- Phase 3: Script Editor -->
+                            <avalonDock:LayoutDocument Title="Script Editor" ContentId="scriptEditor">
+                                <DockPanel x:Name="ScriptEditorContent" Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
+                                        <TextBlock Text="SCRIPT EDITOR" FontWeight="SemiBold" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <Button Command="{Binding NewScriptCommand}" Content="New" Padding="8,2" Style="{StaticResource ToolbarButton}" />
+                                        <Button Command="{Binding SaveScriptCommand}" Content="Save" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <Button Command="{Binding DeleteScriptCommand}" Content="Delete" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,8,0" />
+                                        <Button Command="{Binding ValidateCommand}" Content="Validate" Padding="8,2" Style="{StaticResource ToolbarButton}" />
+                                        <Button Command="{Binding EnableScriptCommand}" Content="Enable" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <Button Command="{Binding DisableScriptCommand}" Content="Disable" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,8,0" />
+                                        <Menu Background="Transparent" VerticalAlignment="Center">
+                                            <MenuItem Header="Insert Template" Foreground="{DynamicResource PrimaryForeground}" FontSize="11">
+                                                <MenuItem Header="AOB Inject" Command="{Binding InsertTemplateCommand}" CommandParameter="aob_inject" />
+                                                <MenuItem Header="Code Cave" Command="{Binding InsertTemplateCommand}" CommandParameter="code_cave" />
+                                                <MenuItem Header="NOP" Command="{Binding InsertTemplateCommand}" CommandParameter="nop" />
+                                                <MenuItem Header="JMP" Command="{Binding InsertTemplateCommand}" CommandParameter="jmp" />
+                                            </MenuItem>
+                                        </Menu>
+                                        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
+                                    </StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="200" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <DockPanel Grid.Column="0">
+                                            <Button DockPanel.Dock="Top" Command="{Binding RefreshScriptListCommand}" Content="Refresh" Padding="4,2" Margin="4"
+                                                    Style="{StaticResource ToolbarButton}" />
+                                            <ListBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Label"
+                                                     Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                                     BorderThickness="0" FontSize="12">
+                                                <ListBox.InputBindings>
+                                                    <MouseBinding Gesture="LeftDoubleClick" Command="{Binding LoadSelectedScriptCommand}" />
+                                                </ListBox.InputBindings>
+                                            </ListBox>
+                                        </DockPanel>
+                                        <GridSplitter Grid.Column="1" Width="4" Background="{DynamicResource BorderBrush}" />
+                                        <DockPanel Grid.Column="2">
+                                            <TextBlock DockPanel.Dock="Bottom" Text="{Binding ValidationResult}" FontFamily="Consolas" FontSize="11"
+                                                       Foreground="{DynamicResource SecondaryForeground}" Margin="4" TextWrapping="Wrap" />
+                                            <TextBox Text="{Binding EditorText, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
+                                                     AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                     CaretBrush="{DynamicResource InputCaret}" BorderThickness="0" />
+                                        </DockPanel>
+                                    </Grid>
+                                </DockPanel>
+                            </avalonDock:LayoutDocument>
+
+                            <!-- Phase 3: Debugger -->
+                            <avalonDock:LayoutDocument Title="Debugger" ContentId="debugger">
+                                <DockPanel x:Name="DebuggerContent" Background="{DynamicResource SidebarBackground}">
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
+                                        <TextBlock Text="DEBUGGER" FontWeight="SemiBold" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
+                                        <Button Command="{Binding StepInCommand}" Content="Step In" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" />
+                                        <Button Command="{Binding StepOverCommand}" Content="Step Over" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" Margin="4,0,0,0" />
+                                        <Button Command="{Binding StepOutCommand}" Content="Step Out" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" Margin="4,0,0,0" />
+                                        <Button Command="{Binding ContinueCommand}" Content="Continue" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" Margin="4,0,8,0" />
+                                        <Button Command="{Binding RefreshBreakpointsCommand}" Content="Refresh BPs" Padding="8,2" Style="{StaticResource ToolbarButton}" />
+                                        <Button Command="{Binding LoadHitDetailsCommand}" Content="Hit Log" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <Button Command="{Binding WalkCallStackCommand}" Content="Walk Stack" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
+                                    </StackPanel>
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+                                        <!-- Top-left: Registers -->
+                                        <DockPanel Grid.Column="0" Grid.Row="0">
+                                            <TextBlock DockPanel.Dock="Top" Text="REGISTERS" FontWeight="SemiBold" FontSize="10"
+                                                       Foreground="{DynamicResource SecondaryForeground}" Margin="4,2" />
+                                            <DataGrid ItemsSource="{Binding Registers}" AutoGenerateColumns="False" IsReadOnly="True"
+                                                      FontFamily="Consolas" FontSize="12" Background="{DynamicResource PanelBackground}"
+                                                      Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
+                                                      HeadersVisibility="Column" CanUserAddRows="False">
+                                                <DataGrid.Columns>
+                                                    <DataGridTextColumn Header="Register" Binding="{Binding Name}" Width="100" />
+                                                    <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" />
+                                                </DataGrid.Columns>
+                                            </DataGrid>
+                                        </DockPanel>
+                                        <!-- Top-right: Call Stack -->
+                                        <DockPanel Grid.Column="2" Grid.Row="0">
+                                            <TextBlock DockPanel.Dock="Top" Text="CALL STACK" FontWeight="SemiBold" FontSize="10"
+                                                       Foreground="{DynamicResource SecondaryForeground}" Margin="4,2" />
+                                            <ListView ItemsSource="{Binding CallStack}" FontFamily="Consolas" FontSize="11"
+                                                      Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                                      BorderThickness="0">
+                                                <ListView.View>
+                                                    <GridView>
+                                                        <GridViewColumn Header="#" Width="30" DisplayMemberBinding="{Binding FrameIndex}" />
+                                                        <GridViewColumn Header="IP" Width="150" DisplayMemberBinding="{Binding InstructionPointer}" />
+                                                        <GridViewColumn Header="Module+Offset" Width="200" DisplayMemberBinding="{Binding ModuleOffset}" />
+                                                        <GridViewColumn Header="Return" Width="150" DisplayMemberBinding="{Binding ReturnAddress}" />
+                                                    </GridView>
+                                                </ListView.View>
+                                            </ListView>
+                                        </DockPanel>
+                                        <GridSplitter Grid.ColumnSpan="3" Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
+                                                      Background="{DynamicResource BorderBrush}" />
+                                        <!-- Bottom: Breakpoint Hits -->
+                                        <DockPanel Grid.Column="0" Grid.Row="2" Grid.ColumnSpan="3">
+                                            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,2">
+                                                <TextBlock Text="BREAKPOINT HITS" FontWeight="SemiBold" FontSize="10"
+                                                           Foreground="{DynamicResource SecondaryForeground}" />
+                                                <TextBlock Text="  (select a hit to view its registers)" FontSize="10"
+                                                           Foreground="{DynamicResource TertiaryForeground}" />
+                                            </StackPanel>
+                                            <ListView ItemsSource="{Binding HitDetails}" SelectedItem="{Binding SelectedHit}"
+                                                      FontFamily="Consolas" FontSize="11"
+                                                      Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                                      BorderThickness="0">
+                                                <ListView.View>
+                                                    <GridView>
+                                                        <GridViewColumn Header="BP ID" Width="80" DisplayMemberBinding="{Binding BreakpointId}" />
+                                                        <GridViewColumn Header="Address" Width="150" DisplayMemberBinding="{Binding Address}" />
+                                                        <GridViewColumn Header="Thread" Width="60" DisplayMemberBinding="{Binding ThreadId}" />
+                                                        <GridViewColumn Header="Time" Width="120" DisplayMemberBinding="{Binding Timestamp}" />
+                                                    </GridView>
+                                                </ListView.View>
+                                            </ListView>
+                                        </DockPanel>
+                                        <GridSplitter Grid.Column="1" Grid.Row="0" Width="4" Background="{DynamicResource BorderBrush}" />
+                                    </Grid>
+                                </DockPanel>
                             </avalonDock:LayoutDocument>
                         </avalonDock:LayoutDocumentPane>
 

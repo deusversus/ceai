@@ -192,3 +192,68 @@ public sealed class JournalEntryDisplayItem
     public string Mode { get; init; } = "";
     public string Status { get; init; } = "";
 }
+
+// ── Phase 3 display models ──
+
+public sealed partial class StructureFieldDisplayItem : ObservableObject
+{
+    public int Offset { get; init; }
+    public string OffsetHex => $"0x{Offset:X3}";
+    public string ProbableType { get; init; } = "";
+    public string DisplayValue { get; init; } = "";
+    public double Confidence { get; init; }
+    public string ConfidencePercent => $"{Confidence * 100:F0}%";
+
+    [ObservableProperty]
+    private string _name = "";
+}
+
+public sealed class PointerPathDisplayItem
+{
+    public string Chain { get; init; } = "";
+    public string ResolvedAddress { get; init; } = "";
+    public string ModuleName { get; init; } = "";
+    public string Status { get; init; } = "Found";
+    public CEAISuite.Application.PointerPath? Source { get; init; }
+}
+
+public sealed partial class DisassemblyLineDisplayItem : ObservableObject
+{
+    public string Address { get; init; } = "";
+    public string HexBytes { get; init; } = "";
+    public string Mnemonic { get; init; } = "";
+    public string Operands { get; init; } = "";
+    public bool IsFunctionStart { get; init; }
+    public bool IsCallOrJump { get; init; }
+    public string? XrefLabel { get; init; }
+    public string? ModuleOffset { get; init; }
+
+    [ObservableProperty]
+    private string _comment = "";
+
+    [ObservableProperty]
+    private string _label = "";
+}
+
+public sealed class RegisterDisplayItem
+{
+    public string Name { get; init; } = "";
+    public string Value { get; init; } = "";
+}
+
+public sealed class CallStackFrameDisplayItem
+{
+    public int FrameIndex { get; init; }
+    public string InstructionPointer { get; init; } = "";
+    public string ModuleOffset { get; init; } = "";
+    public string ReturnAddress { get; init; } = "";
+}
+
+public sealed class BreakpointHitDetailItem
+{
+    public string BreakpointId { get; init; } = "";
+    public string Address { get; init; } = "";
+    public int ThreadId { get; init; }
+    public string Timestamp { get; init; } = "";
+    public IReadOnlyList<RegisterDisplayItem> Registers { get; init; } = [];
+}

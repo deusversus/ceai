@@ -38,6 +38,8 @@ public partial class MemoryRegionsViewModel : ObservableObject
 
     public IReadOnlyList<string> ProtectionFilters { get; } = ["All", "R", "RW", "RWX", "X"];
 
+    partial void OnFilterProtectionChanged(string value) => _ = RefreshAsync();
+
     [RelayCommand]
     private async Task RefreshAsync()
     {

@@ -91,9 +91,7 @@ public partial class WorkspaceViewModel : ObservableObject
     [RelayCommand]
     private void ImportCheatTable()
     {
-        var path = _dialogService.ShowOpenFileDialog("Cheat Tables (*.ct)|*.ct|All files (*.*)|*.*");
-        if (string.IsNullOrWhiteSpace(path)) return;
-        LoadCheatTableRequested?.Invoke(path);
-        StatusText = $"Importing {System.IO.Path.GetFileName(path)}...";
+        // Delegate to AddressTableViewModel which handles its own file dialog + merge/replace logic
+        LoadCheatTableRequested?.Invoke("");
     }
 }

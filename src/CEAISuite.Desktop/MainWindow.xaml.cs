@@ -161,6 +161,10 @@ public partial class MainWindow : Window
 
         // Wire Workspace events to MainViewModel session logic
         workspaceVm.LoadSessionRequested += sessionId => _ = _mainVm.RestoreSession(sessionId);
+        workspaceVm.LoadCheatTableRequested += _ => _addressTableVm.LoadCheatTableCommand.Execute(null);
+
+        // Auto-populate workspace session list on startup
+        _ = workspaceVm.RefreshCommand.ExecuteAsync(null);
 
         // Wire AI Operator ViewModel
         AiOperatorContent.DataContext = aiOperatorVm;
@@ -201,6 +205,11 @@ public partial class MainWindow : Window
             ActivateDocument("disassembler");
         };
         _addressTableVm.PopulateFindResults += (items, desc) =>
+        {
+            _mainVm.PopulateFindResults(items, desc);
+            ActivateAnchorable("findResults");
+        };
+        disassemblerVm.PopulateFindResults += (items, desc) =>
         {
             _mainVm.PopulateFindResults(items, desc);
             ActivateAnchorable("findResults");

@@ -98,13 +98,33 @@ public partial class PointerScannerViewModel : ObservableObject
         if (Results.Count == 0) { StatusText = "No results to validate."; return; }
 
         StatusText = "Validating...";
-        int stable = 0, drifted = 0, broken = 0;
-        foreach (var item in Results)
+
+        // Validate in batches to avoid per-item UI thrash
+        const int batchSize = 50;
+        var items = Results.ToList();
+        var statuses = new (string Status, int Index)[items.Count];
+
+        for (int i = 0; i < items.Count; i += batchSize)
         {
-            if (item.Source is null) { item.Status = "Broken"; broken++; continue; }
-            var (status, _) = await _scannerService.ValidatePathAsync(pid.Value, item.Source);
-            item.Status = status;
-            switch (status)
+            var batch = items.Skip(i).Take(batchSize).Select((item, offset) =>
+            {
+                var idx = i + offset;
+                if (item.Source is null) return Task.FromResult(("Broken", idx));
+                return ValidateOneAsync(pid.Value, item.Source, idx);
+            });
+            var results = await Task.WhenAll(batch);
+            foreach (var (status, idx) in results)
+                statuses[idx] = (status, idx);
+
+            StatusText = $"Validating... {Math.Min(i + batchSize, items.Count)}/{items.Count}";
+        }
+
+        // Apply results to observable items in one pass
+        int stable = 0, drifted = 0, broken = 0;
+        for (int i = 0; i < items.Count; i++)
+        {
+            items[i].Status = statuses[i].Status;
+            switch (statuses[i].Status)
             {
                 case "Stable": stable++; break;
                 case "Drifted": drifted++; break;
@@ -112,6 +132,12 @@ public partial class PointerScannerViewModel : ObservableObject
             }
         }
         StatusText = $"Validated: {stable} stable, {drifted} drifted, {broken} broken";
+    }
+
+    private async Task<(string Status, int Index)> ValidateOneAsync(int pid, PointerPath path, int index)
+    {
+        var (status, _) = await _scannerService.ValidatePathAsync(pid, path);
+        return (status, index);
     }
 
     [RelayCommand]

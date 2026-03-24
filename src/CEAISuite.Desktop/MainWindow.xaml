@@ -44,6 +44,11 @@
                                   Padding="8,4">
                             <MenuItem Header="_Windows">
                                 <MenuItem Header="_Processes" Click="ShowPanel" Tag="processes" />
+                                <MenuItem Header="_Modules" Click="ShowPanel" Tag="modules" />
+                                <MenuItem Header="_Threads" Click="ShowPanel" Tag="threads" />
+                                <MenuItem Header="Memory _Map" Click="ShowPanel" Tag="memoryRegions" />
+                                <MenuItem Header="_Workspace" Click="ShowPanel" Tag="workspace" />
+                                <Separator />
                                 <MenuItem Header="_Scanner" Click="ShowPanel" Tag="scanner" />
                                 <MenuItem Header="_Output" Click="ShowPanel" Tag="output" />
                                 <MenuItem Header="_AI Operator" Click="ShowPanel" Tag="aiOperator" />

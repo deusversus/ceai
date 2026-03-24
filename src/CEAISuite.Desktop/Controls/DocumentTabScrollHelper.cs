@@ -66,6 +66,12 @@ public static class DocumentTabScrollHelper
             fe => fe is LayoutDocumentPaneControl or LayoutAnchorablePaneControl);
         if (paneCtrl is null) return false;
 
+        // Hide the theme's built-in dropdown button (DropDownButton from AvalonDock)
+        // to avoid having two dropdown buttons
+        var themeDropdown = FindFirst<DropDownButton>(paneCtrl, _ => true);
+        if (themeDropdown is not null)
+            themeDropdown.Visibility = Visibility.Collapsed;
+
         // Find the immediate parent of the tab panel
         var parent = VisualTreeHelper.GetParent(tabPanel);
         if (parent is null) return false;

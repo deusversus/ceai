@@ -1,17 +1,5 @@
 <ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-                    xmlns:avalonDockCtrl="clr-namespace:AvalonDock.Controls;assembly=AvalonDock"
-                    xmlns:localCtrl="clr-namespace:CEAISuite.Desktop.Controls">
-
-    <!-- ═══ AVALONDOCK TAB OVERFLOW ═══
-         Adds scroll buttons + dropdown document list when tabs overflow the tab strip.
-         Applied to both document panes (center tabs) and anchorable panes (bottom tabs). -->
-    <Style TargetType="avalonDockCtrl:LayoutDocumentPaneControl">
-        <Setter Property="localCtrl:DocumentTabScrollHelper.EnableScroll" Value="True" />
-    </Style>
-    <Style TargetType="avalonDockCtrl:LayoutAnchorablePaneControl">
-        <Setter Property="localCtrl:DocumentTabScrollHelper.EnableScroll" Value="True" />
-    </Style>
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <!-- ═══ SHARED CONTROL STYLES ═══
          These use DynamicResource so they respond to theme switching.

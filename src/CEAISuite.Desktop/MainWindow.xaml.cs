@@ -109,6 +109,9 @@ public partial class MainWindow : Window
         // Restore saved panel layout (must happen after InitializeComponent + theme)
         RestoreLayout();
 
+        // Add scroll arrows + dropdown to tab strips when tabs overflow
+        Controls.DocumentTabScrollHelper.Attach(DockManager);
+
         // Stash panel content when user closes a panel so we can restore it from Windows menu
         DockManager.AnchorableClosing += (_, args) =>
         {

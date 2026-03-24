@@ -3,87 +3,134 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using AvalonDock.Controls;
 using AvalonDock.Layout;
 
 namespace CEAISuite.Desktop.Controls;
 
 /// <summary>
-/// Attached behavior that adds scroll-left / scroll-right buttons and a dropdown
-/// document list to AvalonDock's LayoutDocumentPaneControl when tabs overflow.
-/// Applied via an implicit Style in SharedStyles.xaml.
+/// Injects scroll buttons + a dropdown document list into AvalonDock tab strips
+/// that would otherwise silently hide overflow tabs.
+///
+/// Usage: call <see cref="Attach"/> on the DockingManager after theme + layout load.
 /// </summary>
 public static class DocumentTabScrollHelper
 {
-    public static readonly DependencyProperty EnableScrollProperty =
-        DependencyProperty.RegisterAttached(
-            "EnableScroll", typeof(bool), typeof(DocumentTabScrollHelper),
-            new PropertyMetadata(false, OnEnableScrollChanged));
+    private static readonly HashSet<int> _processed = new();
 
-    public static bool GetEnableScroll(DependencyObject obj) => (bool)obj.GetValue(EnableScrollProperty);
-    public static void SetEnableScroll(DependencyObject obj, bool value) => obj.SetValue(EnableScrollProperty, value);
-
-    private static void OnEnableScrollChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    /// <summary>
+    /// Hook into the DockingManager so that every document/anchorable pane
+    /// gets scroll arrows + dropdown when its tab strip overflows.
+    /// </summary>
+    public static void Attach(AvalonDock.DockingManager dockManager)
     {
-        if (d is not FrameworkElement ctrl) return;
-        if (d is not LayoutDocumentPaneControl and not LayoutAnchorablePaneControl) return;
+        _processed.Clear();
 
-        if ((bool)e.NewValue)
+        // Process existing panes
+        dockManager.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ScanAndPatch(dockManager));
+
+        // Re-process after layout changes (tabs dragged, panels docked/undocked)
+        dockManager.LayoutChanged += (_, _) =>
+            dockManager.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ScanAndPatch(dockManager));
+        dockManager.LayoutUpdated += (_, _) =>
+            dockManager.Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => ScanAndPatch(dockManager));
+    }
+
+    private static void ScanAndPatch(DependencyObject root)
+    {
+        // Find all DocumentPaneTabPanel and AnchorablePaneTabPanel instances
+        foreach (var tabPanel in FindAll<Panel>(root, p => p is DocumentPaneTabPanel or AnchorablePaneTabPanel))
         {
-            ctrl.Loaded += OnPaneLoaded;
-            ctrl.PreviewMouseWheel += OnMouseWheel;
-        }
-        else
-        {
-            ctrl.Loaded -= OnPaneLoaded;
-            ctrl.PreviewMouseWheel -= OnMouseWheel;
+            var hash = tabPanel.GetHashCode();
+            if (_processed.Contains(hash)) continue;
+
+            if (TryWrap(tabPanel))
+                _processed.Add(hash);
         }
     }
 
-    private static void OnPaneLoaded(object sender, RoutedEventArgs e)
+    private static bool TryWrap(Panel tabPanel)
     {
-        if (sender is not FrameworkElement paneCtrl) return;
-
-        // Find the tab panel inside the control (DocumentPaneTabPanel or AnchorablePaneTabPanel)
-        var tabPanel = FindChild<Panel>(paneCtrl, p =>
-            p is DocumentPaneTabPanel or AnchorablePaneTabPanel);
-        if (tabPanel is null) return;
-
-        // Check if we already wrapped it
-        if (tabPanel.Parent is ScrollViewer) return;
-
-        // Get the existing parent (usually a Panel or Border)
-        var parent = VisualTreeHelper.GetParent(tabPanel) as Panel;
-        if (parent is null) return;
-
-        var idx = parent.Children.IndexOf(tabPanel);
-        parent.Children.Remove(tabPanel);
-
-        // Create the scroll wrapper
-        var scrollViewer = new ScrollViewer
+        // Already wrapped?
+        var ancestor = VisualTreeHelper.GetParent(tabPanel);
+        while (ancestor is not null)
         {
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
-            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            CanContentScroll = true,
-            Content = tabPanel
-        };
+            if (ancestor is DockPanel dp && dp.Tag is "TabScrollWrapper") return true;
+            if (ancestor is LayoutDocumentPaneControl or LayoutAnchorablePaneControl) break;
+            ancestor = VisualTreeHelper.GetParent(ancestor);
+        }
 
-        // Scroll left button
-        var leftBtn = CreateScrollButton("◀", -60, scrollViewer);
+        // Get the pane control that owns this tab panel
+        var paneCtrl = FindAncestor<FrameworkElement>(tabPanel,
+            fe => fe is LayoutDocumentPaneControl or LayoutAnchorablePaneControl);
+        if (paneCtrl is null) return false;
 
-        // Scroll right button
-        var rightBtn = CreateScrollButton("▶", 60, scrollViewer);
+        // Find the immediate parent of the tab panel
+        var parent = VisualTreeHelper.GetParent(tabPanel);
+        if (parent is null) return false;
 
-        // Dropdown button — get the layout model
+        // Determine the layout model for the dropdown
         ILayoutContainer? layoutModel = paneCtrl switch
         {
             LayoutDocumentPaneControl docCtrl => docCtrl.Model as ILayoutContainer,
             LayoutAnchorablePaneControl ancCtrl => ancCtrl.Model as ILayoutContainer,
             _ => null
         };
+
+        // Remove the tab panel from its parent — handle different container types
+        switch (parent)
+        {
+            case Panel parentPanel:
+            {
+                var idx = parentPanel.Children.IndexOf(tabPanel);
+                if (idx < 0) return false;
+                parentPanel.Children.RemoveAt(idx);
+                var wrapper = BuildWrapper(tabPanel, paneCtrl, layoutModel);
+                parentPanel.Children.Insert(idx, wrapper);
+                return true;
+            }
+            case Border parentBorder:
+            {
+                parentBorder.Child = null;
+                var wrapper = BuildWrapper(tabPanel, paneCtrl, layoutModel);
+                parentBorder.Child = wrapper;
+                return true;
+            }
+            case ContentControl parentCC:
+            {
+                parentCC.Content = null;
+                var wrapper = BuildWrapper(tabPanel, paneCtrl, layoutModel);
+                parentCC.Content = wrapper;
+                return true;
+            }
+            case Decorator parentDec:
+            {
+                parentDec.Child = null;
+                var wrapper = BuildWrapper(tabPanel, paneCtrl, layoutModel);
+                parentDec.Child = wrapper;
+                return true;
+            }
+            default:
+                return false;
+        }
+    }
+
+    private static DockPanel BuildWrapper(Panel tabPanel, FrameworkElement paneCtrl, ILayoutContainer? layoutModel)
+    {
+        var scrollViewer = new ScrollViewer
+        {
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            CanContentScroll = false,
+            Focusable = false,
+            Content = tabPanel
+        };
+
+        var leftBtn = CreateScrollButton("◀", -80, scrollViewer);
+        var rightBtn = CreateScrollButton("▶", 80, scrollViewer);
         var dropdownBtn = CreateDropdownButton(layoutModel);
 
-        // Assemble: [◀] [ScrollViewer with tabs] [▶] [▼]
         var wrapper = new DockPanel
         {
             LastChildFill = true,
@@ -91,23 +138,31 @@ public static class DocumentTabScrollHelper
         };
 
         DockPanel.SetDock(leftBtn, Dock.Left);
-        DockPanel.SetDock(rightBtn, Dock.Right);
         DockPanel.SetDock(dropdownBtn, Dock.Right);
+        DockPanel.SetDock(rightBtn, Dock.Right);
         wrapper.Children.Add(leftBtn);
         wrapper.Children.Add(dropdownBtn);
         wrapper.Children.Add(rightBtn);
         wrapper.Children.Add(scrollViewer);
 
-        parent.Children.Insert(idx, wrapper);
+        // Mouse wheel scrolling on the pane control header area
+        paneCtrl.PreviewMouseWheel -= OnMouseWheel;
+        paneCtrl.PreviewMouseWheel += OnMouseWheel;
+
+        return wrapper;
     }
 
     private static void OnMouseWheel(object sender, MouseWheelEventArgs e)
     {
-        if (sender is not FrameworkElement paneCtrl) return;
-        var sv = FindChild<ScrollViewer>(paneCtrl, _ => true);
+        if (sender is not FrameworkElement fe) return;
+
+        // Only scroll if the mouse is over the tab strip area (top ~28px)
+        var pos = e.GetPosition(fe);
+        if (pos.Y > 30) return;
+
+        var sv = FindFirst<ScrollViewer>(fe, s => s.Tag is null); // not any nested content ScrollViewer
         if (sv is null) return;
 
-        // Scroll tabs horizontally on mouse wheel
         sv.ScrollToHorizontalOffset(sv.HorizontalOffset - e.Delta * 0.5);
         e.Handled = true;
     }
@@ -200,15 +255,40 @@ public static class DocumentTabScrollHelper
         return btn;
     }
 
-    private static T? FindChild<T>(DependencyObject parent, Func<T, bool> predicate) where T : DependencyObject
+    // ── Visual tree helpers ──
+
+    private static T? FindAncestor<T>(DependencyObject child, Func<T, bool> predicate) where T : DependencyObject
+    {
+        var current = VisualTreeHelper.GetParent(child);
+        while (current is not null)
+        {
+            if (current is T typed && predicate(typed)) return typed;
+            current = VisualTreeHelper.GetParent(current);
+        }
+        return null;
+    }
+
+    private static T? FindFirst<T>(DependencyObject parent, Func<T, bool> predicate) where T : DependencyObject
     {
         for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
         {
             var child = VisualTreeHelper.GetChild(parent, i);
             if (child is T typed && predicate(typed)) return typed;
-            var found = FindChild(child, predicate);
+            var found = FindFirst(child, predicate);
             if (found is not null) return found;
         }
         return null;
+    }
+
+    private static IEnumerable<T> FindAll<T>(DependencyObject parent, Func<T, bool> predicate) where T : DependencyObject
+    {
+        for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typed && predicate(typed))
+                yield return typed;
+            foreach (var found in FindAll(child, predicate))
+                yield return found;
+        }
     }
 }

@@ -114,7 +114,8 @@ public partial class DebuggerViewModel : ObservableObject
         if (pid is null) { StatusText = "No process attached."; return; }
 
         // Use thread ID from last selected hit, or default to 0 (main thread)
-        var threadId = SelectedHit?.ThreadId ?? 0;
+        var hit = SelectedHit;
+        var threadId = hit?.ThreadId ?? 0;
         try
         {
             var attachment = await _engineFacade.AttachAsync(pid.Value);

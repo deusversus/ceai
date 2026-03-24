@@ -138,7 +138,7 @@ public partial class DisassemblerViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task SearchInstructionsAsync()
+    private void SearchInstructions()
     {
         if (string.IsNullOrWhiteSpace(SearchPattern)) return;
         try
@@ -162,7 +162,6 @@ public partial class DisassemblerViewModel : ObservableObject
         {
             StatusText = $"Invalid regex: {ex.Message}";
         }
-        await Task.CompletedTask;
     }
 
     /// <summary>Navigate to a specific address (called externally by NavigationService).</summary>

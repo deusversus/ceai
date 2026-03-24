@@ -51,6 +51,7 @@ public partial class PointerScannerViewModel : ObservableObject
             long.TryParse(MaxOffset, out maxOff);
 
         _scanCts?.Cancel();
+        _scanCts?.Dispose();
         _scanCts = new CancellationTokenSource();
         IsScanning = true;
         StatusText = "Scanning...";

@@ -146,7 +146,8 @@ public partial class ScriptEditorViewModel : ObservableObject
     [RelayCommand]
     private async Task EnableScriptAsync()
     {
-        if (_autoAssemblerEngine is null || _loadedNodeId is null) return;
+        if (_autoAssemblerEngine is null) { StatusText = "No assembler engine available."; return; }
+        if (_loadedNodeId is null) { StatusText = "No script loaded."; return; }
         var pid = _processContext.AttachedProcessId;
         if (pid is null) { StatusText = "No process attached."; return; }
         try
@@ -163,7 +164,8 @@ public partial class ScriptEditorViewModel : ObservableObject
     [RelayCommand]
     private async Task DisableScriptAsync()
     {
-        if (_autoAssemblerEngine is null || _loadedNodeId is null) return;
+        if (_autoAssemblerEngine is null) { StatusText = "No assembler engine available."; return; }
+        if (_loadedNodeId is null) { StatusText = "No script loaded."; return; }
         var pid = _processContext.AttachedProcessId;
         if (pid is null) { StatusText = "No process attached."; return; }
         try

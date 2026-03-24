@@ -73,8 +73,8 @@ public partial class StructureDissectorViewModel : ObservableObject
     [RelayCommand]
     private void FollowPointer()
     {
-        var sel = Fields.FirstOrDefault(f => f == _selectedField && f.ProbableType == "Pointer");
-        if (sel is null) return;
+        if (_selectedField is null || _selectedField.ProbableType != "Pointer") return;
+        var sel = _selectedField;
         BaseAddress = sel.DisplayValue;
         _ = DissectAsync();
     }

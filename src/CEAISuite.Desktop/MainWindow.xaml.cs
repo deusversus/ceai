@@ -1082,12 +1082,21 @@ public partial class MainWindow : Window
         "addressTable" => "Address Table",
         "inspection" => "Inspection",
         "memoryBrowser" => "Memory Browser",
+        "disassembler" => "Disassembler",
+        "structureDissector" => "Structure Dissector",
+        "pointerScanner" => "Pointer Scanner",
+        "scriptEditor" => "Script Editor",
+        "debugger" => "Debugger",
         "breakpoints" => "Breakpoints",
         "scripts" => "Scripts",
         "snapshots" => "Snapshots",
         "findResults" => "Find Results",
         "hotkeys" => "Hotkeys",
         "journal" => "Journal",
+        "modules" => "Modules",
+        "threads" => "Threads",
+        "memoryRegions" => "Memory Map",
+        "workspace" => "Workspace",
         _ => contentId
     };
 
@@ -1190,10 +1199,16 @@ public partial class MainWindow : Window
             .OfType<LayoutAnchorablePane>()
             .ToList();
 
+        // Route closed panels back to their natural sibling group
         var siblingId = contentId switch
         {
-            "processes" => "processes",
+            // Left sidebar
+            "processes" or "modules" or "threads" or "memoryRegions" or "workspace" => "processes",
+            // Right sidebar
             "aiOperator" => "aiOperator",
+            // Bottom panels
+            "scanner" or "breakpoints" or "scripts" or "snapshots"
+                or "findResults" or "hotkeys" or "journal" or "output" => "scanner",
             _ => "scanner"
         };
 

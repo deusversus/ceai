@@ -70,6 +70,42 @@ public sealed class PointerScannerService(IEngineFacade engine)
         return results;
     }
 
+    /// <summary>
+    /// Re-walk a pointer chain and return a stability status.
+    /// "Stable" = resolves to same target, "Drifted" = resolves but to a different address,
+    /// "Broken" = chain is broken (null pointer in chain).
+    /// </summary>
+    public async Task<(string Status, nuint CurrentAddress)> ValidatePathAsync(
+        int processId, PointerPath path, CancellationToken ct = default)
+    {
+        try
+        {
+            var attachment = await engine.AttachAsync(processId, ct);
+            var mod = attachment.Modules.FirstOrDefault(m =>
+                m.Name.Equals(path.ModuleName, StringComparison.OrdinalIgnoreCase));
+            if (mod is null) return ("Broken", 0);
+
+            var currentAddr = (nuint)((long)mod.BaseAddress + path.ModuleOffset);
+
+            foreach (var offset in path.Offsets)
+            {
+                ct.ThrowIfCancellationRequested();
+                var result = await engine.ReadMemoryAsync(processId, currentAddr, 8, ct);
+                var ptrValue = BitConverter.ToUInt64(result.Bytes.ToArray(), 0);
+                if (ptrValue == 0) return ("Broken", 0);
+                currentAddr = (nuint)(ptrValue + (ulong)offset);
+            }
+
+            if (currentAddr == path.ResolvedAddress)
+                return ("Stable", currentAddr);
+            return ("Drifted", currentAddr);
+        }
+        catch
+        {
+            return ("Broken", 0);
+        }
+    }
+
     private async Task<List<(nuint Address, long Offset, ModuleDescriptor Module)>> FindPointersToAddress(
         int processId,
         IReadOnlyList<ModuleDescriptor> modules,

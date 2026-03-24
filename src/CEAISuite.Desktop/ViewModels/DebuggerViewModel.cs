@@ -41,12 +41,25 @@ public partial class DebuggerViewModel : ObservableObject
     [ObservableProperty] private BreakpointHitDetailItem? _selectedHit;
     [ObservableProperty] private string? _statusText;
 
+    /// <summary>Register values from the previously selected hit, keyed by name.</summary>
+    private Dictionary<string, string>? _previousRegisterSnapshot;
+
     partial void OnSelectedHitChanged(BreakpointHitDetailItem? value)
     {
+        var prevSnapshot = _previousRegisterSnapshot;
         Registers.Clear();
         if (value?.Registers is null) return;
+
         foreach (var reg in value.Registers)
+        {
+            reg.IsChanged = prevSnapshot is not null
+                && prevSnapshot.TryGetValue(reg.Name, out var prevVal)
+                && !string.Equals(prevVal, reg.Value, StringComparison.OrdinalIgnoreCase);
             Registers.Add(reg);
+        }
+
+        // Store current as snapshot for next comparison
+        _previousRegisterSnapshot = value.Registers.ToDictionary(r => r.Name, r => r.Value);
     }
 
     [RelayCommand]

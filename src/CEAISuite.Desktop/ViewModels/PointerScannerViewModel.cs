@@ -91,6 +91,30 @@ public partial class PointerScannerViewModel : ObservableObject
     private void CancelScan() => _scanCts?.Cancel();
 
     [RelayCommand]
+    private async Task ValidatePathsAsync()
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        if (Results.Count == 0) { StatusText = "No results to validate."; return; }
+
+        StatusText = "Validating...";
+        int stable = 0, drifted = 0, broken = 0;
+        foreach (var item in Results)
+        {
+            if (item.Source is null) { item.Status = "Broken"; broken++; continue; }
+            var (status, _) = await _scannerService.ValidatePathAsync(pid.Value, item.Source);
+            item.Status = status;
+            switch (status)
+            {
+                case "Stable": stable++; break;
+                case "Drifted": drifted++; break;
+                default: broken++; break;
+            }
+        }
+        StatusText = $"Validated: {stable} stable, {drifted} drifted, {broken} broken";
+    }
+
+    [RelayCommand]
     private void AddSelectedToTable()
     {
         if (SelectedResult?.Source is not { } path) return;

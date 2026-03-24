@@ -34,6 +34,11 @@ public partial class StructureDissectorViewModel : ObservableObject
     [ObservableProperty] private string? _statusText;
     [ObservableProperty] private bool _isDissecting;
 
+    // ── Side-by-side compare ──
+    [ObservableProperty] private string _compareAddress = "";
+    [ObservableProperty] private ObservableCollection<StructureCompareDisplayItem> _compareResults = new();
+    [ObservableProperty] private bool _isComparing;
+
     public IReadOnlyList<string> TypeHints { get; } = ["auto", "int32", "float", "pointers"];
 
     [RelayCommand]
@@ -108,6 +113,79 @@ public partial class StructureDissectorViewModel : ObservableObject
         _clipboard.SetText(sb.ToString());
         StatusText = "C struct copied to clipboard.";
     }
+
+    [RelayCommand]
+    private async Task CompareAsync()
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        if (string.IsNullOrWhiteSpace(BaseAddress) || string.IsNullOrWhiteSpace(CompareAddress))
+        { StatusText = "Enter both base and compare addresses."; return; }
+        if (!TryParseAddress(BaseAddress, out var addrA) || !TryParseAddress(CompareAddress, out var addrB))
+        { StatusText = "Invalid address."; return; }
+
+        IsComparing = true;
+        StatusText = "Comparing...";
+        try
+        {
+            var (fieldsA, _) = await _dissectorService.DissectAsync(pid.Value, addrA, RegionSize, SelectedTypeHint);
+            var (fieldsB, _) = await _dissectorService.DissectAsync(pid.Value, addrB, RegionSize, SelectedTypeHint);
+
+            var dictB = fieldsB.ToDictionary(f => f.Offset);
+            CompareResults.Clear();
+            foreach (var fA in fieldsA)
+            {
+                var valueB = dictB.TryGetValue(fA.Offset, out var fB) ? fB.DisplayValue : "—";
+                var differs = !string.Equals(fA.DisplayValue, valueB, StringComparison.Ordinal);
+                CompareResults.Add(new StructureCompareDisplayItem
+                {
+                    OffsetHex = $"0x{fA.Offset:X3}",
+                    Type = fA.ProbableType,
+                    ValueA = fA.DisplayValue,
+                    ValueB = valueB,
+                    IsDifferent = differs
+                });
+            }
+            StatusText = $"{CompareResults.Count} fields compared, {CompareResults.Count(r => r.IsDifferent)} differ";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+        }
+        finally { IsComparing = false; }
+    }
+
+    [RelayCommand]
+    private void ExportCEStruct()
+    {
+        if (Fields.Count == 0) return;
+        var sb = new StringBuilder();
+        sb.AppendLine("<?xml version=\"1.0\"?>");
+        sb.AppendLine("<Structure Name=\"Unknown\" AutoFill=\"0\" AutoCreate=\"1\" DefaultHex=\"1\" AutoDestroy=\"0\" DoNotSaveLocal=\"0\" AutoCreateStructsize=\"4096\">");
+        foreach (var f in Fields)
+        {
+            var ceType = f.ProbableType switch
+            {
+                "Int32" => "4 Bytes",
+                "Int64" => "8 Bytes",
+                "Float" => "Float",
+                "Double" => "Double",
+                "Pointer" => "Pointer",
+                _ => "4 Bytes"
+            };
+            var name = string.IsNullOrWhiteSpace(f.Name) ? $"field_{f.Offset:X3}" : f.Name;
+            sb.AppendLine($"  <Element Offset=\"{f.Offset}\" Vartype=\"{ceType}\" Bytesize=\"{GetByteSize(f.ProbableType)}\" Description=\"{name}\" DisplayMethod=\"0\"/>");
+        }
+        sb.AppendLine("</Structure>");
+        _clipboard.SetText(sb.ToString());
+        StatusText = "CE structure definition copied to clipboard.";
+    }
+
+    private static int GetByteSize(string type) => type switch
+    {
+        "Int64" or "Double" or "Pointer" => 8,
+        _ => 4
+    };
 
     /// <summary>Navigate to a specific address for dissection (called externally).</summary>
     public void NavigateToAddress(string address)

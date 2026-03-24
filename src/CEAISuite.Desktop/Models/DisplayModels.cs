@@ -208,13 +208,25 @@ public sealed partial class StructureFieldDisplayItem : ObservableObject
     private string _name = "";
 }
 
-public sealed class PointerPathDisplayItem
+public sealed class StructureCompareDisplayItem
+{
+    public string OffsetHex { get; init; } = "";
+    public string Type { get; init; } = "";
+    public string ValueA { get; init; } = "";
+    public string ValueB { get; init; } = "";
+    public bool IsDifferent { get; init; }
+}
+
+public sealed partial class PointerPathDisplayItem : ObservableObject
 {
     public string Chain { get; init; } = "";
     public string ResolvedAddress { get; init; } = "";
     public string ModuleName { get; init; } = "";
-    public string Status { get; init; } = "Found";
     public CEAISuite.Application.PointerPath? Source { get; init; }
+
+    /// <summary>Validation status: Found, Stable, Drifted, Broken.</summary>
+    [ObservableProperty]
+    private string _status = "Found";
 }
 
 public sealed partial class DisassemblyLineDisplayItem : ObservableObject
@@ -235,10 +247,14 @@ public sealed partial class DisassemblyLineDisplayItem : ObservableObject
     private string _label = "";
 }
 
-public sealed class RegisterDisplayItem
+public sealed partial class RegisterDisplayItem : ObservableObject
 {
     public string Name { get; init; } = "";
     public string Value { get; init; } = "";
+
+    /// <summary>True when this register's value differs from the previous breakpoint hit.</summary>
+    [ObservableProperty]
+    private bool _isChanged;
 }
 
 public sealed class CallStackFrameDisplayItem

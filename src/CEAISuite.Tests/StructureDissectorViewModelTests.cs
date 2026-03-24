@@ -99,4 +99,20 @@ public class StructureDissectorViewModelTests
 
         Assert.Null(_clipboard.LastText);
     }
+
+    [Fact]
+    public void ExportCEStruct_PopulatesClipboardWithXml()
+    {
+        var vm = CreateVm();
+        vm.Fields.Add(new() { Offset = 0, ProbableType = "Int32", DisplayValue = "100", Confidence = 0.7 });
+        vm.Fields.Add(new() { Offset = 8, ProbableType = "Pointer", DisplayValue = "0x7FF00000", Confidence = 0.9 });
+
+        vm.ExportCEStructCommand.Execute(null);
+
+        Assert.NotNull(_clipboard.LastText);
+        Assert.Contains("<Structure", _clipboard.LastText);
+        Assert.Contains("Vartype=\"4 Bytes\"", _clipboard.LastText);
+        Assert.Contains("Vartype=\"Pointer\"", _clipboard.LastText);
+        Assert.Contains("Bytesize=\"8\"", _clipboard.LastText);
+    }
 }

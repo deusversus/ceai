@@ -123,4 +123,49 @@ public class DebuggerViewModelTests
         Assert.Equal(3, vm.CallStack.Count);
         Assert.Equal("game.dll+0x100", vm.CallStack[0].ModuleOffset);
     }
+
+    [Fact]
+    public void SelectSecondHit_MarksChangedRegisters()
+    {
+        var vm = CreateVm();
+        var hit1 = new BreakpointHitDetailItem
+        {
+            BreakpointId = "bp-0", Address = "0x100", ThreadId = 1, Timestamp = "12:00:00",
+            Registers = [
+                new RegisterDisplayItem { Name = "RAX", Value = "0x1000" },
+                new RegisterDisplayItem { Name = "RBX", Value = "0x2000" }
+            ]
+        };
+        var hit2 = new BreakpointHitDetailItem
+        {
+            BreakpointId = "bp-0", Address = "0x100", ThreadId = 1, Timestamp = "12:00:01",
+            Registers = [
+                new RegisterDisplayItem { Name = "RAX", Value = "0xAAAA" },
+                new RegisterDisplayItem { Name = "RBX", Value = "0x2000" }
+            ]
+        };
+
+        vm.SelectedHit = hit1;
+        vm.SelectedHit = hit2;
+
+        Assert.True(vm.Registers[0].IsChanged);   // RAX changed
+        Assert.False(vm.Registers[1].IsChanged);   // RBX same
+    }
+
+    [Fact]
+    public void SelectFirstHit_NoChangesMarked()
+    {
+        var vm = CreateVm();
+        var hit = new BreakpointHitDetailItem
+        {
+            BreakpointId = "bp-0", Address = "0x100", ThreadId = 1, Timestamp = "12:00:00",
+            Registers = [
+                new RegisterDisplayItem { Name = "RAX", Value = "0x1000" }
+            ]
+        };
+
+        vm.SelectedHit = hit;
+
+        Assert.False(vm.Registers[0].IsChanged);
+    }
 }

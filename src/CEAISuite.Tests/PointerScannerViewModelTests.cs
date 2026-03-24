@@ -85,4 +85,41 @@ public class PointerScannerViewModelTests
         // CancelScan with no active scan should not throw
         vm.CancelScanCommand.Execute(null);
     }
+
+    [Fact]
+    public async Task ValidatePaths_NoProcess_SetsStatusError()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = null;
+
+        await vm.ValidatePathsCommand.ExecuteAsync(null);
+
+        Assert.Contains("No process", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ValidatePaths_EmptyResults_SetsStatusMessage()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+
+        await vm.ValidatePathsCommand.ExecuteAsync(null);
+
+        Assert.Contains("No results", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task ValidatePaths_WithResult_UpdatesStatus()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        var path = new PointerPath("game.dll", 0x7FF00000, 0x1000, [0x10], 0x50000);
+        vm.Results.Add(new() { Chain = path.Display, ResolvedAddress = "0x50000", ModuleName = "game.dll", Source = path });
+
+        await vm.ValidatePathsCommand.ExecuteAsync(null);
+
+        // The stub engine won't have the right memory so the path will be broken or drifted
+        Assert.Contains("Validated", vm.StatusText);
+        Assert.NotEqual("Found", vm.Results[0].Status);
+    }
 }

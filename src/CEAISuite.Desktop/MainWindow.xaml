@@ -6,6 +6,7 @@
         xmlns:local="clr-namespace:CEAISuite.Desktop"
         xmlns:models="clr-namespace:CEAISuite.Desktop.Models"
         xmlns:avalonDock="https://github.com/Dirkster99/AvalonDock"
+        xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
         mc:Ignorable="d"
         Title="CE AI Suite"
         Height="860"
@@ -488,19 +489,41 @@
                                     <ListView ItemsSource="{Binding Lines}" SelectedItem="{Binding SelectedLine}" FontFamily="Consolas" FontSize="12"
                                               Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
                                               BorderThickness="0">
+                                        <ListView.ItemContainerStyle>
+                                            <Style TargetType="ListViewItem">
+                                                <Setter Property="ToolTip">
+                                                    <Setter.Value>
+                                                        <MultiBinding StringFormat="{}{0}  {1}  {2} {3}&#x0a;Module: {4}&#x0a;Xref: {5}">
+                                                            <Binding Path="Address" />
+                                                            <Binding Path="HexBytes" />
+                                                            <Binding Path="Mnemonic" />
+                                                            <Binding Path="Operands" />
+                                                            <Binding Path="ModuleOffset" TargetNullValue="(unknown)" />
+                                                            <Binding Path="XrefLabel" TargetNullValue="—" />
+                                                        </MultiBinding>
+                                                    </Setter.Value>
+                                                </Setter>
+                                            </Style>
+                                        </ListView.ItemContainerStyle>
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Address" Width="130" DisplayMemberBinding="{Binding Address}" />
-                                                <GridViewColumn Header="Bytes" Width="140" DisplayMemberBinding="{Binding HexBytes}" />
+                                                <GridViewColumn Header="Module" Width="140" DisplayMemberBinding="{Binding ModuleOffset}" />
+                                                <GridViewColumn Header="Bytes" Width="120" DisplayMemberBinding="{Binding HexBytes}" />
                                                 <GridViewColumn Header="Mnemonic" Width="80" DisplayMemberBinding="{Binding Mnemonic}" />
-                                                <GridViewColumn Header="Operands" Width="220" DisplayMemberBinding="{Binding Operands}" />
-                                                <GridViewColumn Header="Comment" Width="200" DisplayMemberBinding="{Binding Comment}" />
+                                                <GridViewColumn Header="Operands" Width="200" DisplayMemberBinding="{Binding Operands}" />
+                                                <GridViewColumn Header="Xref" Width="100" DisplayMemberBinding="{Binding XrefLabel}" />
+                                                <GridViewColumn Header="Comment" Width="160" DisplayMemberBinding="{Binding Comment}" />
                                             </GridView>
                                         </ListView.View>
                                         <ListView.ContextMenu>
                                             <ContextMenu Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}">
                                                 <MenuItem Header="Set Breakpoint" Command="{Binding SetBreakpointAtSelectedCommand}" />
+                                                <MenuItem Header="Find What Writes" Command="{Binding FindWhatWritesCommand}" />
+                                                <MenuItem Header="Generate Signature" Command="{Binding GenerateSignatureCommand}" />
+                                                <Separator />
                                                 <MenuItem Header="Follow Jump/Call" Command="{Binding FollowJumpCallCommand}" />
+                                                <MenuItem Header="Edit Instruction..." Command="{Binding EditInstructionCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="Copy All" Command="{Binding CopySelectedRangeCommand}" />
                                             </ContextMenu>
@@ -528,23 +551,60 @@
                                                   Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}" />
                                         <Button Command="{Binding FollowPointerCommand}" Content="Follow Ptr" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="8,0,0,0" />
                                         <Button Command="{Binding ExportCStructCommand}" Content="Export C" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <Button Command="{Binding ExportCEStructCommand}" Content="Export CE" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
                                     </StackPanel>
-                                    <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}"
-                                               FontSize="11" Margin="8,0,8,4" />
-                                    <DataGrid ItemsSource="{Binding Fields}" AutoGenerateColumns="False" SelectedItem="{Binding SelectedField}"
-                                              FontFamily="Consolas" FontSize="12" Background="{DynamicResource PanelBackground}"
-                                              Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
-                                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
-                                              RowBackground="{DynamicResource PanelBackground}" AlternatingRowBackground="{DynamicResource SidebarBackground}"
-                                              HeadersVisibility="Column" CanUserAddRows="False" SelectionMode="Single">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" IsReadOnly="True" Width="80" />
-                                            <DataGridTextColumn Header="Type" Binding="{Binding ProbableType}" IsReadOnly="True" Width="100" />
-                                            <DataGridTextColumn Header="Value" Binding="{Binding DisplayValue}" IsReadOnly="True" Width="200" />
-                                            <DataGridTextColumn Header="Conf." Binding="{Binding ConfidencePercent}" IsReadOnly="True" Width="60" />
-                                            <DataGridTextColumn Header="Name" Binding="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Width="*" />
-                                        </DataGrid.Columns>
-                                    </DataGrid>
+                                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,0,8,4">
+                                        <TextBlock Text="Compare:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                                        <TextBox Width="180" Text="{Binding CompareAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" CaretBrush="{DynamicResource InputCaret}" VerticalContentAlignment="Center" Padding="4,2" />
+                                        <Button Command="{Binding CompareCommand}" Content="Compare" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
+                                    </StackPanel>
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" MaxHeight="250" />
+                                        </Grid.RowDefinitions>
+                                        <DataGrid Grid.Row="0" ItemsSource="{Binding Fields}" AutoGenerateColumns="False" SelectedItem="{Binding SelectedField}"
+                                                  FontFamily="Consolas" FontSize="12" Background="{DynamicResource PanelBackground}"
+                                                  Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
+                                                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                                                  RowBackground="{DynamicResource PanelBackground}" AlternatingRowBackground="{DynamicResource SidebarBackground}"
+                                                  HeadersVisibility="Column" CanUserAddRows="False" SelectionMode="Single">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" IsReadOnly="True" Width="80" />
+                                                <DataGridTextColumn Header="Type" Binding="{Binding ProbableType}" IsReadOnly="True" Width="100" />
+                                                <DataGridTextColumn Header="Value" Binding="{Binding DisplayValue}" IsReadOnly="True" Width="200" />
+                                                <DataGridTextColumn Header="Conf." Binding="{Binding ConfidencePercent}" IsReadOnly="True" Width="60" />
+                                                <DataGridTextColumn Header="Name" Binding="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Width="*" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                        <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}" />
+                                        <DataGrid Grid.Row="2" ItemsSource="{Binding CompareResults}" AutoGenerateColumns="False" IsReadOnly="True"
+                                                  FontFamily="Consolas" FontSize="12" Background="{DynamicResource PanelBackground}"
+                                                  Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
+                                                  GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BorderBrush}"
+                                                  HeadersVisibility="Column" CanUserAddRows="False">
+                                            <DataGrid.RowStyle>
+                                                <Style TargetType="DataGridRow">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsDifferent}" Value="True">
+                                                            <Setter Property="Foreground" Value="#FFE04040" />
+                                                            <Setter Property="FontWeight" Value="Bold" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </DataGrid.RowStyle>
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Offset" Binding="{Binding OffsetHex}" Width="80" />
+                                                <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="100" />
+                                                <DataGridTextColumn Header="Value A" Binding="{Binding ValueA}" Width="200" />
+                                                <DataGridTextColumn Header="Value B" Binding="{Binding ValueB}" Width="200" />
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                    </Grid>
                                 </DockPanel>
                             </avalonDock:LayoutDocument>
 
@@ -573,6 +633,7 @@
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                             <Button Command="{Binding AddSelectedToTableCommand}" Content="Add to Table" Padding="8,2" Style="{StaticResource ToolbarButton}" />
+                                            <Button Command="{Binding ValidatePathsCommand}" Content="Validate" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
                                             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
                                         </StackPanel>
                                     </StackPanel>
@@ -634,10 +695,11 @@
                                         <DockPanel Grid.Column="2">
                                             <TextBlock DockPanel.Dock="Bottom" Text="{Binding ValidationResult}" FontFamily="Consolas" FontSize="11"
                                                        Foreground="{DynamicResource SecondaryForeground}" Margin="4" TextWrapping="Wrap" />
-                                            <TextBox Text="{Binding EditorText, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="12"
-                                                     AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+                                            <avalonEdit:TextEditor x:Name="ScriptTextEditor" FontFamily="Consolas" FontSize="12"
+                                                     ShowLineNumbers="True" WordWrap="False"
+                                                     VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
                                                      Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
-                                                     CaretBrush="{DynamicResource InputCaret}" BorderThickness="0" />
+                                                     BorderThickness="0" />
                                         </DockPanel>
                                     </Grid>
                                 </DockPanel>
@@ -677,6 +739,16 @@
                                                       FontFamily="Consolas" FontSize="12" Background="{DynamicResource PanelBackground}"
                                                       Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
                                                       HeadersVisibility="Column" CanUserAddRows="False">
+                                                <DataGrid.RowStyle>
+                                                    <Style TargetType="DataGridRow">
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsChanged}" Value="True">
+                                                                <Setter Property="Foreground" Value="#FFE04040" />
+                                                                <Setter Property="FontWeight" Value="Bold" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </DataGrid.RowStyle>
                                                 <DataGrid.Columns>
                                                     <DataGridTextColumn Header="Register" Binding="{Binding Name}" Width="100" />
                                                     <DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*" />

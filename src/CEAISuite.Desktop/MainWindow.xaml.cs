@@ -12,6 +12,8 @@ using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
 using CEAISuite.Desktop.ViewModels;
 using CEAISuite.Engine.Abstractions;
+using ICSharpCode.AvalonEdit.Highlighting;
+using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 
 namespace CEAISuite.Desktop;
 
@@ -144,6 +146,7 @@ public partial class MainWindow : Window
         StructureDissectorContent.DataContext = structureDissectorVm;
         PointerScannerContent.DataContext = pointerScannerVm;
         ScriptEditorContent.DataContext = scriptEditorVm;
+        SetupScriptEditorHighlighting(scriptEditorVm);
         DebuggerContent.DataContext = debuggerVm;
 
         // Wire AI Operator ViewModel
@@ -1248,4 +1251,34 @@ public partial class MainWindow : Window
     }
 
     #endregion
+
+    // ── AvalonEdit integration for Script Editor ──
+
+    private void SetupScriptEditorHighlighting(ScriptEditorViewModel vm)
+    {
+        // Load Auto Assembler syntax highlighting from embedded resource
+        var assembly = typeof(MainWindow).Assembly;
+        using var stream = assembly.GetManifestResourceStream("CEAISuite.Desktop.Resources.AutoAssembler.xshd");
+        if (stream is not null)
+        {
+            using var reader = new System.Xml.XmlTextReader(stream);
+            ScriptTextEditor.SyntaxHighlighting = HighlightingLoader.Load(reader, HighlightingManager.Instance);
+        }
+
+        // Two-way binding: ViewModel.EditorText ↔ AvalonEdit.Text
+        ScriptTextEditor.Text = vm.EditorText ?? "";
+        ScriptTextEditor.TextChanged += (_, _) =>
+        {
+            if (vm.EditorText != ScriptTextEditor.Text)
+                vm.EditorText = ScriptTextEditor.Text;
+        };
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(vm.EditorText) && vm.EditorText != ScriptTextEditor.Text)
+                Dispatcher.BeginInvoke(() => ScriptTextEditor.Text = vm.EditorText ?? "");
+        };
+
+        // Apply dark theme colors
+        ScriptTextEditor.LineNumbersForeground = new SolidColorBrush(Color.FromRgb(0x60, 0x60, 0x60));
+    }
 }

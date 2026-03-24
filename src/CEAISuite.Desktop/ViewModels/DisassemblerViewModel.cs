@@ -1,10 +1,12 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CEAISuite.Engine.Abstractions;
 using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
@@ -20,6 +22,7 @@ public partial class DisassemblerViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private readonly IDialogService _dialogService;
     private readonly IClipboardService _clipboard;
+    private readonly IAutoAssemblerEngine? _autoAssemblerEngine;
 
     private readonly Stack<string> _backStack = new();
     private readonly Stack<string> _forwardStack = new();
@@ -38,7 +41,8 @@ public partial class DisassemblerViewModel : ObservableObject
         INavigationService navigationService,
         IOutputLog outputLog,
         IDialogService dialogService,
-        IClipboardService clipboard)
+        IClipboardService clipboard,
+        IAutoAssemblerEngine? autoAssemblerEngine = null)
     {
         _disassemblyService = disassemblyService;
         _breakpointService = breakpointService;
@@ -49,6 +53,7 @@ public partial class DisassemblerViewModel : ObservableObject
         _outputLog = outputLog;
         _dialogService = dialogService;
         _clipboard = clipboard;
+        _autoAssemblerEngine = autoAssemblerEngine;
     }
 
     [ObservableProperty] private string _goToAddress = "";
@@ -118,11 +123,77 @@ public partial class DisassemblerViewModel : ObservableObject
         if (SelectedLine is null) return;
         var pid = _processContext.AttachedProcessId;
         if (pid is null) { StatusText = "No process attached."; return; }
+
+        // Gap 6: Risk assessment — warn if setting BP in a hot code area
+        var isHotCode = SelectedLine.Mnemonic.StartsWith("ret", StringComparison.OrdinalIgnoreCase)
+            || SelectedLine.Mnemonic.Equals("int3", StringComparison.OrdinalIgnoreCase)
+            || (SelectedLine.XrefLabel is not null && SelectedLine.XrefLabel.Contains("ntdll", StringComparison.OrdinalIgnoreCase));
+        if (isHotCode)
+        {
+            var proceed = _dialogService.Confirm(
+                $"Setting a breakpoint at {SelectedLine.Address} ({SelectedLine.Mnemonic}) may be risky.\n" +
+                "This instruction is in a sensitive area (system code or return instruction).\nProceed?",
+                "Risk Assessment");
+            if (!proceed) { StatusText = "Breakpoint cancelled."; return; }
+        }
+
         try
         {
             var bp = await _breakpointService.SetBreakpointAsync(pid.Value, SelectedLine.Address);
             StatusText = $"Breakpoint set at {SelectedLine.Address} ({bp.Mode})";
             _outputLog.Append("Disasm", "Info", $"Breakpoint set at {SelectedLine.Address}");
+        }
+        catch (Exception ex) { StatusText = $"Failed: {ex.Message}"; }
+    }
+
+    [RelayCommand]
+    private async Task FindWhatWritesAsync()
+    {
+        if (SelectedLine is null) return;
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        try
+        {
+            // Set a write-breakpoint at the selected address to capture writers
+            var bp = await _breakpointService.SetBreakpointAsync(
+                pid.Value, SelectedLine.Address,
+                CEAISuite.Engine.Abstractions.BreakpointType.HardwareWrite,
+                CEAISuite.Engine.Abstractions.BreakpointHitAction.LogAndContinue);
+
+            StatusText = $"Write breakpoint set at {SelectedLine.Address} — trigger writes in target, then check Hit Log.";
+            _outputLog.Append("Disasm", "Info", $"Find What Writes: BP {bp.Id} at {SelectedLine.Address}");
+
+            var items = new List<FindResultDisplayItem>
+            {
+                new() { Address = SelectedLine.Address, Instruction = $"{SelectedLine.Mnemonic} {SelectedLine.Operands}",
+                         Module = SelectedLine.ModuleOffset ?? "", Context = $"Write BP {bp.Id} armed" }
+            };
+            PopulateFindResults?.Invoke(items, $"Find What Writes to {SelectedLine.Address}");
+        }
+        catch (Exception ex) { StatusText = $"Failed: {ex.Message}"; }
+    }
+
+    [RelayCommand]
+    private async Task GenerateSignatureAsync()
+    {
+        if (SelectedLine is null) return;
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        try
+        {
+            if (!TryParseHex(SelectedLine.Address, out var addr))
+            { StatusText = "Invalid address."; return; }
+
+            var sig = await _signatureService.GenerateAsync(pid.Value, (nuint)addr);
+            var uniqueness = await _signatureService.TestUniquenessAsync(
+                pid.Value,
+                SelectedLine.ModuleOffset?.Split('+')[0] ?? "",
+                sig.Pattern);
+
+            var resultText = $"AOB: {sig.Pattern}\nLength: {sig.Length} bytes\nMatches: {uniqueness}";
+            _clipboard.SetText(sig.Pattern);
+            StatusText = $"Signature: {sig.Pattern} ({uniqueness} match{(uniqueness == 1 ? "" : "es")}) — copied";
+            _outputLog.Append("Disasm", "Info", resultText);
         }
         catch (Exception ex) { StatusText = $"Failed: {ex.Message}"; }
     }
@@ -138,6 +209,42 @@ public partial class DisassemblerViewModel : ObservableObject
         }
         _clipboard.SetText(sb.ToString());
         StatusText = $"Copied {Lines.Count} lines to clipboard.";
+    }
+
+    [RelayCommand]
+    private async Task EditInstructionAsync()
+    {
+        if (SelectedLine is null) return;
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        if (_autoAssemblerEngine is null) { StatusText = "Assembler not available."; return; }
+
+        var currentInstr = $"{SelectedLine.Mnemonic} {SelectedLine.Operands}";
+        var newInstr = _dialogService.ShowInput(
+            $"Edit instruction at {SelectedLine.Address}:",
+            "Inline Assembly",
+            currentInstr);
+        if (string.IsNullOrWhiteSpace(newInstr) || newInstr == currentInstr) return;
+
+        // Build a minimal AA script to assemble the new instruction at the address
+        var script = $"[ENABLE]\n{SelectedLine.Address}:\n{newInstr}\n[DISABLE]\n";
+        try
+        {
+            var result = await _autoAssemblerEngine.EnableAsync(pid.Value, script);
+            if (result.Success)
+            {
+                StatusText = $"Patched {SelectedLine.Address}: {newInstr}";
+                _outputLog.Append("Disasm", "Info", $"Inline edit at {SelectedLine.Address}: {currentInstr} → {newInstr}");
+                // Refresh the view
+                if (_currentAddress is not null)
+                    await DisassembleAtAsync(_currentAddress);
+            }
+            else
+            {
+                StatusText = $"Assembly failed: {result.Error}";
+            }
+        }
+        catch (Exception ex) { StatusText = $"Failed: {ex.Message}"; }
     }
 
     [RelayCommand]
@@ -196,6 +303,9 @@ public partial class DisassemblerViewModel : ObservableObject
             GoToAddress = address;
             CurrentFunctionLabel = result.Summary;
 
+            // Build module lookup for symbol resolution
+            var modules = _processContext.CurrentInspection?.Modules;
+
             Lines.Clear();
             foreach (var instr in result.Lines)
             {
@@ -209,7 +319,9 @@ public partial class DisassemblerViewModel : ObservableObject
                     HexBytes = instr.HexBytes,
                     Mnemonic = instr.Mnemonic,
                     Operands = instr.Operands,
-                    IsCallOrJump = isCallJmp
+                    IsCallOrJump = isCallJmp,
+                    ModuleOffset = ResolveModuleOffset(instr.Address, modules),
+                    XrefLabel = isCallJmp ? ResolveXrefTarget(instr.Operands, modules) : null
                 };
 
                 // Restore user comments/labels
@@ -234,5 +346,38 @@ public partial class DisassemblerViewModel : ObservableObject
     {
         CanGoBack = _backStack.Count > 0;
         CanGoForward = _forwardStack.Count > 0;
+    }
+
+    /// <summary>Resolve an instruction address to "module+0xOffset" form.</summary>
+    private static string? ResolveModuleOffset(string addressHex, IReadOnlyList<ModuleOverview>? modules)
+    {
+        if (modules is null || modules.Count == 0) return null;
+        if (!TryParseHex(addressHex, out var addr)) return null;
+
+        foreach (var mod in modules)
+        {
+            if (!TryParseHex(mod.BaseAddress, out var modBase)) continue;
+            if (!ulong.TryParse(mod.Size.Replace(",", ""), out var modSize)) continue;
+            if (addr >= modBase && addr < modBase + modSize)
+                return $"{mod.Name}+0x{addr - modBase:X}";
+        }
+        return null;
+    }
+
+    /// <summary>Resolve a call/jump target operand to "module+0xOffset".</summary>
+    private static string? ResolveXrefTarget(string operands, IReadOnlyList<ModuleOverview>? modules)
+    {
+        var match = Regex.Match(operands, @"0x[0-9A-Fa-f]+");
+        if (!match.Success) return null;
+        return ResolveModuleOffset(match.Value, modules);
+    }
+
+    private static bool TryParseHex(string text, out ulong value)
+    {
+        value = 0;
+        text = text.Trim();
+        if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            text = text[2..];
+        return ulong.TryParse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
     }
 }

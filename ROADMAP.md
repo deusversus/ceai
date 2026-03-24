@@ -70,11 +70,11 @@
 
 ---
 
-## Phase 2.5: Architectural Refactor (MVVM + DI) ⬅ CURRENT
+## Phase 2.5: Architectural Refactor (MVVM + DI) ✅ COMPLETE
 
 **Goal:** Extract the 3,800+ line MainWindow.xaml.cs into ViewModels with dependency injection before Phase 3 adds ~2,000 more lines. This is a prerequisite — not a nice-to-have.
 
-**Why now:** Phase 3 adds Disassembler, Script Editor, Structure Dissector, Pointer Scanner, and Debugger UI. Each is a complex interactive view. Without MVVM+DI, MainWindow.xaml.cs will exceed 6,000 lines and become unmaintainable. The cost of refactoring grows with every feature added.
+**Result:** 18 ViewModels extracted (7 more than the 11 planned). DI fully wired in App.xaml.cs with 30+ services registered. MainWindow.xaml.cs reduced to ~1,250 lines (AvalonDock framework wiring). INavigationService, IDialogService, IClipboardService, IDispatcherService all implemented. CommunityToolkit.Mvvm used throughout. ViewModel test coverage at ~55%.
 
 ### 2.5A — DI Container & Service Registration
 
@@ -115,78 +115,81 @@
 
 ---
 
-## Phase 3: Center Document Tabs — Core Feature Windows
+## Phase 3: Center Document Tabs — Core Feature Windows ✅ COMPLETE
 
 **Goal:** Build the major interactive views that CE users expect. These are the biggest parity gaps.
 
-### 3A — Interactive Disassembler (Review §2.3: 35% parity → target 70%)
+**Result:** All five center document tabs shipped with full ViewModel + XAML + DI wiring. Gap closure pass completed all remaining items (xrefs, symbol display, tooltips, Find What Writes, Generate Signature, inline assembly editing, risk assessment, pointer validation, side-by-side compare, CE export, AvalonEdit syntax highlighting, register change highlighting). 152 tests passing, 6 new tests added during gap closure.
+
+### 3A — Interactive Disassembler ✅ (Review §2.3: 35% parity → target 70%)
 
 The #1 missing feature per the review. CE's disassembler is its core navigation tool.
 
-| Item | Tools Surfaced | Details |
-|------|---------------|---------|
-| Scrollable instruction list | `Disassemble`, `DisassembleFunction` | Address, bytes, mnemonic, operands — themed, navigable |
-| Go-to address bar | — | Hex address input with navigation history |
-| Function boundary markers | `FindFunctionBoundaries` | Visual start/end markers |
-| Cross-reference annotations | `GetCallerGraph` | Clickable xref labels on call/jump targets |
-| Context menu | Multiple | Set Breakpoint, Find What Writes, Generate Signature, Copy, Follow Jump/Call |
-| Instruction search | `SearchInstructionPattern`, `FindByMemoryOperand` | Regex search bar with result navigation |
-| Instruction info tooltips | `GetInstructionInfo` | Hover details |
-| Symbol display | `ResolveSymbol` | Module+offset labels (ASLR-aware) |
-| Inline assembly editing | `AssembleInstruction` | Click instruction → edit → reassemble |
-| Symbol loading | PDB, .NET metadata | Phase 3A: module exports + .NET metadata. Phase 7 stretch: PDB/DWARF symbol loading. |
-| Comment / label annotations | — | User annotations on instructions (IDA-style); persisted per session |
-| Copy disassembly ranges | — | Select range → copy formatted text to clipboard |
-| Risk assessment before breakpoints | `ProbeTargetRisk` | Show risk dialog before committing breakpoint in hot code |
-| Signature testing | `TestSignatureUniqueness` | After Generate Signature, verify uniqueness in target |
+| Item | Tools Surfaced | Status |
+|------|---------------|--------|
+| Scrollable instruction list | `Disassemble`, `DisassembleFunction` | ✅ Done — ListView with GridView columns |
+| Go-to address bar | — | ✅ Done — with back/forward navigation history |
+| Function boundary markers | `FindFunctionBoundaries` | ✅ Done — CurrentFunctionLabel display |
+| Cross-reference annotations | `GetCallerGraph` | ✅ Done — XrefLabel column populated via ResolveXrefTarget |
+| Context menu | Multiple | ✅ Done — Set BP, Find What Writes, Generate Signature, Edit Instruction, Follow Jump/Call, Copy |
+| Instruction search | `SearchInstructionPattern`, `FindByMemoryOperand` | ✅ Done — regex search bar |
+| Instruction info tooltips | `GetInstructionInfo` | ✅ Done — MultiBinding tooltip with address, bytes, module, xref |
+| Symbol display | `ResolveSymbol` | ✅ Done — Module+offset column via ResolveModuleOffset |
+| Inline assembly editing | `AssembleInstruction` | ✅ Done — dialog → AA script → Keystone assembly |
+| Symbol loading | PDB, .NET metadata | ⏳ Phase 7 stretch — module exports only for now |
+| Comment / label annotations | — | ✅ Done — data model + Comment column (persistence deferred) |
+| Copy disassembly ranges | — | ✅ Done — formatted text to clipboard |
+| Risk assessment before breakpoints | `ProbeTargetRisk` | ✅ Done — warns on ret/int3/ntdll targets |
+| Signature testing | `TestSignatureUniqueness` | ✅ Done — integrated into Generate Signature (tests + copies) |
 
-### 3B — Script Editor (Review §2.4: 50% parity → target 80%)
+### 3B — Script Editor ✅ (Review §2.4: 50% parity → target 80%)
 
-| Item | Tools Surfaced | Details |
-|------|---------------|---------|
-| Script list (left pane) | `ListScripts` | List with enable/disable status icons |
-| Editor pane | `ViewScript`, `EditScript` | Syntax-highlighted Auto Assembler editor (CE format) |
-| New / Save / Delete | `CreateScriptEntry` | Script lifecycle management |
-| Validate / Deep Validate | `ValidateScript`, `ValidateScriptDeep` | Button toolbar with inline results |
-| Enable / Disable | `EnableScript`, `DisableScript` | Toggle buttons |
-| Code generation templates | `GenerateAutoAssemblerScript`, `GenerateLuaScript` | Quick-insert: AOB inject, code cave, NOP, JMP |
-| Assembly syntax support | — | CE-compatible Auto Assembler syntax; full FASM/NASM compatibility is a Phase 7C stretch goal |
+| Item | Tools Surfaced | Status |
+|------|---------------|--------|
+| Script list (left pane) | `ListScripts` | ✅ Done — ListBox with double-click load |
+| Editor pane | `ViewScript`, `EditScript` | ✅ Done — AvalonEdit with AA syntax highlighting |
+| New / Save / Delete | `CreateScriptEntry` | ✅ Done |
+| Validate / Deep Validate | `ValidateScript`, `ValidateScriptDeep` | ✅ Done — inline validation results |
+| Enable / Disable | `EnableScript`, `DisableScript` | ✅ Done |
+| Code generation templates | `GenerateAutoAssemblerScript`, `GenerateLuaScript` | ✅ Done — AOB inject, code cave, NOP, JMP |
+| Assembly syntax support | — | ✅ Done — AvalonEdit with AutoAssembler.xshd (sections, directives, registers, mnemonics) |
 
-### 3C — Structure Dissector (Review §2.3 gap, §8 #6 High priority)
+### 3C — Structure Dissector ✅ (Review §2.3 gap, §8 #6 High priority)
 
-| Item | Tools Surfaced | Details |
-|------|---------------|---------|
-| Address input | — | Base address with optional auto-detect |
-| Structure grid | `DissectStructure` | Offset, type, value, name — editable columns |
-| Pointer follow | Address resolution | Click pointer fields → navigate to target |
-| Export | `GenerateStructDefinition` | Export as C struct or CE structure definition |
-| Side-by-side compare | `CompareSnapshots` | Two instances of same structure |
+| Item | Tools Surfaced | Status |
+|------|---------------|--------|
+| Address input | — | ✅ Done — with region size and type hint |
+| Structure grid | `DissectStructure` | ✅ Done — DataGrid with editable names |
+| Pointer follow | Address resolution | ✅ Done |
+| Export as C struct | `GenerateStructDefinition` | ✅ Done — copies to clipboard |
+| Export as CE structure definition | `GenerateStructDefinition` | ✅ Done — XML format with Vartype/Bytesize |
+| Side-by-side compare | `CompareSnapshots` | ✅ Done — compare DataGrid with diff highlighting |
 
-### 3D — Pointer Scanner (Review §2.6: 30% parity → target 60%)
+### 3D — Pointer Scanner ✅ (Review §2.6: 30% parity → target 60%)
 
-| Item | Tools Surfaced | Details |
-|------|---------------|---------|
-| Target address input | — | Address, max depth, max offset fields |
-| Scan with progress | `ScanForPointers` | Progress bar, cancel support |
-| Results list | Scan results | Chains ranked by stability |
-| Cross-restart validate | `ValidatePointerPaths` | Validate button with status column |
-| Add to address table | — | Send validated chain to address table |
-| Stability ranking | `RankPointerPaths` | Visual stability column |
+| Item | Tools Surfaced | Status |
+|------|---------------|--------|
+| Target address input | — | ✅ Done — address, max depth, max offset fields |
+| Scan with progress | `ScanForPointers` | ✅ Done — with cancel support |
+| Results list | Scan results | ✅ Done — chains with module display |
+| Cross-restart validate | `ValidatePointerPaths` | ✅ Done — re-walks chain, reports Stable/Drifted/Broken |
+| Add to address table | — | ✅ Done |
+| Stability ranking | `RankPointerPaths` | ✅ Done — status column updated by ValidatePathsCommand |
 
-### 3E — Debugger UI (Review §8 #3: Critical)
+### 3E — Debugger UI ✅ (Review §8 #3: Critical — stepping deferred to Phase 7)
 
-Interactive debugging view — CE's full debugger interface. Can be integrated into the Disassembler tab or as a separate debug mode.
+Interactive debugging view — CE's full debugger interface. Stepping commands are stubbed and disabled until Phase 7 engine support.
 
-| Item | Tools Surfaced | Details |
-|------|---------------|---------|
-| Register view | `DumpRegisterState` | All registers displayed, editable, with changed-value highlighting |
-| Stack view | `GetCallStack` | Call stack with frame navigation |
-| Single-step execution | New engine work | Step Into / Step Over / Step Out / Run to Cursor |
-| Instruction-level stepping | New engine work | Step through disassembly one instruction at a time |
-| Break-and-trace | New engine work | Trace execution path from a breakpoint (log instructions hit) |
-| Trace window | New engine work | Dedicated trace output panel showing step-by-step instruction execution log |
-| Debug toolbar | — | Continue, Pause, Step In/Over/Out, Stop buttons |
-| Watch expressions | New | User-defined expressions evaluated on break |
+| Item | Tools Surfaced | Status |
+|------|---------------|--------|
+| Register view | `DumpRegisterState` | ✅ Done — all registers displayed with changed-value highlighting (red + bold) |
+| Stack view | `GetCallStack` | ✅ Done — call stack with frame navigation |
+| Single-step execution | New engine work | ⏳ Phase 7 — commands stubbed, disabled |
+| Instruction-level stepping | New engine work | ⏳ Phase 7 |
+| Break-and-trace | New engine work | ⏳ Phase 7 |
+| Trace window | New engine work | ⏳ Phase 7 |
+| Debug toolbar | — | ✅ Done — Step In/Over/Out/Continue buttons (disabled until Phase 7) |
+| Watch expressions | New | ⏳ Phase 7 |
 
 ---
 
@@ -430,13 +433,13 @@ Interactive debugging view — CE's full debugger interface. Can be integrated i
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 2 ✅ | After Ph 2.5 | After Ph 3 | After Ph 5 | After Ph 7 | Target |
+| Category | After Ph 2 ✅ | After Ph 2.5 ✅ | After Ph 3 ✅ | After Ph 5 | After Ph 7 | Target |
 |----------|-------------|-------------|-----------|-----------|-----------|--------|
 | Process & Attachment | 20% | 20% | 20% | 20% | 20% | 80%* |
 | Memory Read/Write | 10% | 10% | 10% | 80% | 80% | 90% |
 | Scanning | 67% | 67% | 67% | 67% | 90% | 95% |
 | Disassembly & Analysis | 20% | 20% | 70% | 70% | 70% | 85% |
-| Breakpoints & Hooks | 50% | 50% | 50% | 50% | 80% | 90% |
+| Breakpoints & Hooks | 50% | 50% | 55% | 55% | 80% | 90% |
 | Address Table | 67% | 67% | 67% | 67% | 90% | 95% |
 | Scripting | 40% | 40% | 80% | 80% | 80% | 95%** |
 | Pointer Resolution | 0% | 0% | 60% | 60% | 70% | 80% |
@@ -461,30 +464,27 @@ Phase 1 ✅ (Foundation)
     │
     Phase 2 ✅ (Bottom Panels) ← Snapshots, Hotkeys at 100%; Scripts, Journal, Breakpoints surfaced
     │
-    Phase 2.5 ⬅ CURRENT (MVVM + DI Refactor)
-    │   ├── DI container + service registration
-    │   ├── Extract ~11 ViewModels from MainWindow.xaml.cs (3,800 → ~500 lines)
-    │   └── CommunityToolkit.Mvvm, INavigationService, IDialogService
+    Phase 2.5 ✅ (MVVM + DI Refactor) ← 18 ViewModels, DI container, CommunityToolkit.Mvvm
     │
-    ├── Phase 3 (Core Windows) ← requires Phase 2.5 for clean ViewModel architecture
-    │       ├── Phase 3A (Disassembler) ← §8 #3 Critical
-    │       ├── Phase 3B (Script Editor) ← §8 #2 via UI surface
-    │       ├── Phase 3C (Structure Dissector) ← §8 #6 High
-    │       ├── Phase 3D (Pointer Scanner)
-    │       └── Phase 3E (Debugger UI) ← §8 #3 Critical
+    Phase 3 ✅ (Core Windows) ← all 5 tabs + gap closure complete
+    │       ├── Phase 3A ✅ Disassembler (xrefs, symbols, tooltips, Find What Writes, signatures, inline edit)
+    │       ├── Phase 3B ✅ Script Editor (AvalonEdit syntax highlighting, templates, validation)
+    │       ├── Phase 3C ✅ Structure Dissector (CE export, side-by-side compare)
+    │       ├── Phase 3D ✅ Pointer Scanner (cross-restart validation, stability ranking)
+    │       └── Phase 3E ✅ Debugger UI (register change highlighting; stepping deferred to Phase 7)
     │
-    ├── Phase 4 (Explorer Sidebar) ← can run parallel to Phase 3
-    ├── Phase 5 (Memory Browser+) ← can run parallel to Phase 3
+    ├── Phase 4 (Explorer Sidebar) ⬅ NEXT
+    ├── Phase 5 (Memory Browser+)
     │
-    ├── Phase 6 (Command Bar & UX) ← 6A ~90% done, 6C ~60% done; remaining items depend on Phases 3-5
+    ├── Phase 6 (Command Bar & UX) ← 6A ~90% done, 6C ~60% done; remaining items depend on Phases 4-5
     │       └── remaining: token display, progress indicators, first-run UX
     │
     ├── Phase 7A (Multi-threaded scanning) ← §8 #5 Critical, independent
-    ├── Phase 7B-E (Engine gaps) ← independent of UI phases
+    ├── Phase 7B-E (Engine gaps) ← includes debugger stepping (Phase 3E deferred items)
     │
     ├── Phase 8 (Lua) ← §8 #2 Critical, independent of UI phases
     │
-    ├── Phase 9 (CI/CD, Logging, Testing, UX gaps) ← DI moved to 2.5; CI/CD should be early
+    ├── Phase 9 (CI/CD, Logging, Testing, UX gaps) ← CI/CD should be early
     │       └── includes: auto-update, crash recovery, progress indicators, first-run onboarding
     │
     └── Phase 10 (Advanced) ← long-term; includes AI co-pilot mode
@@ -493,12 +493,12 @@ Phase 1 ✅ (Foundation)
 **Highest-impact order (updated):**
 1. ✅ Phase 1 — Done
 2. ✅ Phase 2 — Done (Snapshots, Hotkeys at 100%; 7 new bottom tabs)
-3. **Phase 2.5 — MVVM + DI refactor (CURRENT — prerequisite for Phase 3)**
-4. Phase 3A — Disassembler (largest single feature gap)
-5. Phase 3E — Debugger UI (§8 #3 Critical — stepping, registers, call stack)
-6. Phase 9B — CI/CD (should be set up before Phase 3 ships)
+3. ✅ Phase 2.5 — Done (18 ViewModels, DI container, MVVM infrastructure)
+4. ✅ Phase 3 — Done (5 center tabs + full gap closure; 152 tests)
+5. **Phase 9B — CI/CD (should be set up now that Phase 3 is complete)**
+6. Phase 4 — Explorer Sidebar (module list, thread list, memory map)
 7. Phase 7A — Multi-threaded scanning (performance critical)
-8. Phase 3B — Script Editor (enables manual scripting workflow)
+8. Phase 5 — Memory Browser+ (hex editing, data inspector)
 9. Phase 8 — Lua (CE's killer feature)
 
 ---
@@ -509,12 +509,12 @@ Phase 1 ✅ (Foundation)
 |-------|-------|--------|-------------|
 | **1** | Foundation | ✅ Complete | Dockable panels, Memory Browser tab, theme sync |
 | **2** | Bottom Panels | ✅ Complete | 10 new tabs/panels; Snapshots, Hotkeys at 100% parity; token budgeting |
-| **2.5** | **MVVM + DI Refactor** | **⬅ Current** | **Extract ViewModels, DI container, MainWindow 3,800 → ~500 lines** |
-| **3** | Core Windows | Planned | Disassembler + symbols, Script Editor, Structure Dissector, Pointer Scanner, Debugger UI |
-| **4** | Explorer Sidebar | Planned | Module list (w/ exports), thread list, memory map |
+| **2.5** | MVVM + DI Refactor | ✅ Complete | 18 ViewModels, DI container, CommunityToolkit.Mvvm, INavigationService, IDialogService |
+| **3** | Core Windows | ✅ Complete | Disassembler (xrefs, symbols, tooltips, inline edit), Script Editor (AvalonEdit), Structure Dissector (CE export, compare), Pointer Scanner (validation), Debugger (register highlighting); 152 tests |
+| **4** | Explorer Sidebar | **⬅ Next** | Module list (w/ exports), thread list, memory map |
 | **5** | Memory Browser+ | Planned | Hex editing, data inspector, protection tools, structure spider |
 | **6** | UX Polish | ~70% done | Command bar ~90%, status bar ~60%; remaining: token display, progress indicators, first-run |
-| **7** | Engine Gaps | Planned | Multi-threaded scan, bit-level scan, conditional BPs, AA directives + loadlibrary |
+| **7** | Engine Gaps | Planned | Multi-threaded scan, bit-level scan, conditional BPs, AA directives, debugger stepping |
 | **8** | Lua | Planned | Full Lua 5.4 scripting engine with CE API bindings |
 | **9** | Infrastructure | Planned | CI/CD, logging, expanded tests, auto-update, crash recovery |
 | **10** | Advanced | Long-term | Trainers, overlays, kernel debugging, plugins, AI co-pilot mode |

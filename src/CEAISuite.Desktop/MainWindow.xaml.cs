@@ -108,6 +108,7 @@ public partial class MainWindow : Window
 
         // Restore saved panel layout (must happen after InitializeComponent + theme)
         RestoreLayout();
+        EnforceLeftSidebarWidth();
 
         // Add scroll arrows + dropdown to tab strips when tabs overflow
         Controls.DocumentTabScrollHelper.Attach(DockManager);
@@ -1115,6 +1116,21 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"SaveLayout failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Force the left sidebar pane to a usable width regardless of saved/default state.</summary>
+    private void EnforceLeftSidebarWidth()
+    {
+        foreach (var pane in DockManager.Layout.Descendents().OfType<LayoutAnchorablePane>())
+        {
+            // Find the pane containing "processes" — that's our left sidebar
+            if (pane.Children.Any(c => c.ContentId == "processes"))
+            {
+                pane.DockWidth = new System.Windows.GridLength(450);
+                pane.DockMinWidth = 300;
+                break;
+            }
         }
     }
 

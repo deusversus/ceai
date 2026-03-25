@@ -39,8 +39,8 @@ public static class DocumentTabScrollHelper
 
     private static void ScanAndPatch(DependencyObject root)
     {
-        // Find all DocumentPaneTabPanel and AnchorablePaneTabPanel instances
-        foreach (var tabPanel in FindAll<Panel>(root, p => p is DocumentPaneTabPanel or AnchorablePaneTabPanel))
+        // Only patch document pane tabs (center tabs), not anchorable side panels
+        foreach (var tabPanel in FindAll<Panel>(root, p => p is DocumentPaneTabPanel))
         {
             var hash = tabPanel.GetHashCode();
             if (_processed.Contains(hash)) continue;

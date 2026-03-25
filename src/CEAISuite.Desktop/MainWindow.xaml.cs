@@ -38,7 +38,7 @@ public partial class MainWindow : Window
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 17; // v17 = Phase 4 explorer sidebar (modules, threads, memory map, workspace)
+    private const int LayoutVersion = 18; // v18 = widen left sidebar from 250 → 420
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

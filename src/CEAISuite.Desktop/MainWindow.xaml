@@ -196,7 +196,7 @@
                 <avalonDock:LayoutPanel Orientation="Horizontal">
 
                     <!-- Left sidebar: Process List -->
-                    <avalonDock:LayoutAnchorablePane DockWidth="250">
+                    <avalonDock:LayoutAnchorablePane DockWidth="420">
                         <avalonDock:LayoutAnchorable Title="Processes" ContentId="processes">
                             <DockPanel x:Name="ProcessesContent" Background="{DynamicResource SidebarBackground}">
                                 <TextBlock DockPanel.Dock="Top" Text="PROCESSES" FontSize="11" FontWeight="SemiBold"

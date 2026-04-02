@@ -73,6 +73,79 @@ public sealed class AppSettings
     public int? LimitMaxChatSearchResults { get; set; }
     public bool? LimitFilterRegisters { get; set; }
     public bool? LimitDereferenceHookRegisters { get; set; }
+
+    /// <summary>
+    /// Use the new AgentLoop (owns the tool-call loop directly) instead of MAF's
+    /// FunctionInvokingChatClient. Default: true. Set to false to revert to the
+    /// legacy MAF agent path.
+    /// </summary>
+    public bool UseNewAgentLoop { get; set; } = true;
+
+    // ── MCP Servers ──
+
+    /// <summary>
+    /// Configured MCP (Model Context Protocol) servers. Each server provides
+    /// external tools that the agent can use alongside built-in tools.
+    /// </summary>
+    public List<McpServerSettingsEntry> McpServers { get; set; } = [];
+
+    // ── Token Budget ──
+
+    /// <summary>Maximum session cost in USD. 0 = unlimited.</summary>
+    public decimal MaxSessionCostDollars { get; set; } = 0;
+
+    /// <summary>Input token price per million (for cost estimation).</summary>
+    public decimal InputPricePerMillion { get; set; } = 3.00m;
+
+    /// <summary>Output token price per million (for cost estimation).</summary>
+    public decimal OutputPricePerMillion { get; set; } = 15.00m;
+
+    /// <summary>Cached input token price per million.</summary>
+    public decimal CachedInputPricePerMillion { get; set; } = 0.30m;
+
+    // ── Memory ──
+
+    /// <summary>Enable persistent cross-session agent memory. Default: true.</summary>
+    public bool EnableAgentMemory { get; set; } = true;
+
+    /// <summary>Maximum memory entries to keep (older entries are pruned).</summary>
+    public int MaxMemoryEntries { get; set; } = 500;
+
+    // ── Plan Mode ──
+
+    /// <summary>Require plan mode for requests that involve destructive operations.</summary>
+    public bool RequirePlanForDestructive { get; set; } = false;
+    public List<string> FallbackModels { get; set; } = [];
+    public string PermissionMode { get; set; } = "Normal";
+
+    /// <summary>
+    /// Enable speculative early tool execution during LLM streaming.
+    /// Read-only tools start executing before the full response arrives.
+    /// Default: false (conservative; enable for lower latency on tool-heavy conversations).
+    /// </summary>
+    public bool EnableEarlyToolExecution { get; set; } = false;
+}
+
+/// <summary>Settings entry for a configured MCP server.</summary>
+public sealed class McpServerSettingsEntry
+{
+    /// <summary>Human-readable server name.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Command to execute (e.g., "npx", "python", path to binary).</summary>
+    public string Command { get; set; } = "";
+
+    /// <summary>Command-line arguments.</summary>
+    public string? Arguments { get; set; }
+
+    /// <summary>Environment variables as key=value pairs.</summary>
+    public Dictionary<string, string>? Environment { get; set; }
+
+    /// <summary>Whether to auto-connect on startup.</summary>
+    public bool AutoConnect { get; set; } = true;
+
+    /// <summary>Whether this server is enabled.</summary>
+    public bool Enabled { get; set; } = true;
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]

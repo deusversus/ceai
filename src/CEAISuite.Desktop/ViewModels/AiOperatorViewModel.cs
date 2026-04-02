@@ -105,6 +105,18 @@ public partial class AiOperatorViewModel : ObservableObject
     [ObservableProperty]
     private bool _isStreamingBlocksVisible;
 
+    /// <summary>Session cost estimate displayed in the status bar.</summary>
+    [ObservableProperty]
+    private string _budgetStatus = "";
+
+    /// <summary>Memory entry count for status display.</summary>
+    [ObservableProperty]
+    private string _memoryStatus = "";
+
+    /// <summary>MCP server connection status.</summary>
+    [ObservableProperty]
+    private string _mcpStatus = "";
+
     // ── Events for MainWindow to subscribe (UI-specific actions) ──
 
     /// <summary>Raised when the chat display needs to scroll to bottom.</summary>
@@ -322,6 +334,7 @@ public partial class AiOperatorViewModel : ObservableObject
                 StatusText = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
             RefreshChatDisplay();
             RefreshChatSwitcher();
+            RefreshStatusIndicators();
         }
     }
 
@@ -670,6 +683,26 @@ public partial class AiOperatorViewModel : ObservableObject
     }
 
     // ── Helpers ──
+
+    /// <summary>Update budget, memory, and MCP status indicators.</summary>
+    public void RefreshStatusIndicators()
+    {
+        var budget = _aiOperatorService.TokenBudget;
+        if (budget.TotalRequests > 0)
+        {
+            BudgetStatus = $"~${budget.EstimatedCostUsd:F4} ({budget.TotalInputTokens:#,0}↑ {budget.TotalOutputTokens:#,0}↓)";
+        }
+
+        var memory = _aiOperatorService.Memory;
+        if (memory is not null)
+        {
+            MemoryStatus = memory.Entries.Count > 0
+                ? $"{memory.Entries.Count} memories"
+                : "";
+        }
+
+        McpStatus = _aiOperatorService.GetMcpStatus();
+    }
 
     internal Brush FindThemeBrush(string key) => _themeService.FindBrush(key);
 

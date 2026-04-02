@@ -225,14 +225,6 @@ public partial class MainWindow : Window
             Dispatcher.BeginInvoke(() => _aiOperatorVm.RefreshChatSwitcher());
         };
 
-        // Wire up non-streaming approval handler
-        _aiOperatorService.ApprovalRequested += async (toolName, argsStr) =>
-        {
-            var approval = new AgentStreamEvent.ApprovalRequested(toolName, argsStr);
-            await Dispatcher.InvokeAsync(() => _aiOperatorVm.HandleApprovalRequest(approval));
-            return await approval.UserDecision;
-        };
-
         _appSettingsService.SettingsChanged += () =>
         {
             Dispatcher.Invoke(() => _mainVm.HandleSettingsChanged());

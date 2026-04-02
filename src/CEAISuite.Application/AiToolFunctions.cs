@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using CEAISuite.Application.AgentLoop;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
 using Microsoft.Extensions.AI;
@@ -64,6 +65,8 @@ public sealed class AiToolFunctions(
         catch { return false; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List running processes. Returns PID, name, architecture.")]
     public async Task<string> ListProcesses()
     {
@@ -73,6 +76,8 @@ public sealed class AiToolFunctions(
         return $"Found {processes.Count} processes (showing {Math.Min(cap, processes.Count)}):\n{string.Join('\n', lines)}";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Inspect process by PID. Returns modules and architecture.")]
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
@@ -85,6 +90,8 @@ public sealed class AiToolFunctions(
                $"Modules ({inspection.Modules.Count} total, showing {Math.Min(cap, inspection.Modules.Count)}):\n{string.Join('\n', modules)}{extra}";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Read a typed value from process memory.")]
     public async Task<string> ReadMemory(
         [Description("Process ID")] int processId,
@@ -105,6 +112,9 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
     [Description("Write a value to process memory. Records original for undo.")]
     public async Task<string> WriteMemory(
         [Description("Process ID")] int processId,
@@ -134,6 +144,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Start a new memory scan. Returns result count.")]
     public async Task<string> StartScan(
         [Description("Process ID to scan")] int processId,
@@ -158,6 +170,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Refine previous scan with a new constraint.")]
     public async Task<string> RefineScan(
         [Description("Scan type: ExactValue, Increased, Decreased, Changed, Unchanged")] string scanType,
@@ -177,6 +191,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Resolve symbolic expression (module+offset) to live address.")]
     public async Task<string> ResolveSymbol(
         [Description("Process ID")] int processId,
@@ -256,6 +272,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Identify artifact type from an ID (hook, BP, script, etc).")]
     public Task<string> IdentifyArtifact(
         [Description("The artifact ID to look up")] string id)
@@ -285,6 +303,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult(ToJson(new { id, type = "unknown", description = "ID not recognized. It may be expired, removed, or from a different session." }));
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Disassemble code at an address. Accepts hex or symbolic.")]
     public async Task<string> Disassemble(
         [Description("Process ID")] int processId,
@@ -358,6 +378,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Unbounded)]
     [Description("List memory regions. Shows address, size, R/W/X flags.")]
     public async Task<string> ListMemoryRegions(
         [Description("Process ID")] int processId,
@@ -414,6 +436,8 @@ public sealed class AiToolFunctions(
             _ => $"{bytes} B"
         };
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Add a memory address to the address table for tracking.")]
     public Task<string> AddToAddressTable(
         [Description("Memory address")] string address,
@@ -426,6 +450,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Added to address table: {entry.Label} at {entry.Address} ({entry.DataType})");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List address table entries with pagination.")]
     public Task<string> ListAddressTable(
         [Description("Number of entries to skip (default 0). Use for pagination.")] int offset = 0,
@@ -499,6 +525,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Refresh address table values from process memory.")]
     public async Task<string> RefreshAddressTable([Description("Process ID")] int processId)
     {
@@ -525,6 +553,8 @@ public sealed class AiToolFunctions(
 
     // ── Artifact generation tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Generate C# trainer script from locked entries.")]
     public Task<string> GenerateTrainerScript([Description("Process name for the trainer target")] string processName)
     {
@@ -534,6 +564,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Generated C# trainer script ({locked.Count} entries):\n\n{script}");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Generate Auto Assembler script from locked entries.")]
     public Task<string> GenerateAutoAssemblerScript([Description("Process name")] string processName)
     {
@@ -543,6 +575,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Generated AA script ({locked.Count} entries):\n\n{script}");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Generate Lua script from locked entries.")]
     public Task<string> GenerateLuaScript([Description("Process name")] string processName)
     {
@@ -552,6 +586,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Generated Lua script ({locked.Count} entries):\n\n{script}");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Summarize current investigation state.")]
     public Task<string> SummarizeInvestigation(
         [Description("Process name")] string processName,
@@ -572,6 +608,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult(summary);
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Attach to a process by PID for memory operations.")]
     public async Task<string> AttachProcess([Description("Process ID")] int processId)
     {
@@ -580,6 +618,8 @@ public sealed class AiToolFunctions(
                $"{inspection.Modules.Count} modules loaded.";
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Load a .CT (Cheat Table) file and import entries into the address table.")]
     public Task<string> LoadCheatTable([Description("Full file path to the .CT file")] string filePath)
     {
@@ -600,6 +640,8 @@ public sealed class AiToolFunctions(
             (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : ""));
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Save the current address table as a Cheat Engine .CT file.")]
     public Task<string> SaveCheatTable([Description("File path to save to")] string filePath)
     {
@@ -635,6 +677,9 @@ public sealed class AiToolFunctions(
 
     // ── Breakpoint tools ──
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
     [Description("Set a breakpoint. Modes: Auto, Stealth, PageGuard, Hardware, Software.")]
     public async Task<string> SetBreakpoint(
         [Description("Process ID")] int processId,
@@ -774,6 +819,7 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [Destructive]
     [Description("Remove a breakpoint by its ID.")]
     public async Task<string> RemoveBreakpoint(
         [Description("Process ID")] int processId,
@@ -784,6 +830,7 @@ public sealed class AiToolFunctions(
         return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
     }
 
+    [Destructive]
     [Description("EMERGENCY: Restore page guard protections for hung target.")]
     public async Task<string> EmergencyRestorePageProtection(
         [Description("Process ID of the hung process")] int processId)
@@ -795,6 +842,7 @@ public sealed class AiToolFunctions(
             : "No active page guard breakpoints found to restore.";
     }
 
+    [Destructive]
     [Description("EMERGENCY: Force detach debugger, clean up all BPs.")]
     public async Task<string> ForceDetachAndCleanup(
         [Description("Process ID of the hung process")] int processId)
@@ -804,6 +852,8 @@ public sealed class AiToolFunctions(
         return $"✅ Force detach complete for process {processId}. Page guards restored, debugger detached, session torn down.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all active breakpoints for a process.")]
     public async Task<string> ListBreakpoints([Description("Process ID")] int processId)
     {
@@ -826,6 +876,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Get breakpoint hit log with registers and thread info.")]
     public async Task<string> GetBreakpointHitLog(
         [Description("Breakpoint ID")] string breakpointId,
@@ -847,6 +899,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Get breakpoint health and lifecycle status.")]
     public async Task<string> GetBreakpointHealth(
         [Description("Breakpoint ID")] string breakpointId,
@@ -897,6 +951,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Get breakpoint mode capability matrix.")]
     public string GetBreakpointModeCapabilities()
     {
@@ -913,6 +969,8 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Probe address risk level and recommended BP modes.")]
     public async Task<string> ProbeTargetRisk(
         [Description("Process ID")] int processId,
@@ -1050,6 +1108,8 @@ public sealed class AiToolFunctions(
 
     // ── Script tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all script entries with name, status, and type.")]
     public Task<string> ListScripts()
     {
@@ -1085,6 +1145,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("View source code of a script entry by ID or label.")]
     public Task<string> ViewScript([Description("Node ID or label of the script entry")] string nodeId)
     {
@@ -1108,6 +1170,8 @@ public sealed class AiToolFunctions(
             $"──────────────────────\n{node.AssemblerScript}");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Validate script syntax without executing.")]
     public Task<string> ValidateScript(
         [Description("Node ID or label of the script entry")] string nodeId)
@@ -1128,6 +1192,8 @@ public sealed class AiToolFunctions(
             $"Warnings: {string.Join("; ", result.Warnings)}");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Deep-validate script against live process state.")]
     public async Task<string> ValidateScriptDeep(
         [Description("Node ID or label of the script entry")] string nodeId,
@@ -1335,6 +1401,8 @@ public sealed class AiToolFunctions(
 
     // ── Pointer Scanner tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Scan for pointer chains to a target address.")]
     public async Task<string> ScanForPointers(
         [Description("Process ID to scan")] int processId,
@@ -1351,6 +1419,8 @@ public sealed class AiToolFunctions(
         return $"Found {paths.Count} pointer path(s) to 0x{addr:X}:\n{string.Join('\n', lines)}";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Browse raw memory as hex dump with ASCII.")]
     public async Task<string> BrowseMemory(
         [Description("Process ID")] int processId,
@@ -1385,6 +1455,8 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Dissect memory structure, identify field types and values.")]
     public async Task<string> DissectStructure(
         [Description("Process ID")] int processId,
@@ -1416,6 +1488,8 @@ public sealed class AiToolFunctions(
         return sb.ToString();
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Register a global hotkey to toggle freeze/script.")]
     public Task<string> SetHotkey(
         [Description("Node ID or label of the address table entry")] string nodeId,
@@ -1487,6 +1561,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Hotkey '{hotkey}' registered for '{node.Label}'. Press {hotkey} to toggle {(node.IsScriptEntry ? "script" : "freeze")}.");
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all registered global hotkeys and their bound actions.")]
     public Task<string> ListHotkeys()
     {
@@ -1499,6 +1575,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult(sb.ToString().TrimEnd());
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Remove a registered global hotkey by binding ID.")]
     public Task<string> RemoveHotkey([Description("Binding ID to remove")] int bindingId)
     {
@@ -1508,6 +1586,9 @@ public sealed class AiToolFunctions(
             : $"Binding {bindingId} not found.");
     }
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
     [Description("Undo the last memory write operation, restoring original bytes.")]
     public async Task<string> UndoWrite()
     {
@@ -1515,6 +1596,9 @@ public sealed class AiToolFunctions(
         return await patchUndoService.UndoAsync();
     }
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
     [Description("Redo the last undone memory write operation.")]
     public async Task<string> RedoWrite()
     {
@@ -1522,6 +1606,8 @@ public sealed class AiToolFunctions(
         return await patchUndoService.RedoAsync();
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Show recent memory write history for undo/redo review.")]
     public Task<string> PatchHistory([Description("Number of recent patches to show (default 10)")] int count = 10)
     {
@@ -1537,6 +1623,8 @@ public sealed class AiToolFunctions(
 
     // ── State & control tools (agent needs these to act autonomously) ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Find a process by name (partial match). Returns PID.")]
     public async Task<string> FindProcess([Description("Process name or partial name")] string name)
     {
@@ -1550,6 +1638,8 @@ public sealed class AiToolFunctions(
         return $"Found {matches.Count} match(es) for '{name}':\n{string.Join('\n', lines)}";
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Freeze or unfreeze an address table entry's value.")]
     public Task<string> FreezeAddress(
         [Description("Node ID or label")] string nodeId,
@@ -1583,6 +1673,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
     [Description("Toggle a script entry on/off via the AA engine.")]
     public async Task<string> ToggleScript([Description("Node ID or label of the script entry")] string nodeId)
     {
@@ -1633,6 +1725,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Get detailed info about an address table node.")]
     public Task<string> GetAddressTableNode([Description("Node ID or label (case-insensitive label match)")] string nodeId)
     {
@@ -1670,6 +1764,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult(sb.ToString());
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Get current scan results (top N).")]
     public Task<string> GetScanResults(
         [Description("Maximum results to return")] int maxResults = 0)
@@ -1695,6 +1791,8 @@ public sealed class AiToolFunctions(
         }));
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Get current context: process, table summary, scan state.")]
     public Task<string> GetCurrentContext()
     {
@@ -1729,6 +1827,8 @@ public sealed class AiToolFunctions(
         }));
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Check if process is alive and session state freshness.")]
     public string CheckProcessLiveness([Description("Process ID")] int processId)
     {
@@ -1747,6 +1847,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Probe address as multiple types (Int32, Float, Int64, etc).")]
     public async Task<string> ProbeAddress(
         [Description("Process ID")] int processId,
@@ -1773,6 +1875,8 @@ public sealed class AiToolFunctions(
 
     // ── Script editing tools ──
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Replace script content of an existing entry.")]
     public Task<string> EditScript(
         [Description("Node ID or label of the script entry")] string nodeId,
@@ -1807,6 +1911,8 @@ public sealed class AiToolFunctions(
             $"New script is {newScript.Length} chars. Use ValidateScript to verify, then ToggleScript to enable.");
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Create a new script entry in the address table.")]
     public Task<string> CreateScriptEntry(
         [Description("Label/name for the script entry")] string label,
@@ -1852,6 +1958,8 @@ public sealed class AiToolFunctions(
 
     // ── Screen capture tool ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Capture screenshot of attached process window.")]
     public async Task<string> CaptureProcessWindow()
     {
@@ -1873,6 +1981,8 @@ public sealed class AiToolFunctions(
         return $"Screenshot captured: '{result.WindowTitle}' ({result.Width}x{result.Height}, {result.PngData.Length / 1024}KB). The image has been queued for your visual analysis.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Hex dump of raw bytes at an address.")]
     public async Task<string> HexDump(
         [Description("Process ID")] int processId,
@@ -1911,6 +2021,8 @@ public sealed class AiToolFunctions(
 
     // ── Address table management tools ──
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Remove an entry from the address table by its node ID.")]
     public Task<string> RemoveFromAddressTable([Description("Node ID or label to remove")] string nodeId)
     {
@@ -1921,6 +2033,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Removed '{label}' (ID: {nodeId}) from address table.");
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Rename an address table entry's label/description.")]
     public Task<string> RenameAddressTableEntry(
         [Description("Node ID or label to rename")] string nodeId,
@@ -1933,6 +2047,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Renamed '{oldLabel}' → '{newLabel}'.");
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Set or update notes/annotations on an address table entry.")]
     public Task<string> SetEntryNotes(
         [Description("Node ID or label")] string nodeId,
@@ -1944,6 +2060,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Notes updated for '{node.Label}'.");
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Create a group (folder) in the address table to organize entries.")]
     public Task<string> CreateAddressGroup(
         [Description("Group label")] string label,
@@ -1963,6 +2081,8 @@ public sealed class AiToolFunctions(
         return Task.FromResult($"Group '{label}' created (ID: {group.Id}).");
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Move an address table entry into a group. Pass null groupId to move to top level.")]
     public Task<string> MoveEntryToGroup(
         [Description("Node ID or label of entry to move")] string nodeId,
@@ -1981,6 +2101,8 @@ public sealed class AiToolFunctions(
 
     // ── Session management tools ──
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Save current session (address table + log) to disk.")]
     public async Task<string> SaveSession()
     {
@@ -1994,6 +2116,8 @@ public sealed class AiToolFunctions(
         return $"Session saved: {sessionId}";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List recent investigation sessions.")]
     public async Task<string> ListSessions([Description("Max sessions to list")] int limit = 10)
     {
@@ -2004,6 +2128,8 @@ public sealed class AiToolFunctions(
         return $"Sessions ({sessions.Count}):\n{string.Join('\n', lines)}";
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Load a saved session by ID, restoring address table.")]
     public async Task<string> LoadSession([Description("Session ID to load")] string sessionId)
     {
@@ -2017,6 +2143,8 @@ public sealed class AiToolFunctions(
 
     // ── Chat History Search ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Search chat transcripts for a keyword or phrase.")]
     public string SearchChatHistory(
         [Description("Search query (case-insensitive substring match)")] string query,
@@ -2101,6 +2229,8 @@ public sealed class AiToolFunctions(
 
     // ── Signature / AOB tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Generate AOB signature at a code address.")]
     public async Task<string> GenerateSignature(
         [Description("Process ID")] int processId,
@@ -2121,6 +2251,8 @@ public sealed class AiToolFunctions(
         }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Test AOB signature uniqueness within a module.")]
     public async Task<string> TestSignatureUniqueness(
         [Description("Process ID")] int processId,
@@ -2148,6 +2280,8 @@ public sealed class AiToolFunctions(
 
     // ── Memory Protection Tools ──
 
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
     [Description("Change memory page protection for a region.")]
     public async Task<string> ChangeMemoryProtection(
         [Description("Process ID")] int processId,
@@ -2167,6 +2301,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"ChangeMemoryProtection failed: {ex.Message}"; }
     }
 
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
     [Description("Allocate memory in the target process.")]
     public async Task<string> AllocateMemory(
         [Description("Process ID")] int processId,
@@ -2186,6 +2322,7 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"AllocateMemory failed: {ex.Message}"; }
     }
 
+    [Destructive]
     [Description("Free previously allocated memory in the target process.")]
     public async Task<string> FreeMemory(
         [Description("Process ID")] int processId,
@@ -2202,6 +2339,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"FreeMemory failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Query memory protection flags at an address.")]
     public async Task<string> QueryMemoryProtection(
         [Description("Process ID")] int processId,
@@ -2229,6 +2368,8 @@ public sealed class AiToolFunctions(
 
     // ── Memory Snapshot Tools ──
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Capture a memory snapshot for later comparison. Stores a copy of the bytes at the given address range.")]
     public async Task<string> CaptureSnapshot(
         [Description("Process ID")] int processId,
@@ -2247,6 +2388,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"CaptureSnapshot failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Compare two snapshots and show what changed between them. Useful for before/after analysis.")]
     public string CompareSnapshots(
         [Description("First snapshot ID")] string snapshotIdA,
@@ -2269,6 +2412,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"CompareSnapshots failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Compare a previous snapshot with the current live memory state.")]
     public async Task<string> CompareSnapshotWithLive(
         [Description("Snapshot ID to compare against live memory")] string snapshotId)
@@ -2290,6 +2435,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"CompareSnapshotWithLive failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all captured memory snapshots.")]
     public string ListSnapshots()
     {
@@ -2302,6 +2449,8 @@ public sealed class AiToolFunctions(
         return $"{snaps.Count} snapshot(s):\n{string.Join('\n', lines)}";
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Delete a memory snapshot by ID.")]
     public string DeleteSnapshot(
         [Description("Snapshot ID to delete")] string snapshotId)
@@ -2312,6 +2461,8 @@ public sealed class AiToolFunctions(
 
     // ── Pointer Rescan Tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Re-resolve a pointer path to verify it still works after game restart/update. Walks the chain from module base through offsets.")]
     public async Task<string> RescanPointerPath(
         [Description("Process ID")] int processId,
@@ -2341,6 +2492,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"RescanPointerPath failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Validate multiple pointer paths and rank by stability. Returns which paths still work and which need fresh scanning.")]
     public async Task<string> ValidatePointerPaths(
         [Description("Process ID")] int processId,
@@ -2366,6 +2519,8 @@ public sealed class AiToolFunctions(
 
     // ── Call Stack Tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Walk the call stack of a thread in the attached process. Shows function call chain with module offsets.")]
     public async Task<string> GetCallStack(
         [Description("Process ID")] int processId,
@@ -2398,6 +2553,8 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"GetCallStack failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Walk call stacks of all threads in the process. Returns frames per thread with module resolution.")]
     public async Task<string> GetAllThreadStacks(
         [Description("Process ID")] int processId,
@@ -2442,6 +2599,9 @@ public sealed class AiToolFunctions(
 
     // ─── Code Cave (Stealth Hook) Tools ─────────────────────────────────
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
     [Description("Install a stealth code cave hook. No debugger — game-safe. Captures registers and hit count.")]
     public async Task<string> InstallCodeCaveHook(
         [Description("Process ID")] int processId,
@@ -2479,6 +2639,7 @@ public sealed class AiToolFunctions(
         catch (Exception ex) { return $"InstallCodeCaveHook failed: {ex.Message}"; }
     }
 
+    [Destructive]
     [Description("Remove a stealth code cave hook, restoring original bytes.")]
     public async Task<string> RemoveCodeCaveHook(
         [Description("Process ID")] int processId,
@@ -2489,6 +2650,8 @@ public sealed class AiToolFunctions(
         return removed ? $"Hook {hookId} removed, original bytes restored." : $"Hook {hookId} not found.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all active stealth code cave hooks for a process.")]
     public async Task<string> ListCodeCaveHooks([Description("Process ID")] int processId)
     {
@@ -2502,6 +2665,8 @@ public sealed class AiToolFunctions(
         });
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Get register snapshots from a code cave hook. Returns captures with key registers, thread IDs, and timestamps.")]
     public async Task<string> GetCodeCaveHookHits(
         [Description("Hook ID")] string hookId,
@@ -2592,6 +2757,8 @@ public sealed class AiToolFunctions(
         return result;
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Dry-run a code cave hook install. Shows bytes, relocations, fixups, and safety assessment without patching.")]
     public async Task<string> DryRunHookInstall(
         [Description("Process ID")] int processId,
@@ -2732,6 +2899,8 @@ public sealed class AiToolFunctions(
 
     // ── Static Analysis Tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Search a module's code for instructions that write to a specific offset (e.g., [reg+0x38]). Returns all MOV/ADD/SUB/XOR/INC/DEC/IMUL instructions targeting [any_register + offset]. Essential for finding what code writes to a known data field. Set includeReads=true to also find reads and LEA address computations.")]
     public async Task<string> FindWritersToOffset(
         [Description("Process ID")] int processId,
@@ -2814,6 +2983,8 @@ public sealed class AiToolFunctions(
             : $"No instructions {(includeReads ? "accessing" : "writing to")} offset 0x{(ulong)(nuint)ParseAddress(offset):X} found in {moduleName}.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Find function boundaries around a given address by scanning for prologue/epilogue patterns (push rbp, sub rsp, ret, int3 padding). Returns the likely function start, end, and size.")]
     public async Task<string> FindFunctionBoundaries(
         [Description("Process ID")] int processId,
@@ -2962,6 +3133,8 @@ public sealed class AiToolFunctions(
         return sb.ToString().TrimEnd();
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Find all CALL and JMP instructions that target a specific function address. Scans module code for direct calls (call 0xABCD), indirect calls (call [rip+disp] resolved to target), and tail-call jumps. Useful for tracing who calls a known function.")]
     public async Task<string> GetCallerGraph(
         [Description("Process ID")] int processId,
@@ -3057,6 +3230,8 @@ public sealed class AiToolFunctions(
               "Note: If the target is called through vtables or register-indirect calls (call rax), those cannot be resolved statically.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Search for instruction patterns in a module. Find specific mnemonics, register usage, or memory access patterns. Examples: 'mov.*\\\\[rsi\\\\+0x38\\\\]', 'call.*GameAssembly', 'imul.*ebx'.")]
     public async Task<string> SearchInstructionPattern(
         [Description("Process ID")] int processId,
@@ -3122,6 +3297,8 @@ public sealed class AiToolFunctions(
             : $"No instructions matching '{pattern}' found in {moduleName}.\nNote: MASM formatter uses hex suffixed with 'h' (e.g., [rax+38h] not [rax+0x38]). Consider using FindByMemoryOperand for offset-based searches.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Search for instructions with a specific memory operand displacement and optional base register. More reliable than regex pattern search since it uses structured operand data, not text matching.")]
     public async Task<string> FindByMemoryOperand(
         [Description("Process ID")] int processId,
@@ -3205,6 +3382,8 @@ public sealed class AiToolFunctions(
             : $"No instructions with displacement 0x{(ulong)(nuint)ParseAddress(displacement):X} ({baseDesc}, filter={filter}) found in {moduleName}.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("High-level tool that bridges from a known data field to the code that writes it. " +
         "Given an address table entry (by ID or label), extracts its structure offset, finds the containing module's code, " +
         "and searches for instructions referencing that offset. Combines table metadata + FindByMemoryOperand + caller analysis. " +
@@ -3643,6 +3822,8 @@ public sealed class AiToolFunctions(
 
     // ── Non-debugger write tracing (M2) ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Trace writes to a data address using sampled memory snapshots (no debugger attachment). Takes multiple snapshots with a delay and reports if the value changed. Safer than breakpoints for anti-debug targets.")]
     public async Task<string> SampledWriteTrace(
         [Description("Process ID")] int processId,
@@ -3708,6 +3889,8 @@ public sealed class AiToolFunctions(
 
     // ── Operation journaling (M4) ──
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Begin a named transaction group for compound breakpoint/hook operations. All operations in the group can be rolled back together. Returns the group ID.")]
     public string BeginTransaction([Description("Name for this transaction group")] string name = "auto")
     {
@@ -3715,6 +3898,8 @@ public sealed class AiToolFunctions(
         return JsonSerializer.Serialize(new { groupId, status = "open", message = $"Transaction group '{groupId}' created. Pass this groupId to subsequent BP/hook operations." }, _jsonOpts);
     }
 
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
     [Description("Rollback all operations in a transaction group, restoring original state in reverse order.")]
     public async Task<string> RollbackTransaction([Description("Transaction group ID")] string groupId)
     {
@@ -3723,6 +3908,8 @@ public sealed class AiToolFunctions(
         return JsonSerializer.Serialize(new { result.Success, result.TotalOperations, result.SucceededRollbacks, result.Message }, _jsonOpts);
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all recorded operations in the journal. Shows operation type, address, mode, status, and group membership.")]
     public string ListJournalEntries()
     {
@@ -3741,6 +3928,8 @@ public sealed class AiToolFunctions(
 
     // ── Hook/script coexistence (L4) ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Check for hook/patch conflicts at an address. Detects if existing code cave hooks, breakpoints, or scripts already modify the target bytes. Use before installing new hooks to avoid conflicts.")]
     public async Task<string> CheckHookConflicts(
         [Description("Process ID")] int processId,
@@ -3794,6 +3983,8 @@ public sealed class AiToolFunctions(
 
     // ── Watchdog safety tools ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Check if an address+mode combination has been marked unsafe by the watchdog. Returns safety status and history of prior freeze events.")]
     public string CheckAddressSafety(
         [Description("Memory address to check (hex or decimal)")] string address,
@@ -3812,6 +4003,8 @@ public sealed class AiToolFunctions(
         return $"Address 0x{addr:X} + mode {mode}: no known safety issues.";
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all addresses marked unsafe by the watchdog due to prior freeze incidents.")]
     public string ListUnsafeAddresses()
     {
@@ -3823,6 +4016,8 @@ public sealed class AiToolFunctions(
         return $"Unsafe addresses ({entries.Count}):\n{string.Join('\n', lines)}";
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Clear the unsafe flag for an address, allowing breakpoints to be set there again. Use after fixing the underlying issue.")]
     public string ClearUnsafeAddress(
         [Description("Memory address (hex or decimal)")] string address,
@@ -3893,6 +4088,8 @@ public sealed class AiToolFunctions(
 
     // ── Spilled Result Retrieval ──
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Unbounded)]
     [Description("Retrieve a page of a large tool result that was spilled to storage. " +
         "When a tool result is too large for the context window, it is stored and you receive a " +
         "summary with a result_id. Use this tool to page through the full data.")]
@@ -3908,6 +4105,8 @@ public sealed class AiToolFunctions(
         return page;
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List all large tool results currently stored. Each entry shows the result ID, " +
         "source tool name, total size, and when it was stored.")]
     public string ListStoredResults()

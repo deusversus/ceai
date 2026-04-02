@@ -1,0 +1,554 @@
+using System.Diagnostics;
+using System.Threading.Channels;
+using Microsoft.Extensions.AI;
+
+namespace CEAISuite.Application.AgentLoop;
+
+/// <summary>
+/// The core agent loop. Replaces MAF's opaque <c>FunctionInvokingChatClient</c> +
+/// <c>AIAgent</c> with an explicit state machine that gives us full control over:
+/// - Tool dispatch and parallel execution
+/// - Error recovery with retry and fallback
+/// - State transitions (compaction retry, token escalation, diminishing returns)
+/// - Post-compaction context restoration
+///
+/// Modeled after Claude Code's <c>queryLoop()</c> in query.ts (lines 241-1729).
+///
+/// The loop calls <see cref="IChatClient.GetStreamingResponseAsync"/> directly,
+/// parses tool_use blocks, dispatches them via <see cref="ToolExecutor"/>,
+/// and decides whether to continue, compact, escalate, or stop.
+/// </summary>
+public sealed class AgentLoop
+{
+    private readonly IChatClient _chatClient;
+    private readonly AgentLoopOptions _options;
+    private readonly ToolExecutor _toolExecutor;
+    private readonly RetryPolicy _retryPolicy;
+    private readonly CompactionPipeline _compactionPipeline;
+    private readonly Action<string, string>? _log;
+
+    /// <summary>The options this loop was created with (exposed for SubagentManager/PlanExecutor).</summary>
+    public AgentLoopOptions Options => _options;
+
+    public AgentLoop(IChatClient chatClient, AgentLoopOptions options, ToolAttributeCache? attributeCache = null)
+    {
+        _chatClient = chatClient;
+        _options = options;
+        _toolExecutor = new ToolExecutor(options, attributeCache ?? new ToolAttributeCache());
+        _retryPolicy = new RetryPolicy(log: options.Log);
+        _compactionPipeline = new CompactionPipeline(chatClient, options.Limits, options.Log);
+        _log = options.Log;
+    }
+
+    /// <summary>
+    /// Run the agent loop for a single user message. Returns a channel of streaming events
+    /// that the UI consumes via <c>await foreach</c>.
+    /// </summary>
+    public ChannelReader<AgentStreamEvent> RunStreamingAsync(
+        string userMessage,
+        ChatHistoryManager history,
+        Func<string>? contextProvider = null,
+        IReadOnlySet<string>? activeCategories = null,
+        CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateUnbounded<AgentStreamEvent>(
+            new UnboundedChannelOptions { SingleReader = true });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunLoopAsync(userMessage, history, channel.Writer,
+                    contextProvider, activeCategories, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Error("Stopped by user."));
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke("LOOP", $"Unhandled error: {ex}");
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Error($"Agent error: {ex.Message}"));
+            }
+            finally
+            {
+                channel.Writer.TryComplete();
+            }
+        }, cancellationToken);
+
+        return channel.Reader;
+    }
+
+    private async Task RunLoopAsync(
+        string userMessage,
+        ChatHistoryManager history,
+        ChannelWriter<AgentStreamEvent> channel,
+        Func<string>? contextProvider,
+        IReadOnlySet<string>? activeCategories,
+        CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
+
+        // Add user message with dynamic context
+        string? contextSuffix = null;
+        try { contextSuffix = contextProvider?.Invoke(); } catch { /* ignore */ }
+        var fullContext = contextSuffix is not null ? $"[CURRENT STATE]\n{contextSuffix}" : null;
+        history.AddUserMessage(userMessage, fullContext);
+
+        var state = new AgentLoopState();
+
+        while (state.Transition == AgentTransition.NextTurn
+            || state.Transition == AgentTransition.CompactionRetry
+            || state.Transition == AgentTransition.TokenEscalation)
+        {
+            if (ct.IsCancellationRequested)
+            {
+                state = state with
+                {
+                    Transition = AgentTransition.Aborted,
+                    AbortInfo = new AbortReason { Kind = AbortKind.UserCancelled, Message = "User cancelled" }
+                };
+                break;
+            }
+
+            // Check turn budget
+            if (state.TurnCount > _options.MaxTurns)
+            {
+                _log?.Invoke("LOOP", $"Max turns ({_options.MaxTurns}) reached");
+                await channel.WriteAsync(
+                    new AgentStreamEvent.TextDelta($"\n[Max turns ({_options.MaxTurns}) reached — stopping.]"),
+                    ct);
+                state = state with
+                {
+                    Transition = AgentTransition.BudgetExhausted,
+                    AbortInfo = new AbortReason { Kind = AbortKind.BudgetExhausted, Message = "Token or cost budget exhausted" }
+                };
+                break;
+            }
+
+            _log?.Invoke("LOOP", $"Turn {state.TurnCount} (transition: {state.Transition})");
+
+            // Build ChatOptions for this turn
+            var chatOptions = BuildChatOptions(state);
+
+            // Pre-LLM hooks
+            if (_options.Hooks is { } preLlmHooks)
+            {
+                var preLlmCtx = new PreLlmContext
+                {
+                    Messages = history.GetMessages(),
+                    Options = chatOptions,
+                    TurnNumber = state.TurnCount,
+                };
+                var preLlmResult = await preLlmHooks.RunPreLlmHooksAsync(preLlmCtx, ct);
+                if (preLlmResult.Outcome == HookOutcome.Block)
+                {
+                    _log?.Invoke("HOOK", $"Pre-LLM hook blocked LLM call: {preLlmResult.Message}");
+                    await channel.WriteAsync(
+                        new AgentStreamEvent.TextDelta($"\n[LLM call blocked by hook: {preLlmResult.Message}]"), ct);
+                    state = state with { Transition = AgentTransition.Completed };
+                    break;
+                }
+            }
+
+            // Call LLM with retry
+            var (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks) =
+                await CallLlmWithRetry(history, chatOptions, channel, state, ct);
+
+            // Handle max output tokens recovery
+            if (ErrorClassifier.IsMaxOutputTokens(finishReason) && toolCalls.Count == 0)
+            {
+                state = HandleMaxOutputTokens(state, channel, history, assistantText);
+                if (state.Transition == AgentTransition.TokenEscalation)
+                    continue;
+            }
+
+            // Detect diminishing returns
+            state = state with
+            {
+                LastTurnOutputTokens = outputTokens,
+                ConsecutiveLowOutputTurns = outputTokens < _options.LowOutputTokenThreshold
+                    ? state.ConsecutiveLowOutputTurns + 1
+                    : 0,
+            };
+
+            if (state.ConsecutiveLowOutputTurns >= _options.MaxConsecutiveLowOutputTurns && toolCalls.Count > 0)
+            {
+                _log?.Invoke("LOOP", $"Diminishing returns: {state.ConsecutiveLowOutputTurns} consecutive low-output turns");
+                history.AddSystemMessage(
+                    "You've been producing very little output for several turns. " +
+                    "Please either complete the task and provide a final response, or explain what's blocking you.");
+            }
+
+            // If no tool calls → conversation turn complete (unless stop hook forces continuation)
+            if (toolCalls.Count == 0)
+            {
+                // Run stop hooks — Block means "force continue"
+                if (_options.Hooks is { } stopHooks)
+                {
+                    var stopCtx = new StopHookContext
+                    {
+                        TurnCount = state.TurnCount,
+                        TotalToolCalls = state.TotalToolCalls,
+                        LastAssistantText = assistantText,
+                    };
+                    var stopResult = await stopHooks.RunStopHooksAsync(stopCtx, ct);
+                    if (stopResult.Outcome == HookOutcome.Block)
+                    {
+                        _log?.Invoke("HOOK", $"Stop hook forced continuation: {stopResult.Message}");
+                        history.AddSystemMessage(
+                            stopResult.Message ?? "A hook has determined the task is not yet complete. Continue working.");
+                        state = state with
+                        {
+                            TurnCount = state.TurnCount + 1,
+                            Transition = AgentTransition.NextTurn,
+                        };
+                        continue;
+                    }
+                }
+
+                state = state with { Transition = AgentTransition.Completed };
+                break;
+            }
+
+            // Add assistant message with tool calls to history
+            var assistantContents = new List<AIContent>();
+            if (!string.IsNullOrEmpty(assistantText))
+                assistantContents.Add(new TextContent(assistantText));
+            foreach (var tc in toolCalls)
+                assistantContents.Add(tc);
+            history.AddAssistantMessage(new ChatMessage(ChatRole.Assistant, assistantContents));
+
+            // Execute tools (graceful abort: synthetic results for cancelled tools)
+            _toolExecutor.TurnNumber = state.TurnCount;
+            List<ToolExecutor.ToolCallResult> results;
+            try
+            {
+                results = await _toolExecutor.ExecuteAsync(toolCalls, channel, ct, speculativeTasks);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Generate synthetic error results for all tool calls so the
+                // LLM's history stays consistent (every FunctionCallContent needs
+                // a matching FunctionResultContent).
+                _log?.Invoke("LOOP", $"Abort: generating synthetic results for {toolCalls.Count} tool calls");
+                results = GenerateSyntheticResults(toolCalls);
+            }
+
+            // Add tool results to history
+            history.AddToolResults(results.Select(r => r.Result));
+
+            // Emit tool use summary
+            if (results.Count > 0)
+            {
+                var byTool = results.GroupBy(r => r.Call.Name ?? "unknown")
+                    .ToDictionary(g => g.Key, g => g.Count());
+                await channel.WriteAsync(new AgentStreamEvent.ToolUseSummary(results.Count, byTool), ct);
+            }
+
+            state = state with
+            {
+                TotalToolCalls = state.TotalToolCalls + results.Count,
+                TurnCount = state.TurnCount + 1,
+                Transition = AgentTransition.NextTurn,
+            };
+
+            // Check token budget
+            if (_options.Budget is { IsExhausted: true })
+            {
+                _log?.Invoke("LOOP", "Token budget exhausted — stopping");
+                state = state with
+                {
+                    Transition = AgentTransition.BudgetExhausted,
+                    TransitionReason = "token_budget_exhausted",
+                    AbortInfo = new AbortReason { Kind = AbortKind.BudgetExhausted, Message = "Token or cost budget exhausted" }
+                };
+                history.AddSystemMessage(
+                    "Token budget has been exhausted. Provide a final summary of work completed so far.");
+                break;
+            }
+
+            // Check if compaction is needed
+            if (_compactionPipeline.ShouldCompact(history) && !state.HasAttemptedCompaction)
+            {
+                _log?.Invoke("LOOP", "Compaction triggered");
+                var snapshot = PostCompactionRestorer.CaptureSnapshot(
+                    history, activeCategories ?? new HashSet<string>(), contextProvider);
+
+                var didCompact = await _compactionPipeline.CompactAsync(history, ct);
+                if (didCompact)
+                {
+                    PostCompactionRestorer.Restore(history, snapshot);
+                    state = state with { HasAttemptedCompaction = true };
+
+                    // Notify UI that old messages were compacted away
+                    await channel.WriteAsync(new AgentStreamEvent.Tombstone("compacted"), ct);
+                    await channel.WriteAsync(new AgentStreamEvent.ContentReplace(
+                        "compacted", "[Context compacted — earlier messages summarized]"), ct);
+                }
+            }
+        }
+
+        // Emit completion
+        await channel.WriteAsync(
+            new AgentStreamEvent.Completed(state.TotalToolCalls, sw.Elapsed), ct);
+    }
+
+    private async Task<(string assistantText, List<FunctionCallContent> toolCalls, int outputTokens, string? finishReason, Dictionary<string, Task<ToolExecutor.ToolCallResult>>? speculativeTasks)>
+        CallLlmWithRetry(
+            ChatHistoryManager history,
+            ChatOptions chatOptions,
+            ChannelWriter<AgentStreamEvent> channel,
+            AgentLoopState state,
+            CancellationToken ct)
+    {
+        var retryResult = await _retryPolicy.ExecuteAsync(async retryCt =>
+        {
+            var assistantText = "";
+            var toolCalls = new List<FunctionCallContent>();
+            int outputTokens = 0;
+            string? finishReason = null;
+
+            // Speculative early tool execution: start read-only tools during streaming
+            var speculativeTasks = _options.EnableEarlyToolExecution
+                ? new Dictionary<string, Task<ToolExecutor.ToolCallResult>>()
+                : null;
+
+            var rawStream = _chatClient.GetStreamingResponseAsync(
+                history.GetMessages(), chatOptions, retryCt);
+            var watchedStream = StreamingWatchdog.WithIdleTimeout(
+                rawStream, _options.StreamingIdleTimeout, _log, retryCt);
+
+            await foreach (var update in watchedStream)
+            {
+                // Process streaming chunks
+                foreach (var content in update.Contents)
+                {
+                    if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
+                    {
+                        assistantText += tc.Text;
+                        await channel.WriteAsync(new AgentStreamEvent.TextDelta(tc.Text), retryCt);
+                    }
+                    else if (content is FunctionCallContent fc)
+                    {
+                        toolCalls.Add(fc);
+
+                        // Speculative early execution for read-only tools
+                        if (speculativeTasks is not null
+                            && _toolExecutor.CanExecuteSpeculatively(fc.Name ?? ""))
+                        {
+                            var callId = fc.CallId ?? fc.Name ?? "";
+                            if (!speculativeTasks.ContainsKey(callId))
+                            {
+                                _log?.Invoke("SPECULATIVE", $"Starting early execution of {fc.Name}");
+                                speculativeTasks[callId] = _toolExecutor.ExecuteSingleSpeculativeAsync(fc, channel, retryCt);
+                            }
+                        }
+                    }
+                    else if (content is UsageContent usage)
+                    {
+                        outputTokens += (int)(usage.Details?.OutputTokenCount ?? 0);
+
+                        // Record usage in budget tracker
+                        if (_options.Budget is { } budget)
+                        {
+                            var inputToks = usage.Details?.InputTokenCount ?? 0;
+                            var outputToks = usage.Details?.OutputTokenCount ?? 0;
+                            var cachedToks = usage.Details?.CachedInputTokenCount ?? 0;
+                            budget.RecordUsage(inputToks, outputToks, cachedToks);
+                        }
+                    }
+                }
+
+                // Check for finish reason
+                if (update.FinishReason is ChatFinishReason fr)
+                    finishReason = fr.Value;
+            }
+
+            return (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks);
+        },
+        onHeartbeat: msg => channel.TryWrite(new AgentStreamEvent.TextDelta($"\n[{msg}]\n")),
+        cancellationToken: ct);
+
+        if (retryResult.Success)
+        {
+            var val = retryResult.Value!;
+            return (val.assistantText, val.toolCalls, val.outputTokens, val.finishReason, val.speculativeTasks);
+        }
+
+        if (retryResult.NeedsCompaction && !state.HasAttemptedCompaction)
+        {
+            _log?.Invoke("LOOP", "Prompt too long — triggering compaction and retry (one-shot)");
+            await _compactionPipeline.CompactAsync(history, ct);
+            // Single retry after compaction — carry forward existing state to prevent infinite recursion
+            var compactedState = state with { HasAttemptedCompaction = true };
+            return await CallLlmWithRetry(history, BuildChatOptions(compactedState), channel,
+                compactedState, ct);
+        }
+
+        if (retryResult.NeedsModelFallback)
+        {
+            if (_options.ModelSwitcher is { } switcher)
+            {
+                var fallback = switcher.FallbackToNext();
+                if (fallback is not null)
+                {
+                    _log?.Invoke("LOOP", $"Model fallback: switching to {fallback.ModelId}");
+                    // Retry with current state — the model switch takes effect on next LLM call
+                    return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct);
+                }
+                _log?.Invoke("LOOP", "Model fallback exhausted — no more fallback models");
+            }
+            else
+            {
+                _log?.Invoke("LOOP", "Model fallback signaled but no ModelSwitcher configured");
+            }
+        }
+
+        if (retryResult.AdjustedMaxTokens.HasValue)
+        {
+            _log?.Invoke("LOOP", $"Token overflow — retrying with max_tokens={retryResult.AdjustedMaxTokens}");
+            // Carry forward existing state with the adjusted token override
+            var adjustedState = state with { MaxOutputTokensOverride = retryResult.AdjustedMaxTokens };
+            var adjustedOptions = BuildChatOptions(adjustedState);
+            return await CallLlmWithRetry(history, adjustedOptions, channel,
+                adjustedState, ct);
+        }
+
+        // All retries failed
+        throw retryResult.Exception ?? new InvalidOperationException("LLM call failed after retries");
+    }
+
+    private AgentLoopState HandleMaxOutputTokens(
+        AgentLoopState state,
+        ChannelWriter<AgentStreamEvent> channel,
+        ChatHistoryManager history,
+        string partialText)
+    {
+        const int maxRecoveryAttempts = 3;
+        const int escalatedTokens = 16384;
+
+        if (state.MaxOutputTokensRecoveryCount >= maxRecoveryAttempts)
+        {
+            _log?.Invoke("LOOP", "Max output tokens recovery exhausted — completing with partial text");
+            return state with { Transition = AgentTransition.Completed };
+        }
+
+        // First hit: escalate tokens
+        if (state.MaxOutputTokensOverride is null)
+        {
+            _log?.Invoke("LOOP", $"Max output tokens hit — escalating to {escalatedTokens}");
+            return state with
+            {
+                MaxOutputTokensOverride = escalatedTokens,
+                MaxOutputTokensRecoveryCount = state.MaxOutputTokensRecoveryCount + 1,
+                Transition = AgentTransition.TokenEscalation,
+                TransitionReason = "max_output_tokens_escalate",
+            };
+        }
+
+        // Subsequent hits: inject resume message
+        _log?.Invoke("LOOP", "Max output tokens hit again — injecting resume message");
+        history.AddSystemMessage(
+            "Output token limit hit. Resume directly from where you stopped — " +
+            "no apology, no recap, no restatement. Continue mid-thought.");
+
+        return state with
+        {
+            MaxOutputTokensRecoveryCount = state.MaxOutputTokensRecoveryCount + 1,
+            Transition = AgentTransition.TokenEscalation,
+            TransitionReason = "max_output_tokens_recovery",
+        };
+    }
+
+    private ChatOptions BuildChatOptions(AgentLoopState state)
+    {
+        var maxTokens = state.MaxOutputTokensOverride ?? _options.Limits.MaxOutputTokens;
+
+        // Compose system prompt via PromptCacheOptimizer if available, else direct concatenation.
+        // The optimizer orders sections Static→Session→Volatile for maximum prefix cache hits
+        // and memoizes unchanged sections to avoid re-serialization.
+        string systemPrompt;
+        if (_options.PromptCacheOptimizer is { } optimizer)
+        {
+            var sections = new List<PromptSection>
+            {
+                new() { Name = "core", Content = _options.SystemPrompt, CacheScope = PromptCacheScope.Static },
+            };
+
+            if (_options.Skills is { } sk)
+            {
+                var skillText = sk.BuildActiveSkillInstructions();
+                if (skillText is not null)
+                    sections.Add(new PromptSection { Name = "skills", Content = skillText, CacheScope = PromptCacheScope.Session });
+            }
+
+            if (_options.Memory is { } mem)
+            {
+                var memText = mem.BuildMemoryContext();
+                if (memText is not null)
+                    sections.Add(new PromptSection { Name = "memory", Content = memText, CacheScope = PromptCacheScope.Session });
+            }
+
+            systemPrompt = optimizer.Build(sections);
+        }
+        else
+        {
+            // Fallback: direct concatenation (no caching optimization)
+            systemPrompt = _options.SystemPrompt;
+            if (_options.Skills is { } skills)
+            {
+                var skillInstructions = skills.BuildActiveSkillInstructions();
+                if (skillInstructions is not null)
+                    systemPrompt += skillInstructions;
+            }
+            if (_options.Memory is { } memory)
+            {
+                var memoryContext = memory.BuildMemoryContext();
+                if (memoryContext is not null)
+                    systemPrompt += memoryContext;
+            }
+        }
+
+        var options = new ChatOptions
+        {
+            Instructions = systemPrompt,
+            Tools = _options.Tools,
+            Temperature = _options.Temperature,
+            MaxOutputTokens = maxTokens,
+        };
+
+        // Merge additional properties (cache_control, etc.) and context management strategies
+        var additionalProps = _options.AdditionalProperties is not null
+            ? new AdditionalPropertiesDictionary(_options.AdditionalProperties)
+            : new AdditionalPropertiesDictionary();
+
+        if (_options.ContextManagementStrategies is { Count: > 0 } strategies)
+            additionalProps["context_management"] = ContextManagementSerializer.Serialize(strategies);
+
+        if (additionalProps.Count > 0)
+            options.AdditionalProperties = additionalProps;
+
+        return options;
+    }
+
+    /// <summary>
+    /// Generate synthetic error results for tool calls that were not completed
+    /// due to cancellation. This keeps the chat history consistent — every
+    /// <see cref="FunctionCallContent"/> must have a matching <see cref="FunctionResultContent"/>
+    /// or the LLM may hallucinate missing results.
+    /// </summary>
+    private static List<ToolExecutor.ToolCallResult> GenerateSyntheticResults(
+        IReadOnlyList<FunctionCallContent> toolCalls)
+    {
+        return toolCalls.Select(call => new ToolExecutor.ToolCallResult(
+            call,
+            new FunctionResultContent(
+                call.CallId ?? Guid.NewGuid().ToString("N"),
+                $"[ABORTED] Tool '{call.Name ?? "unknown"}' was not executed because the operation was cancelled by the user."),
+            IsError: true
+        )).ToList();
+    }
+}

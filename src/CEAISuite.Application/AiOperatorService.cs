@@ -2,13 +2,9 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Threading.Channels;
-using Microsoft.Agents.AI;
-using Microsoft.Agents.AI.Compaction;
+using CEAISuite.Application.AgentLoop;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
-
-#pragma warning disable MAAI001 // MAF compaction APIs are experimental in RC4
-#pragma warning disable MEAI001 // M.E.AI approval APIs are experimental
 
 namespace CEAISuite.Application;
 
@@ -47,11 +43,24 @@ public abstract record AgentStreamEvent
     }
     public sealed record Completed(int ToolCallCount, TimeSpan Elapsed) : AgentStreamEvent;
     public sealed record Error(string Message) : AgentStreamEvent;
+    public sealed record ToolProgress(string ToolName, double PercentComplete, string? StatusMessage) : AgentStreamEvent;
+    public sealed record ToolUseSummary(int TotalCalls, IReadOnlyDictionary<string, int> CallsByTool) : AgentStreamEvent;
+    public sealed record Attachment(string ToolName, string ContentType, string Data) : AgentStreamEvent;
+    /// <summary>
+    /// Emitted when messages are removed from the conversation (e.g., after compaction).
+    /// The UI should remove or grey-out the corresponding message bubble.
+    /// </summary>
+    public sealed record Tombstone(string MessageId) : AgentStreamEvent;
+    /// <summary>
+    /// Emitted when a message's content is replaced (e.g., compaction summary replaces original).
+    /// The UI should update the corresponding message bubble in-place.
+    /// </summary>
+    public sealed record ContentReplace(string MessageId, string NewContent) : AgentStreamEvent;
 }
 
 /// <summary>
 /// Names of tools that require user approval before execution.
-/// These are wrapped with <see cref="ApprovalRequiredAIFunction"/> in MAF.
+/// The ToolExecutor checks this set and emits ApprovalRequested events.
 /// </summary>
 internal static class DangerousTools
 {
@@ -60,7 +69,7 @@ internal static class DangerousTools
         "WriteMemory",
         "SetBreakpoint",
         "InstallCodeCaveHook",
-        "EnableScript",
+        "ToggleScript",
         "ForceDetachAndCleanup",
         "ChangeMemoryProtection",
     };
@@ -90,6 +99,17 @@ internal static class ToolCategories
         "RetrieveToolResult", "ListStoredResults",
         // Meta-tools (always available)
         "request_tools", "list_tool_categories", "unload_tools",
+        // Skill meta-tools (always available)
+        "load_skill", "list_skills", "unload_skill",
+        // Memory meta-tools (always available when enabled)
+        "remember", "recall_memory", "forget_memory",
+        // Budget meta-tool
+        "get_budget_status",
+        // Subagent & plan meta-tools
+        "spawn_subagent", "plan_task", "execute_plan",
+        // Phase 5 meta-tools
+        "switch_model", "schedule_task", "list_tasks", "cancel_task",
+        "get_session_info", "search_sessions",
     };
 
     /// <summary>Category name → tool names. Agent calls request_tools(category) to load these.</summary>
@@ -145,9 +165,7 @@ internal static class ToolCategories
 
 public sealed class AiOperatorService
 {
-    private AIAgent _agent;
     private IChatClient _baseChatClient;
-    private AgentSession _session = null!;
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
     private Func<string>? _contextProvider;
@@ -158,24 +176,44 @@ public sealed class AiOperatorService
     private readonly Dictionary<string, AITool> _allToolsByName;
     private readonly HashSet<string> _loadedCategories = new(StringComparer.OrdinalIgnoreCase);
 
-    // Token usage tracking
-    private long _totalPromptTokens;
-    private long _totalCompletionTokens;
-    private long _totalCachedTokens;
-    private int _totalRequests;
+    // ── New AgentLoop (replaces MAF's opaque inner loop) ──
+    private AgentLoop.AgentLoop? _agentLoop;
+    private ChatHistoryManager? _historyManager;
+    private readonly ToolAttributeCache _toolAttributeCache;
+    private readonly SkillSystem _skillSystem = new();
+
+    // ── Phase 4 systems ──
+    private readonly McpManager _mcpManager;
+    private readonly TokenBudget _tokenBudget;
+    private readonly MemorySystem? _memorySystem;
+    private SubagentManager? _subagentManager;
+    private PlanExecutor? _planExecutor;
+    private readonly AppSettings? _appSettings;
+
+    // ── Phase 5 systems ──
+    private readonly ModelSwitcher? _modelSwitcher;
+    private readonly CeaiTaskScheduler? _taskScheduler;
+    private readonly PluginHost? _pluginHost;
+    private readonly SessionMetadata _sessionMetadata = new();
+    private readonly SessionIndex? _sessionIndex;
+    private readonly PromptCacheOptimizer _promptCacheOptimizer;
+
+    // ── Auto-unload idle categories ──
+    private readonly Dictionary<string, int> _categoryLastUsedTurn = new(StringComparer.OrdinalIgnoreCase);
+    private int _currentTurn;
 
     // Rate limiting
     private DateTimeOffset? _lastRequestTime;
     private readonly object _rateLimitLock = new();
 
     /// <summary>Cumulative input tokens sent across all requests in this session.</summary>
-    public long TotalPromptTokens => _totalPromptTokens;
+    public long TotalPromptTokens => _tokenBudget.TotalInputTokens;
     /// <summary>Cumulative output tokens received across all requests in this session.</summary>
-    public long TotalCompletionTokens => _totalCompletionTokens;
+    public long TotalCompletionTokens => _tokenBudget.TotalOutputTokens;
     /// <summary>Cumulative cached input tokens (prompt cache hits) across all requests.</summary>
-    public long TotalCachedTokens => _totalCachedTokens;
+    public long TotalCachedTokens => _tokenBudget.TotalCachedTokens;
     /// <summary>Total number of API requests made in this session.</summary>
-    public int TotalRequests => _totalRequests;
+    public int TotalRequests => _tokenBudget.TotalRequests;
 
     /// <summary>Maximum number of conversation messages (excluding system prompt) to send to the API.</summary>
     public int MaxConversationMessages { get; set; } = 40;
@@ -199,19 +237,12 @@ public sealed class AiOperatorService
     /// <summary>Raised when the chat list changes (new chat, delete, rename).</summary>
     public event Action? ChatListChanged;
 
-    /// <summary>
-    /// Raised when the agent wants to execute a dangerous tool and needs user approval.
-    /// The handler should return true to approve, false to deny.
-    /// </summary>
-    public event Func<string, string, Task<bool>>? ApprovalRequested;
-
     public IReadOnlyList<AiChatMessage> DisplayHistory => _displayHistory;
     public IReadOnlyList<AiActionLogEntry> ActionLog => _actionLog;
     public bool IsConfigured { get; private set; }
 
-    /// <summary>Number of messages in the MAF session history (post-compaction). Useful for monitoring.</summary>
-    public int SessionMessageCount =>
-        _session?.TryGetInMemoryChatHistory(out var h) == true ? h.Count : 0;
+    /// <summary>Number of messages in the agent session history (post-compaction). Useful for monitoring.</summary>
+    public int SessionMessageCount => _historyManager?.Count ?? 0;
 
     /// <summary>Current chat session ID.</summary>
     public string CurrentChatId { get; private set; } = "";
@@ -219,7 +250,9 @@ public sealed class AiOperatorService
     /// <summary>Current chat title.</summary>
     public string CurrentChatTitle { get; private set; } = "New Chat";
 
-    public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions, Func<string>? contextProvider = null, AiChatStore? chatStore = null)
+    public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions,
+        Func<string>? contextProvider = null, AiChatStore? chatStore = null,
+        AppSettingsService? settingsService = null)
     {
         IsConfigured = chatClient is not null;
         _contextProvider = contextProvider;
@@ -229,16 +262,15 @@ public sealed class AiOperatorService
         var baseClient = chatClient ?? new StubChatClient();
         _baseChatClient = baseClient;
 
+        var settings = settingsService?.Settings;
+        _appSettings = settings;
+
         // Build AIFunction list from the tool functions instance using reflection.
-        // Dangerous tools are wrapped with ApprovalRequiredAIFunction.
         var methods = typeof(AiToolFunctions).GetMethods(
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         var allTools = methods
             .Where(m => !m.IsSpecialName)
-            .Select(m => AIFunctionFactory.Create(m, toolFunctions))
-            .Select(fn => DangerousTools.Names.Contains(fn.Name)
-                ? (AITool)new ApprovalRequiredAIFunction(fn)
-                : fn)
+            .Select(m => (AITool)AIFunctionFactory.Create(m, toolFunctions))
             .ToList();
 
         // Index all tools by name for on-demand loading
@@ -258,13 +290,138 @@ public sealed class AiOperatorService
         _allToolsByName["unload_tools"] = AIFunctionFactory.Create(UnloadTools, "unload_tools",
             "Unload tool categories no longer needed to free token budget. Use 'all' to reset to core only.");
 
+        // Skill meta-tools
+        _allToolsByName["load_skill"] = AIFunctionFactory.Create(LoadSkillTool, "load_skill",
+            "Load a domain skill for expert guidance. Loaded skills inject instructions into the system prompt. " +
+            "Available skills: " + string.Join(", ", _skillSystem.Catalog.Keys));
+        _allToolsByName["list_skills"] = AIFunctionFactory.Create(ListSkillsTool,
+            "list_skills", "List available domain skills and which are currently loaded.");
+        _allToolsByName["unload_skill"] = AIFunctionFactory.Create(UnloadSkillTool,
+            "unload_skill", "Unload a domain skill to free token budget.");
+
+        // ── Token Budget ──
+        _tokenBudget = new TokenBudget(Log);
+        if (settings is not null)
+        {
+            _tokenBudget.SetPricing(
+                settings.InputPricePerMillion,
+                settings.OutputPricePerMillion,
+                settings.CachedInputPricePerMillion);
+            if (settings.MaxSessionCostDollars > 0)
+                _tokenBudget.SetLimits(maxCostDollars: settings.MaxSessionCostDollars);
+        }
+
+        _allToolsByName["get_budget_status"] = AIFunctionFactory.Create(GetBudgetStatusTool,
+            "get_budget_status", "Get current token usage, cost estimate, and budget status for this session.");
+
+        // ── Memory System ──
+        if (settings?.EnableAgentMemory != false)
+        {
+            _memorySystem = new MemorySystem(log: Log);
+            _memorySystem.Load();
+            _memorySystem.Prune(settings?.MaxMemoryEntries ?? 500);
+
+            _allToolsByName["remember"] = AIFunctionFactory.Create(RememberTool,
+                "remember",
+                "Save a persistent memory entry. Memories carry across sessions. Categories: " +
+                "UserPreference, ProcessKnowledge, LearnedPattern, WorkflowRecipe, SafetyNote, ToolTip.");
+            _allToolsByName["recall_memory"] = AIFunctionFactory.Create(RecallMemoryTool,
+                "recall_memory", "Search persistent memories by keyword, category, or process name.");
+            _allToolsByName["forget_memory"] = AIFunctionFactory.Create(ForgetMemoryTool,
+                "forget_memory", "Delete a persistent memory entry by ID.");
+        }
+
+        // ── Subagent & Plan meta-tools ──
+        _allToolsByName["spawn_subagent"] = AIFunctionFactory.Create(SpawnSubagentTool,
+            "spawn_subagent",
+            "Spawn a focused subagent for a subtask. The subagent gets its own conversation, " +
+            "works autonomously, and returns results. Use for parallel investigation or complex " +
+            "sub-tasks. Provide: task (prompt), description (short label), context (optional), " +
+            "allowed_tools (optional glob patterns like 'Read*'), max_turns (optional, default 15).");
+        _allToolsByName["plan_task"] = AIFunctionFactory.Create(PlanTaskTool,
+            "plan_task",
+            "Generate a structured execution plan for a complex task. Returns a plan with " +
+            "numbered steps, expected tools, and safety warnings. The user can review before execution. " +
+            "Use for multi-step operations or when destructive tools are involved.");
+        _allToolsByName["execute_plan"] = AIFunctionFactory.Create(ExecutePlanTool,
+            "execute_plan",
+            "Generate AND immediately execute a structured plan for a complex task. " +
+            "Each step is executed sequentially and progress is reported. " +
+            "Use when you are confident the plan should run without user review.");
+
+        // ── MCP Manager ──
+        _mcpManager = new McpManager(Log);
+
         // Start with only core tools — agent requests more via request_tools()
         _tools = [];
         LoadCoreTools();
 
         Log("INFO", $"Progressive tools: {_tools.Count} core loaded, {_allToolsByName.Count} total available");
 
-        _agent = BuildAgent(baseClient);
+        // Build tool attribute cache for parallel execution decisions
+        _toolAttributeCache = new ToolAttributeCache();
+        _toolAttributeCache.ScanType(typeof(AiToolFunctions));
+
+        // Load skills from built-in and user directories
+        LoadSkillsFromDisk();
+
+        _historyManager = new ChatHistoryManager();
+        _agentLoop = BuildNewAgentLoop(baseClient);
+        Log("INFO", "Using new AgentLoop (owns tool-call loop directly)");
+
+        // Connect MCP servers from settings (fire-and-forget, non-blocking)
+        if (settings?.McpServers is { Count: > 0 } mcpServers)
+            _ = ConnectMcpServersAsync(mcpServers);
+
+        // ── Model Switcher ──
+        if (settings?.FallbackModels is { Count: > 0 } fallbackModels)
+        {
+            var models = new List<ModelConfig>
+            {
+                new() { ModelId = settings.Model ?? "default", MaxContextTokens = 200_000 }
+            };
+            // Fallback entries have ModelId only — client factory wired on Reconfigure
+            foreach (var fb in fallbackModels)
+                models.Add(new ModelConfig { ModelId = fb, MaxContextTokens = 200_000 });
+            _modelSwitcher = new ModelSwitcher(models, Log);
+        }
+
+        _allToolsByName["switch_model"] = AIFunctionFactory.Create(SwitchModelTool,
+            "switch_model", "Switch to a different AI model mid-conversation. Available models: " +
+            (_modelSwitcher?.Models.Select(m => m.ModelId).DefaultIfEmpty("none configured")
+                .Aggregate((a, b) => a + ", " + b) ?? "none configured"));
+
+        // ── Scheduled Tasks ──
+        _taskScheduler = new CeaiTaskScheduler(log: Log);
+        _taskScheduler.TaskDue += OnScheduledTaskDue;
+        _taskScheduler.Start();
+
+        _allToolsByName["schedule_task"] = AIFunctionFactory.Create(ScheduleTaskTool,
+            "schedule_task", "Schedule a recurring or one-shot task using a cron expression. " +
+            "The task runs as a subagent. Format: minute hour day-of-month month day-of-week. " +
+            "Example: '0 9 * * 1-5' = weekdays at 9am.");
+        _allToolsByName["list_tasks"] = AIFunctionFactory.Create(ListTasksTool,
+            "list_tasks", "List all scheduled tasks with their status and next run time.");
+        _allToolsByName["cancel_task"] = AIFunctionFactory.Create(CancelTaskTool,
+            "cancel_task", "Cancel and remove a scheduled task by ID.");
+
+        // ── Session Metadata ──
+        _allToolsByName["get_session_info"] = AIFunctionFactory.Create(GetSessionInfoTool,
+            "get_session_info", "Get metadata about the current session: target process, discoveries, timeline, cost.");
+        _allToolsByName["search_sessions"] = AIFunctionFactory.Create(SearchSessionsTool,
+            "search_sessions", "Search across all saved sessions by keyword (process name, discoveries, events).");
+
+        var chatStoreDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CEAISuite", "chats");
+        _sessionIndex = new SessionIndex(chatStoreDir, Log);
+
+        // ── Prompt Cache Optimizer ──
+        _promptCacheOptimizer = new PromptCacheOptimizer(Log);
+
+        // ── Plugin Host ──
+        _pluginHost = new PluginHost(log: Log);
+        _ = LoadPluginsAsync();
 
         // Start with a fresh chat session
         NewChat();
@@ -273,99 +430,57 @@ public sealed class AiOperatorService
         try { Directory.CreateDirectory(LogDir); } catch { /* best effort */ }
     }
 
-    private AIAgent BuildAgent(IChatClient client)
+    // ── Shared hook registry (single instance across sessions) ──
+    private readonly HookRegistry _hookRegistry = new();
+
+    private AgentLoop.AgentLoop BuildNewAgentLoop(IChatClient client)
     {
-        Log("DEBUG", $"BuildAgent: tool count = {_tools.Count}, " +
-            $"tool names = [{string.Join(", ", _tools.Take(5).Select(t => t is AIFunction f ? f.Name : t.GetType().Name))}...]");
-
-        // Build the MAF compaction pipeline (gentle → aggressive):
-        // 1. Collapse old tool-call groups into summaries (cheap, no API call)
-        // 2. LLM-powered summarization when context gets large (costs an API call!)
-        // 3. Sliding window: keep most recent N user turns (cheap)
-        // 4. Emergency truncation backstop (cheap)
-        // Budget: Copilot model limit = 128K. Tool defs ~10K + system prompt ~3K = ~13K overhead.
-        // Leave ~15K for the response → message budget ≈ 100K. Triggers set conservatively.
-        var compactionPipeline = new PipelineCompactionStrategy(
-            new ToolResultCompactionStrategy(CompactionTriggers.MessagesExceed(Limits.CompactionToolResultMessages)),
-            new SummarizationCompactionStrategy(client, CompactionTriggers.TokensExceed(Limits.CompactionSummarizationTokens)),
-            new SlidingWindowCompactionStrategy(CompactionTriggers.TurnsExceed(Limits.CompactionSlidingWindowTurns)),
-            new TruncationCompactionStrategy(CompactionTriggers.TokensExceed(Limits.CompactionTruncationTokens)));
-
-        // Discover agent skills from the skills/ directory.
-        // Progressive disclosure: only name+description are advertised per skill (~100 tokens each),
-        // full instructions loaded on-demand via load_skill tool (<5K tokens per skill).
-        var contextProviders = new List<AIContextProvider>
+        var effectiveSystemPrompt = SystemPrompt;
+        if (_appSettings?.RequirePlanForDestructive == true)
         {
-            new CompactionProvider(compactionPipeline),
-        };
-
-        // Only one FileAgentSkillsProvider allowed — it registers load_skill and
-        // read_skill_resource tools, and duplicate tool names cause Copilot API 400s.
-        // Prefer user skills dir (overrides), fall back to built-in.
-        foreach (var skillsDir in ResolveSkillsPaths().Reverse())
-        {
-            if (Directory.Exists(skillsDir))
-            {
-                try
-                {
-                    contextProviders.Add(new FileAgentSkillsProvider(skillsDir));
-                    Log("INFO", $"Loaded skills from: {skillsDir}");
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    Log("WARN", $"Failed to load skills from {skillsDir}: {ex.Message}");
-                }
-            }
+            effectiveSystemPrompt += "\n\n" +
+                "[POLICY] The user has enabled RequirePlanForDestructive. Before performing any " +
+                "destructive operation (WriteMemory, SetBreakpoint, InstallCodeCaveHook, ToggleScript, " +
+                "ForceDetachAndCleanup, ChangeMemoryProtection), you MUST first call plan_task to " +
+                "generate and present an execution plan for user approval. Do not execute destructive " +
+                "tools directly without planning first.";
         }
 
-        // Build the MAF agent with compaction, skills, tools, and system prompt.
-        // UseFunctionInvocation() inserts FunctionInvokingChatClient — required for
-        // the agent to actually execute tool calls returned by the model.
-        // ToolResultCappingChatClient sits between function invocation and the LLM,
-        // truncating any tool result that exceeds MaxToolResultChars before it
-        // consumes API tokens. This is the universal safety net.
-        return client
-            .AsBuilder()
-            .UseFunctionInvocation(configure: client => client.IncludeDetailedErrors = true)
-            .Use(inner => new ToolResultCappingChatClient(inner, Limits, _toolResultStore, _tools))
-            .UseAIContextProviders(contextProviders.ToArray())
-            .BuildAIAgent(new ChatClientAgentOptions
+        // Build permission engine with optional mode from settings
+        var permissionEngine = new PermissionEngine(DangerousTools.Names, Log, _toolAttributeCache);
+        if (_appSettings is not null && Enum.TryParse<PermissionMode>(_appSettings.PermissionMode ?? "Normal", true, out var mode))
+            permissionEngine.ActiveMode = mode;
+
+        var loop = new AgentLoop.AgentLoop(client, new AgentLoopOptions
+        {
+            SystemPrompt = effectiveSystemPrompt,
+            Tools = _tools,
+            Temperature = 0.3f,
+            Limits = Limits,
+            ToolResultStore = _toolResultStore,
+            DangerousToolNames = DangerousTools.Names,
+            MaxTurns = 25,
+            AdditionalProperties = new AdditionalPropertiesDictionary
             {
-                Name = "CEAIOperator",
-                ChatHistoryProvider = new InMemoryChatHistoryProvider(),
-                ChatOptions = new ChatOptions
-                {
-                    Instructions = SystemPrompt,
-                    Tools = _tools,
-                    Temperature = 0.3f,
-                    MaxOutputTokens = Limits.MaxOutputTokens,
-                    // Anthropic prompt caching: the official SDK reads this from
-                    // AdditionalProperties and maps it to MessageCreateParams.CacheControl,
-                    // which auto-applies cache_control to the last cacheable block
-                    // (system prompt + tool definitions). 90% cost reduction on cache hits.
-                    AdditionalProperties = new AdditionalPropertiesDictionary
-                    {
-                        ["cache_control"] = new Dictionary<string, string> { ["type"] = "ephemeral" }
-                    },
-                },
-            });
-    }
+                ["cache_control"] = new Dictionary<string, string> { ["type"] = "ephemeral" }
+            },
+            ContextManagementStrategies = ContextManagementStrategy.AnthropicDefaults,
+            Budget = _tokenBudget,
+            Memory = _memorySystem,
+            Log = Log,
+            Skills = _skillSystem,
+            PermissionEngine = permissionEngine,
+            Hooks = _hookRegistry,
+            EnableEarlyToolExecution = _appSettings?.EnableEarlyToolExecution ?? false,
+            ModelSwitcher = _modelSwitcher,
+            PromptCacheOptimizer = _promptCacheOptimizer,
+        }, _toolAttributeCache);
 
-    /// <summary>
-    /// Returns skill directory paths in priority order: built-in (ships with app) and user-defined.
-    /// </summary>
-    private static IEnumerable<string> ResolveSkillsPaths()
-    {
-        // Built-in skills shipped alongside the application binary
-        var appDir = AppDomain.CurrentDomain.BaseDirectory;
-        yield return Path.Combine(appDir, "skills");
+        // Build subagent manager and plan executor using the same options
+        _subagentManager = new SubagentManager(client, loop.Options, _toolAttributeCache);
+        _planExecutor = new PlanExecutor(client, loop.Options);
 
-        // User-defined skills in the app data directory
-        var userSkills = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CEAISuite", "skills");
-        yield return userSkills;
+        return loop;
     }
 
     /// <summary>
@@ -379,18 +494,18 @@ public sealed class AiOperatorService
     {
         var baseClient = newClient ?? new StubChatClient();
         _baseChatClient = baseClient;
-        _agent = BuildAgent(baseClient);
         IsConfigured = newClient is not null;
 
         // Save current chat, then start a fresh session with the new agent
         if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
             SaveCurrentChat();
 
-        _session = _agent.CreateSessionAsync().GetAwaiter().GetResult();
+        _agentLoop = BuildNewAgentLoop(baseClient);
+        _historyManager = new ChatHistoryManager();
 
-        // Replay existing display history into the new agent session
-        if (_displayHistory.Count > 0 && _session.TryGetInMemoryChatHistory(out var history))
-            ReplayHistoryInto(history, _displayHistory);
+        // Replay existing display history into the new history manager
+        if (_displayHistory.Count > 0)
+            _historyManager.ReplayFromSaved(_displayHistory, Limits.MaxReplayMessages, Limits, _toolResultStore);
 
         Log("INFO", $"Reconfigured AI provider (IsConfigured={IsConfigured})");
         StatusChanged?.Invoke(IsConfigured ? "Ready (provider updated)" : "Not configured");
@@ -410,245 +525,17 @@ public sealed class AiOperatorService
 
     public async Task<string> SendMessageAsync(string userMessage, CancellationToken cancellationToken = default)
     {
-        // Rate limiting
-        if (RateLimitSeconds > 0)
+        AddUserMessageToHistory(userMessage);
+        var reader = SendMessageStreamingAsync(userMessage, cancellationToken);
+        var text = "";
+        await foreach (var evt in reader.ReadAllAsync(cancellationToken))
         {
-            var now = DateTimeOffset.UtcNow;
-            DateTimeOffset? last;
-            lock (_rateLimitLock) { last = _lastRequestTime; }
-
-            if (last.HasValue)
-            {
-                var elapsed = now - last.Value;
-                var cooldown = TimeSpan.FromSeconds(RateLimitSeconds);
-                if (elapsed < cooldown)
-                {
-                    if (RateLimitWait)
-                    {
-                        var remaining = cooldown - elapsed;
-                        UpdateStatus($"Rate limited — waiting {remaining.TotalSeconds:F1}s…");
-                        await Task.Delay(remaining, cancellationToken);
-                    }
-                    else
-                    {
-                        throw new InvalidOperationException(
-                            $"Rate limited: please wait {(cooldown - elapsed).TotalSeconds:F0}s before sending another request.");
-                    }
-                }
-            }
-
-            lock (_rateLimitLock) { _lastRequestTime = DateTimeOffset.UtcNow; }
+            if (evt is AgentStreamEvent.TextDelta delta)
+                text += delta.Text;
+            else if (evt is AgentStreamEvent.Error err)
+                return $"AI error: {err.Message}";
         }
-
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        Log("INFO", $"User: {userMessage}");
-        // Note: caller should call AddUserMessageToHistory() before this method
-        // so the UI shows the user message immediately.
-
-        // Append dynamic context to the user message (keeps system prompt prefix stable for cache hits)
-        var contextSuffix = BuildContextSuffix();
-        var fullUserMessage = contextSuffix is not null
-            ? $"{userMessage}\n\n{contextSuffix}"
-            : userMessage;
-
-        try
-        {
-            UpdateStatus("Thinking...");
-
-            // Run the agent using MAF's structured agent loop.
-            // This handles tool invocation, compaction, and history automatically.
-            var response = await _agent.RunAsync(fullUserMessage, _session, cancellationToken: cancellationToken);
-
-            TrackUsage(response);
-
-            // Extract tool calls and final text from all response messages
-            var assistantText = "";
-            int toolCallCount = 0;
-            var toolCalls = new List<AiToolCallInfo>();
-            var toolResults = new List<AiToolResultInfo>();
-            foreach (var message in response.Messages)
-            {
-                foreach (var content in message.Contents)
-                {
-                    if (content is TextContent textContent && !string.IsNullOrWhiteSpace(textContent.Text))
-                    {
-                        assistantText = textContent.Text;
-                    }
-                    else if (content is FunctionCallContent functionCall)
-                    {
-                        toolCallCount++;
-                        var argsStr = functionCall.Arguments is not null
-                            ? string.Join(", ", functionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-                            : "";
-                        var argsJson = functionCall.Arguments is not null
-                            ? JsonSerializer.Serialize(functionCall.Arguments)
-                            : null;
-                        UpdateStatus($"Tool: {functionCall.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
-                        Log("TOOL", $"Call: {functionCall.Name}({argsStr})");
-                        _actionLog.Add(new AiActionLogEntry(
-                            functionCall.Name ?? "unknown",
-                            argsStr,
-                            "invoked",
-                            DateTimeOffset.UtcNow));
-                        toolCalls.Add(new AiToolCallInfo(
-                            functionCall.CallId ?? "", functionCall.Name ?? "unknown", argsJson));
-                    }
-                    else if (content is FunctionResultContent functionResult)
-                    {
-                        var resultStr = functionResult.Result?.ToString() ?? "";
-                        var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
-                        Log("TOOL", $"Result: {truncated}");
-                        for (int i = _actionLog.Count - 1; i >= 0; i--)
-                        {
-                            if (_actionLog[i].Result == "invoked")
-                            {
-                                _actionLog[i] = _actionLog[i] with { Result = truncated };
-                                break;
-                            }
-                        }
-                        toolResults.Add(new AiToolResultInfo(
-                            functionResult.CallId ?? "", LookupToolName(toolCalls, functionResult.CallId), resultStr));
-                    }
-                    else if (content is FunctionApprovalRequestContent approvalRequest)
-                    {
-                        // Handle dangerous tool approval via MAF's approval flow
-                        var approved = await HandleApprovalRequestAsync(approvalRequest);
-                        if (approved)
-                        {
-                            // Re-run agent with approval response
-                            var approvalMsg = new ChatMessage(ChatRole.User, [approvalRequest.CreateResponse(true)]);
-                            response = await _agent.RunAsync([approvalMsg], _session, cancellationToken: cancellationToken);
-                            TrackUsage(response);
-
-                            // Process additional response messages
-                            foreach (var msg in response.Messages)
-                            {
-                                foreach (var c in msg.Contents)
-                                {
-                                    if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
-                                        assistantText = tc.Text;
-                                    else if (c is FunctionCallContent fc2)
-                                    {
-                                        toolCallCount++;
-                                        var a = fc2.Arguments is not null
-                                            ? string.Join(", ", fc2.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-                                            : "";
-                                        var aj = fc2.Arguments is not null
-                                            ? JsonSerializer.Serialize(fc2.Arguments) : null;
-                                        UpdateStatus($"Tool: {fc2.Name ?? "unknown"} ({toolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
-                                        Log("TOOL", $"Call: {fc2.Name}({a})");
-                                        _actionLog.Add(new AiActionLogEntry(fc2.Name ?? "unknown", a, "invoked", DateTimeOffset.UtcNow));
-                                        toolCalls.Add(new AiToolCallInfo(
-                                            fc2.CallId ?? "", fc2.Name ?? "unknown", aj));
-                                    }
-                                    else if (c is FunctionResultContent fr2)
-                                    {
-                                        var r = fr2.Result?.ToString() ?? "";
-                                        var t = r.Length > 200 ? r[..200] + "..." : r;
-                                        Log("TOOL", $"Result: {t}");
-                                        for (int i = _actionLog.Count - 1; i >= 0; i--)
-                                        {
-                                            if (_actionLog[i].Result == "invoked") { _actionLog[i] = _actionLog[i] with { Result = t }; break; }
-                                        }
-                                        toolResults.Add(new AiToolResultInfo(
-                                            fr2.CallId ?? "", LookupToolName(toolCalls, fr2.CallId), r));
-                                    }
-                                }
-                            }
-                        }
-                        else
-                        {
-                            var denialMsg = new ChatMessage(ChatRole.User, [approvalRequest.CreateResponse(false)]);
-                            response = await _agent.RunAsync([denialMsg], _session, cancellationToken: cancellationToken);
-                            TrackUsage(response);
-                            foreach (var msg in response.Messages)
-                                foreach (var c in msg.Contents)
-                                    if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
-                                        assistantText = tc.Text;
-                        }
-                    }
-                }
-            }
-
-            // Inject any pending screenshots as image content for future turns (max 3 per turn)
-            if (_toolFunctions is not null)
-            {
-                int imagesProcessed = 0;
-                int maxImagesPerTurn = Limits.MaxImagesPerTurn;
-                while (imagesProcessed < maxImagesPerTurn && _toolFunctions.PendingImages.TryDequeue(out var img))
-                {
-                    imagesProcessed++;
-                    UpdateStatus($"Analyzing screenshot ({imagesProcessed})...");
-                    var imageMsg = new ChatMessage(ChatRole.User, new List<AIContent>
-                    {
-                        new TextContent($"[Screenshot: {img.Description}]"),
-                        new DataContent(img.PngData, "image/png")
-                    });
-
-                    var imageResponse = await _agent.RunAsync([imageMsg], _session, cancellationToken: cancellationToken);
-                    TrackUsage(imageResponse);
-
-                    foreach (var msg in imageResponse.Messages)
-                        foreach (var c in msg.Contents)
-                            if (c is TextContent tc && !string.IsNullOrWhiteSpace(tc.Text))
-                                assistantText += "\n" + tc.Text;
-                }
-                // Drain any excess images to prevent stale accumulation
-                while (_toolFunctions.PendingImages.TryDequeue(out _))
-                    Log("WARN", $"Discarded excess pending image (max {maxImagesPerTurn} per turn)");
-            }
-
-            if (string.IsNullOrWhiteSpace(assistantText))
-            {
-                assistantText = "(Tool calls executed — see action log for details)";
-            }
-
-            sw.Stop();
-            var usagePart = _totalRequests > 0
-                ? $", tokens: {_totalPromptTokens}↑ {_totalCompletionTokens}↓ {_totalCachedTokens}⚡"
-                : "";
-            var historyPart = $", {SessionMessageCount} msgs in context";
-            var summary = toolCallCount > 0
-                ? $"Done ({toolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})"
-                : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})";
-            UpdateStatus(summary);
-            Log("INFO", $"Assistant: {(assistantText.Length > 300 ? assistantText[..300] + "..." : assistantText)}");
-            _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow)
-            {
-                ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
-                ToolResults = toolResults.Count > 0 ? toolResults : null
-            });
-            PruneOldToolResults();
-            SaveCurrentChat();
-            return assistantText;
-        }
-        catch (Exception ex)
-        {
-            sw.Stop();
-            // Try to extract response body for better diagnostics (ClientResultException from OpenAI SDK)
-            var detail = "";
-            try
-            {
-                var rawMethod = ex.GetType().GetMethod("GetRawResponse");
-                if (rawMethod is not null)
-                {
-                    var raw = rawMethod.Invoke(ex, null);
-                    var contentProp = raw?.GetType().GetProperty("Content");
-                    if (contentProp is not null)
-                    {
-                        var body = contentProp.GetValue(raw)?.ToString();
-                        if (!string.IsNullOrEmpty(body))
-                            detail = $" | Response: {body}";
-                    }
-                }
-            }
-            catch { /* best effort */ }
-            var errorMessage = $"AI error: {ex.Message}";
-            Log("ERROR", $"{ex.GetType().Name}: {ex.Message}{detail}\n{ex.StackTrace}");
-            UpdateStatus($"Error ({sw.Elapsed.TotalSeconds:F1}s)");
-            _displayHistory.Add(new AiChatMessage("assistant", errorMessage, DateTimeOffset.UtcNow));
-            return errorMessage;
-        }
+        return string.IsNullOrWhiteSpace(text) ? "(No response)" : text;
     }
 
     /// <summary>
@@ -661,24 +548,24 @@ public sealed class AiOperatorService
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
     }
 
-    /// <summary>
-    /// Streaming version of SendMessageAsync. Returns a ChannelReader that yields
-    /// AgentStreamEvents as they arrive — text deltas, tool status, completion.
-    /// The UI can consume these to update the chat in real-time.
-    ///
-    /// Approval flow: When a dangerous tool needs approval, the stream emits an
-    /// <see cref="AgentStreamEvent.ApprovalRequested"/> event with a TaskCompletionSource.
-    /// The UI should present Allow/Deny buttons and call Resolve(true/false).
-    /// The service then re-runs the agent with the approval response (MAF multi-turn pattern).
-    /// </summary>
     public ChannelReader<AgentStreamEvent> SendMessageStreamingAsync(
         string userMessage, CancellationToken cancellationToken = default)
     {
-        var channel = Channel.CreateUnbounded<AgentStreamEvent>();
+        return SendMessageViaNewLoop(userMessage, cancellationToken);
+    }
+
+    /// <summary>
+    /// New AgentLoop streaming path. Delegates to AgentLoop.RunStreamingAsync() and
+    /// wraps the events with display history tracking, usage tracking, and persistence.
+    /// </summary>
+    private ChannelReader<AgentStreamEvent> SendMessageViaNewLoop(
+        string userMessage, CancellationToken cancellationToken)
+    {
+        var outerChannel = Channel.CreateUnbounded<AgentStreamEvent>();
 
         _ = Task.Run(async () =>
         {
-            // Rate limiting (mirrors non-streaming path)
+            // Rate limiting
             if (RateLimitSeconds > 0)
             {
                 var now = DateTimeOffset.UtcNow;
@@ -699,317 +586,175 @@ public sealed class AiOperatorService
                         }
                         else
                         {
-                            await channel.Writer.WriteAsync(
-                                new AgentStreamEvent.Error($"Rate limited: please wait {(cooldown - elapsed).TotalSeconds:F0}s"), cancellationToken);
-                            channel.Writer.Complete();
+                            await outerChannel.Writer.WriteAsync(
+                                new AgentStreamEvent.Error($"Rate limited: wait {(cooldown - elapsed).TotalSeconds:F0}s"), cancellationToken);
+                            outerChannel.Writer.Complete();
                             return;
                         }
                     }
                 }
-
                 lock (_rateLimitLock) { _lastRequestTime = DateTimeOffset.UtcNow; }
             }
 
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            Log("INFO", $"User (streaming): {userMessage}");
+            // Track turn for idle category auto-unload
+            _currentTurn++;
 
-            var contextSuffix = BuildContextSuffix();
-            var fullUserMessage = contextSuffix is not null
-                ? $"{userMessage}\n\n{contextSuffix}"
-                : userMessage;
+            // Auto-activate skills based on trigger patterns
+            var triggered = _skillSystem.FindTriggeredSkills(userMessage);
+            foreach (var skillName in triggered)
+            {
+                _skillSystem.LoadSkill(skillName);
+                Log("SKILL", $"Auto-activated skill: {skillName}");
+            }
 
-            var state = new StreamState();
+            Log("INFO", $"User (new loop): {userMessage}");
+            UpdateStatus("Thinking...");
+
             var toolCalls = new List<AiToolCallInfo>();
             var toolResults = new List<AiToolResultInfo>();
+            var assistantText = "";
+            int toolCallCount = 0;
 
             try
             {
-                UpdateStatus("Thinking...");
+                var reader = _agentLoop!.RunStreamingAsync(
+                    userMessage, _historyManager!, _contextProvider,
+                    _loadedCategories, cancellationToken);
 
-                // --- First run: user message ---
-                var pendingApprovals = new List<FunctionApprovalRequestContent>();
-
-                await foreach (var update in _agent.RunStreamingAsync(
-                    fullUserMessage, _session, cancellationToken: cancellationToken))
+                await foreach (var evt in reader.ReadAllAsync(cancellationToken))
                 {
-                    await ProcessStreamUpdate(update, channel, sw, state,
-                        toolCalls, toolResults, pendingApprovals, cancellationToken);
-                }
-
-                // --- Multi-turn approval loop (MAF pattern) ---
-                // RunStreamingAsync returns EARLY when it hits approval-required tools.
-                // We must collect approvals, get user decision, then re-run with the response.
-                int maxApprovalRounds = Limits.MaxApprovalRounds;
-                int approvalRound = 0;
-                while (pendingApprovals.Count > 0 && approvalRound++ < maxApprovalRounds)
-                {
-                    var approvalResponses = new List<AIContent>();
-
-                    foreach (var approvalRequest in pendingApprovals)
+                    switch (evt)
                     {
-                        var toolName = approvalRequest.FunctionCall.Name ?? "unknown";
-                        var argsStr = approvalRequest.FunctionCall.Arguments is not null
-                            ? string.Join(", ", approvalRequest.FunctionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-                            : "";
+                        case AgentStreamEvent.TextDelta delta:
+                            assistantText += delta.Text;
+                            break;
 
-                        Log("APPROVAL", $"Requesting approval for {toolName}({argsStr})");
+                        case AgentStreamEvent.ToolCallStarted started:
+                            toolCallCount++;
+                            var argsJson = started.Arguments.Length > 0
+                                ? $"{{{started.Arguments}}}" : null;
+                            toolCalls.Add(new AiToolCallInfo(
+                                $"call_{toolCallCount}", started.ToolName, argsJson));
+                            _actionLog.Add(new AiActionLogEntry(
+                                started.ToolName, started.Arguments, "invoked", DateTimeOffset.UtcNow));
+                            UpdateStatus($"Tool: {started.ToolName} ({toolCallCount} calls)");
+                            break;
 
-                        // Emit interactive event — UI will show Allow/Deny and resolve the TCS
-                        var approvalEvent = new AgentStreamEvent.ApprovalRequested(toolName, argsStr);
-                        await channel.Writer.WriteAsync(approvalEvent, cancellationToken);
+                        case AgentStreamEvent.ToolCallCompleted completed:
+                            var truncResult = completed.Result.Length > 200
+                                ? completed.Result[..200] + "..." : completed.Result;
+                            toolResults.Add(new AiToolResultInfo(
+                                $"call_{toolCallCount}", completed.ToolName, completed.Result));
+                            for (int i = _actionLog.Count - 1; i >= 0; i--)
+                            {
+                                if (_actionLog[i].Result == "invoked")
+                                {
+                                    _actionLog[i] = _actionLog[i] with { Result = truncResult };
+                                    break;
+                                }
+                            }
+                            break;
 
-                        // Wait for the user's decision (blocks until UI calls Resolve)
-                        bool approved;
-                        try
-                        {
-                            approved = await approvalEvent.UserDecision.WaitAsync(
-                                TimeSpan.FromMinutes(5), cancellationToken);
-                        }
-                        catch (TimeoutException)
-                        {
-                            Log("APPROVAL", $"Timed out waiting for approval of {toolName} — auto-denying");
-                            approved = false;
-                        }
-
-                        Log("APPROVAL", $"{toolName}: {(approved ? "APPROVED" : "DENIED")} by user");
-                        approvalResponses.Add(approvalRequest.CreateResponse(approved));
+                        case AgentStreamEvent.Completed done:
+                            // Final — will be emitted below after history update
+                            break;
                     }
 
-                    pendingApprovals.Clear();
-
-                    // Re-run agent with all approval responses
-                    var approvalMsg = new ChatMessage(ChatRole.User, approvalResponses);
-                    UpdateStatus("Executing approved tools...");
-
-                    await foreach (var update in _agent.RunStreamingAsync(
-                        [approvalMsg], _session, cancellationToken: cancellationToken))
-                    {
-                        await ProcessStreamUpdate(update, channel, sw, state,
-                            toolCalls, toolResults, pendingApprovals, cancellationToken);
-                    }
-                    // Loop again if the re-run triggered MORE approval requests
+                    // Forward all events to the outer channel for the ViewModel
+                    await outerChannel.Writer.WriteAsync(evt, cancellationToken);
                 }
 
-                if (approvalRound >= maxApprovalRounds && pendingApprovals.Count > 0)
-                {
-                    Log("APPROVAL", $"Hit max approval rounds ({maxApprovalRounds}), aborting remaining approvals");
-                    state.AssistantText += "\n\n⚠️ Reached maximum approval rounds — some tool calls were skipped.";
-                    pendingApprovals.Clear();
-                }
-
-                // Inject any pending screenshots as image content for the model to analyze
+                // Pending images — inject into the history and run additional loop turns
                 if (_toolFunctions is not null)
                 {
                     int imagesProcessed = 0;
-                    int maxImagesPerTurn = Limits.MaxImagesPerTurn;
-                    while (imagesProcessed < maxImagesPerTurn && _toolFunctions.PendingImages.TryDequeue(out var img))
+                    while (imagesProcessed < Limits.MaxImagesPerTurn
+                        && _toolFunctions.PendingImages.TryDequeue(out var img))
                     {
                         imagesProcessed++;
                         UpdateStatus($"Analyzing screenshot ({imagesProcessed})...");
-                        var imageMsg = new ChatMessage(ChatRole.User, new List<AIContent>
+                        // For the new loop, inject the image as a user message and run another loop
+                        var imageDesc = $"[Screenshot: {img.Description}]";
+                        var imageReader = _agentLoop!.RunStreamingAsync(
+                            imageDesc, _historyManager!, _contextProvider,
+                            _loadedCategories, cancellationToken);
+                        await foreach (var evt in imageReader.ReadAllAsync(cancellationToken))
                         {
-                            new TextContent($"[Screenshot: {img.Description}]"),
-                            new DataContent(img.PngData, "image/png")
-                        });
-
-                        // Stream the image analysis response
-                        await foreach (var update in _agent.RunStreamingAsync(
-                            [imageMsg], _session, cancellationToken: cancellationToken))
-                        {
-                            await ProcessStreamUpdate(update, channel, sw, state,
-                                toolCalls, toolResults, pendingApprovals, cancellationToken);
+                            if (evt is AgentStreamEvent.TextDelta delta)
+                                assistantText += "\n" + delta.Text;
+                            await outerChannel.Writer.WriteAsync(evt, cancellationToken);
                         }
                     }
                     while (_toolFunctions.PendingImages.TryDequeue(out _))
-                        Log("WARN", $"Discarded excess pending image (max {maxImagesPerTurn} per turn)");
+                        Log("WARN", $"Discarded excess pending image (max {Limits.MaxImagesPerTurn} per turn)");
                 }
 
-                sw.Stop();
-                if (string.IsNullOrWhiteSpace(state.AssistantText))
-                    state.AssistantText = "(Tool calls executed — see action log for details)";
+                // Auto-unload categories not used in the last 10 turns
+                AutoUnloadIdleCategories();
 
-                Log("INFO", $"Assistant: {(state.AssistantText.Length > 300 ? state.AssistantText[..300] + "..." : state.AssistantText)}");
-                _displayHistory.Add(new AiChatMessage("assistant", state.AssistantText, DateTimeOffset.UtcNow)
+                // Update session metadata
+                _sessionMetadata.TotalToolCalls += toolCallCount;
+                if (toolCallCount > 0)
+                    _sessionMetadata.AddEvent($"Turn {_currentTurn}: {toolCallCount} tool calls");
+                if (_tokenBudget.EstimatedCostUsd > 0)
+                    _sessionMetadata.CumulativeCost = _tokenBudget.EstimatedCostUsd;
+
+                if (string.IsNullOrWhiteSpace(assistantText))
+                    assistantText = "(Tool calls executed — see action log for details)";
+
+                // Update display history and persist
+                _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow)
                 {
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
-                    ToolResults = toolResults.Count > 0 ? toolResults : null
+                    ToolResults = toolResults.Count > 0 ? toolResults : null,
                 });
-                PruneOldToolResults();
+                _historyManager!.PruneOldToolResults();
                 SaveCurrentChat();
 
-                var usagePart = _totalRequests > 0
-                    ? $", tokens: {_totalPromptTokens}↑ {_totalCompletionTokens}↓ {_totalCachedTokens}⚡"
+                var budgetPart = _tokenBudget.TotalRequests > 0
+                    ? $", ~${_tokenBudget.EstimatedCostUsd:F4}"
                     : "";
-                var historyPart = $", {SessionMessageCount} msgs in context";
-                var summary = state.ToolCallCount > 0
-                    ? $"Done ({state.ToolCallCount} tool calls, {sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})"
-                    : $"Done ({sw.Elapsed.TotalSeconds:F1}s{usagePart}{historyPart})";
+                var usagePart = _tokenBudget.TotalRequests > 0
+                    ? $", tokens: {_tokenBudget.TotalInputTokens:#,0}↑ {_tokenBudget.TotalOutputTokens:#,0}↓ {_tokenBudget.TotalCachedTokens:#,0}⚡{budgetPart}"
+                    : "";
+                var historyPart = $", {_historyManager!.Count} msgs in context";
+                var summary = toolCallCount > 0
+                    ? $"Done ({toolCallCount} tool calls{usagePart}{historyPart})"
+                    : $"Done{usagePart}{historyPart}";
                 UpdateStatus(summary);
-
-                await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Completed(state.ToolCallCount, sw.Elapsed), cancellationToken);
             }
             catch (OperationCanceledException)
             {
-                sw.Stop();
                 var cancelMsg = "⏹ Stopped by user.";
-                Log("INFO", "Streaming cancelled by user");
-                UpdateStatus($"Stopped ({sw.Elapsed.TotalSeconds:F1}s)");
+                Log("INFO", "Streaming cancelled by user (new loop)");
+                UpdateStatus("Stopped");
                 _displayHistory.Add(new AiChatMessage("assistant",
-                    state.AssistantText.Length > 0 ? state.AssistantText + "\n\n" + cancelMsg : cancelMsg,
+                    assistantText.Length > 0 ? assistantText + "\n\n" + cancelMsg : cancelMsg,
                     DateTimeOffset.UtcNow)
                 {
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
-                    ToolResults = toolResults.Count > 0 ? toolResults : null
+                    ToolResults = toolResults.Count > 0 ? toolResults : null,
                 });
                 SaveCurrentChat();
-                await channel.Writer.WriteAsync(
+                await outerChannel.Writer.WriteAsync(
                     new AgentStreamEvent.Error(cancelMsg), CancellationToken.None);
             }
             catch (Exception ex)
             {
-                sw.Stop();
-                // Try to extract response body for better diagnostics (ClientResultException from OpenAI SDK)
-                var detail = "";
-                try
-                {
-                    var rawMethod = ex.GetType().GetMethod("GetRawResponse");
-                    if (rawMethod is not null)
-                    {
-                        var raw = rawMethod.Invoke(ex, null);
-                        var contentProp = raw?.GetType().GetProperty("Content");
-                        if (contentProp is not null)
-                        {
-                            var body = contentProp.GetValue(raw)?.ToString();
-                            if (!string.IsNullOrEmpty(body))
-                                detail = $" | Response: {body}";
-                        }
-                    }
-                }
-                catch { /* best effort */ }
                 var errorMsg = $"AI error: {ex.Message}";
-                Log("ERROR", $"{ex.GetType().Name}: {ex.Message}{detail}\n{ex.StackTrace}");
-                UpdateStatus($"Error ({sw.Elapsed.TotalSeconds:F1}s)");
+                Log("ERROR", $"New loop error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                UpdateStatus("Error");
                 _displayHistory.Add(new AiChatMessage("assistant", errorMsg, DateTimeOffset.UtcNow));
-                await channel.Writer.WriteAsync(
+                await outerChannel.Writer.WriteAsync(
                     new AgentStreamEvent.Error(errorMsg), CancellationToken.None);
             }
             finally
             {
-                channel.Writer.Complete();
+                outerChannel.Writer.Complete();
             }
         }, cancellationToken);
 
-        return channel.Reader;
-    }
-
-    /// <summary>Mutable holder for streaming state (avoids ref params in async methods).</summary>
-    private sealed class StreamState
-    {
-        public int ToolCallCount;
-        public string AssistantText = "";
-    }
-
-    /// <summary>
-    /// Process a single streaming update from RunStreamingAsync — extracts text, tool calls,
-    /// tool results, and approval requests into the appropriate collections.
-    /// </summary>
-    private async Task ProcessStreamUpdate(
-        AgentResponseUpdate update,
-        Channel<AgentStreamEvent> channel,
-        System.Diagnostics.Stopwatch sw,
-        StreamState state,
-        List<AiToolCallInfo> toolCalls,
-        List<AiToolResultInfo> toolResults,
-        List<FunctionApprovalRequestContent> pendingApprovals,
-        CancellationToken cancellationToken)
-    {
-        foreach (var content in update.Contents)
-        {
-            if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
-            {
-                state.AssistantText += tc.Text;
-                await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.TextDelta(tc.Text), cancellationToken);
-            }
-            else if (content is FunctionCallContent fc)
-            {
-                state.ToolCallCount++;
-                var args = fc.Arguments is not null
-                    ? string.Join(", ", fc.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-                    : "";
-                var argsJson = fc.Arguments is not null
-                    ? JsonSerializer.Serialize(fc.Arguments) : null;
-                UpdateStatus($"Tool: {fc.Name ?? "unknown"} ({state.ToolCallCount} calls, {sw.Elapsed.TotalSeconds:F0}s)");
-                Log("TOOL", $"Call: {fc.Name}({args})");
-                _actionLog.Add(new AiActionLogEntry(fc.Name ?? "unknown", args, "invoked", DateTimeOffset.UtcNow));
-                toolCalls.Add(new AiToolCallInfo(
-                    fc.CallId ?? "", fc.Name ?? "unknown", argsJson));
-                await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.ToolCallStarted(fc.Name ?? "unknown", args), cancellationToken);
-            }
-            else if (content is FunctionResultContent fr)
-            {
-                var resultStr = fr.Result?.ToString() ?? "";
-                var truncated = resultStr.Length > 200 ? resultStr[..200] + "..." : resultStr;
-                Log("TOOL", $"Result: {truncated}");
-                for (int i = _actionLog.Count - 1; i >= 0; i--)
-                {
-                    if (_actionLog[i].Result == "invoked")
-                    {
-                        _actionLog[i] = _actionLog[i] with { Result = truncated };
-                        break;
-                    }
-                }
-                toolResults.Add(new AiToolResultInfo(
-                    fr.CallId ?? "", LookupToolName(toolCalls, fr.CallId), resultStr));
-                await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.ToolCallCompleted(fr.CallId ?? "unknown", truncated), cancellationToken);
-            }
-            else if (content is FunctionApprovalRequestContent approvalRequest)
-            {
-                // Collect — don't process inline. MAF expects the stream to complete first,
-                // then we re-run with approval responses (multi-turn pattern).
-                pendingApprovals.Add(approvalRequest);
-            }
-            else if (content is UsageContent usage)
-            {
-                _totalPromptTokens += usage.Details?.InputTokenCount ?? 0;
-                _totalCompletionTokens += usage.Details?.OutputTokenCount ?? 0;
-                var counts = usage.Details?.AdditionalCounts;
-                _totalCachedTokens += counts?.GetValueOrDefault("CachedInputTokenCount") ?? 0;   // OpenAI/Copilot
-                _totalCachedTokens += counts?.GetValueOrDefault("cache_read_input_tokens") ?? 0;  // Anthropic
-                _totalRequests++;
-                var cacheRate = _totalPromptTokens > 0 ? _totalCachedTokens * 100 / _totalPromptTokens : 0;
-                Log("USAGE", $"Streaming cumulative prompt: {_totalPromptTokens}, completion: {_totalCompletionTokens}, cached: {_totalCachedTokens} ({cacheRate}%), requests: {_totalRequests}");
-
-                // Prompt caching verification
-                if (_totalCachedTokens > 0 && _totalRequests == 2)
-                    Log("CACHE", $"✓ Prompt caching active! {_totalCachedTokens} tokens cached on 2nd request.");
-                else if (_totalCachedTokens == 0 && _totalRequests == 5)
-                    Log("CACHE", "⚠ Prompt caching may be inactive — check if AdditionalProperties flows through IChatClient adapter.");
-            }
-        }
-    }
-
-    /// <summary>Handle an approval request for a dangerous tool call.</summary>
-    private async Task<bool> HandleApprovalRequestAsync(FunctionApprovalRequestContent request)
-    {
-        var toolName = request.FunctionCall.Name ?? "unknown";
-        var argsStr = request.FunctionCall.Arguments is not null
-            ? string.Join(", ", request.FunctionCall.Arguments.Select(kv => $"{kv.Key}={kv.Value}"))
-            : "";
-
-        Log("APPROVAL", $"Approval requested for {toolName}({argsStr})");
-
-        if (ApprovalRequested is not null)
-        {
-            return await ApprovalRequested(toolName, argsStr);
-        }
-
-        // Default: auto-approve if no handler is registered (preserves existing behavior)
-        Log("APPROVAL", $"Auto-approved {toolName} (no approval handler registered)");
-        return true;
+        return outerChannel.Reader;
     }
 
     // ─── Progressive Tool Loading ───────────────────────────────────────
@@ -1032,23 +777,43 @@ public sealed class AiOperatorService
     /// </summary>
     [System.ComponentModel.Description("Load additional tool categories on-demand.")]
     private string RequestTools(
-        [System.ComponentModel.Description("Category to load (e.g. breakpoints, disassembly, scripts, hooks, snapshots, memory_advanced, scanning_advanced, address_table, safety, signatures, hotkeys, undo, transactions, cheat_tables, vision, utility). Comma-separated for multiple.")] string categories)
+        [System.ComponentModel.Description("Category to load, OR a keyword to search for tools by name/description (e.g. 'breakpoints', 'disassembly', 'hex dump', 'memory scan'). Comma-separated for multiple categories.")] string categories)
     {
         var loaded = new List<string>();
         var alreadyLoaded = new List<string>();
         var activeNames = new HashSet<string>(_tools.Select(t => t is AIFunction f ? f.Name : ""),
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var cat in categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var rawCat in categories.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
+            var cat = rawCat;
+
             if (_loadedCategories.Contains(cat))
             {
                 alreadyLoaded.Add(cat);
                 continue;
             }
 
+            // Try exact category match first
             if (!ToolCategories.Categories.TryGetValue(cat, out var toolNames))
-                continue;
+            {
+                // Fall back to keyword search across all categories
+                var bestCategory = FindBestCategoryByKeyword(cat);
+                if (bestCategory is not null && ToolCategories.Categories.TryGetValue(bestCategory, out toolNames))
+                {
+                    Log("TOOLS", $"Keyword '{cat}' matched category '{bestCategory}' via search scoring");
+                    cat = bestCategory;
+                    if (_loadedCategories.Contains(cat))
+                    {
+                        alreadyLoaded.Add(cat);
+                        continue;
+                    }
+                }
+                else
+                {
+                    continue;
+                }
+            }
 
             foreach (var name in toolNames)
             {
@@ -1061,6 +826,7 @@ public sealed class AiOperatorService
                 }
             }
             _loadedCategories.Add(cat);
+            _categoryLastUsedTurn[cat] = _currentTurn;
         }
 
         Log("TOOLS", $"Loaded categories: [{categories}] → {loaded.Count} new tools " +
@@ -1069,9 +835,35 @@ public sealed class AiOperatorService
         if (loaded.Count == 0 && alreadyLoaded.Count > 0)
             return $"Categories already loaded: {string.Join(", ", alreadyLoaded)}. No new tools added.";
         if (loaded.Count == 0)
-            return $"No matching categories found. Available: {string.Join(", ", ToolCategories.Categories.Keys)}";
+            return $"No matching categories found for '{categories}'. Available: {string.Join(", ", ToolCategories.Categories.Keys)}";
 
         return $"Loaded {loaded.Count} tools: {string.Join(", ", loaded)}. Active tool count: {_tools.Count}.";
+    }
+
+    /// <summary>Find the best-matching category for a keyword search.</summary>
+    private string? FindBestCategoryByKeyword(string keyword)
+    {
+        var bestScore = 0;
+        string? bestCategory = null;
+
+        foreach (var (cat, toolNames) in ToolCategories.Categories)
+        {
+            // Score each tool in the category
+            var tools = toolNames.Select(name =>
+            {
+                var meta = _toolAttributeCache.Get(name);
+                return (name, meta.SearchHints, (string?)null);
+            });
+
+            var score = ToolSearchScorer.ScoreCategory(keyword, tools);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestCategory = cat;
+            }
+        }
+
+        return bestScore >= 20 ? bestCategory : null; // Minimum threshold
     }
 
     /// <summary>Meta-tool: list available categories and their load status.</summary>
@@ -1133,180 +925,353 @@ public sealed class AiOperatorService
     }
 
     /// <summary>
-    /// Replay saved chat messages into an agent session's history with full fidelity.
-    /// Reconstructs FunctionCallContent/FunctionResultContent from stored metadata
-    /// so the agent remembers which tools it called and what they returned.
-    /// Limits replay to the most recent messages and truncates large tool results
-    /// to avoid blowing the token budget on chat restore.
+    /// Automatically unload tool categories that haven't been used in the last N turns.
+    /// Called after each agent turn to keep the active tool set lean.
     /// </summary>
-    private void ReplayHistoryInto(IList<ChatMessage> history, IEnumerable<AiChatMessage> messages)
+    private void AutoUnloadIdleCategories(int maxIdleTurns = 10)
     {
-        int maxReplayMessages = Limits.MaxReplayMessages;
-        int maxToolResultChars = Limits.MaxToolResultChars;
+        var toUnload = _categoryLastUsedTurn
+            .Where(kv => _currentTurn - kv.Value > maxIdleTurns)
+            .Select(kv => kv.Key)
+            .ToList();
 
-        // Take only the most recent messages to avoid token explosion on restore
-        var messageList = messages as IList<AiChatMessage> ?? messages.ToList();
-        var replayMessages = messageList.Count > maxReplayMessages
-            ? messageList.Skip(messageList.Count - maxReplayMessages)
-            : messageList;
-
-        foreach (var msg in replayMessages)
+        foreach (var cat in toUnload)
         {
-            var role = msg.Role == "user" ? ChatRole.User : ChatRole.Assistant;
-
-            // Simple message (no tool data) — plain text replay
-            if (msg.ToolCalls is null or { Count: 0 } && msg.ToolResults is null or { Count: 0 })
-            {
-                history.Add(new ChatMessage(role, msg.Content));
-                continue;
-            }
-
-            // Assistant message with tool calls — reconstruct structured content
-            var contents = new List<AIContent>();
-            if (!string.IsNullOrEmpty(msg.Content))
-                contents.Add(new TextContent(msg.Content));
-
-            if (msg.ToolCalls is not null)
-            {
-                foreach (var tc in msg.ToolCalls)
-                {
-                    IDictionary<string, object?>? args = null;
-                    if (tc.ArgumentsJson is not null)
-                    {
-                        try
-                        {
-                            args = JsonSerializer.Deserialize<Dictionary<string, object?>>(tc.ArgumentsJson);
-                        }
-                        catch { /* fall back to null args */ }
-                    }
-                    contents.Add(new FunctionCallContent(tc.CallId, tc.Name, args));
-                }
-            }
-            history.Add(new ChatMessage(ChatRole.Assistant, contents));
-
-            // Tool results as separate messages — spill large results to store
-            if (msg.ToolResults is not null)
-            {
-                foreach (var tr in msg.ToolResults)
-                {
-                    var result = tr.Result ?? "";
-                    if (result.Length > maxToolResultChars)
-                    {
-                        var handle = _toolResultStore.Store(tr.Name ?? "unknown", result);
-                        var previewLen = Math.Max(maxToolResultChars / 2, 500);
-                        var preview = result[..Math.Min(previewLen, result.Length)];
-                        result = $"{preview}\n\n" +
-                            $"--- RESULT SPILLED (too large for context) ---\n" +
-                            $"result_id: {handle}\n" +
-                            $"total_chars: {result.Length:#,0}\n" +
-                            $"Use RetrieveToolResult(resultId: \"{handle}\", offset: {preview.Length}) to read more.";
-                    }
-                    history.Add(new ChatMessage(ChatRole.Tool,
-                        [new FunctionResultContent(tr.CallId, result)]));
-                }
-            }
+            UnloadCategory(cat);
+            _categoryLastUsedTurn.Remove(cat);
+            Log("TOOLS", $"Auto-unloaded idle category '{cat}' (idle for {_currentTurn - _categoryLastUsedTurn.GetValueOrDefault(cat)} turns)");
         }
-
-        if (messageList.Count > maxReplayMessages)
-            Log("INFO", $"Chat restore: replayed {maxReplayMessages} of {messageList.Count} messages (older messages trimmed)");
-    }
-
-    /// <summary>Look up tool name from collected tool calls by matching CallId.</summary>
-    private static string LookupToolName(List<AiToolCallInfo> toolCalls, string? callId) =>
-        toolCalls.FirstOrDefault(tc => tc.CallId == callId)?.Name ?? "unknown";
-
-    /// <summary>Extract token usage from an agent response and update cumulative counters.</summary>
-    private void TrackUsage(AgentResponse response)
-    {
-        foreach (var message in response.Messages)
-        {
-            if (message.AdditionalProperties?.TryGetValue("Usage", out var usageObj) == true
-                && usageObj is UsageContent usage)
-            {
-                _totalPromptTokens += usage.Details?.InputTokenCount ?? 0;
-                _totalCompletionTokens += usage.Details?.OutputTokenCount ?? 0;
-                var counts = usage.Details?.AdditionalCounts;
-                _totalCachedTokens += counts?.GetValueOrDefault("CachedInputTokenCount") ?? 0;   // OpenAI/Copilot
-                _totalCachedTokens += counts?.GetValueOrDefault("cache_read_input_tokens") ?? 0;  // Anthropic
-                _totalRequests++;
-            }
-        }
-
-        // Also check the response-level usage if available from the underlying ChatResponse
-        if (response.Messages.Count > 0)
-        {
-            var lastMsg = response.Messages[^1];
-            if (lastMsg.AdditionalProperties?.TryGetValue("usage", out var rawUsage) == true)
-            {
-                var cacheRate = _totalPromptTokens > 0 ? _totalCachedTokens * 100 / _totalPromptTokens : 0;
-                Log("USAGE", $"Cumulative prompt: {_totalPromptTokens}, completion: {_totalCompletionTokens}, cached: {_totalCachedTokens} ({cacheRate}%), requests: {_totalRequests}");
-            }
-        }
-    }
-
-    public async void ClearHistory()
-    {
-        _session = await _agent.CreateSessionAsync();
-        _displayHistory.Clear();
-        _actionLog.Clear();
-        _lastContextSuffix = null;
     }
 
     /// <summary>
-    /// Prune old tool results from the session's chat history to save tokens.
-    /// Keeps results from the last 2 user turns intact; replaces older ones with
-    /// compact summaries so the model retains awareness without full output.
+    /// Remove all tools belonging to a category from the active tool list.
+    /// Does not remove core tools even if they overlap with the category.
     /// </summary>
-    private void PruneOldToolResults()
+    private void UnloadCategory(string category)
     {
-        if (!_session.TryGetInMemoryChatHistory(out var history)) return;
+        if (!_loadedCategories.Remove(category)) return;
 
-        // Find the boundary: keep last 2 user turns intact
-        int userCount = 0;
-        int pruneBeforeIndex = -1;
-        for (int i = history.Count - 1; i >= 0; i--)
+        if (ToolCategories.Categories.TryGetValue(category, out var toolNames))
         {
-            if (history[i].Role == ChatRole.User && ++userCount >= 3)
+            var coreNames = ToolCategories.Core;
+            foreach (var name in toolNames)
             {
-                pruneBeforeIndex = i;
-                break;
+                if (coreNames.Contains(name)) continue;
+                _tools.RemoveAll(t => t is AIFunction f &&
+                    string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
             }
         }
-        if (pruneBeforeIndex < 0) return;
+    }
 
-        int pruned = 0;
-        for (int i = 0; i <= pruneBeforeIndex; i++)
+    // ─── Skill Meta-Tools ───────────────────────────────────────────────
+
+    [System.ComponentModel.Description("Load a domain skill for expert guidance.")]
+    private string LoadSkillTool(
+        [System.ComponentModel.Description("Skill name to load (e.g. memory-scanning, code-analysis, breakpoint-mastery)")] string name)
+    {
+        return _skillSystem.LoadSkill(name);
+    }
+
+    [System.ComponentModel.Description("List available domain skills and their load status.")]
+    private string ListSkillsTool() => _skillSystem.BuildCatalogSummary();
+
+    [System.ComponentModel.Description("Unload a domain skill to free token budget.")]
+    private string UnloadSkillTool(
+        [System.ComponentModel.Description("Skill name to unload")] string name)
+    {
+        return _skillSystem.UnloadSkill(name);
+    }
+
+    /// <summary>Load skill definitions from built-in and user directories.</summary>
+    private void LoadSkillsFromDisk()
+    {
+        // Built-in skills shipped alongside the application binary
+        var appDir = AppDomain.CurrentDomain.BaseDirectory;
+        var builtInSkills = Path.Combine(appDir, "skills");
+
+        // User-defined skills in the app data directory
+        var userSkills = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CEAISuite", "skills");
+
+        foreach (var dir in new[] { builtInSkills, userSkills })
         {
-            var msg = history[i];
-            if (!msg.Contents.Any(c => c is FunctionResultContent)) continue;
-
-            var newContents = new List<AIContent>();
-            foreach (var content in msg.Contents)
-            {
-                if (content is FunctionResultContent frc)
-                {
-                    var result = frc.Result?.ToString() ?? "";
-                    if (result.Length > 120)
-                    {
-                        var summary = result[..100] + "...";
-                        newContents.Add(new FunctionResultContent(frc.CallId ?? "", $"[pruned] {summary}"));
-                        pruned++;
-                    }
-                    else
-                    {
-                        newContents.Add(content); // Short results kept as-is
-                    }
-                }
-                else
-                {
-                    newContents.Add(content);
-                }
-            }
-            history[i] = new ChatMessage(msg.Role, newContents);
+            var skills = SkillLoader.LoadFromDirectory(dir, Log);
+            _skillSystem.RegisterAll(skills);
         }
 
-        if (pruned > 0)
-            Log("PRUNE", $"Pruned {pruned} old tool results (kept last 2 user turns)");
+        if (_skillSystem.Catalog.Count > 0)
+            Log("INFO", $"Skills: {_skillSystem.Catalog.Count} loaded from disk");
+    }
+
+    // ─── MCP Server Management ─────────────────────────────────────────
+
+    /// <summary>
+    /// Connect to configured MCP servers and inject their discovered tools.
+    /// Called from the constructor (fire-and-forget) for auto-connect servers.
+    /// </summary>
+    private async Task ConnectMcpServersAsync(IReadOnlyList<McpServerSettingsEntry> servers)
+    {
+        foreach (var entry in servers)
+        {
+            if (!entry.Enabled || !entry.AutoConnect) continue;
+            if (string.IsNullOrWhiteSpace(entry.Command)) continue;
+
+            try
+            {
+                var config = new McpServerConfig
+                {
+                    Name = entry.Name,
+                    Command = entry.Command,
+                    Arguments = entry.Arguments,
+                    Environment = entry.Environment,
+                    AutoConnect = entry.AutoConnect,
+                };
+
+                var discoveredTools = await _mcpManager.AddServerAsync(config);
+
+                // Inject discovered MCP tools into the tool index
+                foreach (var fn in discoveredTools)
+                {
+                    _allToolsByName[fn.Name] = fn;
+                    _tools.Add(fn); // MCP tools are always active (no progressive loading)
+                }
+
+                Log("MCP", $"Server '{entry.Name}': {discoveredTools.Count} tools injected");
+            }
+            catch (Exception ex)
+            {
+                Log("MCP", $"Failed to connect to '{entry.Name}': {ex.Message}");
+            }
+        }
+
+        if (_mcpManager.Clients.Count > 0)
+            Log("MCP", $"Connected to {_mcpManager.Clients.Count} MCP server(s)");
+    }
+
+    /// <summary>MCP server status summary (exposed for UI).</summary>
+    public string GetMcpStatus() => _mcpManager.GetStatusSummary();
+
+    // ─── Token Budget Meta-Tools ────────────────────────────────────────
+
+    [System.ComponentModel.Description("Get current token usage and cost estimate.")]
+    private string GetBudgetStatusTool()
+    {
+        return _tokenBudget.GetSummary();
+    }
+
+    /// <summary>Token budget tracker (exposed for UI status bar).</summary>
+    public TokenBudget TokenBudget => _tokenBudget;
+
+    // ─── Memory Meta-Tools ──────────────────────────────────────────────
+
+    [System.ComponentModel.Description("Save a persistent memory entry.")]
+    private string RememberTool(
+        [System.ComponentModel.Description("Content to remember")] string content,
+        [System.ComponentModel.Description("Category: UserPreference, ProcessKnowledge, LearnedPattern, WorkflowRecipe, SafetyNote, ToolTip")] string category,
+        [System.ComponentModel.Description("Process name this memory relates to (optional, null for global)")] string? processName = null)
+    {
+        if (_memorySystem is null) return "Memory system is disabled.";
+        if (!Enum.TryParse<MemoryCategory>(category, true, out var cat))
+            return $"Invalid category '{category}'. Valid: {string.Join(", ", Enum.GetNames<MemoryCategory>())}";
+        return _memorySystem.Remember(content, cat, processName, source: "agent");
+    }
+
+    [System.ComponentModel.Description("Search persistent memories.")]
+    private string RecallMemoryTool(
+        [System.ComponentModel.Description("Search keyword (optional)")] string? query = null,
+        [System.ComponentModel.Description("Filter by category (optional)")] string? category = null,
+        [System.ComponentModel.Description("Filter by process name (optional)")] string? processName = null)
+    {
+        if (_memorySystem is null) return "Memory system is disabled.";
+        MemoryCategory? cat = null;
+        if (category is not null && Enum.TryParse<MemoryCategory>(category, true, out var parsed))
+            cat = parsed;
+
+        var results = _memorySystem.Recall(query, cat, processName);
+        if (results.Count == 0) return "No matching memories found.";
+
+        var lines = results.Select(e =>
+            $"[{e.Id}] [{e.Category}] {(e.ProcessName is not null ? $"({e.ProcessName}) " : "")}{e.Content}");
+        return $"Found {results.Count} memories:\n" + string.Join("\n", lines);
+    }
+
+    [System.ComponentModel.Description("Delete a persistent memory entry.")]
+    private string ForgetMemoryTool(
+        [System.ComponentModel.Description("Memory ID to delete (e.g. mem-20260401-120000-000)")] string id)
+    {
+        if (_memorySystem is null) return "Memory system is disabled.";
+        return _memorySystem.Forget(id);
+    }
+
+    /// <summary>Memory system (exposed for UI management).</summary>
+    public MemorySystem? Memory => _memorySystem;
+
+    // ─── Subagent Meta-Tools ────────────────────────────────────────────
+
+    [System.ComponentModel.Description("Spawn a focused subagent for a subtask.")]
+    private async Task<string> SpawnSubagentTool(
+        [System.ComponentModel.Description("The task/prompt for the subagent")] string task,
+        [System.ComponentModel.Description("Short description (shown in status)")] string? description = null,
+        [System.ComponentModel.Description("Context from parent (optional)")] string? context = null,
+        [System.ComponentModel.Description("Comma-separated tool name glob patterns to allow (optional, e.g. 'Read*,List*')")] string? allowed_tools = null,
+        [System.ComponentModel.Description("Maximum turns (default 15)")] int? max_turns = null,
+        [System.ComponentModel.Description("Use a preset configuration: explore, plan, verify, script")] string? preset = null)
+    {
+        if (preset is not null)
+        {
+            var presetRequest = preset.ToLowerInvariant() switch
+            {
+                "explore" => SubagentPresets.Explore(task, context),
+                "plan" => SubagentPresets.Plan(task, context),
+                "verify" => SubagentPresets.Verify(task, context),
+                "script" => SubagentPresets.Script(task, context),
+                _ => (SubagentRequest?)null,
+            };
+            if (presetRequest is not null)
+            {
+                // Override with any explicitly provided parameters
+                if (max_turns.HasValue)
+                    presetRequest = presetRequest with { MaxTurns = max_turns.Value };
+                if (description is not null)
+                    presetRequest = presetRequest with { Description = description };
+
+                if (_subagentManager is null) return "SubagentManager not initialized. Start a new chat first.";
+                var presetResults = await _subagentManager.SpawnAndWaitAsync(new[] { presetRequest });
+                return presetResults[0].Text;
+            }
+            return $"Unknown preset: '{preset}'. Available: explore, plan, verify, script";
+        }
+
+        if (_subagentManager is null) return "Subagent system not initialized.";
+
+        var patterns = allowed_tools?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        var request = new SubagentRequest
+        {
+            Task = task,
+            Description = description ?? task,
+            Context = context,
+            AllowedToolPatterns = patterns,
+            MaxTurns = max_turns ?? 15,
+            ContextProvider = _contextProvider,
+        };
+
+        var handle = _subagentManager.Spawn(request);
+        Log("SUBAGENT", $"Spawned [{handle.Id}]: {description}");
+
+        // Wait for the subagent to complete
+        var result = await handle.Task;
+        return result.Success
+            ? $"[Subagent completed: {result.ToolCallCount} tool calls, {result.Duration.TotalSeconds:F1}s]\n\n{result.Text}"
+            : $"[Subagent failed: {result.Duration.TotalSeconds:F1}s]\n\n{result.Text}";
+    }
+
+    // ─── Plan Mode Meta-Tools ───────────────────────────────────────────
+
+    [System.ComponentModel.Description("Generate a structured execution plan for a complex task.")]
+    private async Task<string> PlanTaskTool(
+        [System.ComponentModel.Description("The task to plan (describe what you want to accomplish)")] string task)
+    {
+        if (_planExecutor is null || _historyManager is null)
+            return "Plan system not initialized.";
+
+        var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider);
+
+        // Format the plan for display
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## {plan.Title}");
+        sb.AppendLine($"*{plan.Summary}*");
+        sb.AppendLine();
+
+        for (int i = 0; i < plan.Steps.Count; i++)
+        {
+            var step = plan.Steps[i];
+            var destructiveTag = step.IsDestructive ? " ⚠️ DESTRUCTIVE" : "";
+            sb.AppendLine($"**Step {i + 1}**: {step.Description}{destructiveTag}");
+            if (step.Details is not null)
+                sb.AppendLine($"  Details: {step.Details}");
+            if (step.ExpectedTools is { Count: > 0 })
+                sb.AppendLine($"  Tools: {string.Join(", ", step.ExpectedTools)}");
+            if (step.EstimatedDuration is not null)
+                sb.AppendLine($"  Duration: {step.EstimatedDuration}");
+            sb.AppendLine();
+        }
+
+        if (plan.EstimatedToolCalls.HasValue)
+            sb.AppendLine($"Estimated tool calls: ~{plan.EstimatedToolCalls}");
+        if (plan.Warnings is { Count: > 0 })
+        {
+            sb.AppendLine("\n⚠️ **Warnings:**");
+            foreach (var w in plan.Warnings)
+                sb.AppendLine($"  • {w}");
+        }
+
+        sb.AppendLine("\n*To execute this plan, use execute_plan or describe the task directly.*");
+
+        return sb.ToString();
+    }
+
+    [System.ComponentModel.Description("Generate and immediately execute a structured plan for a complex task.")]
+    private async Task<string> ExecutePlanTool(
+        [System.ComponentModel.Description("The task to plan and execute")] string task)
+    {
+        if (_planExecutor is null || _historyManager is null || _agentLoop is null)
+            return "Plan system not initialized.";
+
+        // Phase 1: Generate the plan
+        var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Executing Plan: {plan.Title}");
+        sb.AppendLine($"*{plan.Summary}*");
+        sb.AppendLine($"Steps: {plan.Steps.Count}");
+        sb.AppendLine();
+
+        // Phase 2: Execute the plan step by step
+        var reader = _planExecutor.ExecutePlanAsync(plan, _agentLoop, _historyManager, _contextProvider);
+
+        await foreach (var evt in reader.ReadAllAsync())
+        {
+            switch (evt)
+            {
+                case AgentLoop.PlanProgressEvent.StepStarted ss:
+                    sb.AppendLine($"--- Step {ss.StepIndex + 1}/{plan.Steps.Count}: {ss.Step.Description} ---");
+                    break;
+                case AgentLoop.PlanProgressEvent.StepCompleted sc:
+                    var status = sc.Result.Success ? "OK" : "FAILED";
+                    sb.AppendLine($"[Step {sc.StepIndex + 1} {status}: {sc.Result.ToolCallCount} tool calls]");
+                    if (!string.IsNullOrWhiteSpace(sc.Result.Text))
+                    {
+                        // Include a summary of the step result (truncated)
+                        var text = sc.Result.Text.Length > 500
+                            ? sc.Result.Text[..500] + "..."
+                            : sc.Result.Text;
+                        sb.AppendLine(text);
+                    }
+                    sb.AppendLine();
+                    break;
+                case AgentLoop.PlanProgressEvent.PlanCompleted:
+                    sb.AppendLine("**Plan execution complete.**");
+                    break;
+                case AgentLoop.PlanProgressEvent.PlanFailed pf:
+                    sb.AppendLine($"**Plan execution failed:** {pf.Error}");
+                    break;
+                case AgentLoop.PlanProgressEvent.PlanCancelled:
+                    sb.AppendLine("**Plan execution cancelled.**");
+                    break;
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    public void ClearHistory()
+    {
+        _historyManager?.Clear();
+        _displayHistory.Clear();
+        _actionLog.Clear();
+        _lastContextSuffix = null;
     }
 
     /// <summary>Save the current chat to disk.</summary>
@@ -1333,6 +1298,24 @@ public sealed class AiOperatorService
             Title = CurrentChatTitle,
             Messages = _displayHistory.ToList()
         });
+
+        // Persist session metadata alongside the chat for cross-session search
+        try
+        {
+            _sessionMetadata.Id = CurrentChatId;
+            var metaJson = System.Text.Json.JsonSerializer.Serialize(_sessionMetadata, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            });
+            var metaDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CEAISuite", "chats");
+            if (!Directory.Exists(metaDir)) Directory.CreateDirectory(metaDir);
+            File.WriteAllText(Path.Combine(metaDir, $"{CurrentChatId}.session.json"), metaJson);
+        }
+        catch (Exception ex) { Log("SESSION", $"Failed to save session metadata: {ex.Message}"); }
     }
 
     /// <summary>Create a new chat, saving the current one first.</summary>
@@ -1341,11 +1324,35 @@ public sealed class AiOperatorService
         if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
             SaveCurrentChat();
 
+        // Fire session end hooks for the previous session
+        if (_agentLoop?.Options.Hooks is { } endHooks && !string.IsNullOrEmpty(CurrentChatId))
+        {
+            var endCtx = new SessionLifecycleContext { SessionId = CurrentChatId, IsNewSession = false };
+            _ = Task.Run(async () =>
+            {
+                try { await endHooks.RunSessionEndHooksAsync(endCtx, CancellationToken.None); }
+                catch (Exception ex) { Log("HOOK", $"Session end hook error: {ex.Message}"); }
+            });
+        }
+
         CurrentChatId = $"chat-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}";
         CurrentChatTitle = "New Chat";
         ClearHistory();
         _toolResultStore.Clear(); // Discard spilled results from previous chat
+        _tokenBudget.Reset(); // Reset cost tracking for new session
         LoadCoreTools(); // Reset to core tools for fresh conversation
+
+        // Fire session start hooks
+        if (_agentLoop?.Options.Hooks is { } startHooks)
+        {
+            var startCtx = new SessionLifecycleContext { SessionId = CurrentChatId, IsNewSession = true };
+            _ = Task.Run(async () =>
+            {
+                try { await startHooks.RunSessionStartHooksAsync(startCtx, CancellationToken.None); }
+                catch (Exception ex) { Log("HOOK", $"Session start hook error: {ex.Message}"); }
+            });
+        }
+
         ChatListChanged?.Invoke();
     }
 
@@ -1368,11 +1375,8 @@ public sealed class AiOperatorService
         // Restore display history
         _displayHistory.AddRange(chatSession.Messages);
 
-        // Rebuild MAF agent session history from saved messages.
-        // We inject them into the session's in-memory chat history so the agent
-        // has context from the previous conversation, including tool call/result structure.
-        if (_session.TryGetInMemoryChatHistory(out var history))
-            ReplayHistoryInto(history, chatSession.Messages);
+        // Rebuild agent session history from saved messages
+        _historyManager?.ReplayFromSaved(chatSession.Messages, Limits.MaxReplayMessages, Limits, _toolResultStore);
 
         ChatListChanged?.Invoke();
     }
@@ -1488,6 +1492,98 @@ public sealed class AiOperatorService
         Use it to avoid redundant calls. Addresses in hex (0x...). Be concise.
         """;
 
+    // ─── Phase 5 Meta-Tools ───────────────────────────────────────────
+
+    private string SwitchModelTool(string modelId)
+    {
+        if (_modelSwitcher is null) return "No model switching configured. Add FallbackModels to settings.";
+        return _modelSwitcher.SwitchToModel(modelId)
+            ? $"Switched to model: {modelId}"
+            : $"Model '{modelId}' not found. Available: {string.Join(", ", _modelSwitcher.Models.Select(m => m.ModelId))}";
+    }
+
+    private string ScheduleTaskTool(string cron, string prompt, string description, bool oneShot = false)
+    {
+        if (_taskScheduler is null) return "Scheduler not available.";
+        try
+        {
+            var id = _taskScheduler.AddTask(cron, prompt, description, oneShot);
+            return $"Task scheduled: {id} ({description}) — cron: {cron}";
+        }
+        catch (ArgumentException ex) { return $"Invalid cron: {ex.Message}"; }
+    }
+
+    private string ListTasksTool() => _taskScheduler?.GetSummary() ?? "Scheduler not available.";
+
+    private string CancelTaskTool(string id)
+    {
+        if (_taskScheduler is null) return "Scheduler not available.";
+        return _taskScheduler.RemoveTask(id) ? $"Task {id} cancelled." : $"Task {id} not found.";
+    }
+
+    private void OnScheduledTaskDue(ScheduledTask task)
+    {
+        Log("SCHEDULER", $"Executing due task: {task.Id} ({task.Description})");
+        // Fire-and-forget via subagent
+        if (_subagentManager is not null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var results = await _subagentManager.SpawnAndWaitAsync(
+                        [new SubagentRequest
+                        {
+                            Task = task.Prompt,
+                            Description = $"[Scheduled] {task.Description}",
+                            MaxTurns = 10,
+                        }]);
+                    Log("SCHEDULER", $"Task {task.Id} completed: {results[0].Text[..Math.Min(200, results[0].Text.Length)]}");
+                }
+                catch (Exception ex) { Log("SCHEDULER", $"Task {task.Id} failed: {ex.Message}"); }
+            });
+        }
+    }
+
+    private string GetSessionInfoTool() => _sessionMetadata.GetSummary();
+
+    private string SearchSessionsTool(string query)
+    {
+        if (_sessionIndex is null) return "Session index not available.";
+        _sessionIndex.Rebuild();
+        var results = _sessionIndex.Search(query, 5);
+        if (results.Count == 0) return $"No sessions found matching '{query}'.";
+        return string.Join("\n\n", results.Select(r => r.GetSummary()));
+    }
+
+    private async Task LoadPluginsAsync()
+    {
+        if (_pluginHost is null) return;
+        try
+        {
+            var ctx = new PluginContext
+            {
+                Log = Log,
+                Limits = Limits,
+                ResultStore = _toolResultStore,
+                StorageDirectory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "CEAISuite", "plugins"),
+            };
+            var count = await _pluginHost.LoadAllAsync(ctx);
+            if (count > 0)
+            {
+                foreach (var tool in _pluginHost.GetAllTools())
+                {
+                    _allToolsByName[tool.Name] = tool;
+                    _tools.Add(tool); // Plugin tools always active
+                }
+                Log("PLUGIN", $"Loaded {count} tools from plugins");
+            }
+        }
+        catch (Exception ex) { Log("PLUGIN", $"Plugin loading failed: {ex.Message}"); }
+    }
+
     private sealed class StubChatClient : IChatClient
     {
         public ChatClientMetadata Metadata => new("stub");
@@ -1520,106 +1616,4 @@ public sealed class AiOperatorService
         public void Dispose() { }
     }
 
-    /// <summary>
-    /// Delegating chat client that intercepts all messages flowing to the LLM and
-    /// spills any <see cref="FunctionResultContent"/> whose string representation
-    /// exceeds <see cref="TokenLimits.MaxToolResultChars"/> to a <see cref="ToolResultStore"/>.
-    /// The AI receives a summary with the result handle and can retrieve pages via
-    /// <c>RetrieveToolResult</c>. Sits between the
-    /// <see cref="Microsoft.Extensions.AI.FunctionInvokingChatClient"/> and the
-    /// underlying LLM client so tool results are capped before consuming API tokens.
-    /// </summary>
-    private sealed class ToolResultCappingChatClient(IChatClient inner, TokenLimits limits, ToolResultStore store, List<AITool> baseline) : DelegatingChatClient(inner)
-    {
-        public override Task<ChatResponse> GetResponseAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
-        {
-            var capped = CapToolResults(messages);
-            ResetToolsFromBaseline(options);
-            return base.GetResponseAsync(capped, options, cancellationToken);
-        }
-
-        public override IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
-            IEnumerable<ChatMessage> messages,
-            ChatOptions? options = null,
-            CancellationToken cancellationToken = default)
-        {
-            var capped = CapToolResults(messages);
-            ResetToolsFromBaseline(options);
-            return base.GetStreamingResponseAsync(capped, options, cancellationToken);
-        }
-
-        /// <summary>
-        /// Reset ChatOptions.Tools to a fresh copy of our progressive tool list.
-        /// The MAF framework's UseAIContextProviders merges context provider tools
-        /// (e.g. load_skill, read_skill_resource) into ChatOptions.Tools on every call,
-        /// but never clears previous injections. Since ChatOptions.Tools is a shared
-        /// mutable list reference, tools accumulate across calls. We fix this by
-        /// replacing the list with a clean snapshot of our _tools each call, so the
-        /// framework's merge always starts from a known-good baseline.
-        /// </summary>
-        private void ResetToolsFromBaseline(ChatOptions? options)
-        {
-            if (options is null) return;
-            options.Tools = new List<AITool>(baseline);
-        }
-
-        private IEnumerable<ChatMessage> CapToolResults(IEnumerable<ChatMessage> messages)
-        {
-            foreach (var msg in messages)
-            {
-                bool hasFunctionResult = false;
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionResultContent)
-                    {
-                        hasFunctionResult = true;
-                        break;
-                    }
-                }
-
-                if (!hasFunctionResult)
-                {
-                    yield return msg;
-                    continue;
-                }
-
-                // Rebuild the contents list, spilling oversized tool results to the store
-                var newContents = new List<AIContent>(msg.Contents.Count);
-                foreach (var content in msg.Contents)
-                {
-                    if (content is FunctionResultContent frc)
-                    {
-                        var resultStr = frc.Result?.ToString();
-                        if (resultStr is not null && resultStr.Length > limits.MaxToolResultChars)
-                        {
-                            // Spill full result to store, return summary + handle
-                            var toolName = frc.CallId ?? "unknown";
-                            var handle = store.Store(toolName, resultStr);
-                            var previewLen = Math.Max(limits.MaxToolResultChars / 2, 500);
-                            var preview = resultStr[..Math.Min(previewLen, resultStr.Length)];
-                            var summary = $"{preview}\n\n" +
-                                $"--- RESULT SPILLED (too large for context) ---\n" +
-                                $"result_id: {handle}\n" +
-                                $"total_chars: {resultStr.Length:#,0}\n" +
-                                $"shown_chars: {preview.Length:#,0}\n" +
-                                $"Use RetrieveToolResult(resultId: \"{handle}\", offset: {preview.Length}) to read more.";
-                            newContents.Add(new FunctionResultContent(frc.CallId ?? "", summary));
-                        }
-                        else
-                        {
-                            newContents.Add(content);
-                        }
-                    }
-                    else
-                    {
-                        newContents.Add(content);
-                    }
-                }
-                yield return new ChatMessage(msg.Role, newContents);
-            }
-        }
-    }
 }

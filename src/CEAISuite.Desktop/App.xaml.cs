@@ -135,7 +135,8 @@ public partial class App : System.Windows.Application
                 chatClient: null,
                 sp.GetRequiredService<AiToolFunctions>(),
                 contextProvider: null,
-                sp.GetRequiredService<AiChatStore>()));
+                sp.GetRequiredService<AiChatStore>(),
+                sp.GetRequiredService<AppSettingsService>()));
 
         // ── Desktop shared services ──
         services.AddSingleton<IProcessContext, ProcessContext>();

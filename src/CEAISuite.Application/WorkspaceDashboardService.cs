@@ -28,7 +28,6 @@ public sealed class WorkspaceDashboardService(
         return CurrentDashboard = new WorkspaceDashboard(
             WorkspaceBootstrap.CreateOverview(),
             processes
-                .Take(25)
                 .Select(process => new RunningProcessOverview(process.Id, process.Name, process.Architecture))
                 .ToArray(),
             recentSessions

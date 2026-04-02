@@ -156,6 +156,7 @@
                                   ToolTip="Select process (Ctrl+P)"
                                   IsEditable="True" IsTextSearchEnabled="True"
                                   DisplayMemberPath="Label"
+                                  MaxDropDownHeight="300"
                                   DropDownOpened="ProcessComboBox_DropDownOpened" />
                         <Button Content="📎 Attach" Padding="8,3" FontSize="11" Click="CmdAttachProcess"
                                 ToolTip="Attach to selected process" />

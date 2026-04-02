@@ -45,10 +45,32 @@ public sealed class WindowsEngineFacade : IEngineFacade
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                return Process.GetProcesses()
-                    .OrderBy(process => process.ProcessName, StringComparer.OrdinalIgnoreCase)
-                    .Select(process => CreateDescriptor(process))
-                    .ToArray();
+                var results = new List<ProcessDescriptor>();
+                var processes = Process.GetProcesses();
+                try
+                {
+                    foreach (var process in processes)
+                    {
+                        try
+                        {
+                            results.Add(CreateDescriptor(process));
+                        }
+                        catch
+                        {
+                            // Process exited between enumeration and descriptor creation — skip it.
+                        }
+                    }
+                }
+                finally
+                {
+                    foreach (var process in processes)
+                    {
+                        try { process.Dispose(); } catch { }
+                    }
+                }
+
+                results.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+                return results;
             },
             cancellationToken);
 

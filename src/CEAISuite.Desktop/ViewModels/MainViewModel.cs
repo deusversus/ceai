@@ -387,8 +387,12 @@ public partial class MainViewModel : ObservableObject
                 StatusMessage = dashboard.StatusMessage
             };
             PopulateProcessCombo();
+            _outputLog.Append("Processes", "Info", $"Process dropdown refreshed: {ProcessComboItems.Count} processes.");
         }
-        catch { /* swallow -- non-critical refresh */ }
+        catch (Exception ex)
+        {
+            _outputLog.Append("Processes", "Error", $"Process dropdown refresh failed: {ex.Message}");
+        }
     }
 
     // ── Undo / Redo ──

@@ -75,6 +75,9 @@
                                 <Separator />
                                 <MenuItem Header="_Reload Skills" Click="ReloadSkills" />
                             </MenuItem>
+                            <MenuItem Header="MCP _Servers">
+                                <MenuItem Header="_Manage Servers…" Click="OpenMcpManager" />
+                            </MenuItem>
                             <MenuItem Header="_Help">
                                 <MenuItem Header="_About CE AI Suite" Click="ShowAbout" />
                             </MenuItem>

@@ -712,6 +712,13 @@ public partial class MainWindow : Window
             _mainVm.ReconfigureAiAfterSkillsChange();
     }
 
+    private void OpenMcpManager(object sender, RoutedEventArgs e)
+    {
+        var window = new McpManagerWindow(_appSettingsService);
+        window.Owner = this;
+        window.ShowDialog();
+    }
+
     private void OpenSkillsFolder(object sender, RoutedEventArgs e) => _mainVm.OpenSkillsFolder();
 
     private void ReloadSkills(object sender, RoutedEventArgs e)

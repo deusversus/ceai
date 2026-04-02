@@ -490,6 +490,7 @@ public sealed class AiOperatorService
             EnableEarlyToolExecution = _appSettings?.EnableEarlyToolExecution ?? false,
             ModelSwitcher = _modelSwitcher,
             PromptCacheOptimizer = _promptCacheOptimizer,
+            MicroCompaction = new MicroCompaction(log: Log),
         }, _toolAttributeCache);
 
         // Build subagent manager and plan executor using the same options

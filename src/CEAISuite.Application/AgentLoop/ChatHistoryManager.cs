@@ -164,6 +164,30 @@ public sealed class ChatHistoryManager
     }
 
     /// <summary>
+    /// Replace the content of a specific FunctionResultContent by its call ID.
+    /// Used by microcompaction to prune oversized results without removing messages.
+    /// </summary>
+    public bool ReplaceToolResult(string callId, string newContent)
+    {
+        lock (_lock)
+        {
+            foreach (var msg in _messages)
+            {
+                if (msg.Role != ChatRole.Tool) continue;
+                for (int j = 0; j < msg.Contents.Count; j++)
+                {
+                    if (msg.Contents[j] is FunctionResultContent frc && frc.CallId == callId)
+                    {
+                        msg.Contents[j] = new FunctionResultContent(callId, newContent);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Replay saved chat messages into the history for session restoration.
     /// Reconstructs FunctionCallContent and FunctionResultContent from metadata,
     /// spilling large results to the store.

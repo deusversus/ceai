@@ -15,6 +15,12 @@ public sealed class RetryPolicy
     private readonly Action<string, string>? _log;
     private int _consecutiveOverloadCount;
 
+    /// <summary>If retry-after exceeds this, switch to fallback model immediately instead of waiting.</summary>
+    private const int FastFallbackRetryAfterSeconds = 30;
+
+    /// <summary>Duration to stay on the fallback model after a fast-mode trigger.</summary>
+    public static readonly TimeSpan FastModeCooldownDuration = TimeSpan.FromMinutes(5);
+
     public RetryPolicy(
         int maxRetries = 10,
         TimeSpan? baseDelay = null,
@@ -52,8 +58,15 @@ public sealed class RetryPolicy
         public static RetryResult<T> TokenOverflow(int adjustedMax) => new() { AdjustedMaxTokens = adjustedMax };
         public bool NeedsModelFallback { get; init; }
 
+        /// <summary>
+        /// True if the fallback is due to repeated short-delay overloads (cooldown).
+        /// False if due to a single long-delay retry-after (immediate switch).
+        /// </summary>
+        public bool NeedsFastModeCooldown { get; init; }
+
         public static RetryResult<T> Failure(Exception ex) => new() { Exception = ex };
         public static RetryResult<T> ModelFallback() => new() { NeedsModelFallback = true };
+        public static RetryResult<T> ModelFallbackWithCooldown() => new() { NeedsModelFallback = true, NeedsFastModeCooldown = true };
     }
 
     /// <summary>
@@ -109,16 +122,29 @@ public sealed class RetryPolicy
                     return RetryResult<T>.TokenOverflow(available);
                 }
 
-                // Track consecutive 529 overloaded errors → model fallback
+                // Track consecutive overloaded errors → model fallback (differentiated by retry-after)
                 if (ErrorClassifier.IsOverloaded(ex))
                 {
                     _consecutiveOverloadCount++;
+                    var retryAfterForFallback = ErrorClassifier.ParseRetryAfter(ex);
+
+                    // Long delay: signal immediate model fallback instead of waiting
+                    if (retryAfterForFallback.HasValue
+                        && retryAfterForFallback.Value.TotalSeconds > FastFallbackRetryAfterSeconds)
+                    {
+                        _log?.Invoke("RETRY", $"Long retry-after ({retryAfterForFallback.Value.TotalSeconds}s) — signaling immediate model fallback");
+                        return RetryResult<T>.ModelFallback();
+                    }
+
+                    // Short delay but repeated: trigger cooldown fallback after 3 consecutive
                     _log?.Invoke("RETRY", $"Consecutive overload errors: {_consecutiveOverloadCount}");
                     if (_consecutiveOverloadCount >= 3)
                     {
-                        _log?.Invoke("RETRY", "3 consecutive overload errors — signaling model fallback");
-                        return RetryResult<T>.ModelFallback();
+                        _log?.Invoke("RETRY", "3 consecutive short-delay overload errors — signaling model fallback with cooldown");
+                        return RetryResult<T>.ModelFallbackWithCooldown();
                     }
+
+                    // Short delay, not yet at threshold: normal retry with backoff
                 }
                 else
                 {

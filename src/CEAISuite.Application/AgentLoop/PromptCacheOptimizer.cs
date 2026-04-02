@@ -31,9 +31,10 @@ public sealed class PromptCacheOptimizer
 
     /// <summary>
     /// Build an optimized system prompt from sections. Static sections are placed
-    /// first for better prefix caching. Returns the concatenated prompt.
+    /// first for better prefix caching. Returns a <see cref="PromptCacheResult"/>
+    /// with both flat text and structured blocks for API-level cache control.
     /// </summary>
-    public string Build(IEnumerable<PromptSection> sections)
+    public PromptCacheResult Build(IEnumerable<PromptSection> sections)
     {
         var sectionList = sections.ToList();
 
@@ -54,14 +55,18 @@ public sealed class PromptCacheOptimizer
                 .ToList();
 
             var sb = new StringBuilder();
+            var blocks = new List<PromptCacheBlock>(ordered.Count);
+
             foreach (var section in ordered)
             {
                 var hash = ComputeHash(section.Content);
+                bool isUnchanged;
                 if (_sectionHashes.TryGetValue(section.Name, out var existingHash) && existingHash == hash)
                 {
                     // Cache hit — content unchanged
                     LastCacheHits++;
                     sb.AppendLine(_cachedSections[section.Name]);
+                    isUnchanged = true;
                 }
                 else
                 {
@@ -69,11 +74,23 @@ public sealed class PromptCacheOptimizer
                     _sectionHashes[section.Name] = hash;
                     _cachedSections[section.Name] = section.Content;
                     sb.AppendLine(section.Content);
+                    isUnchanged = false;
                 }
+
+                blocks.Add(new PromptCacheBlock
+                {
+                    Text = section.Content,
+                    Scope = section.CacheScope,
+                    IsUnchanged = isUnchanged,
+                });
             }
 
             _log?.Invoke("CACHE", $"Prompt sections: {LastCacheHits}/{LastTotalSections} cache hits");
-            return sb.ToString();
+            return new PromptCacheResult
+            {
+                FlatText = sb.ToString(),
+                Blocks = blocks,
+            };
         }
     }
 
@@ -92,6 +109,39 @@ public sealed class PromptCacheOptimizer
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(content));
         return Convert.ToHexString(bytes)[..16]; // First 8 bytes is enough
     }
+}
+
+/// <summary>
+/// Result of building the optimized prompt. Contains both a flat text string
+/// (for providers that don't support caching) and structured blocks with
+/// cache control metadata (for Anthropic API-level cache_control headers).
+/// </summary>
+public sealed record PromptCacheResult
+{
+    /// <summary>The full concatenated prompt text (for providers that don't support caching).</summary>
+    public required string FlatText { get; init; }
+
+    /// <summary>Structured sections with cache control metadata (for Anthropic).</summary>
+    public required IReadOnlyList<PromptCacheBlock> Blocks { get; init; }
+}
+
+/// <summary>
+/// A single block of the system prompt with cache scope and change detection.
+/// Used to set <c>cache_control: { type: "ephemeral" }</c> on Anthropic API calls.
+/// </summary>
+public sealed record PromptCacheBlock
+{
+    /// <summary>The prompt text content.</summary>
+    public required string Text { get; init; }
+
+    /// <summary>Cache scope for this block.</summary>
+    public required PromptCacheScope Scope { get; init; }
+
+    /// <summary>
+    /// Whether this block's content is unchanged since the last build.
+    /// Only unchanged Static/Session blocks benefit from server-side caching.
+    /// </summary>
+    public required bool IsUnchanged { get; init; }
 }
 
 /// <summary>A section of the system prompt with its cache scope.</summary>

@@ -152,4 +152,10 @@ public sealed class AgentLoopOptions
     /// unchanged sections are memoized via SHA256 hashing.
     /// </summary>
     public PromptCacheOptimizer? PromptCacheOptimizer { get; init; }
+
+    /// <summary>
+    /// Optional microcompaction engine. When set, old oversized tool results
+    /// are pruned after every turn without an LLM call.
+    /// </summary>
+    public MicroCompaction? MicroCompaction { get; init; }
 }

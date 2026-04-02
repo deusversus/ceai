@@ -70,8 +70,14 @@ public sealed record AgentLoopState
     /// <summary>How many times we've attempted max-output-tokens recovery.</summary>
     public int MaxOutputTokensRecoveryCount { get; init; }
 
-    /// <summary>Whether a reactive compaction has already been attempted this loop.</summary>
-    public bool HasAttemptedCompaction { get; init; }
+    /// <summary>Number of consecutive compaction failures. Reset to 0 on success.</summary>
+    public int ConsecutiveCompactionFailures { get; init; }
+
+    /// <summary>Turn number of the last successful compaction (to avoid compacting every turn).</summary>
+    public int LastCompactionTurn { get; init; } = -1;
+
+    /// <summary>Maximum consecutive compaction failures before the circuit breaker trips.</summary>
+    public const int MaxConsecutiveCompactionFailures = 3;
 
     /// <summary>
     /// Consecutive turns where the LLM produced fewer than 500 output tokens.

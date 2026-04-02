@@ -30,51 +30,62 @@ public sealed class CompactionPipeline
     }
 
     /// <summary>
-    /// Run the compaction pipeline on the history. Returns true if any compaction occurred.
+    /// Run the compaction pipeline on the history. Returns a <see cref="CompactionResult"/>
+    /// with success/failure, token counts before and after.
     /// Stages are applied in order; each stage checks its trigger condition before running.
     /// </summary>
-    public async Task<bool> CompactAsync(
+    public async Task<CompactionResult> CompactAsync(
         ChatHistoryManager history,
         CancellationToken cancellationToken = default)
     {
+        int tokensBefore = history.EstimateTokens();
         bool compacted = false;
 
-        // Stage 1: Tool result collapse
-        if (CountToolResultMessages(history) > _limits.CompactionToolResultMessages)
+        try
         {
-            _log?.Invoke("COMPACT", $"Stage 1: Collapsing old tool results (>{_limits.CompactionToolResultMessages} messages)");
-            CollapseToolResults(history);
-            compacted = true;
-        }
+            // Stage 1: Tool result collapse
+            if (CountToolResultMessages(history) > _limits.CompactionToolResultMessages)
+            {
+                _log?.Invoke("COMPACT", $"Stage 1: Collapsing old tool results (>{_limits.CompactionToolResultMessages} messages)");
+                CollapseToolResults(history);
+                compacted = true;
+            }
 
-        // Stage 2: LLM summarization
-        if (history.EstimateTokens() > _limits.CompactionSummarizationTokens)
+            // Stage 2: LLM summarization
+            if (history.EstimateTokens() > _limits.CompactionSummarizationTokens)
+            {
+                _log?.Invoke("COMPACT", $"Stage 2: LLM summarization (~{history.EstimateTokens():#,0} tokens > {_limits.CompactionSummarizationTokens:#,0})");
+                await SummarizeOlderMessages(history, cancellationToken);
+                compacted = true;
+            }
+
+            // Stage 3: Sliding window
+            if (history.CountUserTurns() > _limits.CompactionSlidingWindowTurns)
+            {
+                _log?.Invoke("COMPACT", $"Stage 3: Sliding window ({history.CountUserTurns()} turns > {_limits.CompactionSlidingWindowTurns})");
+                ApplySlidingWindow(history);
+                compacted = true;
+            }
+
+            // Stage 4: Emergency truncation
+            if (history.EstimateTokens() > _limits.CompactionTruncationTokens)
+            {
+                _log?.Invoke("COMPACT", $"Stage 4: Emergency truncation (~{history.EstimateTokens():#,0} tokens > {_limits.CompactionTruncationTokens:#,0})");
+                TruncateOldest(history);
+                compacted = true;
+            }
+
+            int tokensAfter = history.EstimateTokens();
+            if (compacted)
+                _log?.Invoke("COMPACT", $"Compaction complete: ~{tokensAfter:#,0} tokens (was {tokensBefore:#,0}), {history.Count} messages");
+
+            return new CompactionResult(compacted, tokensBefore, tokensAfter);
+        }
+        catch (Exception ex)
         {
-            _log?.Invoke("COMPACT", $"Stage 2: LLM summarization (~{history.EstimateTokens():#,0} tokens > {_limits.CompactionSummarizationTokens:#,0})");
-            await SummarizeOlderMessages(history, cancellationToken);
-            compacted = true;
+            _log?.Invoke("COMPACT", $"Compaction failed: {ex.Message}");
+            return new CompactionResult(false, tokensBefore, history.EstimateTokens());
         }
-
-        // Stage 3: Sliding window
-        if (history.CountUserTurns() > _limits.CompactionSlidingWindowTurns)
-        {
-            _log?.Invoke("COMPACT", $"Stage 3: Sliding window ({history.CountUserTurns()} turns > {_limits.CompactionSlidingWindowTurns})");
-            ApplySlidingWindow(history);
-            compacted = true;
-        }
-
-        // Stage 4: Emergency truncation
-        if (history.EstimateTokens() > _limits.CompactionTruncationTokens)
-        {
-            _log?.Invoke("COMPACT", $"Stage 4: Emergency truncation (~{history.EstimateTokens():#,0} tokens > {_limits.CompactionTruncationTokens:#,0})");
-            TruncateOldest(history);
-            compacted = true;
-        }
-
-        if (compacted)
-            _log?.Invoke("COMPACT", $"Compaction complete: ~{history.EstimateTokens():#,0} tokens, {history.Count} messages");
-
-        return compacted;
     }
 
     /// <summary>
@@ -105,6 +116,34 @@ public sealed class CompactionPipeline
 
     // ── Stage 2: LLM summarization ──
 
+    private const string SummarizationPrompt =
+        """
+        You are summarizing an AI-assisted memory analysis conversation for context compaction.
+        The summary REPLACES the original messages — the AI will only see your summary going forward.
+
+        PRESERVE with exact values (these are critical and cannot be re-derived):
+        - Memory addresses (hex), offsets, and pointer chains
+        - Data types, struct layouts, and field sizes
+        - Scan results: value type, scan parameters, number of results, key addresses found
+        - Byte sequences, patterns, and signatures
+        - AOB (array of bytes) patterns and their locations
+        - Breakpoint addresses and hit conditions
+        - Code cave addresses and injected code
+        - Cheat table entries and their activation state
+        - All tool calls that CHANGED state (writes, patches, breakpoints) with their exact parameters
+        - Error messages and their resolution
+
+        DROP (these can be re-derived by re-running tools):
+        - Raw memory dump output (keep only the interpretation/findings)
+        - Full disassembly listings (keep only the key instructions referenced)
+        - Large scan result lists (keep the count and top addresses)
+        - Module list output (keep only modules that were actually referenced)
+        - Routine status messages and tool call confirmations
+
+        FORMAT: Use a structured format with headers. Be factual and terse.
+        Start with "## Compacted Session Summary" and organize by topic, not chronology.
+        """;
+
     private async Task SummarizeOlderMessages(
         ChatHistoryManager history,
         CancellationToken ct)
@@ -126,14 +165,10 @@ public sealed class CompactionPipeline
         {
             var summaryResponse = await _summarizationClient.GetResponseAsync(
                 [
-                    new ChatMessage(ChatRole.System,
-                        "Summarize the following conversation concisely. " +
-                        "Preserve: key findings, addresses, data types, values, tool results, and decisions. " +
-                        "Drop: routine tool calls, intermediate steps, and verbose outputs. " +
-                        "Be factual and terse — this summary replaces the original messages."),
+                    new ChatMessage(ChatRole.System, SummarizationPrompt),
                     new ChatMessage(ChatRole.User, summaryText),
                 ],
-                new ChatOptions { MaxOutputTokens = 2048, Temperature = 0.1f },
+                new ChatOptions { MaxOutputTokens = 4096, Temperature = 0.1f },
                 ct);
 
             var summary = summaryResponse.Text ?? "[summary unavailable]";
@@ -143,7 +178,9 @@ public sealed class CompactionPipeline
             var compacted = new List<ChatMessage>
             {
                 new(ChatRole.User,
-                    $"<system-reminder>\n## Conversation Summary (compacted)\n{summary}\n</system-reminder>")
+                    $"<result>\n{summary}\n</result>\n\n" +
+                    "The above is a compacted summary of earlier work in this session. " +
+                    "Treat it as authoritative — do not ask the user to repeat information that appears in the summary.")
             };
             compacted.AddRange(toKeep);
 
@@ -246,4 +283,14 @@ public sealed class CompactionPipeline
         }
         return chars / 4;
     }
+}
+
+/// <summary>
+/// Result of a compaction pipeline run. Allows callers to distinguish success
+/// from failure and track token savings.
+/// </summary>
+public sealed record CompactionResult(bool Success, int TokensBefore, int TokensAfter)
+{
+    /// <summary>Number of tokens freed by compaction.</summary>
+    public int TokensSaved => TokensBefore - TokensAfter;
 }

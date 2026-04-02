@@ -14,6 +14,7 @@ public sealed class HookRegistry
 {
     private readonly List<PreToolHook> _preHooks = [];
     private readonly List<PostToolHook> _postHooks = [];
+    private readonly List<PostToolFailureHook> _postFailureHooks = [];
     private readonly List<PreLlmHook> _preLlmHooks = [];
     private readonly List<PostLlmHook> _postLlmHooks = [];
     private readonly List<PreCompactionHook> _preCompactionHooks = [];
@@ -31,8 +32,11 @@ public sealed class HookRegistry
     /// <summary>Register a hook that fires before a tool executes.</summary>
     public void AddPreToolHook(PreToolHook hook) { lock (_hooksLock) _preHooks.Add(hook); }
 
-    /// <summary>Register a hook that fires after a tool completes.</summary>
+    /// <summary>Register a hook that fires after a tool completes successfully.</summary>
     public void AddPostToolHook(PostToolHook hook) { lock (_hooksLock) _postHooks.Add(hook); }
+
+    /// <summary>Register a hook that fires only when a tool execution fails.</summary>
+    public void AddPostToolFailureHook(PostToolFailureHook hook) { lock (_hooksLock) _postFailureHooks.Add(hook); }
 
     /// <summary>Register a hook that fires before an LLM call (can modify messages).</summary>
     public void AddPreLlmHook(PreLlmHook hook) { lock (_hooksLock) _preLlmHooks.Add(hook); }
@@ -59,6 +63,7 @@ public sealed class HookRegistry
         {
             _preHooks.Clear();
             _postHooks.Clear();
+            _postFailureHooks.Clear();
             _preLlmHooks.Clear();
             _postLlmHooks.Clear();
             _preCompactionHooks.Clear();
@@ -113,7 +118,7 @@ public sealed class HookRegistry
         return HookResult.Continue();
     }
 
-    /// <summary>Run all post-tool hooks after a tool completes.</summary>
+    /// <summary>Run all post-tool hooks after a tool completes successfully.</summary>
     public async Task RunPostToolHooksAsync(ToolHookContext context, string result, bool isError, CancellationToken ct)
     {
         List<PostToolHook> snapshot;
@@ -134,6 +139,42 @@ public sealed class HookRegistry
                 _log?.Invoke("HOOK", $"Post-tool [{hook.Name}] failed: {ex.Message}");
             }
         }
+    }
+
+    /// <summary>
+    /// Run all post-tool failure hooks when a tool execution fails.
+    /// Returns a combined <see cref="PostFailureAction"/> if any hook provides one.
+    /// </summary>
+    public async Task<PostFailureAction?> RunPostToolFailureHooksAsync(
+        ToolHookContext context, string errorMessage, bool wasInterrupted, CancellationToken ct)
+    {
+        List<PostToolFailureHook> snapshot;
+        lock (_hooksLock) snapshot = _postFailureHooks.ToList();
+
+        PostFailureAction? combinedAction = null;
+        foreach (var hook in snapshot)
+        {
+            if (!hook.MatchesToolPattern(context.ToolName)) continue;
+            try
+            {
+                var action = await hook.ExecuteAsync(context, errorMessage, wasInterrupted, ct);
+                if (action is not null)
+                {
+                    // Merge: last non-null RetryHint wins, any SuppressDetailedError wins
+                    combinedAction = new PostFailureAction
+                    {
+                        RetryHint = action.RetryHint ?? combinedAction?.RetryHint,
+                        SuppressDetailedError = action.SuppressDetailedError || (combinedAction?.SuppressDetailedError ?? false),
+                    };
+                }
+                _log?.Invoke("HOOK", $"PostFailure [{hook.Name}] on {context.ToolName}");
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke("HOOK", $"PostFailure [{hook.Name}] error: {ex.Message}");
+            }
+        }
+        return combinedAction;
     }
 
     /// <summary>
@@ -344,9 +385,13 @@ public sealed record HookResult
 
     public static HookResult Blocked(string reason)
         => new() { Outcome = HookOutcome.Block, Message = reason };
+
+    /// <summary>Hook explicitly grants permission (skips the Ask prompt but NOT Deny rules).</summary>
+    public static HookResult Allowed(string? reason = null)
+        => new() { Outcome = HookOutcome.Allow, Message = reason };
 }
 
-public enum HookOutcome { Continue, Block }
+public enum HookOutcome { Continue, Block, Allow }
 
 /// <summary>What happens when a hook itself throws an exception.</summary>
 public enum HookFailurePolicy
@@ -397,6 +442,41 @@ public abstract class PostToolHook
     }
 
     public abstract Task ExecuteAsync(ToolHookContext context, string result, bool isError, CancellationToken ct);
+}
+
+/// <summary>
+/// A hook that fires ONLY when a tool execution fails (throws or returns an error).
+/// Separate from PostToolHook which fires on all completions.
+/// Use this for: cleanup actions, error alerting, retry hint injection, undo operations.
+/// </summary>
+public abstract class PostToolFailureHook
+{
+    public string Name { get; }
+    public string? ToolPattern { get; init; }
+
+    protected PostToolFailureHook(string name) => Name = name;
+
+    public bool MatchesToolPattern(string toolName)
+    {
+        if (ToolPattern is null or "*") return true;
+        return PermissionRule.GlobMatch(toolName, ToolPattern);
+    }
+
+    /// <param name="context">Tool call context (name, args, turn number).</param>
+    /// <param name="errorMessage">The error message or exception text from the failed tool.</param>
+    /// <param name="wasInterrupted">True if the tool was interrupted (cancelled), not just errored.</param>
+    public abstract Task<PostFailureAction?> ExecuteAsync(
+        ToolHookContext context, string errorMessage, bool wasInterrupted, CancellationToken ct);
+}
+
+/// <summary>Action to take after a tool failure hook runs.</summary>
+public sealed record PostFailureAction
+{
+    /// <summary>If set, inject this message into the tool result as a hint for the LLM.</summary>
+    public string? RetryHint { get; init; }
+
+    /// <summary>If true, the tool result should be replaced with a generic error (suppress details).</summary>
+    public bool SuppressDetailedError { get; init; }
 }
 
 /// <summary>A hook that runs before each LLM API call. Can block the call.</summary>

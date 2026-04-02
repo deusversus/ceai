@@ -19,6 +19,8 @@ public sealed class ModelSwitcher
     private readonly object _lock = new();
     private int _currentIndex;
     private readonly Action<string, string>? _log;
+    private DateTime? _cooldownUntil;
+    private int _originalIndex;
 
     public ModelSwitcher(IEnumerable<ModelConfig> models, Action<string, string>? log = null)
     {
@@ -96,6 +98,38 @@ public sealed class ModelSwitcher
         {
             _currentIndex = 0;
             _log?.Invoke("MODEL", $"Reset to primary model: {_models[0].ModelId}");
+        }
+    }
+
+    /// <summary>
+    /// Switch to fallback model temporarily. After the cooldown period,
+    /// <see cref="CheckCooldownExpiry"/> restores the original model.
+    /// </summary>
+    public void TriggerCooldown(TimeSpan duration)
+    {
+        lock (_lock)
+        {
+            _originalIndex = _currentIndex;
+            _cooldownUntil = DateTime.UtcNow + duration;
+            if (_currentIndex < _models.Count - 1)
+            {
+                _currentIndex++;
+                _log?.Invoke("MODEL", $"Fast-mode cooldown: using {_models[_currentIndex].ModelId} for {duration.TotalMinutes:F0}m");
+            }
+        }
+    }
+
+    /// <summary>Check if cooldown has expired and restore the original model.</summary>
+    public void CheckCooldownExpiry()
+    {
+        lock (_lock)
+        {
+            if (_cooldownUntil.HasValue && DateTime.UtcNow >= _cooldownUntil.Value)
+            {
+                _log?.Invoke("MODEL", $"Fast-mode cooldown expired — restoring model: {_models[_originalIndex].ModelId}");
+                _currentIndex = _originalIndex;
+                _cooldownUntil = null;
+            }
         }
     }
 

@@ -128,6 +128,9 @@ public sealed class AgentLoop
                 break;
             }
 
+            // Check cooldown expiry for model switcher (fast-mode fallback recovery)
+            _options.ModelSwitcher?.CheckCooldownExpiry();
+
             _log?.Invoke("LOOP", $"Turn {state.TurnCount} (transition: {state.Transition})");
 
             // Build ChatOptions for this turn
@@ -270,23 +273,50 @@ public sealed class AgentLoop
                 break;
             }
 
-            // Check if compaction is needed
-            if (_compactionPipeline.ShouldCompact(history) && !state.HasAttemptedCompaction)
+            // Microcompaction: prune oversized old tool results (no API call)
+            if (_options.MicroCompaction is { } mc)
+                mc.Prune(history);
+
+            // Check if compaction is needed (circuit breaker pattern)
+            bool circuitBreakerOpen = state.ConsecutiveCompactionFailures >= AgentLoopState.MaxConsecutiveCompactionFailures;
+            bool cooldownExpired = state.TurnCount - state.LastCompactionTurn >= 2; // Don't compact on consecutive turns
+            if (_compactionPipeline.ShouldCompact(history) && !circuitBreakerOpen && cooldownExpired)
             {
                 _log?.Invoke("LOOP", "Compaction triggered");
                 var snapshot = PostCompactionRestorer.CaptureSnapshot(
                     history, activeCategories ?? new HashSet<string>(), contextProvider);
 
-                var didCompact = await _compactionPipeline.CompactAsync(history, ct);
-                if (didCompact)
+                var compactionResult = await _compactionPipeline.CompactAsync(history, ct);
+                if (compactionResult.Success)
                 {
                     PostCompactionRestorer.Restore(history, snapshot);
-                    state = state with { HasAttemptedCompaction = true };
+                    state = state with
+                    {
+                        ConsecutiveCompactionFailures = 0,
+                        LastCompactionTurn = state.TurnCount,
+                    };
+
+                    // Post-restoration safety check: if still over threshold, run microcompaction
+                    if (_options.MicroCompaction is { } mc2 && _compactionPipeline.ShouldCompact(history))
+                    {
+                        _log?.Invoke("COMPACT", "Post-restoration still over threshold — running microcompaction");
+                        mc2.Prune(history);
+                    }
 
                     // Notify UI that old messages were compacted away
                     await channel.WriteAsync(new AgentStreamEvent.Tombstone("compacted"), ct);
                     await channel.WriteAsync(new AgentStreamEvent.ContentReplace(
                         "compacted", "[Context compacted — earlier messages summarized]"), ct);
+                }
+                else
+                {
+                    state = state with
+                    {
+                        ConsecutiveCompactionFailures = state.ConsecutiveCompactionFailures + 1,
+                        LastCompactionTurn = state.TurnCount,
+                    };
+                    if (state.ConsecutiveCompactionFailures >= AgentLoopState.MaxConsecutiveCompactionFailures)
+                        _log?.Invoke("COMPACT", $"Circuit breaker tripped after {state.ConsecutiveCompactionFailures} consecutive failures — skipping future compaction attempts");
                 }
             }
         }
@@ -378,12 +408,14 @@ public sealed class AgentLoop
             return (val.assistantText, val.toolCalls, val.outputTokens, val.finishReason, val.speculativeTasks);
         }
 
-        if (retryResult.NeedsCompaction && !state.HasAttemptedCompaction)
+        if (retryResult.NeedsCompaction
+            && state.ConsecutiveCompactionFailures < AgentLoopState.MaxConsecutiveCompactionFailures)
         {
-            _log?.Invoke("LOOP", "Prompt too long — triggering compaction and retry (one-shot)");
-            await _compactionPipeline.CompactAsync(history, ct);
-            // Single retry after compaction — carry forward existing state to prevent infinite recursion
-            var compactedState = state with { HasAttemptedCompaction = true };
+            _log?.Invoke("LOOP", "Prompt too long — triggering compaction and retry");
+            var compactionResult = await _compactionPipeline.CompactAsync(history, ct);
+            var compactedState = compactionResult.Success
+                ? state with { ConsecutiveCompactionFailures = 0, LastCompactionTurn = state.TurnCount }
+                : state with { ConsecutiveCompactionFailures = state.ConsecutiveCompactionFailures + 1, LastCompactionTurn = state.TurnCount };
             return await CallLlmWithRetry(history, BuildChatOptions(compactedState), channel,
                 compactedState, ct);
         }
@@ -392,11 +424,17 @@ public sealed class AgentLoop
         {
             if (_options.ModelSwitcher is { } switcher)
             {
+                // Differentiated fallback: cooldown (temporary) vs permanent switch
+                if (retryResult.NeedsFastModeCooldown)
+                {
+                    switcher.TriggerCooldown(RetryPolicy.FastModeCooldownDuration);
+                    return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct);
+                }
+
                 var fallback = switcher.FallbackToNext();
                 if (fallback is not null)
                 {
                     _log?.Invoke("LOOP", $"Model fallback: switching to {fallback.ModelId}");
-                    // Retry with current state — the model switch takes effect on next LLM call
                     return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct);
                 }
                 _log?.Invoke("LOOP", "Model fallback exhausted — no more fallback models");
@@ -471,6 +509,7 @@ public sealed class AgentLoop
         // The optimizer orders sections Static→Session→Volatile for maximum prefix cache hits
         // and memoizes unchanged sections to avoid re-serialization.
         string systemPrompt;
+        PromptCacheResult? cacheResult = null;
         if (_options.PromptCacheOptimizer is { } optimizer)
         {
             var sections = new List<PromptSection>
@@ -492,7 +531,8 @@ public sealed class AgentLoop
                     sections.Add(new PromptSection { Name = "memory", Content = memText, CacheScope = PromptCacheScope.Session });
             }
 
-            systemPrompt = optimizer.Build(sections);
+            cacheResult = optimizer.Build(sections);
+            systemPrompt = cacheResult.FlatText;
         }
         else
         {
@@ -541,6 +581,36 @@ public sealed class AgentLoop
             && _options.ContextManagementStrategies is { Count: > 0 } strategies)
         {
             additionalProps["context_management"] = ContextManagementSerializer.Serialize(strategies);
+        }
+
+        // Anthropic-only: API-level cache_control headers for server-side prompt prefix caching.
+        // Place cache breakpoints at the end of each Static/Session scope boundary.
+        // Anthropic supports up to 4 breakpoints per request.
+        if (_options.Provider == ProviderKind.Anthropic && cacheResult is { Blocks.Count: > 0 })
+        {
+            var breakpoints = new List<int>(); // Indices of blocks that get cache_control
+            PromptCacheScope? lastScope = null;
+            for (int i = 0; i < cacheResult.Blocks.Count; i++)
+            {
+                var block = cacheResult.Blocks[i];
+                // Place breakpoint at the last block of each cacheable scope
+                if (lastScope.HasValue && block.Scope != lastScope.Value
+                    && lastScope.Value is PromptCacheScope.Static or PromptCacheScope.Session)
+                {
+                    breakpoints.Add(i - 1);
+                }
+                lastScope = block.Scope;
+            }
+            // Also add breakpoint at the end of the last cacheable scope
+            if (lastScope is PromptCacheScope.Static or PromptCacheScope.Session)
+                breakpoints.Add(cacheResult.Blocks.Count - 1);
+
+            // Limit to 4 breakpoints (Anthropic API max)
+            if (breakpoints.Count > 4)
+                breakpoints = breakpoints.Take(4).ToList();
+
+            if (breakpoints.Count > 0)
+                additionalProps["cache_control_breakpoints"] = breakpoints;
         }
 
         if (additionalProps.Count > 0)

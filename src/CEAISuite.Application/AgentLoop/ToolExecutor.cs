@@ -214,12 +214,8 @@ public sealed class ToolExecutor
                 var call = item.Call;
                 var toolName = call.Name ?? "unknown";
 
-                // Permission check (parallel tools can still be subject to rules)
-                var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, ct);
-                if (permResult is not null)
-                    return (item.Index, Result: (permResult.Result.Result?.ToString() ?? "denied", true));
-
-                // Pre-tool hooks
+                // Pre-tool hooks (run BEFORE permission check)
+                bool hookGrantedPermission = false;
                 if (_options.Hooks is { } hooks)
                 {
                     var hookCtx = new ToolHookContext
@@ -235,14 +231,54 @@ public sealed class ToolExecutor
                         var msg = hookResult.Message ?? $"Tool '{toolName}' blocked by hook";
                         return (item.Index, Result: (msg, true));
                     }
+                    if (hookResult.Outcome == HookOutcome.Allow)
+                        hookGrantedPermission = true;
+                }
+
+                // Permission check (skip Ask if hook granted, but still enforce Deny)
+                if (!hookGrantedPermission)
+                {
+                    var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, ct);
+                    if (permResult is not null)
+                        return (item.Index, Result: (permResult.Result.Result?.ToString() ?? "denied", true));
+                }
+                else if (_options.PermissionEngine is { } engine)
+                {
+                    var decision = engine.Evaluate(toolName, call.Arguments);
+                    if (decision.Effect == PermissionEffect.Deny)
+                    {
+                        var reason = decision.MatchedRule?.Description ?? "denied by permission rule";
+                        return (item.Index, Result: ($"Tool '{toolName}' blocked: {reason}", true));
+                    }
                 }
 
                 // Invoke tool
                 var result = await InvokeToolAsync(call, ct);
                 Interlocked.Increment(ref _totalToolCalls);
 
-                // Post-tool hooks
-                if (_options.Hooks is { } postHooks)
+                // Post-tool hooks: failure hooks for errors, success hooks for success
+                if (result.IsError && _options.Hooks is { } failHooks)
+                {
+                    var hookCtx = new ToolHookContext
+                    {
+                        ToolName = toolName,
+                        Arguments = call.Arguments,
+                        TurnNumber = TurnNumber,
+                        TotalToolCalls = _totalToolCalls,
+                    };
+                    var failureAction = await failHooks.RunPostToolFailureHooksAsync(
+                        hookCtx, result.Result, wasInterrupted: false, ct);
+                    if (failureAction is not null)
+                    {
+                        var modifiedResult = result.Result;
+                        if (failureAction.SuppressDetailedError)
+                            modifiedResult = $"Tool '{toolName}' failed. Details suppressed by hook.";
+                        if (failureAction.RetryHint is { } hint)
+                            modifiedResult += $"\n[HINT] {hint}";
+                        return (item.Index, Result: (modifiedResult, true));
+                    }
+                }
+                else if (!result.IsError && _options.Hooks is { } postHooks)
                 {
                     var hookCtx = new ToolHookContext
                     {
@@ -299,12 +335,8 @@ public sealed class ToolExecutor
             return new ToolCallResult(call, CreateResult(call, errorResult), IsError: true);
         }
 
-        // 2. Permission check (rules engine → dangerous tool fallback → approval)
-        var permissionResult = await CheckPermissionAsync(call, toolName, argsStr, channel, cancellationToken);
-        if (permissionResult is not null)
-            return permissionResult; // Denied or error
-
-        // 3. Pre-tool hooks
+        // 2. Pre-tool hooks (run BEFORE permission check — hooks can grant permission via Allow)
+        bool hookGrantedPermission = false;
         if (_options.Hooks is { } hooks)
         {
             var hookCtx = new ToolHookContext
@@ -322,6 +354,29 @@ public sealed class ToolExecutor
                 await EmitCompleted(channel, toolName, argsStr, blockedMsg, isError: true);
                 return new ToolCallResult(call, CreateResult(call, blockedMsg), IsError: true);
             }
+            if (hookResult.Outcome == HookOutcome.Allow)
+                hookGrantedPermission = true;
+        }
+
+        // 3. Permission check (skip Ask if hook granted, but still enforce Deny rules)
+        if (!hookGrantedPermission)
+        {
+            var permissionResult = await CheckPermissionAsync(call, toolName, argsStr, channel, cancellationToken);
+            if (permissionResult is not null)
+                return permissionResult; // Denied or error
+        }
+        else if (_options.PermissionEngine is { } engine)
+        {
+            // Hook granted, but still enforce hard denies
+            var decision = engine.Evaluate(toolName, call.Arguments);
+            if (decision.Effect == PermissionEffect.Deny)
+            {
+                var reason = decision.MatchedRule?.Description ?? "denied by permission rule";
+                var deniedResult = $"Tool '{toolName}' blocked: {reason}";
+                _log?.Invoke("PERMISSION", $"DENIED (override hook allow): {toolName} — {reason}");
+                await EmitCompleted(channel, toolName, argsStr, deniedResult, isError: true);
+                return new ToolCallResult(call, CreateResult(call, deniedResult), IsError: true);
+            }
         }
 
         // 4. Emit started
@@ -333,8 +388,25 @@ public sealed class ToolExecutor
         // 6. Track tool call count
         _totalToolCalls++;
 
-        // 7. Post-tool hooks
-        if (_options.Hooks is { } postHooks)
+        // 7. Post-tool hooks: failure hooks for errors, success hooks for success
+        if (isError && _options.Hooks is { } failureHooks)
+        {
+            var hookCtx = new ToolHookContext
+            {
+                ToolName = toolName,
+                Arguments = call.Arguments,
+                TurnNumber = TurnNumber,
+                TotalToolCalls = _totalToolCalls,
+            };
+            var failureAction = await failureHooks.RunPostToolFailureHooksAsync(
+                hookCtx, resultStr, wasInterrupted: false, cancellationToken);
+
+            if (failureAction?.SuppressDetailedError == true)
+                resultStr = $"Tool '{toolName}' failed. Details suppressed by hook.";
+            if (failureAction?.RetryHint is { } hint)
+                resultStr += $"\n[HINT] {hint}";
+        }
+        else if (!isError && _options.Hooks is { } postHooks)
         {
             var hookCtx = new ToolHookContext
             {

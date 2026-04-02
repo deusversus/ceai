@@ -1447,7 +1447,10 @@
                                                        Margin="0,0,10,0" ToolTip="Agent memory entries" />
                                             <TextBlock Text="{Binding McpStatus}" FontSize="9"
                                                        Foreground="{DynamicResource TertiaryForeground}"
-                                                       ToolTip="MCP server connections" />
+                                                       Margin="0,0,10,0" ToolTip="MCP server connections" />
+                                            <TextBlock Text="{Binding CacheStatus}" FontSize="9"
+                                                       Foreground="{DynamicResource TertiaryForeground}"
+                                                       ToolTip="Prompt cache hit rate" />
                                         </StackPanel>
                                     </StackPanel>
 

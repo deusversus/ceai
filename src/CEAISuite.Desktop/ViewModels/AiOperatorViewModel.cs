@@ -121,6 +121,10 @@ public partial class AiOperatorViewModel : ObservableObject
     [ObservableProperty]
     private string _mcpStatus = "";
 
+    /// <summary>Prompt cache hit rate status.</summary>
+    [ObservableProperty]
+    private string _cacheStatus = "";
+
     // ── Events for MainWindow to subscribe (UI-specific actions) ──
 
     /// <summary>Raised when the chat display needs to scroll to bottom.</summary>
@@ -722,6 +726,13 @@ public partial class AiOperatorViewModel : ObservableObject
         }
 
         McpStatus = _aiOperatorService.GetMcpStatus();
+
+        var cache = _aiOperatorService.PromptCacheOptimizer;
+        if (cache.LastTotalSections > 0)
+        {
+            var hitRate = cache.LastCacheHits / (decimal)cache.LastTotalSections * 100;
+            CacheStatus = $"Cache: {cache.LastCacheHits}/{cache.LastTotalSections} ({hitRate:F0}%)";
+        }
     }
 
     internal Brush FindThemeBrush(string key) => _themeService.FindBrush(key);

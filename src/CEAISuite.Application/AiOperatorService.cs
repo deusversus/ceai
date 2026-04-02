@@ -1152,6 +1152,9 @@ public sealed class AiOperatorService
     /// <summary>Memory system (exposed for UI management).</summary>
     public MemorySystem? Memory => _memorySystem;
 
+    /// <summary>Prompt cache optimizer (exposed for UI cache hit status).</summary>
+    public PromptCacheOptimizer PromptCacheOptimizer => _promptCacheOptimizer;
+
     // ─── Subagent Meta-Tools ────────────────────────────────────────────
 
     [System.ComponentModel.Description("Spawn a focused subagent for a subtask.")]

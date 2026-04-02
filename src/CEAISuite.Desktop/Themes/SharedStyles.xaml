@@ -232,7 +232,8 @@
                                         Background="{DynamicResource InputBackground}"
                                         BorderBrush="{DynamicResource InputBorder}"
                                         BorderThickness="1" CornerRadius="0,0,2,2">
-                                    <ScrollViewer SnapsToDevicePixels="True">
+                                    <ScrollViewer SnapsToDevicePixels="True"
+                                                  VerticalScrollBarVisibility="Auto">
                                         <StackPanel IsItemsHost="True"
                                                     KeyboardNavigation.DirectionalNavigation="Contained" />
                                     </ScrollViewer>

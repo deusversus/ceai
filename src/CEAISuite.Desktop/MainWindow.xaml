@@ -129,7 +129,7 @@
                                 <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
                                 <Setter Property="BorderThickness" Value="1" />
                             </Style>
-                            <Style TargetType="ComboBox">
+                            <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
                                 <Setter Property="Background" Value="{DynamicResource InputBackground}" />
                                 <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
                                 <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />

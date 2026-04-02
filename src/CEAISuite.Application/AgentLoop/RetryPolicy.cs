@@ -91,6 +91,17 @@ public sealed class RetryPolicy
                 _consecutiveOverloadCount = 0; // Reset on success
                 return RetryResult<T>.Ok(result);
             }
+            catch (StreamingTimeoutException stex)
+            {
+                // Streaming stall — retriable (connection-level issue), don't propagate as cancellation
+                lastException = stex;
+                _log?.Invoke("RETRY", $"Streaming idle timeout: {stex.Message}");
+                if (attempt > _maxRetries) break;
+                var stDelay = CalculateDelay(attempt, null);
+                _log?.Invoke("RETRY", $"Retrying in {stDelay.TotalSeconds:F1}s (attempt {attempt + 1})");
+                await Task.Delay(stDelay, cancellationToken);
+                continue;
+            }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw; // User cancellation — don't retry

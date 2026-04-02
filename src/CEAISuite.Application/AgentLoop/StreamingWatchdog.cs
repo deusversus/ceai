@@ -77,7 +77,7 @@ public static class StreamingWatchdog
 /// The retry policy treats this as retriable — it will attempt a non-streaming fallback
 /// or retry the streaming request.
 /// </summary>
-public sealed class StreamingTimeoutException : Exception
+public sealed class StreamingTimeoutException : OperationCanceledException
 {
     public StreamingTimeoutException(string message) : base(message) { }
     public StreamingTimeoutException(string message, Exception inner) : base(message, inner) { }

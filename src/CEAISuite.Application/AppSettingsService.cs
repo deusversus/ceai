@@ -74,13 +74,6 @@ public sealed class AppSettings
     public bool? LimitFilterRegisters { get; set; }
     public bool? LimitDereferenceHookRegisters { get; set; }
 
-    /// <summary>
-    /// Use the new AgentLoop (owns the tool-call loop directly) instead of MAF's
-    /// FunctionInvokingChatClient. Default: true. Set to false to revert to the
-    /// legacy MAF agent path.
-    /// </summary>
-    public bool UseNewAgentLoop { get; set; } = true;
-
     // ── MCP Servers ──
 
     /// <summary>

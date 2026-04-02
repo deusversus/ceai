@@ -5,7 +5,7 @@ namespace CEAISuite.Application.AgentLoop;
 /// <summary>
 /// Manages runtime model switching and automatic fallback chains.
 ///
-/// When the retry policy detects 3 consecutive 529 (overloaded) errors,
+/// When the retry policy detects 3 consecutive overload errors (529, 503, etc.),
 /// it signals model fallback. The AgentLoop calls <see cref="FallbackToNext"/>
 /// to advance to the next model in the chain. Users can also manually switch
 /// via the <c>switch_model</c> meta-tool.

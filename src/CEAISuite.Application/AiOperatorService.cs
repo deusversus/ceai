@@ -250,6 +250,9 @@ public sealed class AiOperatorService
     /// <summary>Current chat title.</summary>
     public string CurrentChatTitle { get; private set; } = "New Chat";
 
+    /// <summary>Per-chat permission mode. Stored on the chat session so each chat keeps its own policy.</summary>
+    public string CurrentPermissionMode { get; private set; } = "Normal";
+
     public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions,
         Func<string>? contextProvider = null, AiChatStore? chatStore = null,
         AppSettingsService? settingsService = null)
@@ -451,20 +454,33 @@ public sealed class AiOperatorService
         if (_appSettings is not null && Enum.TryParse<PermissionMode>(_appSettings.PermissionMode ?? "Normal", true, out var mode))
             permissionEngine.ActiveMode = mode;
 
+        // Determine the active provider for gating provider-specific features
+        var providerKind = ResolveProviderKind();
+
+        // Build provider-aware additional properties
+        AdditionalPropertiesDictionary? additionalProps = null;
+        if (providerKind == ProviderKind.Anthropic)
+        {
+            additionalProps = new AdditionalPropertiesDictionary
+            {
+                ["cache_control"] = new Dictionary<string, string> { ["type"] = "ephemeral" }
+            };
+        }
+
         var loop = new AgentLoop.AgentLoop(client, new AgentLoopOptions
         {
             SystemPrompt = effectiveSystemPrompt,
             Tools = _tools,
+            Provider = providerKind,
             Temperature = 0.3f,
             Limits = Limits,
             ToolResultStore = _toolResultStore,
             DangerousToolNames = DangerousTools.Names,
             MaxTurns = 25,
-            AdditionalProperties = new AdditionalPropertiesDictionary
-            {
-                ["cache_control"] = new Dictionary<string, string> { ["type"] = "ephemeral" }
-            },
-            ContextManagementStrategies = ContextManagementStrategy.AnthropicDefaults,
+            AdditionalProperties = additionalProps,
+            ContextManagementStrategies = providerKind == ProviderKind.Anthropic
+                ? ContextManagementStrategy.AnthropicDefaults
+                : null,
             Budget = _tokenBudget,
             Memory = _memorySystem,
             Log = Log,
@@ -483,12 +499,41 @@ public sealed class AiOperatorService
         return loop;
     }
 
+    /// <summary>Map the settings provider string to the <see cref="ProviderKind"/> enum.</summary>
+    private ProviderKind ResolveProviderKind()
+    {
+        var provider = (_appSettings?.Provider ?? "openai").ToLowerInvariant();
+        return provider switch
+        {
+            "anthropic" => ProviderKind.Anthropic,
+            "copilot" => ProviderKind.Copilot,
+            "openai-compatible" => ProviderKind.OpenAICompatible,
+            "openai" => ProviderKind.OpenAI,
+            _ => ProviderKind.Unknown,
+        };
+    }
+
     /// <summary>
     /// Hot-swap the AI provider without restarting the app.
-    /// Preserves display history and action log; creates a new MAF agent session.
+    /// Preserves display history and action log; creates a new agent session.
     /// </summary>
     /// <summary>Set the dynamic context provider delegate (for late-binding in DI scenarios).</summary>
     public void SetContextProvider(Func<string> provider) => _contextProvider = provider;
+
+    public void SetPermissionMode(string mode)
+    {
+        if (Enum.TryParse<PermissionMode>(mode, true, out var parsed))
+        {
+            // Update the live agent loop's permission engine if active
+            if (_agentLoop?.Options.PermissionEngine is { } engine)
+                engine.ActiveMode = parsed;
+
+            // Store on the current chat session (per-chat, not global)
+            CurrentPermissionMode = mode;
+
+            Log("INFO", $"Permission mode changed to: {mode}");
+        }
+    }
 
     public void Reconfigure(IChatClient? newClient)
     {
@@ -1296,7 +1341,8 @@ public sealed class AiOperatorService
         {
             Id = CurrentChatId,
             Title = CurrentChatTitle,
-            Messages = _displayHistory.ToList()
+            Messages = _displayHistory.ToList(),
+            PermissionMode = CurrentPermissionMode,
         });
 
         // Persist session metadata alongside the chat for cross-session search
@@ -1337,10 +1383,14 @@ public sealed class AiOperatorService
 
         CurrentChatId = $"chat-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}";
         CurrentChatTitle = "New Chat";
+        CurrentPermissionMode = _appSettings?.PermissionMode ?? "Normal";
         ClearHistory();
         _toolResultStore.Clear(); // Discard spilled results from previous chat
         _tokenBudget.Reset(); // Reset cost tracking for new session
         LoadCoreTools(); // Reset to core tools for fresh conversation
+
+        // Apply the default permission mode from settings to the live engine
+        SetPermissionMode(CurrentPermissionMode);
 
         // Fire session start hooks
         if (_agentLoop?.Options.Hooks is { } startHooks)
@@ -1370,6 +1420,7 @@ public sealed class AiOperatorService
 
         CurrentChatId = chatSession.Id;
         CurrentChatTitle = chatSession.Title;
+        CurrentPermissionMode = chatSession.PermissionMode ?? "Normal";
         ClearHistory();
 
         // Restore display history
@@ -1377,6 +1428,9 @@ public sealed class AiOperatorService
 
         // Rebuild agent session history from saved messages
         _historyManager?.ReplayFromSaved(chatSession.Messages, Limits.MaxReplayMessages, Limits, _toolResultStore);
+
+        // Restore the chat's permission mode to the live engine
+        SetPermissionMode(CurrentPermissionMode);
 
         ChatListChanged?.Invoke();
     }

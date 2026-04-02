@@ -14,10 +14,24 @@ public static partial class ErrorClassifier
     public static bool IsRateLimited(Exception ex)
         => GetStatusCode(ex) == 429;
 
-    /// <summary>HTTP 529 Overloaded (Anthropic-specific).</summary>
+    /// <summary>
+    /// Provider is overloaded / capacity-limited. Detects:
+    /// - HTTP 529 (Anthropic "overloaded")
+    /// - HTTP 503 Service Unavailable (OpenAI, generic)
+    /// - "overloaded_error" in message (Anthropic SDK)
+    /// - "server_error" / "capacity" in message (OpenAI)
+    /// </summary>
     public static bool IsOverloaded(Exception ex)
-        => GetStatusCode(ex) == 529
-           || ex.Message.Contains("overloaded_error", StringComparison.OrdinalIgnoreCase);
+    {
+        var status = GetStatusCode(ex);
+        if (status is 529 or 503)
+            return true;
+        var msg = ex.Message;
+        return msg.Contains("overloaded_error", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("overloaded", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("capacity", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("service_unavailable", StringComparison.OrdinalIgnoreCase);
+    }
 
     /// <summary>HTTP 413 or error message indicating prompt exceeds context window.</summary>
     public static bool IsPromptTooLong(Exception ex)
@@ -40,11 +54,11 @@ public static partial class ErrorClassifier
            || ex.Message.Contains("ECONNRESET", StringComparison.OrdinalIgnoreCase)
            || ex.Message.Contains("EPIPE", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>HTTP 5xx server error.</summary>
+    /// <summary>HTTP 5xx server error (excludes 503/529 which are handled as overloaded).</summary>
     public static bool IsServerError(Exception ex)
     {
         var status = GetStatusCode(ex);
-        return status >= 500 && status < 600 && status != 529;
+        return status >= 500 && status < 600 && status is not 503 and not 529;
     }
 
     /// <summary>
@@ -60,12 +74,19 @@ public static partial class ErrorClassifier
         => ex is StreamingTimeoutException;
 
     /// <summary>
-    /// Check if a chat response indicates max output tokens was hit
-    /// (finish_reason = "length" or "max_tokens").
+    /// Check if a chat response indicates max output tokens was hit.
+    /// Handles all known provider finish reasons:
+    /// - "length" (OpenAI, OpenAI-compatible)
+    /// - "max_tokens" (Anthropic)
+    /// - "max_output_tokens" (some OpenAI models)
+    /// - "token_limit" (some compatible providers)
     /// </summary>
     public static bool IsMaxOutputTokens(string? finishReason)
-        => string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(finishReason, "max_tokens", StringComparison.OrdinalIgnoreCase);
+        => finishReason is not null && (
+            string.Equals(finishReason, "length", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(finishReason, "max_tokens", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(finishReason, "max_output_tokens", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(finishReason, "token_limit", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
     /// Parse retry-after header value from an exception's message or data.

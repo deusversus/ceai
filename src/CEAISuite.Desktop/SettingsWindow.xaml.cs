@@ -135,6 +135,26 @@ public partial class SettingsWindow : Window
         LoadLimitBox(LimitMaxChatSearchResults, s.LimitMaxChatSearchResults);
         LimitFilterRegisters.IsChecked = s.LimitFilterRegisters;
         LimitDereferenceHookRegisters.IsChecked = s.LimitDereferenceHookRegisters;
+
+        // Agent tab
+        var permMode = (s.PermissionMode ?? "Normal").ToLowerInvariant();
+        PermModeNormal.IsChecked = permMode == "normal";
+        PermModeReadOnly.IsChecked = permMode == "readonly";
+        PermModePlanOnly.IsChecked = permMode == "planonly";
+        PermModeUnrestricted.IsChecked = permMode == "unrestricted";
+
+        MaxSessionCostBox.Text = s.MaxSessionCostDollars > 0 ? s.MaxSessionCostDollars.ToString("F2") : "";
+        InputPriceBox.Text = s.InputPricePerMillion.ToString("F2");
+        OutputPriceBox.Text = s.OutputPricePerMillion.ToString("F2");
+        CachedInputPriceBox.Text = s.CachedInputPricePerMillion.ToString("F2");
+
+        FallbackModelsBox.Text = s.FallbackModels.Count > 0 ? string.Join(", ", s.FallbackModels) : "";
+
+        EnableAgentMemoryCheck.IsChecked = s.EnableAgentMemory;
+        MaxMemoryEntriesBox.Text = s.MaxMemoryEntries.ToString();
+
+        RequirePlanCheck.IsChecked = s.RequirePlanForDestructive;
+        EarlyToolExecutionCheck.IsChecked = s.EnableEarlyToolExecution;
     }
 
     private string GetSelectedProvider()
@@ -171,9 +191,44 @@ public partial class SettingsWindow : Window
 
         PopulateModelList(provider);
 
+        // Auto-set default token pricing for the selected provider
+        UpdateDefaultPricing(provider);
+
         // Auto-fetch usage when Copilot is selected
         if (CopilotUsagePanel is not null)
             TryAutoFetchUsage();
+    }
+
+    /// <summary>
+    /// Update the token pricing fields to sensible defaults for the selected provider.
+    /// Only updates if the current values match the previous provider's defaults
+    /// (i.e., the user hasn't customized them).
+    /// </summary>
+    private void UpdateDefaultPricing(string provider)
+    {
+        if (InputPriceBox is null) return; // Agent tab not yet loaded
+
+        // Known default pricing per provider (per million tokens)
+        var (input, output, cached) = provider switch
+        {
+            "anthropic" => (3.00m, 15.00m, 0.30m),    // Claude Sonnet 4 pricing
+            "openai" => (2.50m, 10.00m, 1.25m),       // GPT-4o pricing
+            "copilot" => (0m, 0m, 0m),                 // Copilot: included in subscription
+            _ => (3.00m, 15.00m, 0.30m),               // Default fallback
+        };
+
+        // Only auto-set if the fields look like they haven't been customized
+        // (empty, or match a known provider default within tolerance)
+        if (decimal.TryParse(InputPriceBox.Text, out var currentInput))
+        {
+            var knownDefaults = new[] { 0m, 2.50m, 3.00m, 15.00m };
+            if (!knownDefaults.Any(d => Math.Abs(d - currentInput) < 0.01m))
+                return; // User has customized — don't overwrite
+        }
+
+        InputPriceBox.Text = input.ToString("F2");
+        OutputPriceBox.Text = output.ToString("F2");
+        CachedInputPriceBox.Text = cached.ToString("F2");
     }
 
     private void PopulateModelList(string provider)
@@ -465,6 +520,35 @@ public partial class SettingsWindow : Window
         s.LimitMaxChatSearchResults = ParseLimitBox(LimitMaxChatSearchResults);
         s.LimitFilterRegisters = LimitFilterRegisters.IsChecked; // null = use profile
         s.LimitDereferenceHookRegisters = LimitDereferenceHookRegisters.IsChecked;
+
+        // Agent tab
+        s.PermissionMode = PermModeReadOnly.IsChecked == true ? "ReadOnly"
+                         : PermModePlanOnly.IsChecked == true ? "PlanOnly"
+                         : PermModeUnrestricted.IsChecked == true ? "Unrestricted"
+                         : "Normal";
+
+        if (decimal.TryParse(MaxSessionCostBox.Text, out var maxCost) && maxCost >= 0)
+            s.MaxSessionCostDollars = maxCost;
+        else
+            s.MaxSessionCostDollars = 0;
+
+        if (decimal.TryParse(InputPriceBox.Text, out var inputPrice) && inputPrice >= 0)
+            s.InputPricePerMillion = inputPrice;
+        if (decimal.TryParse(OutputPriceBox.Text, out var outputPrice) && outputPrice >= 0)
+            s.OutputPricePerMillion = outputPrice;
+        if (decimal.TryParse(CachedInputPriceBox.Text, out var cachedPrice) && cachedPrice >= 0)
+            s.CachedInputPricePerMillion = cachedPrice;
+
+        s.FallbackModels = string.IsNullOrWhiteSpace(FallbackModelsBox.Text)
+            ? []
+            : FallbackModelsBox.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+        s.EnableAgentMemory = EnableAgentMemoryCheck.IsChecked == true;
+        if (int.TryParse(MaxMemoryEntriesBox.Text, out var maxMem) && maxMem > 0)
+            s.MaxMemoryEntries = maxMem;
+
+        s.RequirePlanForDestructive = RequirePlanCheck.IsChecked == true;
+        s.EnableEarlyToolExecution = EarlyToolExecutionCheck.IsChecked == true;
 
         _settingsService.Save();
 

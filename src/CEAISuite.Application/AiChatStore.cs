@@ -10,6 +10,9 @@ public sealed class AiChatSession
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
     public List<AiChatMessage> Messages { get; set; } = new();
+
+    /// <summary>Per-chat permission mode. Persisted so each chat retains its own access policy.</summary>
+    public string PermissionMode { get; set; } = "Normal";
 }
 
 /// <summary>

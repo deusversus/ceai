@@ -1422,17 +1422,31 @@
                                 <!-- Bottom: Attachments + Input + Controls + Status -->
                                 <DockPanel DockPanel.Dock="Bottom" Margin="8,4,8,8">
                                     <!-- Status bar at very bottom -->
-                                    <Grid DockPanel.Dock="Bottom" Margin="0,4,0,0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="Auto" />
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock x:Name="AiStatusText" Grid.Column="0" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource SecondaryForeground}" Text="{Binding StatusText}" FontSize="11" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock x:Name="AiChatTitleText" Grid.Column="1" VerticalAlignment="Center"
-                                                   Foreground="{DynamicResource TertiaryForeground}" FontSize="10" TextTrimming="CharacterEllipsis"
-                                                   MaxWidth="120" Text="{Binding ChatTitle}" ToolTip="{Binding ChatTitle}" />
-                                    </Grid>
+                                    <StackPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock x:Name="AiStatusText" Grid.Column="0" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource SecondaryForeground}" Text="{Binding StatusText}" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock x:Name="AiChatTitleText" Grid.Column="1" VerticalAlignment="Center"
+                                                       Foreground="{DynamicResource TertiaryForeground}" FontSize="10" TextTrimming="CharacterEllipsis"
+                                                       MaxWidth="120" Text="{Binding ChatTitle}" ToolTip="{Binding ChatTitle}" />
+                                        </Grid>
+                                        <!-- Session indicators -->
+                                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                            <TextBlock Text="{Binding BudgetStatus}" FontSize="9"
+                                                       Foreground="{DynamicResource TertiaryForeground}"
+                                                       Margin="0,0,10,0" ToolTip="Session cost estimate" />
+                                            <TextBlock Text="{Binding MemoryStatus}" FontSize="9"
+                                                       Foreground="{DynamicResource TertiaryForeground}"
+                                                       Margin="0,0,10,0" ToolTip="Agent memory entries" />
+                                            <TextBlock Text="{Binding McpStatus}" FontSize="9"
+                                                       Foreground="{DynamicResource TertiaryForeground}"
+                                                       ToolTip="MCP server connections" />
+                                        </StackPanel>
+                                    </StackPanel>
 
                                     <!-- Main input container -->
                                     <Border CornerRadius="12" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
@@ -1476,6 +1490,7 @@
                                             <Grid DockPanel.Dock="Bottom" Margin="8,4,8,8">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
@@ -1487,8 +1502,46 @@
                                                         BorderThickness="0" Cursor="Hand" ToolTip="Attach context"
                                                         Click="AttachContext_Click" VerticalAlignment="Center" />
 
+                                                <!-- Permission mode selector -->
+                                                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
+                                                    <Button x:Name="PermissionModeButton" Click="PermissionMode_Click"
+                                                            Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="4,2"
+                                                            ToolTip="Permission mode — controls tool access policy">
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock x:Name="PermissionModeIcon" Text="🛡" FontSize="11" VerticalAlignment="Center" Margin="0,0,3,0" />
+                                                            <TextBlock Text="{Binding PermissionModeDisplay}" FontSize="11"
+                                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" />
+                                                            <TextBlock Text=" ▾" FontSize="9" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                                        </StackPanel>
+                                                    </Button>
+                                                    <Popup x:Name="PermissionModePopup" StaysOpen="False" Placement="Top"
+                                                           PlacementTarget="{Binding ElementName=PermissionModeButton}" AllowsTransparency="True">
+                                                        <Border Background="{DynamicResource PanelBackground}" BorderBrush="{DynamicResource BorderBrush}"
+                                                                BorderThickness="1" CornerRadius="6" Padding="4" MinWidth="160">
+                                                            <StackPanel>
+                                                                <Button Content="Normal — dangerous tools need approval" FontSize="11" Tag="Normal"
+                                                                        Padding="10,6" HorizontalContentAlignment="Left"
+                                                                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                                        Click="PermissionModeItem_Click" />
+                                                                <Button Content="Read Only — only read-only tools allowed" FontSize="11" Tag="ReadOnly"
+                                                                        Padding="10,6" HorizontalContentAlignment="Left"
+                                                                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                                        Click="PermissionModeItem_Click" />
+                                                                <Button Content="Plan Only — read-only + planning tools" FontSize="11" Tag="PlanOnly"
+                                                                        Padding="10,6" HorizontalContentAlignment="Left"
+                                                                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                                        Click="PermissionModeItem_Click" />
+                                                                <Button Content="Unrestricted — all tools auto-approved" FontSize="11" Tag="Unrestricted"
+                                                                        Padding="10,6" HorizontalContentAlignment="Left"
+                                                                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                                        Click="PermissionModeItem_Click" />
+                                                            </StackPanel>
+                                                        </Border>
+                                                    </Popup>
+                                                </StackPanel>
+
                                                 <!-- Model selector dropdown -->
-                                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                <StackPanel Grid.Column="3" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,8,0">
                                                     <Button x:Name="ModelSelectorButton" Click="ModelSelector_Click"
                                                             Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,2">
                                                         <StackPanel Orientation="Horizontal">
@@ -1519,7 +1572,7 @@
                                                 </StackPanel>
 
                                                 <!-- Send / Stop button (circular, accent color) -->
-                                                <Button x:Name="SendStopButton" Grid.Column="3" Click="SendAiMessage" ToolTip="Send message (Enter)"
+                                                <Button x:Name="SendStopButton" Grid.Column="4" Click="SendAiMessage" ToolTip="Send message (Enter)"
                                                         Width="32" Height="32" Cursor="Hand" Padding="0">
                                                     <Button.Template>
                                                         <ControlTemplate TargetType="Button">

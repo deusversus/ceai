@@ -13,7 +13,7 @@ public sealed class RetryPolicy
     private readonly TimeSpan _maxDelay;
     private readonly double _jitterPercent;
     private readonly Action<string, string>? _log;
-    private int _consecutive529Count;
+    private int _consecutiveOverloadCount;
 
     public RetryPolicy(
         int maxRetries = 10,
@@ -75,7 +75,7 @@ public sealed class RetryPolicy
             try
             {
                 var result = await operation(cancellationToken);
-                _consecutive529Count = 0; // Reset on success
+                _consecutiveOverloadCount = 0; // Reset on success
                 return RetryResult<T>.Ok(result);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -112,17 +112,17 @@ public sealed class RetryPolicy
                 // Track consecutive 529 overloaded errors → model fallback
                 if (ErrorClassifier.IsOverloaded(ex))
                 {
-                    _consecutive529Count++;
-                    _log?.Invoke("RETRY", $"Consecutive 529: {_consecutive529Count}");
-                    if (_consecutive529Count >= 3)
+                    _consecutiveOverloadCount++;
+                    _log?.Invoke("RETRY", $"Consecutive overload errors: {_consecutiveOverloadCount}");
+                    if (_consecutiveOverloadCount >= 3)
                     {
-                        _log?.Invoke("RETRY", "3 consecutive 529s — signaling model fallback");
+                        _log?.Invoke("RETRY", "3 consecutive overload errors — signaling model fallback");
                         return RetryResult<T>.ModelFallback();
                     }
                 }
                 else
                 {
-                    _consecutive529Count = 0; // Reset on non-529 error
+                    _consecutiveOverloadCount = 0; // Reset on non-overload error
                 }
 
                 // Non-retriable errors → fail immediately

@@ -520,13 +520,28 @@ public sealed class AgentLoop
             MaxOutputTokens = maxTokens,
         };
 
-        // Merge additional properties (cache_control, etc.) and context management strategies
-        var additionalProps = _options.AdditionalProperties is not null
-            ? new AdditionalPropertiesDictionary(_options.AdditionalProperties)
-            : new AdditionalPropertiesDictionary();
+        // Merge additional properties — only include provider-specific keys for the active provider
+        var additionalProps = new AdditionalPropertiesDictionary();
 
-        if (_options.ContextManagementStrategies is { Count: > 0 } strategies)
+        if (_options.AdditionalProperties is not null)
+        {
+            foreach (var kvp in _options.AdditionalProperties)
+            {
+                // Gate Anthropic-specific keys: cache_control, context_management
+                if (kvp.Key is "cache_control" or "context_management"
+                    && _options.Provider != ProviderKind.Anthropic)
+                    continue;
+
+                additionalProps[kvp.Key] = kvp.Value;
+            }
+        }
+
+        // Anthropic-only: context management strategies (server-side compaction)
+        if (_options.Provider == ProviderKind.Anthropic
+            && _options.ContextManagementStrategies is { Count: > 0 } strategies)
+        {
             additionalProps["context_management"] = ContextManagementSerializer.Serialize(strategies);
+        }
 
         if (additionalProps.Count > 0)
             options.AdditionalProperties = additionalProps;

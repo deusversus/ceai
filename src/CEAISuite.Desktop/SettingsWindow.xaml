@@ -639,6 +639,235 @@
                 </Border>
             </TabItem>
 
+            <TabItem Header="Agent">
+                <Border Background="{DynamicResource PanelBackground}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0">
+                        <StackPanel Margin="16">
+                            <!-- Default Permission Mode -->
+                            <TextBlock Text="Default Permission Mode" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Default access policy for new chats — each chat keeps its own mode"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+
+                            <UniformGrid Columns="4" Margin="0,0,0,4">
+                                <RadioButton x:Name="PermModeNormal" GroupName="PermMode" Tag="Normal" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,8"
+                                                    Margin="0,0,6,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="Normal" FontWeight="SemiBold" FontSize="12"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="Ask for dangerous" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+
+                                <RadioButton x:Name="PermModeReadOnly" GroupName="PermMode" Tag="ReadOnly" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,8"
+                                                    Margin="0,0,6,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="Read Only" FontWeight="SemiBold" FontSize="12"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="No writes allowed" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+
+                                <RadioButton x:Name="PermModePlanOnly" GroupName="PermMode" Tag="PlanOnly" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,8"
+                                                    Margin="0,0,6,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="Plan Only" FontWeight="SemiBold" FontSize="12"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="Read + plan tools" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+
+                                <RadioButton x:Name="PermModeUnrestricted" GroupName="PermMode" Tag="Unrestricted" Style="{x:Null}">
+                                    <RadioButton.Template>
+                                        <ControlTemplate TargetType="RadioButton">
+                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,8"
+                                                    Margin="0,0,0,0" Cursor="Hand"
+                                                    Background="{DynamicResource InputBackground}"
+                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                                                <StackPanel>
+                                                    <TextBlock Text="Unrestricted" FontWeight="SemiBold" FontSize="12"
+                                                               Foreground="{DynamicResource PrimaryForeground}" />
+                                                    <TextBlock Text="All auto-approved" FontSize="10"
+                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                                </StackPanel>
+                                            </Border>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsChecked" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                                                </Trigger>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
+                                        </ControlTemplate>
+                                    </RadioButton.Template>
+                                </RadioButton>
+                            </UniformGrid>
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- Token Budget -->
+                            <TextBlock Text="Token Budget" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Limit session cost to prevent runaway spending"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Max session cost (USD)" VerticalAlignment="Center" FontSize="12" />
+                                <TextBox x:Name="MaxSessionCostBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                <TextBlock Grid.Column="2" Text="0 = unlimited" FontSize="10" Margin="8,0,0,0"
+                                           Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Expander Header="Token Pricing" FontSize="12" Foreground="{DynamicResource SecondaryForeground}"
+                                      FontWeight="Normal" Margin="0,4,0,0">
+                                <StackPanel Margin="0,8,0,0">
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="180" />
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Input price / million" VerticalAlignment="Center" FontSize="12" />
+                                        <TextBox x:Name="InputPriceBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="$" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="180" />
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Output price / million" VerticalAlignment="Center" FontSize="12" />
+                                        <TextBox x:Name="OutputPriceBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="$" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+                                    <Grid Margin="0,0,0,6">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="180" />
+                                            <ColumnDefinition Width="100" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="Cached input price / million" VerticalAlignment="Center" FontSize="12" />
+                                        <TextBox x:Name="CachedInputPriceBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                        <TextBlock Grid.Column="2" Text="$" FontSize="10" Margin="8,0,0,0"
+                                                   Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                                    </Grid>
+                                </StackPanel>
+                            </Expander>
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- Model Fallback -->
+                            <TextBlock Text="Model Fallback" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Backup models tried when the primary model is unavailable (comma-separated)"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" />
+                            <TextBox x:Name="FallbackModelsBox" FontFamily="Consolas" FontSize="12" Padding="8,6"
+                                     ToolTip="e.g. gpt-4o, claude-haiku-4-5" />
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- Agent Memory -->
+                            <TextBlock Text="Agent Memory" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Persistent cross-session memory for the AI agent"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+                            <CheckBox x:Name="EnableAgentMemoryCheck" Content="Enable agent memory"
+                                      FontSize="13" Margin="0,0,0,8" />
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Max memory entries" VerticalAlignment="Center" FontSize="12" />
+                                <TextBox x:Name="MaxMemoryEntriesBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                <TextBlock Grid.Column="2" Text="Older entries pruned" FontSize="10" Margin="8,0,0,0"
+                                           Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- Behavior toggles -->
+                            <TextBlock Text="Behavior" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Fine-tune how the agent operates"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+
+                            <CheckBox x:Name="RequirePlanCheck"
+                                      Content="Require plan mode for destructive operations"
+                                      FontSize="13" Margin="0,0,0,8" />
+                            <TextBlock Text="Forces the agent to create a plan before executing write/modify tools"
+                                       Foreground="{DynamicResource TertiaryForeground}" FontSize="11" Margin="20,0,0,8" />
+
+                            <CheckBox x:Name="EarlyToolExecutionCheck"
+                                      Content="Enable speculative early tool execution"
+                                      FontSize="13" Margin="0,0,0,8" />
+                            <TextBlock Text="Read-only tools start running during LLM stream for lower latency"
+                                       Foreground="{DynamicResource TertiaryForeground}" FontSize="11" Margin="20,0,0,0" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+            </TabItem>
+
             <TabItem Header="Appearance">
                 <Border Background="{DynamicResource PanelBackground}">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">

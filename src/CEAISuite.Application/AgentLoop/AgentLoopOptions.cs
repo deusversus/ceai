@@ -3,6 +3,25 @@ using Microsoft.Extensions.AI;
 namespace CEAISuite.Application.AgentLoop;
 
 /// <summary>
+/// Identifies the AI provider backend. Used to gate provider-specific features
+/// (e.g., Anthropic cache_control, context_management) so the agent loop
+/// remains model-agnostic by default.
+/// </summary>
+public enum ProviderKind
+{
+    /// <summary>Unknown/generic provider — no provider-specific features enabled.</summary>
+    Unknown,
+    /// <summary>OpenAI (GPT-4, GPT-5, o3, etc.)</summary>
+    OpenAI,
+    /// <summary>Anthropic (Claude Sonnet, Opus, Haiku).</summary>
+    Anthropic,
+    /// <summary>GitHub Copilot (proxied models from multiple providers).</summary>
+    Copilot,
+    /// <summary>OpenAI-compatible endpoint (Ollama, LM Studio, Azure, etc.).</summary>
+    OpenAICompatible,
+}
+
+/// <summary>
 /// Configuration for a single agent loop invocation.
 /// Constructed by AiOperatorService and passed to AgentLoop.
 /// </summary>
@@ -16,6 +35,9 @@ public sealed class AgentLoopOptions
     /// Progressive loading (request_tools) modifies this list between turns.
     /// </summary>
     public required IList<AITool> Tools { get; init; }
+
+    /// <summary>The AI provider backend. Gates provider-specific features.</summary>
+    public ProviderKind Provider { get; init; } = ProviderKind.Unknown;
 
     /// <summary>LLM sampling temperature.</summary>
     public float Temperature { get; init; } = 0.3f;
@@ -104,12 +126,7 @@ public sealed class AgentLoopOptions
 
     /// <summary>
     /// Optional model switcher for runtime model changes and fallback chains.
-    /// When the retry policy signals model fallback (3 consecutive 529s),
-    /// the loop calls <c>ModelSwitcher.FallbackToNext()</c>.
-    /// </summary>
-    /// <summary>
-    /// Optional model switcher for runtime model changes and fallback chains.
-    /// When the retry policy signals model fallback (3 consecutive 529s),
+    /// When the retry policy signals model fallback (3 consecutive overload errors),
     /// the loop calls <c>ModelSwitcher.FallbackToNext()</c>.
     /// </summary>
     public ModelSwitcher? ModelSwitcher { get; init; }

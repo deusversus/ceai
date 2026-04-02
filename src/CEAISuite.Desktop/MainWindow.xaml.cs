@@ -951,6 +951,22 @@ public partial class MainWindow : Window
         _aiOperatorVm.SelectModelCommand.Execute(model);
     }
 
+    // ── Permission Mode Selector ──
+
+    private void PermissionMode_Click(object sender, RoutedEventArgs e)
+    {
+        PermissionModePopup.IsOpen = !PermissionModePopup.IsOpen;
+    }
+
+    private void PermissionModeItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn && btn.Tag is string mode)
+        {
+            _aiOperatorVm.SelectPermissionModeCommand.Execute(mode);
+            PermissionModePopup.IsOpen = false;
+        }
+    }
+
     // ─── Theme ───────────────────────────────────────────────────────────
 
     private void ApplyDockTheme(AppTheme resolved)

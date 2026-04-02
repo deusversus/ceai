@@ -60,6 +60,7 @@ public partial class AiOperatorViewModel : ObservableObject
         _themeService = themeService;
 
         _selectedModel = appSettingsService.Settings.Model;
+        _permissionModeDisplay = appSettingsService.Settings.PermissionMode ?? "Normal";
     }
 
     // ── Observable Properties ──
@@ -84,6 +85,9 @@ public partial class AiOperatorViewModel : ObservableObject
 
     [ObservableProperty]
     private string _selectedModel;
+
+    [ObservableProperty]
+    private string _permissionModeDisplay = "Normal";
 
     [ObservableProperty]
     private bool _isStreaming;
@@ -376,6 +380,7 @@ public partial class AiOperatorViewModel : ObservableObject
     private void NewChat()
     {
         _aiOperatorService.NewChat();
+        PermissionModeDisplay = _aiOperatorService.CurrentPermissionMode;
         RefreshChatDisplay();
         RefreshChatSwitcher();
     }
@@ -408,6 +413,7 @@ public partial class AiOperatorViewModel : ObservableObject
         if (selected is not null && selected.Id != _aiOperatorService.CurrentChatId)
         {
             _aiOperatorService.SwitchChat(selected.Id);
+            PermissionModeDisplay = _aiOperatorService.CurrentPermissionMode;
             RefreshChatDisplay();
             RefreshChatSwitcher();
         }
@@ -448,6 +454,19 @@ public partial class AiOperatorViewModel : ObservableObject
         var toRemove = Attachments.FirstOrDefault(a => a.Id == chip.Id);
         if (toRemove is not null)
             Attachments.Remove(toRemove);
+    }
+
+    [RelayCommand]
+    private void SelectPermissionMode(string? mode)
+    {
+        if (string.IsNullOrEmpty(mode)) return;
+
+        _appSettingsService.Settings.PermissionMode = mode;
+        _appSettingsService.Save();
+        PermissionModeDisplay = mode;
+
+        // Update the live permission engine if the operator service has one
+        _aiOperatorService.SetPermissionMode(mode);
     }
 
     [RelayCommand]
@@ -556,6 +575,7 @@ public partial class AiOperatorViewModel : ObservableObject
     {
         if (selected is null) return;
         _aiOperatorService.SwitchChat(selected.Id);
+        PermissionModeDisplay = _aiOperatorService.CurrentPermissionMode;
         RefreshChatDisplay();
         RefreshChatSwitcher();
     }

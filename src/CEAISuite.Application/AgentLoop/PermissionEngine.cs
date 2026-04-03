@@ -23,6 +23,9 @@ public sealed class PermissionEngine
     private readonly Dictionary<string, int> _denialCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly ToolAttributeCache? _attributeCache;
 
+    // Skill-scoped rules: keyed by skill name, evaluated after user rules but before DangerousTools default
+    private readonly Dictionary<string, List<PermissionRule>> _skillRules = new(StringComparer.OrdinalIgnoreCase);
+
     public PermissionEngine(
         IReadOnlySet<string> dangerousToolNames,
         Action<string, string>? log = null,
@@ -53,6 +56,20 @@ public sealed class PermissionEngine
 
     /// <summary>Clear all rules.</summary>
     public void ClearRules() { lock (_rulesLock) _rules.Clear(); }
+
+    /// <summary>Add auto-allow rules granted by an active skill. Evaluated after user rules but before DangerousTools default.</summary>
+    public void AddSkillRules(string skillName, IEnumerable<PermissionRule> rules)
+    {
+        lock (_rulesLock) _skillRules[skillName] = rules.ToList();
+        _log?.Invoke("PERMISSION", $"Added skill rules for '{skillName}'");
+    }
+
+    /// <summary>Remove rules granted by a skill (on unload).</summary>
+    public void RemoveSkillRules(string skillName)
+    {
+        lock (_rulesLock) _skillRules.Remove(skillName);
+        _log?.Invoke("PERMISSION", $"Removed skill rules for '{skillName}'");
+    }
 
     /// <summary>Get a read-only snapshot of current rules.</summary>
     public IReadOnlyList<PermissionRule> Rules { get { lock (_rulesLock) return _rules.ToList(); } }
@@ -114,6 +131,30 @@ public sealed class PermissionEngine
                 _log?.Invoke("PERMISSION",
                     $"{rule.Effect} → {toolName}({FormatArgs(arguments)}) matched rule: {rule}");
                 return new PermissionDecision(rule.Effect, rule);
+            }
+        }
+
+        // Skill-granted rules (lower priority than user-configured rules)
+        List<List<PermissionRule>>? skillRuleSnapshot = null;
+        lock (_rulesLock)
+        {
+            if (_skillRules.Count > 0)
+                skillRuleSnapshot = _skillRules.Values.ToList();
+        }
+
+        if (skillRuleSnapshot is not null)
+        {
+            foreach (var ruleList in skillRuleSnapshot)
+            {
+                foreach (var rule in ruleList)
+                {
+                    if (rule.Matches(toolName, arguments))
+                    {
+                        _log?.Invoke("PERMISSION",
+                            $"{rule.Effect} (skill-granted) → {toolName}({FormatArgs(arguments)})");
+                        return new PermissionDecision(rule.Effect, rule);
+                    }
+                }
             }
         }
 

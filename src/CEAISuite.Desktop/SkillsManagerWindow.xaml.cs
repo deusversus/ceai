@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using CEAISuite.Application.AgentLoop;
 
 namespace CEAISuite.Desktop;
 
@@ -68,7 +69,7 @@ public partial class SkillsManagerWindow : Window
         }
     }
 
-    // ── YAML frontmatter parser ──
+    // ── YAML frontmatter parser (delegates to shared SkillLoader.ParseFrontmatter) ──
 
     private static SkillEntry? ParseSkillFile(string skillMdPath, bool isBuiltIn)
     {
@@ -82,59 +83,10 @@ public partial class SkillsManagerWindow : Window
         }
         if (endIdx < 0) return null;
 
-        string name = "", description = "", version = "", author = "";
-        var tags = new List<string>();
-        bool inDescription = false, inTags = false;
-
-        for (int i = 1; i < endIdx; i++)
-        {
-            var line = lines[i];
-            if (line.StartsWith("name:"))
-            {
-                name = line[5..].Trim();
-                inDescription = false; inTags = false;
-            }
-            else if (line.StartsWith("description:"))
-            {
-                var val = line[12..].Trim();
-                if (val is ">" or "|") { inDescription = true; description = ""; }
-                else { description = val; inDescription = false; }
-                inTags = false;
-            }
-            else if (line.StartsWith("version:"))
-            {
-                version = line[8..].Trim().Trim('"');
-                inDescription = false; inTags = false;
-            }
-            else if (line.StartsWith("author:"))
-            {
-                author = line[7..].Trim().Trim('"');
-                inDescription = false; inTags = false;
-            }
-            else if (line.StartsWith("tags:"))
-            {
-                inTags = true; inDescription = false;
-            }
-            else if (line.StartsWith("triggers:"))
-            {
-                inTags = false; inDescription = false;
-            }
-            else if (inDescription && line.StartsWith("  "))
-            {
-                description += (description.Length > 0 ? " " : "") + line.Trim();
-            }
-            else if (inTags && line.TrimStart().StartsWith("- "))
-            {
-                tags.Add(line.TrimStart()[2..].Trim());
-            }
-            else
-            {
-                inDescription = false; inTags = false;
-            }
-        }
-
+        var fm = SkillLoader.ParseFrontmatter(lines, 1, endIdx);
         var dir = System.IO.Path.GetDirectoryName(skillMdPath) ?? skillMdPath;
-        return new SkillEntry(name, description, version, author, tags.ToArray(), dir, isBuiltIn);
+        return new SkillEntry(fm.Name, fm.Description, fm.Version ?? "", fm.Author ?? "",
+            fm.Tags is { Count: > 0 } ? fm.Tags.ToArray() : [], dir, isBuiltIn);
     }
 
     // ── Selection handling ──

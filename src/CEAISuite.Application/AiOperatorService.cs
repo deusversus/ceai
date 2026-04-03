@@ -107,7 +107,7 @@ internal static class ToolCategories
         // Meta-tools (always available)
         "request_tools", "list_tool_categories", "unload_tools",
         // Skill meta-tools (always available)
-        "load_skill", "list_skills", "unload_skill",
+        "load_skill", "list_skills", "unload_skill", "confirm_load_skill", "view_skill_reference",
         // Memory meta-tools (always available when enabled)
         "remember", "recall_memory", "forget_memory",
         // Budget meta-tool
@@ -189,6 +189,7 @@ public sealed class AiOperatorService
     private ChatHistoryManager? _historyManager;
     private readonly ToolAttributeCache _toolAttributeCache;
     private readonly SkillSystem _skillSystem = new();
+    private PermissionEngine? _permissionEngine;
 
     // ── Phase 4 systems ──
     private readonly McpManager _mcpManager;
@@ -309,6 +310,10 @@ public sealed class AiOperatorService
             "list_skills", "List available domain skills and which are currently loaded.");
         _allToolsByName["unload_skill"] = AIFunctionFactory.Create(UnloadSkillTool,
             "unload_skill", "Unload a domain skill to free token budget.");
+        _allToolsByName["confirm_load_skill"] = AIFunctionFactory.Create(ConfirmLoadSkillTool,
+            "confirm_load_skill", "Confirm loading an elevated skill after the user approves its permissions.");
+        _allToolsByName["view_skill_reference"] = AIFunctionFactory.Create(ViewSkillReferenceTool,
+            "view_skill_reference", "Read a reference file from an active skill's references/ directory.");
 
         // ── Token Budget ──
         _tokenBudget = new TokenBudget(Log);
@@ -459,6 +464,7 @@ public sealed class AiOperatorService
 
         // Build permission engine with optional mode from settings
         var permissionEngine = new PermissionEngine(DangerousTools.Names, Log, _toolAttributeCache);
+        _permissionEngine = permissionEngine;
         if (_appSettings is not null && Enum.TryParse<PermissionMode>(_appSettings.PermissionMode ?? "Normal", true, out var mode))
             permissionEngine.ActiveMode = mode;
 
@@ -1023,7 +1029,18 @@ public sealed class AiOperatorService
     private string LoadSkillTool(
         [System.ComponentModel.Description("Skill name to load (e.g. memory-scanning, code-analysis, breakpoint-mastery)")] string name)
     {
-        return _skillSystem.LoadSkill(name);
+        // Check if this is a fork-context skill — route to subagent instead of injecting into prompt
+        if (_skillSystem.Catalog.TryGetValue(name, out var skillDef) && skillDef.Context == SkillContext.Fork)
+        {
+            if (skillDef.RequiresApproval)
+                return $"Skill '{name}' runs in an isolated sub-agent and requires user approval. Use confirm_load_skill('{name}') after the user approves.";
+
+            return SpawnForkSkill(skillDef);
+        }
+
+        var result = _skillSystem.LoadSkill(name);
+        ApplySkillPermissionRules(name);
+        return result;
     }
 
     [System.ComponentModel.Description("List available domain skills and their load status.")]
@@ -1033,7 +1050,60 @@ public sealed class AiOperatorService
     private string UnloadSkillTool(
         [System.ComponentModel.Description("Skill name to unload")] string name)
     {
+        _permissionEngine?.RemoveSkillRules(name);
         return _skillSystem.UnloadSkill(name);
+    }
+
+    [System.ComponentModel.Description("Confirm loading an elevated skill after user approval.")]
+    private string ConfirmLoadSkillTool(
+        [System.ComponentModel.Description("Skill name to confirm")] string name)
+    {
+        var result = _skillSystem.ConfirmSkillLoad(name);
+        ApplySkillPermissionRules(name);
+        return result;
+    }
+
+    [System.ComponentModel.Description("Read a reference file from a loaded skill.")]
+    private string ViewSkillReferenceTool(
+        [System.ComponentModel.Description("Name of the active skill")] string skillName,
+        [System.ComponentModel.Description("File name within the skill's references/ directory")] string fileName)
+    {
+        return _skillSystem.ReadSkillReference(skillName, fileName);
+    }
+
+    private string SpawnForkSkill(SkillDefinition skill)
+    {
+        if (_subagentManager is null)
+            return $"Sub-agent system not available. Skill '{skill.Name}' requires fork context.";
+
+        var request = new SubagentRequest
+        {
+            Description = $"Skill: {skill.Name}",
+            Task = skill.Instructions,
+            AllowedToolPatterns = skill.AllowedTools?.Count > 0 ? skill.AllowedTools.ToList() : null,
+            BudgetFraction = 0.4,
+        };
+
+        var handle = _subagentManager.Spawn(request);
+        Log("SKILL", $"Fork skill '{skill.Name}' spawned as subagent {handle.Id}");
+        return $"Skill '{skill.Name}' launched as isolated sub-agent (ID: {handle.Id}). " +
+               $"It will execute with its own context window and return results when complete.";
+    }
+
+    private void ApplySkillPermissionRules(string skillName)
+    {
+        if (_permissionEngine is null) return;
+        if (!_skillSystem.Catalog.TryGetValue(skillName, out var skill)) return;
+        if (!_skillSystem.ActiveSkills.Contains(skillName)) return;
+        if (skill.AllowedTools is not { Count: > 0 }) return;
+
+        var rules = skill.AllowedTools.Select(pattern => new PermissionRule
+        {
+            ToolPattern = pattern,
+            Effect = PermissionEffect.Allow,
+            Description = $"Granted by skill '{skillName}'",
+        });
+        _permissionEngine.AddSkillRules(skillName, rules);
     }
 
     /// <summary>Load skill definitions from built-in and user directories.</summary>
@@ -1048,11 +1118,11 @@ public sealed class AiOperatorService
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "CEAISuite", "skills");
 
-        foreach (var dir in new[] { builtInSkills, userSkills })
-        {
-            var skills = SkillLoader.LoadFromDirectory(dir, Log);
-            _skillSystem.RegisterAll(skills);
-        }
+        var builtIn = SkillLoader.LoadFromDirectory(builtInSkills, Log, isBundled: true);
+        _skillSystem.RegisterAll(builtIn);
+
+        var user = SkillLoader.LoadFromDirectory(userSkills, Log, isBundled: false);
+        _skillSystem.RegisterAll(user);
 
         if (_skillSystem.Catalog.Count > 0)
             Log("INFO", $"Skills: {_skillSystem.Catalog.Count} loaded from disk");

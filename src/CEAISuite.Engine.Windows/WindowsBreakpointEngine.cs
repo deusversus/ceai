@@ -77,14 +77,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     {
         var resolvedMode = mode == BreakpointMode.Auto ? ResolveAutoMode(type) : mode;
 
-        // 2F: Address width validation for WOW64 — reject 64-bit addresses for 32-bit processes
-        if (_sessions.TryGetValue(processId, out var existingSession) &&
-            existingSession.IsWow64Target && (ulong)address > 0xFFFFFFFF)
-        {
-            throw new InvalidOperationException(
-                $"Address 0x{address:X} exceeds 32-bit range for WOW64 process. " +
-                "Hardware debug registers are 32-bit in WOW64 mode — the address would be silently truncated.");
-        }
+        // 2F: WOW64 address width validation moved to SetBreakpointCoreAsync (after
+        // GetOrCreateSession) so the check is not skipped on the first breakpoint
+        // when no session exists yet.
 
         // Stealth mode is for code cave hooks (ICodeCaveEngine) — not for the breakpoint engine.
         // If it reaches here, downgrade to the best available mode for the type.
@@ -131,6 +126,17 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var session = GetOrCreateSession(processId, cancellationToken);
+
+                // 2F: Address width validation for WOW64 — reject 64-bit addresses
+                // for 32-bit processes. Performed here (after GetOrCreateSession) so
+                // the session and its IsWow64Target flag are guaranteed to exist,
+                // including on the very first breakpoint for a process.
+                if (session.IsWow64Target && (ulong)address > 0xFFFFFFFF)
+                {
+                    throw new InvalidOperationException(
+                        $"Address 0x{address:X} exceeds 32-bit range for WOW64 process. " +
+                        "Hardware debug registers are 32-bit in WOW64 mode — the address would be silently truncated.");
+                }
 
                 lock (session.SyncRoot)
                 {

@@ -138,6 +138,12 @@ public sealed class OperationJournal
         if (entry.Status == JournalEntryStatus.RolledBack)
             return new JournalRollbackResult(true, 0, 0, "Already rolled back.");
 
+        // Orphaned entries loaded from disk have no rollback delegate — guard against NRE
+        if (entry.RollbackAction is null)
+            return new JournalRollbackResult(false, 1, 0,
+                $"Operation '{operationId}' was loaded from a persisted journal and has no rollback action. " +
+                "Re-attach to the target process and re-create the operation to enable rollback.");
+
         bool success = false;
         try { success = await entry.RollbackAction(); }
         catch { /* rollback failed */ }

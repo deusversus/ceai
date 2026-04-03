@@ -134,6 +134,7 @@ public sealed class WindowsScanEngine : IScanEngine
                 {
                     var valueSize = GetValueSize(refinement.DataType);
                     var refined = new List<ScanResultEntry>();
+                    var isTruncated = false;
 
                     foreach (var previous in previousResults.Results)
                     {
@@ -141,6 +142,7 @@ public sealed class WindowsScanEngine : IScanEngine
 
                         if (refined.Count >= MaxScanResults)
                         {
+                            isTruncated = true;
                             break;
                         }
 
@@ -178,7 +180,8 @@ public sealed class WindowsScanEngine : IScanEngine
                         refined,
                         previousResults.TotalRegionsScanned,
                         previousResults.TotalBytesScanned,
-                        DateTimeOffset.UtcNow);
+                        DateTimeOffset.UtcNow,
+                        isTruncated);
                 }
                 finally
                 {

@@ -131,6 +131,13 @@ public sealed class WindowsEngineFacade : IEngineFacade
         }
     }
 
+    // Comprehensive access mask covering all operations (read, write, query).
+    // The cached handle is opened once with full permissions so that a handle
+    // first opened for ReadMemoryAsync (VM_READ) is equally valid for
+    // WriteBytesAsync (VM_WRITE | VM_OPERATION) without re-opening.
+    private const uint CachedHandleAccess =
+        ProcessQueryLimitedInformation | ProcessVmRead | ProcessVmWrite | ProcessVmOperation; // 0x1038
+
     // 4A: Get or open a cached process handle for the attached process
     private IntPtr GetOrOpenProcessHandle(int processId, uint access)
     {
@@ -140,8 +147,12 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 return _cachedProcessHandle;
         }
 
-        // Not the attached process or no cached handle — open a new one
-        var handle = OpenProcess(access, false, processId);
+        // For the attached process, open with comprehensive access so the cached
+        // handle works for every operation type. For non-attached processes use
+        // exactly the requested access.
+        var effectiveAccess = false;
+        lock (_attachLock) { effectiveAccess = _attachedProcessId == processId; }
+        var handle = OpenProcess(effectiveAccess ? CachedHandleAccess : access, false, processId);
         if (handle == IntPtr.Zero)
             return IntPtr.Zero;
 

@@ -606,7 +606,13 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
     /// <summary>
     /// 1H: Suspend all threads in the target process to prevent mid-instruction races
     /// during code patching. Returns list of suspended thread handles for later resumption.
-    /// Threads with IP within the danger zone are reported via debug output.
+    ///
+    /// NOTE: This method does NOT verify whether any thread's instruction pointer (RIP)
+    /// falls within the danger zone at the time of suspension. A thread whose RIP is
+    /// inside the patch area or trampoline cave will be suspended in that state, but the
+    /// suspension itself prevents further execution, which is the primary safety measure.
+    /// Full IP verification would require GetThreadContext with the CONTEXT struct, which
+    /// adds significant P/Invoke complexity for a diagnostic-only check.
     /// </summary>
     private static List<IntPtr> SuspendTargetThreads(int processId, IntPtr hProcess, nuint dangerStart, nuint dangerSize)
     {
@@ -646,6 +652,10 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
         {
             CloseHandle(snapshot);
         }
+
+        System.Diagnostics.Debug.WriteLine(
+            $"[CodeCaveEngine] Suspended {suspended.Count} thread(s) in process {processId} " +
+            $"(danger zone: 0x{dangerStart:X}..0x{dangerStart + dangerSize:X}).");
 
         return suspended;
     }

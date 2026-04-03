@@ -192,19 +192,18 @@ public partial class MainViewModel : ObservableObject
 
     // ── Process Attach / Detach ──
 
-    private bool _isAttaching; // guard against concurrent attach/detach
+    private int _isAttaching; // guard against concurrent attach/detach (atomic)
 
     public async Task InspectSelectedProcessAsync()
     {
-        if (_isAttaching) return; // prevent re-entrant attach
-        _isAttaching = true;
+        if (Interlocked.CompareExchange(ref _isAttaching, 1, 0) != 0) return;
 
         var dashboard = Dashboard;
         var selectedProcess = _processListVm.SelectedProcess;
         if (selectedProcess is null)
         {
             Dashboard = dashboard with { StatusMessage = "Select a process to inspect." };
-            _isAttaching = false;
+            Interlocked.Exchange(ref _isAttaching, 0);
             return;
         }
 
@@ -261,7 +260,7 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
-            _isAttaching = false;
+            Interlocked.Exchange(ref _isAttaching, 0);
         }
     }
 
@@ -290,14 +289,13 @@ public partial class MainViewModel : ObservableObject
 
     public async Task DetachProcessAsync()
     {
-        if (_isAttaching) return; // prevent detach while attach is in flight
-        _isAttaching = true;
+        if (Interlocked.CompareExchange(ref _isAttaching, 1, 0) != 0) return;
 
         var dashboard = Dashboard;
         if (dashboard.CurrentInspection is null)
         {
             StatusBarCenterText = "No process attached";
-            _isAttaching = false;
+            Interlocked.Exchange(ref _isAttaching, 0);
             return;
         }
 
@@ -342,7 +340,7 @@ public partial class MainViewModel : ObservableObject
         }
         finally
         {
-            _isAttaching = false;
+            Interlocked.Exchange(ref _isAttaching, 0);
         }
     }
 
@@ -636,6 +634,7 @@ public partial class MainViewModel : ObservableObject
 
     public void OnClosing()
     {
+        _processContext.ProcessChanged -= OnProcessContextChanged;
         _addressTableVm.StopAutoRefresh();
         _aiOperatorService.SaveCurrentChat();
     }

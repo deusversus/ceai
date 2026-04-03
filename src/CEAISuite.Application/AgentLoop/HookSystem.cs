@@ -722,7 +722,7 @@ public sealed class CommandHook : PreToolHook
     public CommandHook(string command, string? arguments = null,
         string? toolPattern = null, TimeSpan? timeout = null,
         Action<string, string>? log = null)
-        : base(toolPattern)
+        : base(toolPattern ?? command)
     {
         _command = command;
         _arguments = arguments;

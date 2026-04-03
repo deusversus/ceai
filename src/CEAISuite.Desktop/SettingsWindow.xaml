@@ -25,115 +25,43 @@
 
                             <UniformGrid Columns="4" x:Name="ProviderCards" Margin="0,0,0,4">
                                 <RadioButton x:Name="ProviderOpenAI" GroupName="Provider" Tag="openai"
-                                             Checked="ProviderCard_Checked" Style="{x:Null}">
-                                    <RadioButton.Template>
-                                        <ControlTemplate TargetType="RadioButton">
-                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
-                                                    Margin="0,0,6,0" Cursor="Hand"
-                                                    Background="{DynamicResource InputBackground}"
-                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
-                                                <StackPanel>
-                                                    <TextBlock Text="OpenAI" FontWeight="SemiBold" FontSize="13"
-                                                               Foreground="{DynamicResource PrimaryForeground}" />
-                                                    <TextBlock Text="GPT-5, GPT-4, o3/o4" FontSize="11"
-                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsChecked" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
-                                                </Trigger>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </RadioButton.Template>
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                    <StackPanel>
+                                        <TextBlock Text="OpenAI" FontWeight="SemiBold" FontSize="13"
+                                                   Foreground="{DynamicResource PrimaryForeground}" />
+                                        <TextBlock Text="GPT-5, GPT-4, o3/o4" FontSize="11"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                    </StackPanel>
                                 </RadioButton>
 
                                 <RadioButton x:Name="ProviderAnthropic" GroupName="Provider" Tag="anthropic"
-                                             Checked="ProviderCard_Checked" Style="{x:Null}">
-                                    <RadioButton.Template>
-                                        <ControlTemplate TargetType="RadioButton">
-                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
-                                                    Margin="0,0,6,0" Cursor="Hand"
-                                                    Background="{DynamicResource InputBackground}"
-                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
-                                                <StackPanel>
-                                                    <TextBlock Text="Anthropic" FontWeight="SemiBold" FontSize="13"
-                                                               Foreground="{DynamicResource PrimaryForeground}" />
-                                                    <TextBlock Text="Claude Opus, Sonnet, Haiku" FontSize="11"
-                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsChecked" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
-                                                </Trigger>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </RadioButton.Template>
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                    <StackPanel>
+                                        <TextBlock Text="Anthropic" FontWeight="SemiBold" FontSize="13"
+                                                   Foreground="{DynamicResource PrimaryForeground}" />
+                                        <TextBlock Text="Claude Opus, Sonnet, Haiku" FontSize="11"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                    </StackPanel>
                                 </RadioButton>
 
                                 <RadioButton x:Name="ProviderCopilot" GroupName="Provider" Tag="copilot"
-                                             Checked="ProviderCard_Checked" Style="{x:Null}">
-                                    <RadioButton.Template>
-                                        <ControlTemplate TargetType="RadioButton">
-                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
-                                                    Margin="0,0,6,0" Cursor="Hand"
-                                                    Background="{DynamicResource InputBackground}"
-                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
-                                                <StackPanel>
-                                                    <TextBlock Text="GitHub Copilot" FontWeight="SemiBold" FontSize="13"
-                                                               Foreground="{DynamicResource PrimaryForeground}" />
-                                                    <TextBlock Text="Uses your Copilot subscription" FontSize="11"
-                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsChecked" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
-                                                </Trigger>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </RadioButton.Template>
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                    <StackPanel>
+                                        <TextBlock Text="GitHub Copilot" FontWeight="SemiBold" FontSize="13"
+                                                   Foreground="{DynamicResource PrimaryForeground}" />
+                                        <TextBlock Text="Uses your Copilot subscription" FontSize="11"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                    </StackPanel>
                                 </RadioButton>
 
                                 <RadioButton x:Name="ProviderCompatible" GroupName="Provider" Tag="openai-compatible"
-                                             Checked="ProviderCard_Checked" Style="{x:Null}">
-                                    <RadioButton.Template>
-                                        <ControlTemplate TargetType="RadioButton">
-                                            <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
-                                                    Margin="0,0,0,0" Cursor="Hand"
-                                                    Background="{DynamicResource InputBackground}"
-                                                    BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
-                                                <StackPanel>
-                                                    <TextBlock Text="Compatible" FontWeight="SemiBold" FontSize="13"
-                                                               Foreground="{DynamicResource PrimaryForeground}" />
-                                                    <TextBlock Text="Ollama, LM Studio, etc." FontSize="11"
-                                                               Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
-                                                </StackPanel>
-                                            </Border>
-                                            <ControlTemplate.Triggers>
-                                                <Trigger Property="IsChecked" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
-                                                </Trigger>
-                                                <Trigger Property="IsMouseOver" Value="True">
-                                                    <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
-                                                </Trigger>
-                                            </ControlTemplate.Triggers>
-                                        </ControlTemplate>
-                                    </RadioButton.Template>
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}">
+                                    <StackPanel>
+                                        <TextBlock Text="Compatible" FontWeight="SemiBold" FontSize="13"
+                                                   Foreground="{DynamicResource PrimaryForeground}" />
+                                        <TextBlock Text="Ollama, LM Studio, etc." FontSize="11"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                    </StackPanel>
                                 </RadioButton>
                             </UniformGrid>
 

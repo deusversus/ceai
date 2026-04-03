@@ -177,7 +177,6 @@ public partial class MainWindow : Window
         // Wire AI Operator ViewModel
         AiOperatorContent.DataContext = aiOperatorVm;
         _aiOperatorVm.ScrollToBottomRequested += () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd());
-        _aiOperatorVm.StreamingTextUpdated += () => Dispatcher.BeginInvoke(() => AiChatList.Items.Refresh());
         _aiOperatorVm.StreamingBlocksUpdated += () => Dispatcher.BeginInvoke(() =>
         {
             StreamingBlocksList.Items.Refresh();

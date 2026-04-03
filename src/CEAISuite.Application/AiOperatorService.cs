@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using System.Threading.Channels;
 using CEAISuite.Application.AgentLoop;
@@ -68,10 +69,16 @@ internal static class DangerousTools
     {
         "WriteMemory",
         "SetBreakpoint",
+        "RemoveBreakpoint",
         "InstallCodeCaveHook",
+        "RemoveCodeCaveHook",
         "ToggleScript",
         "ForceDetachAndCleanup",
+        "EmergencyRestorePageProtection",
         "ChangeMemoryProtection",
+        "AllocateMemory",
+        "FreeMemory",
+        "RollbackTransaction",
     };
 }
 
@@ -163,6 +170,7 @@ internal static class ToolCategories
     };
 }
 
+[SupportedOSPlatform("windows")]
 public sealed class AiOperatorService
 {
     private IChatClient _baseChatClient;

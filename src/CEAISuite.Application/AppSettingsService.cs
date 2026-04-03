@@ -131,8 +131,12 @@ public sealed class McpServerSettingsEntry
     /// <summary>Command-line arguments.</summary>
     public string? Arguments { get; set; }
 
-    /// <summary>Environment variables as key=value pairs.</summary>
+    /// <summary>Runtime-only plaintext environment variables (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public Dictionary<string, string>? Environment { get; set; }
+
+    /// <summary>DPAPI-encrypted environment variable values (written to disk).</summary>
+    public Dictionary<string, string>? EncryptedEnvironment { get; set; }
 
     /// <summary>Whether to auto-connect on startup.</summary>
     public bool AutoConnect { get; set; } = true;
@@ -187,6 +191,21 @@ public sealed class AppSettingsService
             catch { _settings.GitHubToken = null; }
         }
 
+        // Decrypt MCP server environment variables
+        foreach (var mcp in _settings.McpServers)
+        {
+            if (mcp.EncryptedEnvironment is { Count: > 0 })
+            {
+                try
+                {
+                    mcp.Environment = mcp.EncryptedEnvironment.ToDictionary(
+                        kv => kv.Key,
+                        kv => DecryptString(kv.Value));
+                }
+                catch { mcp.Environment = null; }
+            }
+        }
+
         // Environment variable overrides stored key if present
         var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
                   ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
@@ -223,6 +242,21 @@ public sealed class AppSettingsService
             _settings.EncryptedGitHubToken = EncryptString(_settings.GitHubToken);
         else
             _settings.EncryptedGitHubToken = null;
+
+        // Encrypt MCP server environment variables before writing
+        foreach (var mcp in _settings.McpServers)
+        {
+            if (mcp.Environment is { Count: > 0 })
+            {
+                mcp.EncryptedEnvironment = mcp.Environment.ToDictionary(
+                    kv => kv.Key,
+                    kv => EncryptString(kv.Value));
+            }
+            else
+            {
+                mcp.EncryptedEnvironment = null;
+            }
+        }
 
         Directory.CreateDirectory(SettingsDir);
         var options = new JsonSerializerOptions { WriteIndented = true };

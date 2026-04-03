@@ -1,0 +1,305 @@
+using System.ComponentModel;
+using System.Globalization;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using CEAISuite.Application.AgentLoop;
+using CEAISuite.Engine.Abstractions;
+using Microsoft.Extensions.AI;
+
+namespace CEAISuite.Application;
+
+public sealed partial class AiToolFunctions
+{
+    // ── Script tools ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("List all script entries with name, status, and type.")]
+    public Task<string> ListScripts()
+    {
+        var scripts = new List<string>();
+        CollectScripts(addressTableService.Roots, scripts, "");
+        if (scripts.Count == 0) return Task.FromResult("No scripts in the address table.");
+        return Task.FromResult($"Found {scripts.Count} scripts:\n{string.Join('\n', scripts.Take(30))}");
+    }
+
+    private static void CollectScripts(IEnumerable<AddressTableNode> nodes, List<string> results, string prefix)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsScriptEntry)
+            {
+                var status = node.IsScriptEnabled ? "✅ Enabled" : "❌ Disabled";
+                var type = node.AssemblerScript!.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
+                results.Add($"  [{status}] {prefix}{node.Label} (ID: {node.Id}, Type: {type})");
+            }
+            if (node.Children.Count > 0)
+                CollectScripts(node.Children, results, $"{prefix}{node.Label}/");
+        }
+    }
+
+    private static void CollectScriptIds(IEnumerable<AddressTableNode> nodes, List<string> results)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.IsScriptEntry)
+                results.Add($"{node.Id} (\"{node.Label}\")");
+            if (node.Children.Count > 0)
+                CollectScriptIds(node.Children, results);
+        }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("View source code of a script entry by ID or label.")]
+    public Task<string> ViewScript([Description("Node ID or label of the script entry")] string nodeId)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null)
+        {
+            // List available scripts to help the operator find the right one
+            var available = new List<string>();
+            CollectScriptIds(addressTableService.Roots, available);
+            var hint = available.Count > 0
+                ? $" Available scripts: {string.Join(", ", available.Take(10))}"
+                : " No scripts in address table.";
+            return Task.FromResult($"Node '{nodeId}' not found.{hint}");
+        }
+        if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry (it's a {(node.IsGroup ? "group" : "value entry")}).");
+
+        var type = node.AssemblerScript.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
+        var status = node.IsScriptEnabled ? "✅ Enabled" : "❌ Disabled";
+        return Task.FromResult(
+            $"Script: {node.Label}\nType: {type}\nStatus: {status}\n" +
+            $"──────────────────────\n{node.AssemblerScript}");
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Validate script syntax without executing.")]
+    public Task<string> ValidateScript(
+        [Description("Node ID or label of the script entry")] string nodeId)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+        if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry.");
+
+        if (autoAssemblerEngine is null) return Task.FromResult("Auto Assembler engine not available for validation.");
+
+        var result = autoAssemblerEngine.Parse(node.AssemblerScript);
+        if (result.IsValid)
+            return Task.FromResult($"Script '{node.Label}' is valid. Has [ENABLE]: {result.EnableSection is not null}, [DISABLE]: {result.DisableSection is not null}");
+
+        return Task.FromResult(
+            $"Script '{node.Label}' has issues:\n" +
+            $"Errors: {string.Join("; ", result.Errors)}\n" +
+            $"Warnings: {string.Join("; ", result.Warnings)}");
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Deep-validate script against live process state.")]
+    public async Task<string> ValidateScriptDeep(
+        [Description("Node ID or label of the script entry")] string nodeId,
+        [Description("Process ID to validate against")] int processId)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return $"Node '{nodeId}' not found.";
+        if (node.AssemblerScript is null) return $"Node '{nodeId}' is not a script entry.";
+        if (autoAssemblerEngine is null) return "Auto Assembler engine not available.";
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"## Deep Validation: {node.Label}");
+
+        int passed = 0, failed = 0, warnings = 0;
+
+        // Step 1: Parse validation
+        var parseResult = autoAssemblerEngine.Parse(node.AssemblerScript);
+        if (!parseResult.IsValid)
+        {
+            sb.AppendLine($"❌ PARSE FAILED: {string.Join("; ", parseResult.Errors)}");
+            return sb.ToString();
+        }
+        sb.AppendLine("✅ Parse: valid syntax");
+        passed++;
+
+        var script = node.AssemblerScript;
+
+        // Step 2: Extract and verify assert directives
+        // Format: "assert(address,bytehex)" e.g. "assert(GameAssembly.dll+9A18E8,48 8B 44 24 38)"
+        var assertPattern = new Regex(
+            @"assert\s*\(\s*([^,]+)\s*,\s*([0-9A-Fa-f\s]+)\s*\)",
+            RegexOptions.IgnoreCase);
+
+        var assertMatches = assertPattern.Matches(script);
+        if (assertMatches.Count == 0)
+        {
+            sb.AppendLine("⚠️ No assert directives found — cannot verify hook compatibility");
+            warnings++;
+        }
+        else
+        {
+            foreach (Match match in assertMatches)
+            {
+                var addrStr = match.Groups[1].Value.Trim();
+                var expectedHex = match.Groups[2].Value.Trim();
+
+                try
+                {
+                    nuint assertAddr;
+                    if (addrStr.Contains('+'))
+                    {
+                        var parts = addrStr.Split('+', 2);
+                        var modName = parts[0].Trim();
+                        var offsetStr = parts[1].Trim();
+
+                        var attachment = await engineFacade.AttachAsync(processId);
+                        var mod = attachment.Modules.FirstOrDefault(m =>
+                            m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
+
+                        if (mod is null)
+                        {
+                            sb.AppendLine($"❌ Assert at {addrStr}: module '{modName}' not found");
+                            failed++;
+                            continue;
+                        }
+
+                        var offsetVal = ulong.Parse(offsetStr, NumberStyles.HexNumber);
+                        assertAddr = (nuint)((ulong)mod.BaseAddress + offsetVal);
+                    }
+                    else
+                    {
+                        assertAddr = ParseAddress(addrStr);
+                    }
+
+                    var expectedBytes = expectedHex.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(b => byte.Parse(b, NumberStyles.HexNumber))
+                        .ToArray();
+
+                    var liveRead = await engineFacade.ReadMemoryAsync(processId, assertAddr, expectedBytes.Length);
+                    var liveBytes = liveRead.Bytes.ToArray();
+
+                    if (liveBytes.SequenceEqual(expectedBytes))
+                    {
+                        sb.AppendLine($"✅ Assert 0x{assertAddr:X}: live bytes match ({expectedHex})");
+                        passed++;
+                    }
+                    else
+                    {
+                        var liveHex = string.Join(" ", liveBytes.Select(b => b.ToString("X2")));
+                        sb.AppendLine($"❌ Assert 0x{assertAddr:X}: MISMATCH");
+                        sb.AppendLine($"   Expected: {expectedHex}");
+                        sb.AppendLine($"   Live:     {liveHex}");
+                        sb.AppendLine($"   ⚠️ Script may be incompatible with current game version");
+                        failed++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine($"❌ Assert {addrStr}: verification failed ({ex.Message})");
+                    failed++;
+                }
+            }
+        }
+
+        // Step 3: Check hook target executability
+        if (memoryProtectionEngine is not null)
+        {
+            var addressPattern = new Regex(
+                @"^\s*(?:(\w+\.dll)\+([0-9A-Fa-f]+)|0x([0-9A-Fa-f]+))\s*:",
+                RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
+            var enableSection = parseResult.EnableSection ?? script;
+            var addrMatches = addressPattern.Matches(enableSection);
+
+            foreach (Match match in addrMatches)
+            {
+                try
+                {
+                    nuint hookAddr;
+                    if (match.Groups[1].Success)
+                    {
+                        var modName = match.Groups[1].Value;
+                        var offsetStr = match.Groups[2].Value;
+                        var attachment = await engineFacade.AttachAsync(processId);
+                        var mod = attachment.Modules.FirstOrDefault(m =>
+                            m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
+                        if (mod is null) continue;
+                        hookAddr = (nuint)((ulong)mod.BaseAddress + ulong.Parse(offsetStr, NumberStyles.HexNumber));
+                    }
+                    else
+                    {
+                        hookAddr = ParseAddress(match.Groups[3].Value);
+                    }
+
+                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, hookAddr);
+                    if (region.IsExecutable)
+                    {
+                        sb.AppendLine($"✅ Hook target 0x{hookAddr:X}: executable ({(region.IsWritable ? "RWX" : "RX")})");
+                        passed++;
+                    }
+                    else
+                    {
+                        sb.AppendLine($"⚠️ Hook target 0x{hookAddr:X}: NOT executable — hook may fail or crash");
+                        warnings++;
+                    }
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ValidateScriptDeep] Address resolve failed: {ex.Message}"); }
+            }
+        }
+
+        // Step 4: Check [DISABLE] has restore logic
+        bool hasEnable = parseResult.EnableSection is not null;
+        bool hasDisable = parseResult.DisableSection is not null;
+
+        if (hasEnable && !hasDisable)
+        {
+            sb.AppendLine("❌ Script has [ENABLE] but no [DISABLE] — cannot be safely reversed");
+            failed++;
+        }
+        else if (hasEnable && hasDisable)
+        {
+            bool hasRestoreBytes = parseResult.DisableSection!.Contains("db ", StringComparison.OrdinalIgnoreCase)
+                || parseResult.DisableSection.Contains("readmem", StringComparison.OrdinalIgnoreCase);
+            bool hasDealloc = parseResult.DisableSection.Contains("dealloc", StringComparison.OrdinalIgnoreCase);
+
+            if (hasRestoreBytes)
+            {
+                sb.AppendLine("✅ [DISABLE] contains byte restoration directives");
+                passed++;
+            }
+            else
+            {
+                sb.AppendLine("⚠️ [DISABLE] section exists but has no visible byte restoration (db/readmem)");
+                warnings++;
+            }
+
+            if (parseResult.EnableSection!.Contains("alloc", StringComparison.OrdinalIgnoreCase))
+            {
+                if (hasDealloc)
+                {
+                    sb.AppendLine("✅ [DISABLE] deallocates memory allocated in [ENABLE]");
+                    passed++;
+                }
+                else
+                {
+                    sb.AppendLine("⚠️ [ENABLE] allocates memory but [DISABLE] has no dealloc — potential memory leak");
+                    warnings++;
+                }
+            }
+        }
+
+        // Summary
+        sb.AppendLine();
+        sb.AppendLine($"## Summary: {passed} passed, {failed} failed, {warnings} warnings");
+        if (failed > 0)
+            sb.AppendLine("🛑 DO NOT ENABLE — script has critical issues that may crash or corrupt the game");
+        else if (warnings > 0)
+            sb.AppendLine("⚠️ Script may work but has potential issues — proceed with caution");
+        else
+            sb.AppendLine("✅ All checks passed — script appears safe to enable");
+
+        return sb.ToString();
+    }
+}

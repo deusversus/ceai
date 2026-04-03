@@ -139,9 +139,6 @@ public partial class AiOperatorViewModel : ObservableObject
     /// <summary>Raised when an approval card needs to be shown (WPF-specific UI).</summary>
     public event Action<AgentStreamEvent.ApprovalRequested>? ApprovalCardRequested;
 
-    /// <summary>Raised when the streaming text delta updates the display items in-place.</summary>
-    public event Action? StreamingTextUpdated;
-
     // ── Public Service Accessors (for MainWindow thin wrappers) ──
 
     public AiOperatorService AiOperatorService => _aiOperatorService;

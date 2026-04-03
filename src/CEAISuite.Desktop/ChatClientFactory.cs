@@ -363,21 +363,13 @@ internal static class ChatClientFactory
             var status = message.Response?.Status ?? 0;
             LogDiag($"RSP: {status}");
 
-            // On any error, dump the full request body to a file for analysis
-            if (status >= 400 && requestBody is not null)
+            // Log error metadata only — never dump full request body (contains conversation history)
+            if (status >= 400)
             {
                 try
                 {
-                    var logDir = System.IO.Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                        "CEAISuite", "logs");
-                    System.IO.Directory.CreateDirectory(logDir);
-                    var ts = DateTime.Now.ToString("HHmmss-fff");
-                    var dumpPath = System.IO.Path.Combine(logDir, $"failed-request-{ts}.json");
-                    System.IO.File.WriteAllText(dumpPath, requestBody);
-                    LogDiag($"DUMP: {dumpPath} ({requestBody.Length}B)");
+                    LogDiag($"ERR: status={status} requestBodyLength={requestBody?.Length ?? 0}B");
 
-                    // Also try to read error response body
                     if (message.Response?.Content is not null)
                     {
                         var errBody = message.Response.Content.ToString();

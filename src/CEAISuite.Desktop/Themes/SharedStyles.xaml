@@ -448,4 +448,30 @@
         <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
     </Style>
 
+    <!-- ── Provider card RadioButton (used in Settings) ── -->
+    <Style x:Key="ProviderCardRadioButton" TargetType="RadioButton">
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="RadioButton">
+                    <Border x:Name="CardBorder" CornerRadius="6" Padding="10,10"
+                            Margin="{TemplateBinding Margin}"
+                            Background="{DynamicResource InputBackground}"
+                            BorderBrush="{DynamicResource InputBorder}" BorderThickness="1.5">
+                        <ContentPresenter />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="CardBorder" Property="BorderBrush" Value="{DynamicResource SelectionHighlight}" />
+                            <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemSelectedBackground}" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="CardBorder" Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
 </ResourceDictionary>

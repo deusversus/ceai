@@ -552,22 +552,22 @@ public class AgentLoopTests
     // ── AgentStreamEvent ─────────────────────────────────────────────
 
     [Fact]
-    public void AgentStreamEvent_ApprovalRequested_CanResolve()
+    public async Task AgentStreamEvent_ApprovalRequested_CanResolve()
     {
         var evt = new AgentStreamEvent.ApprovalRequested("WriteMemory", "addr=0x1000");
         Assert.False(evt.UserDecision.IsCompleted);
 
         evt.Resolve(true);
         Assert.True(evt.UserDecision.IsCompleted);
-        Assert.True(evt.UserDecision.Result);
+        Assert.True(await evt.UserDecision);
     }
 
     [Fact]
-    public void AgentStreamEvent_ApprovalRequested_CanDeny()
+    public async Task AgentStreamEvent_ApprovalRequested_CanDeny()
     {
         var evt = new AgentStreamEvent.ApprovalRequested("DeleteAll", "");
         evt.Resolve(false);
-        Assert.False(evt.UserDecision.Result);
+        Assert.False(await evt.UserDecision);
     }
 
     // ── Integration: Full Loop with Mock IChatClient ──────────────────
@@ -581,8 +581,9 @@ public class AgentLoopTests
         var history = new ChatHistoryManager();
 
         var events = new List<AgentStreamEvent>();
-        var reader = loop.RunStreamingAsync("Hi", history);
-        await foreach (var evt in reader.ReadAllAsync())
+        var ct = TestContext.Current.CancellationToken;
+        var reader = loop.RunStreamingAsync("Hi", history, cancellationToken: ct);
+        await foreach (var evt in reader.ReadAllAsync(ct))
             events.Add(evt);
 
         // Should have at least TextDelta + Completed

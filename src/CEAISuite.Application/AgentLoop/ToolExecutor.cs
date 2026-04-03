@@ -229,7 +229,7 @@ public sealed class ToolExecutor
                     if (hookResult.Outcome == HookOutcome.Block)
                     {
                         var msg = hookResult.Message ?? $"Tool '{toolName}' blocked by hook";
-                        return (item.Index, Result: (msg, true));
+                        return (item.Index, (msg, true));
                     }
                     if (hookResult.Outcome == HookOutcome.Allow)
                         hookGrantedPermission = true;
@@ -240,7 +240,7 @@ public sealed class ToolExecutor
                 {
                     var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, ct);
                     if (permResult is not null)
-                        return (item.Index, Result: (permResult.Result.Result?.ToString() ?? "denied", true));
+                        return (item.Index, (permResult.Result.Result?.ToString() ?? "denied", true));
                 }
                 else if (_options.PermissionEngine is { } engine)
                 {
@@ -248,7 +248,7 @@ public sealed class ToolExecutor
                     if (decision.Effect == PermissionEffect.Deny)
                     {
                         var reason = decision.MatchedRule?.Description ?? "denied by permission rule";
-                        return (item.Index, Result: ($"Tool '{toolName}' blocked: {reason}", true));
+                        return (item.Index, ($"Tool '{toolName}' blocked: {reason}", true));
                     }
                 }
 
@@ -275,7 +275,7 @@ public sealed class ToolExecutor
                             modifiedResult = $"Tool '{toolName}' failed. Details suppressed by hook.";
                         if (failureAction.RetryHint is { } hint)
                             modifiedResult += $"\n[HINT] {hint}";
-                        return (item.Index, Result: (modifiedResult, true));
+                        return (item.Index, (modifiedResult, true));
                     }
                 }
                 else if (!result.IsError && _options.Hooks is { } postHooks)

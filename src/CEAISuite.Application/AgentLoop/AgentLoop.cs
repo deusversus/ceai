@@ -93,7 +93,8 @@ public sealed class AgentLoop
 
         // Add user message with dynamic context
         string? contextSuffix = null;
-        try { contextSuffix = contextProvider?.Invoke(); } catch { /* ignore */ }
+        try { contextSuffix = contextProvider?.Invoke(); }
+        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[AgentLoop] Context provider failed: {ex.Message}"); }
         var fullContext = contextSuffix is not null ? $"[CURRENT STATE]\n{contextSuffix}" : null;
         history.AddUserMessage(userMessage, fullContext);
 

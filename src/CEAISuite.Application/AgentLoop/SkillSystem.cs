@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace CEAISuite.Application.AgentLoop;
 
@@ -186,7 +187,7 @@ public sealed class SkillSystem
                 if (_catalog.TryGetValue(name, out var skill))
                 {
                     sb.AppendLine($"\n## Skill: {skill.Name}");
-                    sb.AppendLine(skill.Instructions);
+                    sb.AppendLine(SanitizeSkillInstructions(skill.Instructions, skill.Name));
                 }
             }
 
@@ -219,6 +220,48 @@ public sealed class SkillSystem
             lines.Add("\nUse load_skill(name) to activate a skill before using its techniques.");
             return string.Join("\n", lines);
         }
+    }
+
+    /// <summary>
+    /// Defense-in-depth: strip patterns from skill instructions that could
+    /// attempt to override system prompt boundaries or inject directives.
+    /// </summary>
+    private static readonly Regex InjectionPattern = new(
+        @"^\s*\[(SYSTEM|ADMIN|OVERRIDE|IGNORE|INSTRUCTION|PROMPT)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private const int MaxSkillInstructionLength = 10_000;
+
+    private static string SanitizeSkillInstructions(string instructions, string skillName)
+    {
+        if (instructions.Length > MaxSkillInstructionLength)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[SkillSystem] Skill '{skillName}' instructions truncated from {instructions.Length} to {MaxSkillInstructionLength} chars");
+            instructions = instructions[..MaxSkillInstructionLength];
+        }
+
+        var lines = instructions.Split('\n');
+        var filtered = new System.Text.StringBuilder(instructions.Length);
+        int stripped = 0;
+
+        foreach (var line in lines)
+        {
+            if (InjectionPattern.IsMatch(line))
+            {
+                stripped++;
+                continue;
+            }
+            filtered.AppendLine(line);
+        }
+
+        if (stripped > 0)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[SkillSystem] Skill '{skillName}': stripped {stripped} suspicious directive line(s)");
+        }
+
+        return filtered.ToString();
     }
 }
 

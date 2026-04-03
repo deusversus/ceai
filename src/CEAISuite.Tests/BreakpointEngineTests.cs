@@ -79,7 +79,7 @@ public class InstructionDecodingTests
         // push rbp (1) + mov rbp,rsp (3) + sub rsp,0x20 (4) + push rbx (1) + push rsi (1) +
         // push rdi (1) + mov edi,ecx (2) + xor ebx,ebx (2) + nop (1) = 16 bytes
         byte[] prologue = [0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20, 0x53, 0x56, 0x57, 0x89, 0xCF, 0x31, 0xDB, 0x90];
-        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 14, (nuint)0x140001000);
+        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 14, unchecked((nuint)0x140001000));
         Assert.True(stealLen >= 14, $"Steal length {stealLen} should be >= 14");
     }
 
@@ -88,7 +88,7 @@ public class InstructionDecodingTests
     {
         // push rbp (1) + mov rbp,rsp (3) = 4 bytes — if min is 2, should align to instruction boundary
         byte[] prologue = [0x55, 0x48, 0x89, 0xE5];
-        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 2, (nuint)0x140001000);
+        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 2, unchecked((nuint)0x140001000));
         Assert.True(stealLen >= 2);
     }
 
@@ -101,7 +101,7 @@ public class InstructionDecodingTests
         // 0x06 is PUSH ES which is invalid in 64-bit mode
         byte[] invalid64 = [0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06];
         Assert.ThrowsAny<InvalidOperationException>(() =>
-            WindowsCodeCaveEngine.CalculateSafeStealLength(invalid64, 14, (nuint)0x140001000));
+            WindowsCodeCaveEngine.CalculateSafeStealLength(invalid64, 14, unchecked((nuint)0x140001000)));
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class InstructionDecodingTests
         // Only 2 bytes of valid instructions, need 14
         byte[] tooShort = [0x55, 0xC3]; // push rbp + ret = 2 bytes
         Assert.ThrowsAny<InvalidOperationException>(() =>
-            WindowsCodeCaveEngine.CalculateSafeStealLength(tooShort, 14, (nuint)0x140001000));
+            WindowsCodeCaveEngine.CalculateSafeStealLength(tooShort, 14, unchecked((nuint)0x140001000)));
     }
 }
 

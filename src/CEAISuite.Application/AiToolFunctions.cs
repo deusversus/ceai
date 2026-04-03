@@ -718,6 +718,26 @@ public sealed class AiToolFunctions(
             {
                 if (codeCaveEngine is null) return "Code cave engine not available.";
                 var stealthAddr = ParseAddress(address);
+
+                // ── Executable-memory safety gate ──
+                // Stealth hooks inject a JMP detour into the target address.
+                // If the target is in a non-executable region (heap data, stack, etc.)
+                // the detour overwrites live data and crashes/freezes the process.
+                if (memoryProtectionEngine is not null)
+                {
+                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, stealthAddr);
+                    if (!region.IsExecutable)
+                    {
+                        return $"❌ Stealth hook REJECTED: Target address 0x{stealthAddr:X} is in a non-executable memory region " +
+                               $"(R={region.IsReadable}, W={region.IsWritable}, X={region.IsExecutable}). " +
+                               $"Stealth (code cave) hooks inject a JMP detour and can only target executable code.\n" +
+                               $"Recommended alternatives:\n" +
+                               $"  1. Use mode=Hardware with type=HardwareWrite to watch data writes via CPU debug registers\n" +
+                               $"  2. Use mode=PageGuard for page-level write monitoring\n" +
+                               $"  3. Use FindWritersToOffset or TraceFieldWriters to find the code that writes to this data, then hook that code instead";
+                    }
+                }
+
                 if (watchdogService is not null && watchdogService.IsUnsafe(stealthAddr, "Stealth"))
                 {
                     // Still allow but warn
@@ -2613,6 +2633,20 @@ public sealed class AiToolFunctions(
             if (codeCaveEngine is null) return "Code cave engine not available.";
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
+
+            // ── Executable-memory safety gate ──
+            if (memoryProtectionEngine is not null)
+            {
+                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+                if (!region.IsExecutable)
+                {
+                    return $"❌ Code cave hook REJECTED: Target address 0x{addr:X} is in a non-executable memory region " +
+                           $"(R={region.IsReadable}, W={region.IsWritable}, X={region.IsExecutable}). " +
+                           $"Code cave hooks inject a JMP detour and can only target executable code.\n" +
+                           $"If you need to monitor writes to this data address, use SetBreakpoint with mode=Hardware and type=HardwareWrite instead.";
+                }
+            }
+
             if (watchdogService is not null && watchdogService.IsUnsafe(addr, "Stealth"))
             {
                 // Still allow but warn

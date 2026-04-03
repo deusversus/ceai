@@ -85,16 +85,22 @@ public sealed class ProcessWatchdogService : IDisposable
             // Step 2: Execute the install
             await installAction();
 
-            // Step 3: For PageGuard installs, do an early fast check (storms happen within ms)
+            // Step 3: For PageGuard installs, do early fast checks (storms happen within ms)
+            // 6C: Extended to 500ms initial check + secondary check at 750ms
             if (string.Equals(mode, "PageGuard", StringComparison.OrdinalIgnoreCase))
             {
-                await Task.Delay(200);
+                await Task.Delay(500);
                 if (!IsProcessResponsive(processId))
                 {
                     // Immediate failure — don't wait the full verifyDelay
                     bool earlyRollbackOk = false;
                     try { earlyRollbackOk = await rollbackAction(); }
-                    catch { /* rollback failed */ }
+                    catch (Exception earlyRollbackEx)
+                    {
+                        // 6B: Log rollback exception
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[Watchdog] Early rollback failed for {operationType} at 0x{address:X}: {earlyRollbackEx.Message}");
+                    }
 
                     var earlyKey = MakeUnsafeKey(address, mode);
                     _unsafeAddresses[earlyKey] = new UnsafeAddressEntry(address, mode, operationType, DateTimeOffset.UtcNow, earlyRollbackOk);
@@ -102,7 +108,29 @@ public sealed class ProcessWatchdogService : IDisposable
                     OnAutoRollback?.Invoke(new WatchdogRollbackEvent(operationId, processId, address, operationType, mode, earlyRollbackOk, DateTimeOffset.UtcNow));
 
                     return new TransactionResult(false,
-                        $"Process became unresponsive within 200ms of PageGuard install (guard storm likely). Rollback {(earlyRollbackOk ? "succeeded" : "FAILED")}. Address marked unsafe.",
+                        $"Process became unresponsive within 500ms of PageGuard install (guard storm likely). Rollback {(earlyRollbackOk ? "succeeded" : "FAILED")}. Address marked unsafe.",
+                        TransactionPhase.Verify);
+                }
+
+                // 6C: Secondary check at 750ms catches gradual accumulation
+                await Task.Delay(250); // 500 + 250 = 750ms total
+                if (!IsProcessResponsive(processId))
+                {
+                    bool secondRollbackOk = false;
+                    try { secondRollbackOk = await rollbackAction(); }
+                    catch (Exception secondRollbackEx)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[Watchdog] Secondary rollback failed for {operationType} at 0x{address:X}: {secondRollbackEx.Message}");
+                    }
+
+                    var secondKey = MakeUnsafeKey(address, mode);
+                    _unsafeAddresses[secondKey] = new UnsafeAddressEntry(address, mode, operationType, DateTimeOffset.UtcNow, secondRollbackOk);
+
+                    OnAutoRollback?.Invoke(new WatchdogRollbackEvent(operationId, processId, address, operationType, mode, secondRollbackOk, DateTimeOffset.UtcNow));
+
+                    return new TransactionResult(false,
+                        $"Process became unresponsive within 750ms of PageGuard install (gradual guard storm). Rollback {(secondRollbackOk ? "succeeded" : "FAILED")}. Address marked unsafe.",
                         TransactionPhase.Verify);
                 }
             }
@@ -116,7 +144,12 @@ public sealed class ProcessWatchdogService : IDisposable
                 // Process became unresponsive — rollback
                 bool rollbackOk = false;
                 try { rollbackOk = await rollbackAction(); }
-                catch { /* rollback failed */ }
+                catch (Exception rollbackEx)
+                {
+                    // 6B: Log rollback exception instead of swallowing silently
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[Watchdog] Rollback failed for {operationType} at 0x{address:X}: {rollbackEx.Message}");
+                }
 
                 // Mark as unsafe
                 var key = MakeUnsafeKey(address, mode);
@@ -267,6 +300,7 @@ public sealed class ProcessWatchdogService : IDisposable
             }
 
             // Signal 3: Thread time progress — check if total user+kernel time is advancing
+            // 6A: Signal 3 should FAIL if CPU time hasn't advanced — don't give benefit of doubt
             total++;
             try
             {
@@ -279,9 +313,7 @@ public sealed class ProcessWatchdogService : IDisposable
                     // If CPU time advanced, the process is executing (not fully wedged)
                     if (totalTime2 > totalTime1)
                         passed++;
-                    else
-                        // Zero CPU progress in 50ms might be normal for idle process — partial pass
-                        passed++; // Give benefit of doubt — a truly hung process often spins
+                    // 6A: Zero CPU progress = signal FAILS (no automatic pass for idle)
                 }
             }
             catch
@@ -434,9 +466,11 @@ internal sealed class WatchdogMonitor : IDisposable
                         {
                             success = await _rollbackAction().ConfigureAwait(false);
                         }
-                        catch
+                        catch (Exception rollbackEx)
                         {
-                            // Rollback itself failed — still report
+                            // 6B: Log rollback exception instead of swallowing
+                            System.Diagnostics.Debug.WriteLine(
+                                $"[Watchdog] Monitor rollback failed for {OperationType} at 0x{Address:X}: {rollbackEx.Message}");
                         }
                         _onRollback(this, success);
                         return; // Stop monitoring

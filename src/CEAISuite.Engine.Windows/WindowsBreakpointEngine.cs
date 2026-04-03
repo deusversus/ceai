@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
+using Iced.Intel;
 
 namespace CEAISuite.Engine.Windows;
 
@@ -76,6 +77,15 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     {
         var resolvedMode = mode == BreakpointMode.Auto ? ResolveAutoMode(type) : mode;
 
+        // 2F: Address width validation for WOW64 — reject 64-bit addresses for 32-bit processes
+        if (_sessions.TryGetValue(processId, out var existingSession) &&
+            existingSession.IsWow64Target && (ulong)address > 0xFFFFFFFF)
+        {
+            throw new InvalidOperationException(
+                $"Address 0x{address:X} exceeds 32-bit range for WOW64 process. " +
+                "Hardware debug registers are 32-bit in WOW64 mode — the address would be silently truncated.");
+        }
+
         // Stealth mode is for code cave hooks (ICodeCaveEngine) — not for the breakpoint engine.
         // If it reaches here, downgrade to the best available mode for the type.
         if (resolvedMode == BreakpointMode.Stealth)
@@ -85,6 +95,36 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         if (resolvedMode == BreakpointMode.PageGuard)
             return SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
 
+        // 2B: Wrap hardware BP installation with auto-fallback to PageGuard on slot exhaustion
+        if (resolvedMode == BreakpointMode.Hardware)
+        {
+            return Task.Run(async () =>
+            {
+                try
+                {
+                    return await SetBreakpointCoreAsync(processId, address, type, resolvedMode, action, singleHit, cancellationToken);
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("four active hardware breakpoints"))
+                {
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[BreakpointEngine] Hardware slots exhausted. Auto-falling back to PageGuard for BP at 0x{address:X}.");
+                    return await SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
+                }
+            }, cancellationToken);
+        }
+
+        return SetBreakpointCoreAsync(processId, address, type, resolvedMode, action, singleHit, cancellationToken);
+    }
+
+    private Task<BreakpointDescriptor> SetBreakpointCoreAsync(
+        int processId,
+        nuint address,
+        BreakpointType type,
+        BreakpointMode resolvedMode,
+        BreakpointHitAction action,
+        bool singleHit,
+        CancellationToken cancellationToken)
+    {
         return Task.Run(
             () =>
             {
@@ -220,11 +260,16 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                                 if (bpList.Count == 0)
                                 {
                                     session.PageGuardBreakpoints.Remove(pageBase);
-                                    // Last BP on this page — restore original protection
-                                    if (breakpoint.OriginalPageProtection is { } origProt)
+                                    // 2H: Last BP on this page — restore original protection from per-page tracking
+                                    if (session.OriginalPageProtections.Remove(pageBase, out var origProt))
                                     {
                                         VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase,
                                             (UIntPtr)PageSize, origProt, out _);
+                                    }
+                                    else if (breakpoint.OriginalPageProtection is { } bpOrigProt)
+                                    {
+                                        VirtualProtectEx(session.ProcessHandle, (IntPtr)pageBase,
+                                            (UIntPtr)PageSize, bpOrigProt, out _);
                                     }
                                 }
                                 // If other BPs remain on this page, guard stays active
@@ -341,10 +386,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 }
 
                 session.IsDebuggerAttached = true;
+                // 7B: No thread Name assigned — avoids anti-cheat fingerprinting of debug thread names
                 session.DebugThread = new Thread(() => DebugLoop(session))
                 {
-                    IsBackground = true,
-                    Name = $"WindowsBreakpointEngine-{processId}"
+                    IsBackground = true
                 };
 
                 if (!_sessions.TryAdd(processId, session))
@@ -450,10 +495,44 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             throw new InvalidOperationException($"A software breakpoint already exists at 0x{breakpoint.Address:X}.");
         }
 
+        // 2C: Instruction boundary validation — read enough bytes to decode at least one instruction
+        var probeBuffer = new byte[15]; // max x86 instruction length
+        if (ReadProcessMemory(session.ProcessHandle, (IntPtr)breakpoint.Address, probeBuffer, probeBuffer.Length, out var probeRead) && probeRead > 0)
+        {
+            var bitness = session.IsWow64Target ? 32 : 64;
+            var codeReader = new ByteArrayCodeReader(probeBuffer, 0, probeRead);
+            var decoder = Decoder.Create(bitness, codeReader, (ulong)breakpoint.Address);
+            var instr = decoder.Decode();
+            if (instr.IsInvalid)
+            {
+                throw new InvalidOperationException(
+                    $"Address 0x{breakpoint.Address:X} does not decode to a valid instruction. " +
+                    "Software breakpoint rejected — this address may not be at an instruction boundary.");
+            }
+            // Verify the decoded instruction starts at exactly our target address
+            if (instr.IP != (ulong)breakpoint.Address)
+            {
+                throw new InvalidOperationException(
+                    $"Address 0x{breakpoint.Address:X} is not at an instruction boundary. " +
+                    $"Nearest instruction starts at 0x{instr.IP:X}.");
+            }
+        }
+
         var original = new byte[1];
         if (!ReadProcessMemory(session.ProcessHandle, (IntPtr)breakpoint.Address, original, original.Length, out var bytesRead) || bytesRead != 1)
         {
             throw CreateWin32Exception($"Unable to read original byte at 0x{breakpoint.Address:X}.");
+        }
+
+        // 2E: Detect existing 0xCC before installing software breakpoint
+        if (original[0] == 0xCC)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[BreakpointEngine] WARNING: Address 0x{breakpoint.Address:X} already contains 0xCC (INT3). " +
+                "Another debugger or padding byte may be present. Skipping patch to avoid recording wrong original byte.");
+            throw new InvalidOperationException(
+                $"Address 0x{breakpoint.Address:X} already contains 0xCC (INT3). " +
+                "Cannot install software breakpoint — original byte would be lost.");
         }
 
         var patch = new byte[] { 0xCC };
@@ -474,7 +553,15 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
 
         var original = new[] { breakpoint.OriginalByte.Value };
-        WriteProcessMemory(session.ProcessHandle, (IntPtr)breakpoint.Address, original, original.Length, out _);
+        if (!WriteProcessMemory(session.ProcessHandle, (IntPtr)breakpoint.Address, original, original.Length, out _))
+        {
+            // 2A: 0xCC persists at this address — mark breakpoint as restoration-failed
+            breakpoint.RestorationFailed = true;
+            System.Diagnostics.Debug.WriteLine(
+                $"[BreakpointEngine] CRITICAL: RestoreOriginalByte failed at 0x{breakpoint.Address:X} " +
+                $"(error {Marshal.GetLastWin32Error()}). The 0xCC byte persists — breakpoint {breakpoint.Id} marked as restoration-failed.");
+            return;
+        }
         FlushInstructionCache(session.ProcessHandle, (IntPtr)breakpoint.Address, (UIntPtr)1);
     }
 
@@ -513,6 +600,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             if (isWow64Target)
             {
                 var context = CreateWow64Context();
+                // 3G: Gracefully handle invalid/stale thread handles
                 if (!Wow64GetThreadContext(threadHandle, ref context))
                 {
                     return; // Thread exited or inaccessible — don't crash host app
@@ -623,6 +711,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 case 3:
                     dr3 = address;
                     break;
+                default:
+                    throw new InvalidOperationException($"Invalid hardware debug register slot {slot}. Valid range is 0-3.");
             }
 
             dr7 |= 1UL << (slot * 2);
@@ -683,6 +773,15 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             if (VirtualQueryEx(processHandle, (IntPtr)pageBase, out var mbi,
                 Marshal.SizeOf<MEMORY_BASIC_INFORMATION>()) != 0)
             {
+                // 2D: Validate that the region is committed memory before arming PAGE_GUARD
+                const uint MemCommit = 0x1000;
+                if ((mbi.State & MemCommit) == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot set PAGE_GUARD at 0x{pageBase:X}: memory region is not committed " +
+                        $"(state=0x{mbi.State:X}). Only committed memory can be guarded.");
+                }
+
                 // Strip PAGE_GUARD if already set, we'll add it back
                 actualProtection = mbi.Protect & ~PageGuard;
             }
@@ -693,9 +792,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 throw CreateWin32Exception($"Unable to set PAGE_GUARD at 0x{pageBase:X}.");
             }
 
-            breakpoint.OriginalPageProtection = actualProtection;
-
             // Step 3: Lock → register BP in dictionaries → release lock.
+            // 2H: Only store original protection on the first BP for a given page
             lock (session.SyncRoot)
             {
                 session.Breakpoints[breakpoint.Id] = breakpoint;
@@ -703,6 +801,14 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 {
                     bpList = new List<BreakpointState>();
                     session.PageGuardBreakpoints[pageBase] = bpList;
+                    // First BP on this page — record the original protection
+                    breakpoint.OriginalPageProtection = actualProtection;
+                    session.OriginalPageProtections[pageBase] = actualProtection;
+                }
+                else
+                {
+                    // Subsequent BP on same page — inherit recorded protection
+                    breakpoint.OriginalPageProtection = session.OriginalPageProtections.GetValueOrDefault(pageBase, actualProtection);
                 }
                 bpList.Add(breakpoint);
                 _breakpointRegistry[breakpoint.Id] = breakpoint;
@@ -747,9 +853,13 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         {
             if (!breakpoint.IsEnabled) continue;
 
+            // 2J: Apply same throttle window logic to PageGuard hits
             if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, faultAddress, registers))
             {
                 breakpoint.IsEnabled = false;
+                System.Diagnostics.Debug.WriteLine(
+                    $"[BreakpointEngine] PageGuard BP {breakpoint.Id} at 0x{breakpoint.Address:X}: " +
+                    $"auto-disabled due to excessive hit rate (guard-page storm prevention).");
             }
         }
 
@@ -830,6 +940,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
     private void DebugLoop(ProcessDebugSession session)
     {
+        // 3B: Retry counter — allow up to 5 consecutive non-timeout failures before killing the loop
+        const int MaxConsecutiveFailures = 5;
+        int consecutiveFailures = 0;
+
         try
         {
             while (!session.StopRequested)
@@ -839,6 +953,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     var error = Marshal.GetLastWin32Error();
                     if (error == ErrorSemTimeout)
                     {
+                        consecutiveFailures = 0; // Reset on successful timeout (normal idle)
                         continue;
                     }
 
@@ -847,8 +962,21 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                         break;
                     }
 
-                    throw CreateWin32Exception($"Debug event loop failed for process {session.ProcessId}.");
+                    consecutiveFailures++;
+                    System.Diagnostics.Debug.WriteLine(
+                        $"[BreakpointEngine] WaitForDebugEventEx failed (error {error}), " +
+                        $"attempt {consecutiveFailures}/{MaxConsecutiveFailures} for PID {session.ProcessId}.");
+
+                    if (consecutiveFailures >= MaxConsecutiveFailures)
+                    {
+                        throw CreateWin32Exception(
+                            $"Debug event loop failed for process {session.ProcessId} after {MaxConsecutiveFailures} consecutive failures.");
+                    }
+
+                    continue;
                 }
+
+                consecutiveFailures = 0; // Reset on successful event
 
                 var continueStatus = DbgContinue;
                 var shouldExit = false;
@@ -867,7 +995,14 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 }
                 finally
                 {
-                    ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus);
+                    // 3I: Check ContinueDebugEvent return value — process may have exited
+                    if (!ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus))
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[BreakpointEngine] ContinueDebugEvent failed for PID {debugEvent.dwProcessId} " +
+                            $"(error {Marshal.GetLastWin32Error()}). Ending debug loop.");
+                        shouldExit = true;
+                    }
                 }
 
                 if (shouldExit)
@@ -1294,6 +1429,31 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         IntPtr threadHandle,
         nuint faultAddress)
     {
+        // 3G: Wrap context calls with try/catch for invalid handle errors
+        try
+        {
+            return CaptureRegisterSnapshotCore(session, threadHandle, faultAddress);
+        }
+        catch (InvalidOperationException ex) when (ex.InnerException is Win32Exception)
+        {
+            // Stale thread handle — remove from session and return empty snapshot
+            var staleThreadId = session.ThreadHandles
+                .FirstOrDefault(kvp => kvp.Value == threadHandle).Key;
+            if (staleThreadId != 0)
+            {
+                session.ThreadHandles.Remove(staleThreadId);
+                System.Diagnostics.Debug.WriteLine(
+                    $"[BreakpointEngine] Removed stale thread handle for TID {staleThreadId} after context access failure.");
+            }
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static IReadOnlyDictionary<string, string> CaptureRegisterSnapshotCore(
+        ProcessDebugSession session,
+        IntPtr threadHandle,
+        nuint faultAddress)
+    {
         if (session.IsWow64Target)
         {
             var context = CreateWow64Context();
@@ -1430,6 +1590,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         lock (session.SyncRoot)
         {
+            // 3K: Clear pending rearm dictionaries to prevent stale entries if PID is recycled
+            session.PendingSoftwareRearm.Clear();
+            session.PendingPageGuardRearm.Clear();
+
             foreach (var threadHandle in session.ThreadHandles.Values.Where(handle => handle != IntPtr.Zero))
             {
                 CloseHandle(threadHandle);
@@ -1521,6 +1685,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         /// <summary>Tracks which BP is pending single-step re-arm of its PAGE_GUARD flag.</summary>
         public Dictionary<int, nuint> PendingPageGuardRearm { get; } = new();
+
+        /// <summary>2H: Per-page original protection tracking. Only the first BP on a page records this.</summary>
+        public Dictionary<nuint, uint> OriginalPageProtections { get; } = new();
     }
 
     private sealed class BreakpointState
@@ -1583,6 +1750,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         /// <summary>When true, this BP was auto-disabled due to excessive hit rate.</summary>
         public bool ThrottleDisabled;
+
+        /// <summary>When true, the original byte could not be restored — 0xCC persists at the address.</summary>
+        public bool RestorationFailed;
 
         public ConcurrentQueue<BreakpointHitEvent> HitLog { get; } = new();
 

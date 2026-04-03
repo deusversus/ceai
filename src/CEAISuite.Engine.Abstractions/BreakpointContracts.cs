@@ -19,26 +19,55 @@ public enum BreakpointHitAction
 
 /// <summary>
 /// Intrusiveness modes for breakpoints, ordered from least to most intrusive.
+/// Each mode has a different detection surface for anti-cheat/anti-debug systems.
 /// </summary>
 public enum BreakpointMode
 {
     /// <summary>Engine picks the least intrusive mode that works for the request.</summary>
     Auto,
 
-    /// <summary>Code cave detour — JMP hook into allocated memory. No debugger attachment.
-    /// Best for execute monitoring. Cannot monitor data reads/writes.</summary>
+    /// <summary>
+    /// Code cave detour — JMP hook into allocated memory. No debugger attachment required.
+    /// Best for execute monitoring. Cannot monitor data reads/writes.
+    /// <para><b>Detection surface:</b> Code integrity scan (CRC checks on .text section will detect
+    /// the overwritten bytes). VirtualQuery on the cave page shows PAGE_EXECUTE_READ allocation
+    /// not backed by a module. Memory scanning for JMP/detour patterns.</para>
+    /// <para><b>Mitigations:</b> Cave allocated within module range, page protection downgraded
+    /// to PAGE_EXECUTE_READ after write (7A). No IsDebuggerPresent detection.</para>
+    /// </summary>
     Stealth,
 
-    /// <summary>PAGE_GUARD protection flag — catches memory access via guard page faults.
-    /// Requires debugger but avoids hardware debug registers. Good for data access monitoring.</summary>
+    /// <summary>
+    /// PAGE_GUARD protection flag — catches memory access via guard page faults.
+    /// Requires debugger but avoids hardware debug registers. Good for data access monitoring.
+    /// <para><b>Detection surface:</b> IsDebuggerPresent / CheckRemoteDebuggerPresent returns true
+    /// (debugger is attached). VirtualQuery on the guarded page shows PAGE_GUARD flag set.
+    /// NtQueryInformationProcess(ProcessDebugPort) returns non-zero.</para>
+    /// <para><b>Mitigations:</b> PAGE_GUARD is a normal OS mechanism and may not be flagged by
+    /// heuristic detectors. Thread names removed (7B).</para>
+    /// </summary>
     PageGuard,
 
-    /// <summary>Hardware debug registers DR0-DR3. Requires thread suspension to set context.
-    /// Limited to 4 simultaneous breakpoints. Can monitor execute/read/write.</summary>
+    /// <summary>
+    /// Hardware debug registers DR0-DR3. Requires thread suspension to set context.
+    /// Limited to 4 simultaneous breakpoints. Can monitor execute/read/write.
+    /// <para><b>Detection surface:</b> GetThreadContext reveals non-zero DR0-DR3/DR7 values.
+    /// IsDebuggerPresent returns true (debugger attached). Some anti-cheats periodically
+    /// read DR registers to detect hardware breakpoints.</para>
+    /// <para><b>Mitigations:</b> Context is only modified during thread suspension windows.
+    /// Thread names removed (7B). DR6 cleared after each hit to reduce fingerprint.</para>
+    /// </summary>
     Hardware,
 
-    /// <summary>Software INT3 byte patch. Most intrusive, most compatible.
-    /// Only supports execute breakpoints.</summary>
+    /// <summary>
+    /// Software INT3 (0xCC) byte patch. Most intrusive, most compatible.
+    /// Only supports execute breakpoints.
+    /// <para><b>Detection surface:</b> Code integrity scan detects the 0xCC byte modification.
+    /// IsDebuggerPresent returns true. Memory CRC checks on code sections will fail.
+    /// This is the most easily detected mode.</para>
+    /// <para><b>Mitigations:</b> Instruction boundary validation (2C) prevents accidental
+    /// corruption. Original byte is tracked for clean restoration.</para>
+    /// </summary>
     Software
 }
 

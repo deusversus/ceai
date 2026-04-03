@@ -39,7 +39,9 @@ public sealed record ScanResultSet(
     IReadOnlyList<ScanResultEntry> Results,
     int TotalRegionsScanned,
     long TotalBytesScanned,
-    DateTimeOffset CompletedAtUtc);
+    DateTimeOffset CompletedAtUtc,
+    bool IsTruncated = false,
+    int SkippedRegions = 0);
 
 public interface IScanEngine
 {

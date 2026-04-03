@@ -69,6 +69,8 @@ public sealed class WindowsScanEngine : IScanEngine
                     var valueSize = GetValueSize(constraints.DataType);
                     var results = new List<ScanResultEntry>();
                     var totalBytesScanned = 0L;
+                    var skippedRegions = 0; // 4H: Track skipped regions
+                    var isTruncated = false; // 4F: Track if results hit the cap
 
                     foreach (var region in regions)
                     {
@@ -76,18 +78,24 @@ public sealed class WindowsScanEngine : IScanEngine
 
                         if (results.Count >= MaxScanResults)
                         {
+                            isTruncated = true; // 4F: Results hit the 50K cap
                             break;
                         }
 
                         var regionBytes = ReadRegion(handle, region.BaseAddress, (int)Math.Min(region.RegionSize, 16 * 1024 * 1024));
                         if (regionBytes is null)
                         {
+                            skippedRegions++; // 4H: Count skipped regions
                             continue;
                         }
 
                         totalBytesScanned += regionBytes.Length;
-                        ScanRegionForInitial(region.BaseAddress, regionBytes, constraints, valueSize, results);
+                        ScanRegionForInitial(region.BaseAddress, regionBytes, constraints, valueSize, results, cancellationToken);
                     }
+
+                    // 4F: Check if we hit the cap after scanning
+                    if (results.Count >= MaxScanResults)
+                        isTruncated = true;
 
                     return new ScanResultSet(
                         $"scan-{Guid.NewGuid().ToString("N")[..8]}",
@@ -96,7 +104,9 @@ public sealed class WindowsScanEngine : IScanEngine
                         results,
                         regions.Length,
                         totalBytesScanned,
-                        DateTimeOffset.UtcNow);
+                        DateTimeOffset.UtcNow,
+                        isTruncated,
+                        skippedRegions);
                 }
                 finally
                 {
@@ -243,7 +253,8 @@ public sealed class WindowsScanEngine : IScanEngine
         byte[] regionBytes,
         ScanConstraints constraints,
         int valueSize,
-        List<ScanResultEntry> results)
+        List<ScanResultEntry> results,
+        CancellationToken cancellationToken = default)
     {
         // Array of Bytes scan uses pattern matching with wildcards
         if (constraints.ScanType == ScanType.ArrayOfBytes && !string.IsNullOrWhiteSpace(constraints.Value))
@@ -252,11 +263,18 @@ public sealed class WindowsScanEngine : IScanEngine
             return;
         }
 
+        var matchCount = 0; // 4G: Counter for periodic cancellation check
         for (var offset = 0; offset <= regionBytes.Length - valueSize; offset += valueSize)
         {
             if (results.Count >= MaxScanResults)
             {
                 return;
+            }
+
+            // 4G: Check cancellation token every 10K iterations within the inner loop
+            if (++matchCount % 10_000 == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
             }
 
             var slice = regionBytes[offset..(offset + valueSize)];

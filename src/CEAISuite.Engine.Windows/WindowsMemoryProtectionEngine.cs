@@ -13,6 +13,15 @@ public sealed class WindowsMemoryProtectionEngine : IMemoryProtectionEngine
     private const uint MemReserve = 0x2000;
     private const uint MemRelease = 0x8000;
 
+    /// <summary>
+    /// Changes the memory protection for a region in the target process.
+    /// <para>
+    /// KNOWN LIMITATION (4E - TOCTOU race): Between VirtualProtectEx reading the old protection
+    /// and the caller using it, another thread in the target process may change the protection.
+    /// For critical paths (e.g., hook installation), use the suspend-all-threads pattern to
+    /// ensure consistency.
+    /// </para>
+    /// </summary>
     public Task<ProtectionChangeResult> ChangeProtectionAsync(
         int processId, nuint address, long size, MemoryProtection newProtection,
         CancellationToken cancellationToken = default) =>

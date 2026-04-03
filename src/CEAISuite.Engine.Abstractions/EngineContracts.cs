@@ -36,7 +36,8 @@ public sealed record EngineAttachment(
 public sealed record MemoryReadResult(
     int ProcessId,
     nuint Address,
-    IReadOnlyList<byte> Bytes);
+    IReadOnlyList<byte> Bytes,
+    bool IsPartialRead = false);
 
 public sealed record TypedMemoryValue(
     int ProcessId,
@@ -86,5 +87,12 @@ public interface IEngineFacade
         nuint address,
         MemoryDataType dataType,
         string value,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Write raw bytes to process memory. Returns the number of bytes written.</summary>
+    Task<int> WriteBytesAsync(
+        int processId,
+        nuint address,
+        byte[] data,
         CancellationToken cancellationToken = default);
 }

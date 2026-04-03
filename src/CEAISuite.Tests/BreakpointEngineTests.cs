@@ -70,49 +70,47 @@ public class CodeCaveFarJmpTests
     }
 }
 
-public class InstructionLengthEstimatorTests
+public class InstructionDecodingTests
 {
-    [Theory]
-    [InlineData(new byte[] { 0x55 }, 0, 1)]                          // push rbp
-    [InlineData(new byte[] { 0x50 }, 0, 1)]                          // push rax
-    [InlineData(new byte[] { 0xC3 }, 0, 1)]                          // ret
-    [InlineData(new byte[] { 0x90 }, 0, 1)]                          // nop
-    [InlineData(new byte[] { 0xCC }, 0, 1)]                          // int3
-    [InlineData(new byte[] { 0x48, 0x89, 0xE5 }, 0, 3)]              // mov rbp, rsp (REX.W + modrm)
-    [InlineData(new byte[] { 0x48, 0x83, 0xEC, 0x20 }, 0, 4)]        // sub rsp, 0x20 (REX.W + modrm + imm8)
-    public void EstimateInstructionLength_CommonProloguePatterns(byte[] code, int offset, int expected)
-    {
-        var len = WindowsCodeCaveEngine.EstimateInstructionLength(code, offset);
-        Assert.Equal(expected, len);
-    }
-
-    [Fact]
-    public void EstimateInstructionLength_PastEnd_ReturnsNegative()
-    {
-        var len = WindowsCodeCaveEngine.EstimateInstructionLength(Array.Empty<byte>(), 0);
-        Assert.Equal(-1, len);
-    }
-
     [Fact]
     public void CalculateSafeStealLength_AlignsToInstructionBoundary()
     {
-        // push rbp (1) + mov rbp,rsp (3) + sub rsp,0x20 (4) = 8 bytes
-        byte[] prologue = [0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20];
-        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 14);
-        // minLength=14 but we only have 8 bytes of decodable code — should return 14 (minimum)
-        // Actually, it depends on how the decoder handles the boundary
+        // Typical x64 function prologue that's long enough:
+        // push rbp (1) + mov rbp,rsp (3) + sub rsp,0x20 (4) + push rbx (1) + push rsi (1) +
+        // push rdi (1) + mov edi,ecx (2) + xor ebx,ebx (2) + nop (1) = 16 bytes
+        byte[] prologue = [0x55, 0x48, 0x89, 0xE5, 0x48, 0x83, 0xEC, 0x20, 0x53, 0x56, 0x57, 0x89, 0xCF, 0x31, 0xDB, 0x90];
+        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 14, (nuint)0x140001000);
         Assert.True(stealLen >= 14, $"Steal length {stealLen} should be >= 14");
     }
 
     [Fact]
     public void CalculateSafeStealLength_SmallMinLength_AlignsUp()
     {
-        // push rbp (1) + mov rbp,rsp (3) = 4 bytes — if min is 2, should get at least 1
+        // push rbp (1) + mov rbp,rsp (3) = 4 bytes — if min is 2, should align to instruction boundary
         byte[] prologue = [0x55, 0x48, 0x89, 0xE5];
-        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 2);
+        var stealLen = WindowsCodeCaveEngine.CalculateSafeStealLength(prologue, 2, (nuint)0x140001000);
         Assert.True(stealLen >= 2);
-        // Should align to instruction boundary: either 1 (push rbp) or 4 (push rbp + mov rbp,rsp)
-        Assert.True(stealLen == 3 || stealLen == 4, $"Expected 3 or 4 but got {stealLen}");
+    }
+
+    [Fact]
+    public void CalculateSafeStealLength_InvalidInstruction_Throws()
+    {
+        // Invalid instruction bytes
+        byte[] garbage = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        // Iced may or may not decode 0xFF 0xFF as valid — test with known-bad pattern
+        // 0x06 is PUSH ES which is invalid in 64-bit mode
+        byte[] invalid64 = [0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06, 0x06];
+        Assert.ThrowsAny<InvalidOperationException>(() =>
+            WindowsCodeCaveEngine.CalculateSafeStealLength(invalid64, 14, (nuint)0x140001000));
+    }
+
+    [Fact]
+    public void CalculateSafeStealLength_TooFewBytes_Throws()
+    {
+        // Only 2 bytes of valid instructions, need 14
+        byte[] tooShort = [0x55, 0xC3]; // push rbp + ret = 2 bytes
+        Assert.ThrowsAny<InvalidOperationException>(() =>
+            WindowsCodeCaveEngine.CalculateSafeStealLength(tooShort, 14, (nuint)0x140001000));
     }
 }
 

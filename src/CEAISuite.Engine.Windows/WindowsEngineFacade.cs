@@ -19,6 +19,11 @@ public sealed class WindowsEngineFacade : IEngineFacade
     private readonly object _attachLock = new();
     private int? _attachedProcessId;
 
+    // 4A: Cached process handle per attached process — avoids re-opening per operation
+    private IntPtr _cachedProcessHandle;
+    // 4D: Cached architecture per attached process
+    private string? _cachedArchitecture;
+
     public int? AttachedProcessId
     {
         get { lock (_attachLock) return _attachedProcessId; }
@@ -115,7 +120,50 @@ public sealed class WindowsEngineFacade : IEngineFacade
         lock (_attachLock)
         {
             _attachedProcessId = null;
+            // 4A: Close cached process handle on detach
+            if (_cachedProcessHandle != IntPtr.Zero)
+            {
+                CloseHandle(_cachedProcessHandle);
+                _cachedProcessHandle = IntPtr.Zero;
+            }
+            // 4D: Invalidate cached architecture
+            _cachedArchitecture = null;
         }
+    }
+
+    // 4A: Get or open a cached process handle for the attached process
+    private IntPtr GetOrOpenProcessHandle(int processId, uint access)
+    {
+        lock (_attachLock)
+        {
+            if (_attachedProcessId == processId && _cachedProcessHandle != IntPtr.Zero)
+                return _cachedProcessHandle;
+        }
+
+        // Not the attached process or no cached handle — open a new one
+        var handle = OpenProcess(access, false, processId);
+        if (handle == IntPtr.Zero)
+            return IntPtr.Zero;
+
+        lock (_attachLock)
+        {
+            if (_attachedProcessId == processId)
+            {
+                // Cache it for the attached process
+                if (_cachedProcessHandle != IntPtr.Zero)
+                    CloseHandle(_cachedProcessHandle);
+                _cachedProcessHandle = handle;
+                return handle;
+            }
+        }
+
+        // Not attached to this process — caller must close
+        return handle;
+    }
+
+    private bool ShouldCloseHandle(int processId)
+    {
+        lock (_attachLock) { return _attachedProcessId != processId; }
     }
 
     public Task<MemoryReadResult> ReadMemoryAsync(
@@ -134,12 +182,13 @@ public sealed class WindowsEngineFacade : IEngineFacade
                     throw new ArgumentOutOfRangeException(nameof(length), "Reads are limited to 65536 bytes per call.");
                 }
 
-                var handle = OpenProcess(ProcessQueryLimitedInformation | ProcessVmRead, false, processId);
+                var handle = GetOrOpenProcessHandle(processId, ProcessQueryLimitedInformation | ProcessVmRead);
                 if (handle == IntPtr.Zero)
                 {
                     throw new InvalidOperationException($"Unable to open process {processId} for memory reads.");
                 }
 
+                var closeHandle = ShouldCloseHandle(processId);
                 try
                 {
                     var buffer = new byte[length];
@@ -149,11 +198,19 @@ public sealed class WindowsEngineFacade : IEngineFacade
                             $"Unable to read memory at 0x{address:X} from process {processId}.");
                     }
 
-                    return new MemoryReadResult(processId, address, buffer[..bytesRead]);
+                    // 4B: Detect partial reads and flag them
+                    var isPartial = bytesRead < length;
+                    if (isPartial)
+                    {
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[EngineFacade] Partial read at 0x{address:X}: got {bytesRead}/{length} bytes.");
+                    }
+
+                    return new MemoryReadResult(processId, address, buffer[..bytesRead], isPartial);
                 }
                 finally
                 {
-                    CloseHandle(handle);
+                    if (closeHandle) CloseHandle(handle);
                 }
             },
             cancellationToken);
@@ -197,16 +254,14 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var bytes = ConvertValueToBytes(processId, dataType, value);
-                var handle = OpenProcess(
-                    ProcessQueryLimitedInformation | ProcessVmWrite | ProcessVmOperation,
-                    false,
-                    processId);
+                var handle = GetOrOpenProcessHandle(processId, ProcessQueryLimitedInformation | ProcessVmWrite | ProcessVmOperation);
 
                 if (handle == IntPtr.Zero)
                 {
                     throw new InvalidOperationException($"Unable to open process {processId} for memory writes.");
                 }
 
+                var closeHandle = ShouldCloseHandle(processId);
                 try
                 {
                     if (!WriteProcessMemory(handle, (IntPtr)address, bytes, bytes.Length, out var bytesWritten) || bytesWritten != bytes.Length)
@@ -219,15 +274,71 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 }
                 finally
                 {
-                    CloseHandle(handle);
+                    if (closeHandle) CloseHandle(handle);
                 }
             },
             cancellationToken);
 
-    private static ProcessDescriptor CreateDescriptor(Process process)
+    public Task<int> WriteBytesAsync(
+        int processId,
+        nuint address,
+        byte[] data,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(
+            () =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var handle = GetOrOpenProcessHandle(processId, ProcessQueryLimitedInformation | ProcessVmWrite | ProcessVmOperation);
+
+                if (handle == IntPtr.Zero)
+                    throw new InvalidOperationException($"Unable to open process {processId} for memory writes.");
+
+                var closeHandle = ShouldCloseHandle(processId);
+                try
+                {
+                    if (!WriteProcessMemory(handle, (IntPtr)address, data, data.Length, out var bytesWritten))
+                        throw new InvalidOperationException(
+                            $"Unable to write {data.Length} bytes at 0x{address:X} in process {processId}.");
+
+                    // 4C: Detect partial writes and throw
+                    if (bytesWritten != data.Length)
+                        throw new InvalidOperationException(
+                            $"Partial write at 0x{address:X}: wrote {bytesWritten}/{data.Length} bytes. Target memory may be in an inconsistent state.");
+
+                    return bytesWritten;
+                }
+                finally
+                {
+                    if (closeHandle) CloseHandle(handle);
+                }
+            },
+            cancellationToken);
+
+    private ProcessDescriptor CreateDescriptor(Process process)
     {
-        var architecture = TryGetArchitecture(process.Id);
+        var architecture = TryGetArchitectureCached(process.Id);
         return new ProcessDescriptor(process.Id, process.ProcessName, architecture);
+    }
+
+    // 4D: Cache architecture per attached process
+    private string TryGetArchitectureCached(int processId)
+    {
+        lock (_attachLock)
+        {
+            if (_attachedProcessId == processId && _cachedArchitecture is not null)
+                return _cachedArchitecture;
+        }
+
+        var arch = TryGetArchitecture(processId);
+
+        lock (_attachLock)
+        {
+            if (_attachedProcessId == processId)
+                _cachedArchitecture = arch;
+        }
+
+        return arch;
     }
 
     private static string TryGetArchitecture(int processId)
@@ -270,7 +381,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
         }
     }
 
-    private static int GetReadSize(int processId, MemoryDataType dataType) =>
+    private int GetReadSize(int processId, MemoryDataType dataType) =>
         dataType switch
         {
             MemoryDataType.Byte => 1,
@@ -279,7 +390,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Int64 => sizeof(long),
             MemoryDataType.Float => sizeof(float),
             MemoryDataType.Double => sizeof(double),
-            MemoryDataType.Pointer => string.Equals(TryGetArchitecture(processId), "x86", StringComparison.OrdinalIgnoreCase)
+            MemoryDataType.Pointer => string.Equals(TryGetArchitectureCached(processId), "x86", StringComparison.OrdinalIgnoreCase)
                 ? sizeof(int)
                 : sizeof(long),
             MemoryDataType.String => 256, // read up to 256 bytes for null-terminated strings
@@ -287,7 +398,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
 
-    private static byte[] ConvertValueToBytes(int processId, MemoryDataType dataType, string value) =>
+    private byte[] ConvertValueToBytes(int processId, MemoryDataType dataType, string value) =>
         dataType switch
         {
             MemoryDataType.Byte => [(byte)int.Parse(value, CultureInfo.InvariantCulture)],
@@ -302,13 +413,13 @@ public sealed class WindowsEngineFacade : IEngineFacade
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
 
-    private static byte[] ConvertPointerValue(int processId, string value)
+    private byte[] ConvertPointerValue(int processId, string value)
     {
         var normalized = value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
             ? value[2..]
             : value;
 
-        var is32Bit = string.Equals(TryGetArchitecture(processId), "x86", StringComparison.OrdinalIgnoreCase);
+        var is32Bit = string.Equals(TryGetArchitectureCached(processId), "x86", StringComparison.OrdinalIgnoreCase);
         return is32Bit
             ? BitConverter.GetBytes(uint.Parse(normalized, NumberStyles.HexNumber, CultureInfo.InvariantCulture))
             : BitConverter.GetBytes(ulong.Parse(normalized, NumberStyles.HexNumber, CultureInfo.InvariantCulture));

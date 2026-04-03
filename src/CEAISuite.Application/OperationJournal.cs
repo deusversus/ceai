@@ -1,15 +1,46 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
 
 namespace CEAISuite.Application;
 
 /// <summary>
 /// Tracks all breakpoint/hook operations as journal entries.
 /// Supports rolling back groups of related operations.
+/// 3F: Appends to a .jsonl file on each RecordOperation for persistence across restarts.
 /// </summary>
 public sealed class OperationJournal
 {
     private readonly ConcurrentDictionary<string, JournalEntry> _entries = new();
     private readonly ConcurrentDictionary<string, List<string>> _groups = new();
+    private readonly string? _journalFilePath;
+
+    public OperationJournal(string? journalDirectory = null)
+    {
+        if (journalDirectory is not null)
+        {
+            try
+            {
+                Directory.CreateDirectory(journalDirectory);
+                _journalFilePath = Path.Combine(journalDirectory, "operations.jsonl");
+                LoadPersistedEntries();
+            }
+            catch
+            {
+                // Persistence is best-effort — don't prevent journal from functioning
+                _journalFilePath = null;
+            }
+        }
+    }
+
+    // Parameterless constructor for backward compatibility
+    public OperationJournal() : this(journalDirectory: null) { }
+
+    /// <summary>Get persisted (orphaned) operation IDs that were active when the app last exited.</summary>
+    public IReadOnlyList<PersistedJournalEntry> GetOrphanedEntries() =>
+        _entries.Values
+            .Where(e => e.Status == JournalEntryStatus.Active && e.RollbackAction is null)
+            .Select(e => new PersistedJournalEntry(e.OperationId, e.OperationType, e.Address, e.Mode, e.GroupId, e.Timestamp))
+            .ToArray();
 
     public string RecordOperation(
         string operationId,
@@ -30,7 +61,73 @@ public sealed class OperationJournal
             _groups.GetOrAdd(groupId, _ => new List<string>()).Add(operationId);
         }
 
+        // 3F: Persist to disk
+        AppendToJournal(entry);
+
         return operationId;
+    }
+
+    private void AppendToJournal(JournalEntry entry)
+    {
+        if (_journalFilePath is null) return;
+        try
+        {
+            var line = JsonSerializer.Serialize(new
+            {
+                operationId = entry.OperationId,
+                operationType = entry.OperationType,
+                address = entry.Address.ToString(),
+                mode = entry.Mode,
+                groupId = entry.GroupId,
+                timestamp = entry.Timestamp,
+                status = entry.Status.ToString()
+            });
+            File.AppendAllText(_journalFilePath, line + Environment.NewLine);
+        }
+        catch
+        {
+            // Persistence is best-effort
+        }
+    }
+
+    private void LoadPersistedEntries()
+    {
+        if (_journalFilePath is null || !File.Exists(_journalFilePath)) return;
+        try
+        {
+            foreach (var line in File.ReadAllLines(_journalFilePath))
+            {
+                if (string.IsNullOrWhiteSpace(line)) continue;
+                try
+                {
+                    using var doc = JsonDocument.Parse(line);
+                    var root = doc.RootElement;
+                    var opId = root.GetProperty("operationId").GetString()!;
+                    var opType = root.GetProperty("operationType").GetString()!;
+                    var addrStr = root.GetProperty("address").GetString()!;
+                    var addr = nuint.Parse(addrStr);
+                    var mode = root.GetProperty("mode").GetString()!;
+                    var groupId = root.TryGetProperty("groupId", out var gp) ? gp.GetString() : null;
+                    var ts = root.GetProperty("timestamp").GetDateTimeOffset();
+                    var statusStr = root.TryGetProperty("status", out var sp) ? sp.GetString() : "Active";
+                    var status = Enum.TryParse<JournalEntryStatus>(statusStr, out var s) ? s : JournalEntryStatus.Active;
+
+                    // Load as orphaned (no rollback action — those can't be serialized)
+                    var entry = new JournalEntry(opId, opType, addr, mode, groupId, null!, ts, status);
+                    _entries.TryAdd(opId, entry);
+                    if (groupId is not null)
+                        _groups.GetOrAdd(groupId, _ => new List<string>()).Add(opId);
+                }
+                catch
+                {
+                    // Skip malformed lines
+                }
+            }
+        }
+        catch
+        {
+            // File read failed — start fresh
+        }
     }
 
     public async Task<JournalRollbackResult> RollbackOperationAsync(string operationId)
@@ -55,16 +152,31 @@ public sealed class OperationJournal
             return new JournalRollbackResult(false, 0, 0, $"Group '{groupId}' not found.");
 
         int total = 0, succeeded = 0;
+        var failures = new List<RollbackFailureDetail>();
+
         // Rollback in reverse order
         foreach (var id in ids.AsEnumerable().Reverse())
         {
             total++;
             var result = await RollbackOperationAsync(id);
-            if (result.Success) succeeded++;
+            if (result.Success)
+            {
+                succeeded++;
+            }
+            else
+            {
+                // 3E: Track which operations failed during group rollback
+                failures.Add(new RollbackFailureDetail(id, result.Message));
+            }
         }
 
-        return new JournalRollbackResult(succeeded == total, total, succeeded,
-            $"Rolled back {succeeded}/{total} operations in group '{groupId}'.");
+        var message = $"Rolled back {succeeded}/{total} operations in group '{groupId}'.";
+        if (failures.Count > 0)
+        {
+            message += $" Failures: {string.Join("; ", failures.Select(f => $"{f.OperationId}: {f.ErrorMessage}"))}";
+        }
+
+        return new JournalRollbackResult(succeeded == total, total, succeeded, message, failures);
     }
 
     public IReadOnlyList<JournalEntry> GetEntries() => _entries.Values.OrderByDescending(e => e.Timestamp).ToArray();
@@ -87,8 +199,21 @@ public sealed record JournalEntry(
     DateTimeOffset Timestamp,
     JournalEntryStatus Status);
 
+/// <summary>3F: Lightweight representation of a persisted journal entry (no rollback action).</summary>
+public sealed record PersistedJournalEntry(
+    string OperationId,
+    string OperationType,
+    nuint Address,
+    string Mode,
+    string? GroupId,
+    DateTimeOffset Timestamp);
+
+/// <summary>3E: Details about a single operation that failed during group rollback.</summary>
+public sealed record RollbackFailureDetail(string OperationId, string ErrorMessage);
+
 public sealed record JournalRollbackResult(
     bool Success,
     int TotalOperations,
     int SucceededRollbacks,
-    string Message);
+    string Message,
+    IReadOnlyList<RollbackFailureDetail>? FailedOperations = null);

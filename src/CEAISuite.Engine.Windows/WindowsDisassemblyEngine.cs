@@ -45,21 +45,36 @@ public sealed class WindowsDisassemblyEngine : IDisassemblyEngine
 
                     var endRip = (ulong)address + (ulong)bytesRead;
 
+                    // 5B: LIMITATION — Disassembly is a point-in-time snapshot. If the target uses
+                    // self-modifying code (JIT, unpacking, runtime code generation), the bytes may
+                    // change between read and display. Results may not reflect the current state.
+
                     while (decoder.IP < endRip && instructions.Count < maxInstructions)
                     {
                         cancellationToken.ThrowIfCancellationRequested();
 
                         var instr = decoder.Decode();
-                        formatter.Format(instr, output);
 
                         var instrBytes = buffer[totalBytes..(totalBytes + instr.Length)];
                         var hexBytes = string.Join(' ', instrBytes.Select(b => b.ToString("X2")));
 
-                        // Split formatted output into mnemonic and operands
-                        var formatted = output.ToStringAndReset();
-                        var spaceIdx = formatted.IndexOf(' ');
-                        var mnemonic = spaceIdx >= 0 ? formatted[..spaceIdx] : formatted;
-                        var operands = spaceIdx >= 0 ? formatted[(spaceIdx + 1)..].TrimStart() : "";
+                        string mnemonic;
+                        string operands;
+
+                        // 5A: Check for invalid instructions — output as "db 0xNN" instead
+                        if (instr.IsInvalid)
+                        {
+                            mnemonic = "db";
+                            operands = string.Join(", ", instrBytes.Select(b => $"0x{b:X2}"));
+                        }
+                        else
+                        {
+                            formatter.Format(instr, output);
+                            var formatted = output.ToStringAndReset();
+                            var spaceIdx = formatted.IndexOf(' ');
+                            mnemonic = spaceIdx >= 0 ? formatted[..spaceIdx] : formatted;
+                            operands = spaceIdx >= 0 ? formatted[(spaceIdx + 1)..].TrimStart() : "";
+                        }
 
                         instructions.Add(new DisassembledInstruction(
                             (nuint)instr.IP,

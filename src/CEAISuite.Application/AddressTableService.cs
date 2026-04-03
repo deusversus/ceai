@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using CEAISuite.Engine.Abstractions;
 
@@ -96,6 +97,10 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     public AddressTableNode? Parent { get; set; }
     /// <summary>CE ShowAsSigned flag. false = display as unsigned (default for CE).</summary>
     public bool ShowAsSigned { get; set; }
+    /// <summary>CE ShowAsHex flag. true = display integer values in hexadecimal.</summary>
+    public bool ShowAsHex { get; set; }
+    /// <summary>CE DropDownList: value-to-name mapping (e.g., item ID → item name).</summary>
+    public Dictionary<int, string>? DropDownList { get; set; }
 
     private nuint? _resolvedAddress;
     /// <summary>The resolved runtime address (set during RefreshAll).</summary>
@@ -138,7 +143,8 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     public string DisplayValue => IsGroup ? $"[{Children.Count} items]"
         : IsScriptEntry ? (IsScriptEnabled ? "[ENABLED]" : "[DISABLED]")
         : string.IsNullOrEmpty(CurrentValue) ? "??" : (IsLocked ? $"{CurrentValue} 🔒" : CurrentValue);
-    public string DisplayType => IsGroup ? "Group" : IsScriptEntry ? "AA Script" : DataType.ToString();
+    public string DisplayType => IsGroup ? "Group" : IsScriptEntry ? "AA Script"
+        : ShowAsHex ? $"{DataType} (Hex)" : DataType.ToString();
     public string DisplayLock => IsGroup ? "" : IsScriptEntry ? "" : (IsLocked ? "🔒 Frozen" : "");
     public string DisplayIcon => IsScriptEntry ? "📜" : IsGroup ? "📁" : (IsPointer ? "🔗" : "");
     public string DisplayAddress => IsGroup ? "" : IsScriptEntry ? "(script)"
@@ -419,10 +425,22 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
 
                 var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, node.DataType, cancellationToken);
                 node.PreviousValue = node.CurrentValue;
-                // CE's ShowAsSigned flag: when false, display integer types as unsigned
-                node.CurrentValue = (!node.ShowAsSigned && typed.RawBytes is { Count: > 0 })
-                    ? FormatUnsigned(typed.RawBytes, node.DataType) ?? typed.DisplayValue
-                    : typed.DisplayValue;
+
+                // Format the display value: hex mode, unsigned mode, or default
+                string displayValue;
+                if (node.ShowAsHex && typed.RawBytes is { Count: > 0 })
+                    displayValue = FormatHex(typed.RawBytes, node.DataType) ?? typed.DisplayValue;
+                else if (!node.ShowAsSigned && typed.RawBytes is { Count: > 0 })
+                    displayValue = FormatUnsigned(typed.RawBytes, node.DataType) ?? typed.DisplayValue;
+                else
+                    displayValue = typed.DisplayValue;
+
+                // Apply dropdown list name lookup if available
+                if (node.DropDownList is not null && TryParseDisplayInt(displayValue, node.ShowAsHex, out var intVal)
+                    && node.DropDownList.TryGetValue(intVal, out var lookupName))
+                    displayValue = $"{displayValue} : {lookupName}";
+
+                node.CurrentValue = displayValue;
 
                 if (node.IsLocked && node.LockedValue is not null)
                 {
@@ -508,6 +526,31 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
             MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString(),
             _ => null // Float/Double/String — no signed/unsigned distinction
         };
+    }
+
+    private static string? FormatHex(IReadOnlyList<byte> raw, MemoryDataType dt)
+    {
+        if (raw.Count == 0) return null;
+        var buf = raw is byte[] arr ? arr : raw.ToArray();
+        return dt switch
+        {
+            MemoryDataType.Byte => buf[0].ToString("X2"),
+            MemoryDataType.Int16 => BitConverter.ToUInt16(buf, 0).ToString("X"),
+            MemoryDataType.Int32 => BitConverter.ToUInt32(buf, 0).ToString("X"),
+            MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString("X"),
+            _ => null // Float/Double/String — hex doesn't apply
+        };
+    }
+
+    private static bool TryParseDisplayInt(string displayValue, bool isHex, out int result)
+    {
+        // Strip any existing lookup suffix ("2904 : Dagger" → "2904")
+        var valueStr = displayValue.Contains(" : ") ? displayValue[..displayValue.IndexOf(" : ")] : displayValue;
+        valueStr = valueStr.Trim();
+
+        if (isHex)
+            return int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out result);
+        return int.TryParse(valueStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out result);
     }
 
     /// <summary>

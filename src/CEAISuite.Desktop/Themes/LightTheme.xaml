@@ -93,6 +93,13 @@
     <SolidColorBrush x:Key="HexNormalForeground"      Color="#333333" />
     <SolidColorBrush x:Key="HexSeparatorForeground"   Color="#AAAAAA" />
     <SolidColorBrush x:Key="HexAsciiForeground"       Color="#A31515" />
+    <SolidColorBrush x:Key="HexSelectionBackground"   Color="#ADD6FF" />
+    <SolidColorBrush x:Key="HexSelectionForeground"   Color="#000000" />
+    <SolidColorBrush x:Key="HexCursorBackground"      Color="#E8E8E8" />
+    <SolidColorBrush x:Key="HexEditingBackground"    Color="#FFFFC0" />
+    <SolidColorBrush x:Key="HexSearchHitBackground"  Color="#FFE0B2" />
+    <SolidColorBrush x:Key="HexProtectionExecutable" Color="#008000" />
+    <SolidColorBrush x:Key="HexBookmarkGutter"       Color="#B8860B" />
     <SolidColorBrush x:Key="ErrorForeground"          Color="#CC0000" />
 
 </ResourceDictionary>

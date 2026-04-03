@@ -87,6 +87,18 @@ public sealed class CheatTableExporter
             entry.Add(new XElement("ShowAsSigned", "0"));
         }
 
+        if (node.ShowAsHex)
+        {
+            entry.Add(new XElement("ShowAsHex", "1"));
+        }
+
+        if (node.DropDownList is { Count: > 0 })
+        {
+            // CE format: "value:name\r\n" pairs
+            var lines = string.Join("\r\n", node.DropDownList.Select(kvp => $"{kvp.Key}:{kvp.Value}"));
+            entry.Add(new XElement("DropDownList", lines + "\r\n"));
+        }
+
         // Pointer offsets — CE stores them deepest-first (same order we keep in PointerOffsets)
         if (node.IsPointer && node.PointerOffsets.Count > 0)
         {

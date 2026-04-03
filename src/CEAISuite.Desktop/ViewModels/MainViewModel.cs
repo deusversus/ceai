@@ -192,18 +192,33 @@ public partial class MainViewModel : ObservableObject
 
     // ── Process Attach / Detach ──
 
+    private bool _isAttaching; // guard against concurrent attach/detach
+
     public async Task InspectSelectedProcessAsync()
     {
+        if (_isAttaching) return; // prevent re-entrant attach
+        _isAttaching = true;
+
         var dashboard = Dashboard;
         var selectedProcess = _processListVm.SelectedProcess;
         if (selectedProcess is null)
         {
             Dashboard = dashboard with { StatusMessage = "Select a process to inspect." };
+            _isAttaching = false;
             return;
         }
 
         try
         {
+            // Detach from current process first if switching to a different one
+            if (dashboard.CurrentInspection is not null
+                && dashboard.CurrentInspection.ProcessId != selectedProcess.Id)
+            {
+                _dashboardService.DetachProcess();
+                _processContext.Detach();
+                UiActionRequested?.Invoke("DetachCleanup", null);
+            }
+
             var inspection = await _dashboardService.InspectProcessAsync(selectedProcess.Id);
             Dashboard = dashboard with
             {
@@ -216,6 +231,8 @@ public partial class MainViewModel : ObservableObject
             _processContext.Attach(inspection);
 
             // Set process context for pointer chain resolution
+            // NOTE: InspectProcessAsync already called AttachAsync internally,
+            // so we only call again here for the module list needed by AddressTableService.
             try
             {
                 var attachment = await _engineFacade.AttachAsync(selectedProcess.Id);
@@ -223,7 +240,11 @@ public partial class MainViewModel : ObservableObject
                     attachment.Modules,
                     selectedProcess.Architecture == "x86");
             }
-            catch { /* non-fatal -- address resolution will try again during refresh */ }
+            catch (Exception ex)
+            {
+                _outputLog.Append("Attach", "Warning",
+                    $"Module enumeration failed for {selectedProcess.Name}: {ex.Message}. Address table resolution may be limited.");
+            }
 
             // Start auto-refresh timer for address table values
             StartAutoRefresh();
@@ -237,6 +258,10 @@ public partial class MainViewModel : ObservableObject
         catch (Exception exception)
         {
             Dashboard = dashboard with { StatusMessage = exception.Message };
+        }
+        finally
+        {
+            _isAttaching = false;
         }
     }
 
@@ -265,10 +290,14 @@ public partial class MainViewModel : ObservableObject
 
     public async Task DetachProcessAsync()
     {
+        if (_isAttaching) return; // prevent detach while attach is in flight
+        _isAttaching = true;
+
         var dashboard = Dashboard;
         if (dashboard.CurrentInspection is null)
         {
             StatusBarCenterText = "No process attached";
+            _isAttaching = false;
             return;
         }
 
@@ -310,6 +339,10 @@ public partial class MainViewModel : ObservableObject
         catch (Exception ex)
         {
             StatusBarCenterText = $"Detach error: {ex.Message}";
+        }
+        finally
+        {
+            _isAttaching = false;
         }
     }
 

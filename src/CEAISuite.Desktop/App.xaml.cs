@@ -193,6 +193,10 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<IOutputLog>()));
         services.AddSingleton<DebuggerViewModel>();
 
+        // ── Phase 5 Memory Browser ──
+        services.AddSingleton<CodeInjectionTemplateService>();
+        services.AddSingleton<MemoryBrowserViewModel>();
+
         // ── Phase 4 Explorer ViewModels ──
         services.AddSingleton<ModuleListViewModel>();
         services.AddSingleton<ThreadListViewModel>();

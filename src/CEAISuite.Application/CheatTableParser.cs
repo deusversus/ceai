@@ -18,7 +18,9 @@ public sealed record CheatTableEntry(
     bool IsGroupHeader,
     string? AssemblerScript,
     IReadOnlyList<CheatTableEntry> Children,
-    bool ShowAsSigned = true);
+    bool ShowAsSigned = true,
+    bool ShowAsHex = false,
+    IReadOnlyDictionary<int, string>? DropDownList = null);
 
 /// <summary>
 /// Represents a parsed Cheat Engine .CT file.
@@ -101,7 +103,9 @@ public sealed class CheatTableParser
                     PointerOffsets = entry.PointerOffsets.Select(o => ParseCeOffset(o)).ToList(),
                     IsOffset = entry.Address.TrimStart().StartsWith('+') || entry.Address.TrimStart().StartsWith('-'),
                     Parent = parent,
-                    ShowAsSigned = entry.ShowAsSigned
+                    ShowAsSigned = entry.ShowAsSigned,
+                    ShowAsHex = entry.ShowAsHex,
+                    DropDownList = entry.DropDownList is not null ? new Dictionary<int, string>(entry.DropDownList) : null
                 };
                 foreach (var child in ConvertToNodes(entry.Children, group))
                     group.Children.Add(child);
@@ -137,7 +141,9 @@ public sealed class CheatTableParser
                 Notes = entry.IsPointer ? $"Pointer: [{string.Join(" → ", entry.PointerOffsets)}]" : null,
                 AssemblerScript = entry.AssemblerScript,
                 Parent = parent,
-                ShowAsSigned = entry.ShowAsSigned
+                ShowAsSigned = entry.ShowAsSigned,
+                ShowAsHex = entry.ShowAsHex,
+                DropDownList = entry.DropDownList is not null ? new Dictionary<int, string>(entry.DropDownList) : null
             };
 
             // Import any children
@@ -258,6 +264,33 @@ public sealed class CheatTableParser
         // CE ShowAsSigned: 0 = unsigned display (default in CE is unsigned)
         var showAsSigned = el.Element("ShowAsSigned")?.Value != "0";
 
+        // CE ShowAsHex: 1 = display values in hexadecimal
+        var showAsHex = el.Element("ShowAsHex")?.Value == "1";
+
+        // CE DropDownList: newline-separated "value:description" pairs for value-to-name mapping
+        Dictionary<int, string>? dropDownList = null;
+        var dropDownText = el.Element("DropDownList")?.Value;
+        if (!string.IsNullOrEmpty(dropDownText))
+        {
+            dropDownList = new Dictionary<int, string>();
+            foreach (var line in dropDownText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+            {
+                var colonIdx = line.IndexOf(':');
+                if (colonIdx <= 0) continue;
+                var valueStr = line[..colonIdx].Trim();
+                var name = line[(colonIdx + 1)..].Trim();
+                // CE dropdown values can be decimal or hex (with 0x prefix or matching ShowAsHex)
+                if (int.TryParse(valueStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
+                    dropDownList.TryAdd(intVal, name);
+                else if (valueStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(valueStr[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexVal))
+                    dropDownList.TryAdd(hexVal, name);
+                else if (int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rawHexVal))
+                    dropDownList.TryAdd(rawHexVal, name);
+            }
+            if (dropDownList.Count == 0) dropDownList = null;
+        }
+
         // Parse nested child entries
         var children = new List<CheatTableEntry>();
         var childEntriesEl = el.Element("CheatEntries");
@@ -270,7 +303,8 @@ public sealed class CheatTableParser
 
         return new CheatTableEntry(
             id, description, address, dataType, lastValue,
-            isPointer, offsets, isGroupHeader, assemblerScript, children, showAsSigned);
+            isPointer, offsets, isGroupHeader, assemblerScript, children,
+            showAsSigned, showAsHex, dropDownList);
     }
 
     private static MemoryDataType MapVariableType(string ceType) =>

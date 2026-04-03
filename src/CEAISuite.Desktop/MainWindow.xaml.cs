@@ -75,7 +75,8 @@ public partial class MainWindow : Window
         ModuleListViewModel moduleListVm,
         ThreadListViewModel threadListVm,
         MemoryRegionsViewModel memoryRegionsVm,
-        WorkspaceViewModel workspaceVm)
+        WorkspaceViewModel workspaceVm,
+        MemoryBrowserViewModel memoryBrowserVm)
     {
         InitializeComponent();
 
@@ -163,6 +164,9 @@ public partial class MainWindow : Window
         MemoryRegionsContent.DataContext = memoryRegionsVm;
         WorkspaceContent.DataContext = workspaceVm;
 
+        // Wire Phase 5 Memory Browser ViewModel
+        MemoryBrowserTab.SetViewModel(memoryBrowserVm);
+
         // Wire Workspace events to MainViewModel session logic
         workspaceVm.LoadSessionRequested += sessionId => _ = _mainVm.RestoreSession(sessionId);
         workspaceVm.LoadCheatTableRequested += _ => _addressTableVm.LoadCheatTableCommand.Execute(null);
@@ -195,9 +199,7 @@ public partial class MainWindow : Window
         {
             if (DataContext is WorkspaceDashboard dashboard && dashboard.CurrentInspection is not null)
             {
-                MemoryBrowserTab.AttachProcess(_engineFacade,
-                    dashboard.CurrentInspection.ProcessId,
-                    dashboard.CurrentInspection.ProcessName);
+                MemoryBrowserTab.AttachProcess();
                 ActivateDocument("memoryBrowser");
                 if (addr != nuint.Zero)
                     _ = MemoryBrowserTab.NavigateToAddress(addr);
@@ -258,7 +260,7 @@ public partial class MainWindow : Window
         switch (action)
         {
             case "OpenMemoryBrowser" when param is RunningProcessOverview proc:
-                MemoryBrowserTab.AttachProcess(_engineFacade, proc.Id, proc.Name);
+                MemoryBrowserTab.AttachProcess();
                 ActivateDocument("memoryBrowser");
                 break;
             case "DetachCleanup":
@@ -695,9 +697,7 @@ public partial class MainWindow : Window
             MessageBox.Show("Attach to a process first.", "Memory Browser");
             return;
         }
-        MemoryBrowserTab.AttachProcess(_engineFacade,
-            dashboard.CurrentInspection.ProcessId,
-            dashboard.CurrentInspection.ProcessName);
+        MemoryBrowserTab.AttachProcess();
         ActivateDocument("memoryBrowser");
     }
 

@@ -93,4 +93,10 @@ public sealed class StubEngineFacade : IEngineFacade
         _memory[address] = bytes;
         return Task.FromResult(new MemoryWriteResult(processId, address, dataType, value, bytes.Length));
     }
+
+    public Task<int> WriteBytesAsync(int processId, nuint address, byte[] data, CancellationToken ct = default)
+    {
+        _memory[address] = data;
+        return Task.FromResult(data.Length);
+    }
 }

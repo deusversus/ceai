@@ -302,4 +302,38 @@ public sealed partial class AiToolFunctions
 
         return sb.ToString();
     }
+
+    // ── Phase 7C: Registered Symbols ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("List all symbols registered by Auto Assembler scripts via registersymbol().")]
+    public Task<string> ListRegisteredSymbols()
+    {
+        if (autoAssemblerEngine is null) return Task.FromResult("Auto Assembler engine not available.");
+
+        var symbols = autoAssemblerEngine.GetRegisteredSymbols();
+        if (symbols.Count == 0)
+            return Task.FromResult("No symbols registered. Execute a script with registersymbol() first.");
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"{symbols.Count} registered symbol(s):");
+        foreach (var sym in symbols)
+            sb.AppendLine($"  {sym.Name} = 0x{sym.Address:X}");
+        return Task.FromResult(sb.ToString());
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Resolve a registered symbol name to its address.")]
+    public Task<string> ResolveRegisteredSymbol(
+        [Description("Symbol name to resolve")] string name)
+    {
+        if (autoAssemblerEngine is null) return Task.FromResult("Auto Assembler engine not available.");
+
+        var addr = autoAssemblerEngine.ResolveSymbol(name);
+        if (addr is null)
+            return Task.FromResult($"Symbol '{name}' not found. Use ListRegisteredSymbols to see available symbols.");
+        return Task.FromResult($"{name} = 0x{addr.Value:X}");
+    }
 }

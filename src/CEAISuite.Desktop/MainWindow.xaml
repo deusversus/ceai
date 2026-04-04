@@ -491,7 +491,11 @@
                                                 <MenuItem Header="Change Type" Command="{Binding ChangeTypeCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="Toggle Freeze" Command="{Binding ToggleFreezeCommand}" InputGestureText="Ctrl+F" />
-                                                <MenuItem Header="Show as Hexadecimal" Command="{Binding ShowAsHexCommand}" IsCheckable="True" />
+                                                <MenuItem Header="Show as Hexadecimal" Command="{Binding ToggleShowAsHexCommand}" IsCheckable="True" />
+                                                <MenuItem Header="Show as Signed" Command="{Binding ToggleShowAsSignedCommand}" IsCheckable="True" />
+                                                <MenuItem Header="Increase Value" Command="{Binding IncreaseValueCommand}" InputGestureText="Ctrl+Up" />
+                                                <MenuItem Header="Decrease Value" Command="{Binding DecreaseValueCommand}" InputGestureText="Ctrl+Down" />
+                                                <MenuItem Header="Configure Dropdown..." Command="{Binding ConfigureDropDownCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="View Script" Command="{Binding ViewSelectedScriptCommand}" />
                                                 <MenuItem Header="Toggle Script" Command="{Binding ToggleSelectedScriptCommand}" />
@@ -869,8 +873,23 @@
                                                     Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibility}}" />
                                         </StackPanel>
                                         <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <TextBlock Text="Module filter:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                                            <TextBox Width="160" Text="{Binding ModuleFilter, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="11"
+                                                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                     BorderBrush="{DynamicResource InputBorder}" VerticalContentAlignment="Center" Padding="4,2"
+                                                     ToolTip="Comma-separated module names to scan (e.g. game.dll, mono.dll). Leave empty for all." />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
                                             <Button Command="{Binding AddSelectedToTableCommand}" Content="Add to Table" Padding="8,2" Style="{StaticResource ToolbarButton}" />
                                             <Button Command="{Binding ValidatePathsCommand}" Content="Validate" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                            <Button Command="{Binding ResumeScanCommand}" Content="Resume" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                    IsEnabled="{Binding CanResume}" ToolTip="Resume a cancelled pointer scan" />
+                                            <Button Command="{Binding SavePointerMapCommand}" Content="Save .PTR" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                    ToolTip="Save pointer map for offline analysis" />
+                                            <Button Command="{Binding LoadPointerMapCommand}" Content="Load .PTR" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                    ToolTip="Load a saved pointer map" />
+                                            <Button Command="{Binding ComparePointerMapsCommand}" Content="Compare" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                    ToolTip="Compare two pointer map files" />
                                             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
                                         </StackPanel>
                                     </StackPanel>
@@ -968,6 +987,18 @@
                                         <Button Command="{Binding RefreshBreakpointsCommand}" Content="Refresh BPs" Padding="8,2" Style="{StaticResource ToolbarButton}" />
                                         <Button Command="{Binding LoadHitDetailsCommand}" Content="Hit Log" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
                                         <Button Command="{Binding WalkCallStackCommand}" Content="Walk Stack" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
+                                        <TextBlock Text="|" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,4,0" />
+                                        <TextBlock Text="Trace:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,4,0" FontSize="11" />
+                                        <TextBox Width="120" Text="{Binding TraceAddress, UpdateSourceTrigger=PropertyChanged}" FontFamily="Consolas" FontSize="11"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" VerticalContentAlignment="Center" Padding="4,2"
+                                                 ToolTip="Address to trace from (hex)" />
+                                        <TextBox Width="50" Text="{Binding TraceMaxInstructions}" FontFamily="Consolas" FontSize="11" Margin="4,0,0,0"
+                                                 Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                 BorderBrush="{DynamicResource InputBorder}" VerticalContentAlignment="Center" Padding="4,2"
+                                                 ToolTip="Max instructions to trace" />
+                                        <Button Command="{Binding StartTraceCommand}" Content="Trace" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                ToolTip="Trace instruction execution from address" />
                                         <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
                                     </StackPanel>
                                     <Grid>
@@ -1024,8 +1055,8 @@
                                         </DockPanel>
                                         <GridSplitter Grid.ColumnSpan="3" Grid.Row="1" Height="4" HorizontalAlignment="Stretch"
                                                       Background="{DynamicResource BorderBrush}" />
-                                        <!-- Bottom: Breakpoint Hits -->
-                                        <DockPanel Grid.Column="0" Grid.Row="2" Grid.ColumnSpan="3">
+                                        <!-- Bottom-left: Breakpoint Hits -->
+                                        <DockPanel Grid.Column="0" Grid.Row="2">
                                             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="4,2">
                                                 <TextBlock Text="BREAKPOINT HITS" FontWeight="SemiBold" FontSize="10"
                                                            Foreground="{DynamicResource SecondaryForeground}" />
@@ -1042,6 +1073,22 @@
                                                         <GridViewColumn Header="Address" Width="150" DisplayMemberBinding="{Binding Address}" />
                                                         <GridViewColumn Header="Thread" Width="60" DisplayMemberBinding="{Binding ThreadId}" />
                                                         <GridViewColumn Header="Time" Width="120" DisplayMemberBinding="{Binding Timestamp}" />
+                                                    </GridView>
+                                                </ListView.View>
+                                            </ListView>
+                                        </DockPanel>
+                                        <!-- Bottom-right: Trace Results -->
+                                        <DockPanel Grid.Column="2" Grid.Row="2">
+                                            <TextBlock DockPanel.Dock="Top" Text="TRACE RESULTS" FontWeight="SemiBold" FontSize="10"
+                                                       Foreground="{DynamicResource SecondaryForeground}" Margin="4,2" />
+                                            <ListView ItemsSource="{Binding TraceEntries}" FontFamily="Consolas" FontSize="11"
+                                                      Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                                      BorderThickness="0">
+                                                <ListView.View>
+                                                    <GridView>
+                                                        <GridViewColumn Header="Address" Width="140" DisplayMemberBinding="{Binding Address}" />
+                                                        <GridViewColumn Header="Instruction" Width="250" DisplayMemberBinding="{Binding Disassembly}" />
+                                                        <GridViewColumn Header="TID" Width="50" DisplayMemberBinding="{Binding ThreadId}" />
                                                     </GridView>
                                                 </ListView.View>
                                             </ListView>
@@ -1083,10 +1130,22 @@
                                         <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
                                             <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding StartNewScanCommand}" Content="New scan" FontSize="11" />
                                             <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding RefineScanCommand}" Content="Next scan" FontSize="11" />
+                                            <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding UndoScanCommand}" Content="Undo"
+                                                    FontSize="11" Style="{StaticResource ToolbarButton}" IsEnabled="{Binding CanUndo}" ToolTip="Undo last refinement" />
                                             <Button Padding="8,3" Margin="0,0,6,0" Command="{Binding ResetScanCommand}" Content="Reset"
                                                     FontSize="11" Style="{StaticResource ToolbarButton}" />
                                             <Button Padding="8,3" Command="{Binding AddSelectedToTableCommand}" Content="Add to table"
                                                     FontSize="11" Style="{StaticResource ToolbarButton}" />
+                                        </StackPanel>
+                                        <StackPanel Orientation="Horizontal" Margin="0,4,0,0">
+                                            <CheckBox Content="Hex" IsChecked="{Binding ShowAsHex}" VerticalAlignment="Center" FontSize="11" Margin="0,0,8,0"
+                                                      ToolTip="Display scan results in hexadecimal" />
+                                            <CheckBox Content="Writable only" IsChecked="{Binding WritableOnly}" VerticalAlignment="Center" FontSize="11" Margin="0,0,8,0"
+                                                      ToolTip="Only scan writable memory regions" />
+                                            <TextBlock Text="Epsilon:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0" />
+                                            <TextBox Width="60" Text="{Binding FloatEpsilon, UpdateSourceTrigger=PropertyChanged}" FontSize="11" VerticalContentAlignment="Center" Padding="4,2"
+                                                     Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                     BorderBrush="{DynamicResource InputBorder}" ToolTip="Float comparison tolerance (e.g. 0.1). Leave empty for exact match." />
                                         </StackPanel>
                                         <Border Background="{DynamicResource MenuBarBackground}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
                                                 CornerRadius="3" Padding="8" Margin="0,6,0,0">

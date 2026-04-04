@@ -469,16 +469,134 @@ public sealed partial class AiToolFunctions(
     public async Task<string> ScanForPointers(
         [Description("Process ID to scan")] int processId,
         [Description("Target address (hex)")] string targetAddress,
-        [Description("Maximum pointer chain depth (1-3, default 2)")] int maxDepth = 2)
+        [Description("Maximum pointer chain depth (1-3, default 2)")] int maxDepth = 2,
+        [Description("Comma-separated module names to scan (e.g. 'game.dll,mono.dll'). Empty = all modules.")] string? moduleFilter = null)
     {
         var scanner = new PointerScannerService(engineFacade);
         var addr = AddressTableService.ParseAddress(targetAddress);
-        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth);
+        IReadOnlyList<string>? filter = string.IsNullOrWhiteSpace(moduleFilter) ? null
+            : moduleFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth, moduleFilter: filter);
 
         if (paths.Count == 0) return "No pointer paths found to the target address.";
 
         var lines = paths.Take(50).Select((p, i) => $"{i + 1}. {p.Display}");
         return $"Found {paths.Count} pointer path(s) to 0x{addr:X}:\n{string.Join('\n', lines)}";
+    }
+
+    // ── Phase 7E: Pointer Map I/O ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Save the last pointer scan results to a .PTR file for offline analysis.")]
+    public async Task<string> SavePointerMap(
+        [Description("Process ID (for process name metadata)")] int processId,
+        [Description("Target address the scan was for (hex)")] string targetAddress,
+        [Description("File path to save the .PTR file to")] string filePath)
+    {
+        try
+        {
+            var scanner = new PointerScannerService(engineFacade);
+            var addr = AddressTableService.ParseAddress(targetAddress);
+
+            // Re-scan to get fresh paths (the service doesn't persist scan state)
+            var paths = await scanner.ScanForPointersAsync(processId, addr, 2);
+            if (paths.Count == 0) return "No pointer paths found. Run ScanForPointers first.";
+
+            var map = new PointerMapFile(
+                $"process-{processId}", addr, DateTimeOffset.UtcNow, 2, 0x2000, paths);
+            await PointerScannerService.SavePointerMapAsync(filePath, map);
+            return $"Saved {paths.Count} pointer paths to {filePath}";
+        }
+        catch (Exception ex) { return $"SavePointerMap failed: {ex.Message}"; }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("Load a previously saved .PTR pointer map file.")]
+    public async Task<string> LoadPointerMap(
+        [Description("File path to the .PTR file")] string filePath)
+    {
+        try
+        {
+            var map = await PointerScannerService.LoadPointerMapAsync(filePath);
+            var lines = map.Paths.Take(50).Select((p, i) => $"{i + 1}. {p.Display}");
+            return $"Loaded {map.Paths.Count} pointer paths from {System.IO.Path.GetFileName(filePath)}\n" +
+                   $"Target: 0x{map.OriginalTargetAddress:X} | Scanned: {map.ScanTimestamp:g}\n" +
+                   string.Join('\n', lines) +
+                   (map.Paths.Count > 50 ? $"\n... ({map.Paths.Count - 50} more)" : "");
+        }
+        catch (Exception ex) { return $"LoadPointerMap failed: {ex.Message}"; }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Compare two pointer map (.PTR) files to find common paths that survive across restarts.")]
+    public async Task<string> ComparePointerMaps(
+        [Description("Path to first .PTR file")] string filePathA,
+        [Description("Path to second .PTR file")] string filePathB)
+    {
+        try
+        {
+            var mapA = await PointerScannerService.LoadPointerMapAsync(filePathA);
+            var mapB = await PointerScannerService.LoadPointerMapAsync(filePathB);
+            var result = PointerScannerService.CompareMaps(mapA, mapB);
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Pointer map comparison: {result.OverlapRatio:P0} overlap");
+            sb.AppendLine($"  Common: {result.CommonPaths.Count} | Only in A: {result.OnlyInFirst.Count} | Only in B: {result.OnlyInSecond.Count}");
+            if (result.CommonPaths.Count > 0)
+            {
+                sb.AppendLine("\nCommon paths (most stable):");
+                foreach (var p in result.CommonPaths.Take(20))
+                    sb.AppendLine($"  {p.Display}");
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex) { return $"ComparePointerMaps failed: {ex.Message}"; }
+    }
+
+    // ── Phase 7A: Grouped Scan ──
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("Scan for multiple values simultaneously in one pass (e.g. health AND mana). Each group gets a label.")]
+    public async Task<string> GroupedScan(
+        [Description("Process ID to scan")] int processId,
+        [Description("Semicolon-separated groups: 'label:type:scanType:value'. Example: 'Health:Int32:ExactValue:100;Mana:Int32:ExactValue:50'")] string groups)
+    {
+        try
+        {
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var parsedGroups = new List<GroupedScanConstraint>();
+            foreach (var groupStr in groups.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                var parts = groupStr.Split(':', 4);
+                if (parts.Length < 4) return $"Invalid group format: '{groupStr}'. Expected 'label:dataType:scanType:value'.";
+                var label = parts[0].Trim();
+                var dt = Enum.Parse<MemoryDataType>(parts[1], ignoreCase: true);
+                var st = Enum.Parse<ScanType>(parts[2], ignoreCase: true);
+                var val = parts[3].Trim();
+                parsedGroups.Add(new GroupedScanConstraint(label, new ScanConstraints(dt, st, val)));
+            }
+
+            if (parsedGroups.Count == 0) return "No valid groups provided.";
+
+            var results = await scanService.GroupedScanAsync(processId, parsedGroups, new ScanOptions());
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Grouped scan: {results.Results.Count} total results across {parsedGroups.Count} groups");
+            foreach (var group in parsedGroups)
+            {
+                var groupResults = results.Results.Where(r => r.GroupLabel == group.Label).Take(10).ToList();
+                sb.AppendLine($"\n[{group.Label}] ({groupResults.Count} shown):");
+                foreach (var r in groupResults)
+                    sb.AppendLine($"  0x{r.Address:X} = {r.CurrentValue}");
+            }
+            return sb.ToString();
+        }
+        catch (Exception ex) { return $"GroupedScan failed: {ex.Message}"; }
     }
 
     [ReadOnlyTool]

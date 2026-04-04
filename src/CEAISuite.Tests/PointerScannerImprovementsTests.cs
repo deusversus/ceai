@@ -150,6 +150,24 @@ public class PointerScannerImprovementsTests
         Assert.True(result.OverlapRatio > 0.6 && result.OverlapRatio < 0.7);
     }
 
+    [Fact]
+    public void CompareMaps_DuplicatePaths_HandledGracefully()
+    {
+        var dup1 = new PointerPath("game.dll", (nuint)0x1000, 0x100, new long[] { 0x10 }, (nuint)0x2000);
+        var dup2 = new PointerPath("game.dll", (nuint)0x1000, 0x100, new long[] { 0x10 }, (nuint)0x2000);
+        var unique = new PointerPath("game.dll", (nuint)0x1000, 0x200, new long[] { 0x20 }, (nuint)0x3000);
+
+        var mapA = new PointerMapFile("game.exe", (nuint)0x2000, DateTimeOffset.UtcNow, 3, 0x2000, new[] { dup1, dup2, unique });
+        var mapB = new PointerMapFile("game.exe", (nuint)0x2000, DateTimeOffset.UtcNow, 3, 0x2000, new[] { dup1, unique });
+
+        // Should NOT throw despite duplicate keys — DistinctBy handles it
+        var result = PointerScannerService.CompareMaps(mapA, mapB);
+
+        Assert.Equal(2, result.CommonPaths.Count); // dup1 (deduped) + unique
+        Assert.Empty(result.OnlyInFirst);
+        Assert.Empty(result.OnlyInSecond);
+    }
+
     // ── Module Filter ──
 
     [Fact]

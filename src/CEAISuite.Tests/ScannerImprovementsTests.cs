@@ -195,6 +195,80 @@ public class ScannerImprovementsTests
         svc.UnregisterCustomType("Vec3");
     }
 
+    // ── Service-level ScanOptions wiring ──
+
+    [Fact]
+    public async Task StartScanWithOptions_PassesOptionsToEngine()
+    {
+        var stub = new StubScanEngine();
+        var svc = new ScanService(stub);
+
+        await svc.StartScanAsync(1, MemoryDataType.Float, ScanType.ExactValue, "100.0",
+            new ScanOptions(FloatEpsilon: 0.5f, WritableOnly: false));
+
+        Assert.NotNull(stub.LastOptions);
+        Assert.Equal(0.5f, stub.LastOptions!.FloatEpsilon);
+        Assert.False(stub.LastOptions.WritableOnly);
+    }
+
+    [Fact]
+    public async Task RefineScanWithOptions_PassesOptionsToEngine()
+    {
+        var stub = new StubScanEngine();
+        var svc = new ScanService(stub);
+
+        await svc.StartScanAsync(1, MemoryDataType.Int32, ScanType.UnknownInitialValue, null);
+        await svc.RefineScanAsync(ScanType.Changed, null, new ScanOptions(Alignment: 4));
+
+        Assert.NotNull(stub.LastOptions);
+        Assert.Equal(4, stub.LastOptions!.Alignment);
+    }
+
+    [Fact]
+    public async Task UndoStack_ExactlyMaxDepthKept()
+    {
+        var stub = new StubScanEngine();
+        var svc = new ScanService(stub);
+
+        stub.NextScanResult = new ScanResultSet("s", 1, new ScanConstraints(MemoryDataType.Int32, ScanType.UnknownInitialValue, null),
+            new List<ScanResultEntry> { new((nuint)0x1000, "1", null, new byte[] { 1, 0, 0, 0 }) },
+            10, 40960, DateTimeOffset.UtcNow);
+        await svc.StartScanAsync(1, MemoryDataType.Int32, ScanType.UnknownInitialValue, null);
+
+        stub.NextRefineResult = new ScanResultSet("s", 1, new ScanConstraints(MemoryDataType.Int32, ScanType.Changed, null),
+            new List<ScanResultEntry> { new((nuint)0x1000, "2", "1", new byte[] { 2, 0, 0, 0 }) },
+            10, 40960, DateTimeOffset.UtcNow);
+
+        // Push exactly 20 (MaxHistoryDepth)
+        for (int i = 0; i < 20; i++)
+            await svc.RefineScanAsync(ScanType.Changed, null);
+
+        Assert.Equal(20, svc.UndoDepth);
+
+        // Push one more — should still be 20 (oldest dropped)
+        await svc.RefineScanAsync(ScanType.Changed, null);
+        Assert.Equal(20, svc.UndoDepth);
+    }
+
+    // ── GroupedScan service wrapper ──
+
+    [Fact]
+    public async Task GroupedScanService_DelegatesToEngine()
+    {
+        var stub = new StubScanEngine();
+        var svc = new ScanService(stub);
+
+        var groups = new List<GroupedScanConstraint>
+        {
+            new("HP", new ScanConstraints(MemoryDataType.Int32, ScanType.ExactValue, "100"))
+        };
+
+        var result = await svc.GroupedScanAsync(1, groups, new ScanOptions());
+        Assert.NotNull(result);
+        Assert.Single(result.Results);
+        Assert.Equal("HP", result.Results[0].GroupLabel);
+    }
+
     // ── 7A.4: Hex Display Toggle ──
 
     [Fact]

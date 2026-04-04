@@ -224,6 +224,30 @@ public class AddressTableImprovementsTests
         Assert.False(child2.IsLocked);
     }
 
+    // ── 7D.4: Group Activation Mixed State ──
+
+    [Fact]
+    public async Task GroupActivation_MixedState_ActivatesAll()
+    {
+        var (vm, svc) = Create();
+        var group = new AddressTableNode("grp-1", "Group", true);
+        var active = MakeLeaf("Active", value: "10");
+        active.IsLocked = true;
+        active.LockedValue = "10";
+        var inactive = MakeLeaf("Inactive", value: "20");
+        // inactive.IsLocked = false (default)
+        group.Children.Add(active);
+        group.Children.Add(inactive);
+        svc.Roots.Add(group);
+
+        // Mixed state: one active, one not → All() returns false → activate = true
+        await vm.HandleActiveCheckBoxClickAsync(group);
+
+        // Both should now be active
+        Assert.True(active.IsLocked);
+        Assert.True(inactive.IsLocked);
+    }
+
     // ── 7D.5: Dropdown Configuration ──
 
     [Fact]

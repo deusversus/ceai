@@ -833,6 +833,16 @@ public partial class MainWindow : Window
             CmdFocusScanner(this, new RoutedEventArgs());
             e.Handled = true;
         }
+        else if (e.Key == Key.Up && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            _addressTableVm.IncreaseValueCommand.Execute(null);
+            e.Handled = true;
+        }
+        else if (e.Key == Key.Down && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
+        {
+            _addressTableVm.DecreaseValueCommand.Execute(null);
+            e.Handled = true;
+        }
     }
 
     // ── Breakpoint handlers ──

@@ -119,6 +119,17 @@ public sealed class ScanService(IScanEngine scanEngine)
         _scanHistory.Clear();
     }
 
+    /// <summary>Execute a grouped scan with multiple constraint sets in a single pass.</summary>
+    public async Task<ScanResultSet> GroupedScanAsync(
+        int processId,
+        IReadOnlyList<GroupedScanConstraint> groups,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await scanEngine.GroupedScanAsync(processId, groups, options, progress, cancellationToken);
+    }
+
     public Task<IReadOnlyList<MemoryRegionDescriptor>> EnumerateRegionsAsync(
         int processId,
         CancellationToken cancellationToken = default) =>

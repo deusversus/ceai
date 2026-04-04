@@ -104,12 +104,6 @@ public sealed record BreakpointHitEvent(
     DateTimeOffset TimestampUtc,
     IReadOnlyDictionary<string, string> RegisterSnapshot);
 
-public sealed record AccessTraceEntry(
-    nuint InstructionAddress,
-    nuint TargetAddress,
-    string AccessType,
-    int ThreadId,
-    DateTimeOffset TimestampUtc);
 
 // ─── Conditional Breakpoints ─────────────────────────────────────────
 

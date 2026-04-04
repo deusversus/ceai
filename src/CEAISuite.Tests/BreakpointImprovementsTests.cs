@@ -128,4 +128,20 @@ public class BreakpointImprovementsTests
         Assert.Equal("0x5000", bp.Address);
         Assert.True(bp.IsEnabled);
     }
+
+    [Fact]
+    public async Task ServicePassthrough_TraceFromBreakpoint()
+    {
+        var engine = new StubBreakpointEngine();
+        engine.NextTraceResult = new TraceResult("bp-t", new List<TraceEntry>
+        {
+            new((nuint)0x1000, "nop", 1, new Dictionary<string, string>(), DateTimeOffset.UtcNow)
+        }, false, false);
+        var service = new BreakpointService(engine);
+
+        var result = await service.TraceFromBreakpointAsync(1234, "0x1000");
+
+        Assert.Single(result.Entries);
+        Assert.Equal("nop", result.Entries[0].Disassembly);
+    }
 }

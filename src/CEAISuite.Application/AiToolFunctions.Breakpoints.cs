@@ -460,4 +460,82 @@ public sealed partial class AiToolFunctions
         }
     }
 
+    // ── Phase 7B: Conditional Breakpoints ──
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Set a conditional breakpoint that only triggers when an expression is true.")]
+    public async Task<string> SetConditionalBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Address (hex) to set breakpoint")] string address,
+        [Description("Breakpoint type: HardwareExecute, HardwareWrite, HardwareReadWrite")] string type,
+        [Description("Condition expression, e.g. 'RAX == 0x1000' or '[RBX+0x10] > 100' or 'hitcount >= 5'")] string expression,
+        [Description("Condition type: RegisterCompare, MemoryCompare, HitCount")] string conditionType = "RegisterCompare",
+        [Description("Breakpoint mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto",
+        [Description("Thread ID to filter (null = all threads)")] int? threadFilter = null)
+    {
+        try
+        {
+            if (breakpointService is null) return "Breakpoint engine not available.";
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
+            var bpMode = Enum.Parse<BreakpointMode>(mode, ignoreCase: true);
+            var ct = Enum.Parse<BreakpointConditionType>(conditionType, ignoreCase: true);
+            var condition = new BreakpointCondition(expression, ct);
+
+            var bp = await breakpointService.SetConditionalBreakpointAsync(
+                processId, address, bpType, condition, bpMode, threadFilter: threadFilter);
+
+            return $"Conditional breakpoint set: {bp.Id} at {bp.Address} ({bp.Mode})\n" +
+                   $"Condition: {expression} ({conditionType})" +
+                   (threadFilter.HasValue ? $"\nThread filter: {threadFilter}" : "");
+        }
+        catch (Exception ex)
+        {
+            return $"SetConditionalBreakpoint failed: {ex.Message}";
+        }
+    }
+
+    // ── Phase 7B: Break-and-Trace ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("Trace instruction execution from an address, recording each instruction in the linear path.")]
+    public async Task<string> TraceFromAddress(
+        [Description("Process ID")] int processId,
+        [Description("Address (hex) to start tracing from")] string address,
+        [Description("Maximum instructions to trace (default 500)")] int maxInstructions = 500,
+        [Description("Timeout in milliseconds (default 5000)")] int timeoutMs = 5000)
+    {
+        try
+        {
+            if (breakpointService is null) return "Breakpoint engine not available.";
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var result = await breakpointService.TraceFromBreakpointAsync(
+                processId, address, maxInstructions, timeoutMs);
+
+            if (result.Entries.Count == 0)
+                return $"Trace from {address}: no instructions decoded (address may be invalid or unreadable).";
+
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Trace from {address}: {result.Entries.Count} instructions");
+            if (result.MaxDepthReached) sb.AppendLine("⚠ Max instruction limit reached.");
+            if (result.WasTruncated) sb.AppendLine("⚠ Trace was truncated.");
+
+            foreach (var entry in result.Entries.Take(50))
+                sb.AppendLine($"  0x{entry.InstructionAddress:X}: {entry.Disassembly}");
+
+            if (result.Entries.Count > 50)
+                sb.AppendLine($"  ... ({result.Entries.Count - 50} more)");
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"TraceFromAddress failed: {ex.Message}";
+        }
+    }
+
 }

@@ -40,23 +40,43 @@ public sealed class ScanService(IScanEngine scanEngine)
     /// <summary>Number of undo steps available.</summary>
     public int UndoDepth => _scanHistory.Count;
 
+    public Task<ScanSessionOverview> StartScanAsync(
+        int processId,
+        MemoryDataType dataType,
+        ScanType scanType,
+        string? value,
+        CancellationToken cancellationToken = default) =>
+        StartScanAsync(processId, dataType, scanType, value, null, null, cancellationToken);
+
     public async Task<ScanSessionOverview> StartScanAsync(
         int processId,
         MemoryDataType dataType,
         ScanType scanType,
         string? value,
+        ScanOptions? options,
+        IProgress<ScanProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         var constraints = new ScanConstraints(dataType, scanType, value?.Trim());
-        var results = await scanEngine.StartScanAsync(processId, constraints, cancellationToken);
+        var results = options is not null
+            ? await scanEngine.StartScanAsync(processId, constraints, options, progress, cancellationToken)
+            : await scanEngine.StartScanAsync(processId, constraints, cancellationToken);
         _scanHistory.Clear(); // new scan clears history
         _lastScanResults = results;
-        return ToOverview(results);
+        return ToOverview(results, options?.ShowAsHex ?? false);
     }
+
+    public Task<ScanSessionOverview> RefineScanAsync(
+        ScanType scanType,
+        string? value,
+        CancellationToken cancellationToken = default) =>
+        RefineScanAsync(scanType, value, null, null, cancellationToken);
 
     public async Task<ScanSessionOverview> RefineScanAsync(
         ScanType scanType,
         string? value,
+        ScanOptions? options,
+        IProgress<ScanProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
         if (_lastScanResults is null)
@@ -78,9 +98,11 @@ public sealed class ScanService(IScanEngine scanEngine)
         _scanHistory.Push(new ScanHistoryEntry(_lastScanResults, _lastScanResults.Constraints, DateTimeOffset.UtcNow));
 
         var refinement = new ScanConstraints(_lastScanResults.Constraints.DataType, scanType, value?.Trim());
-        var results = await scanEngine.RefineScanAsync(_lastScanResults, refinement, cancellationToken);
+        var results = options is not null
+            ? await scanEngine.RefineScanAsync(_lastScanResults, refinement, options, progress, cancellationToken)
+            : await scanEngine.RefineScanAsync(_lastScanResults, refinement, cancellationToken);
         _lastScanResults = results;
-        return ToOverview(results);
+        return ToOverview(results, options?.ShowAsHex ?? false);
     }
 
     /// <summary>Undo the last refinement, restoring the previous scan results.</summary>
@@ -102,7 +124,7 @@ public sealed class ScanService(IScanEngine scanEngine)
         CancellationToken cancellationToken = default) =>
         scanEngine.EnumerateRegionsAsync(processId, cancellationToken);
 
-    private static ScanSessionOverview ToOverview(ScanResultSet resultSet) =>
+    private static ScanSessionOverview ToOverview(ScanResultSet resultSet, bool showAsHex = false) =>
         new(
             resultSet.ScanId,
             resultSet.ProcessId,
@@ -118,10 +140,24 @@ public sealed class ScanService(IScanEngine scanEngine)
                 .Select(
                     entry => new ScanResultOverview(
                         $"0x{entry.Address:X}",
-                        entry.CurrentValue,
+                        showAsHex ? FormatValueAsHex(entry.CurrentValue, entry.RawBytes, resultSet.Constraints.DataType) : entry.CurrentValue,
                         entry.PreviousValue,
                         Convert.ToHexString(entry.RawBytes.ToArray())))
                 .ToArray());
+
+    private static string FormatValueAsHex(string currentValue, IReadOnlyList<byte> rawBytes, MemoryDataType dt)
+    {
+        if (rawBytes.Count == 0) return currentValue;
+        var buf = rawBytes is byte[] arr ? arr : rawBytes.ToArray();
+        return dt switch
+        {
+            MemoryDataType.Byte => buf[0].ToString("X2"),
+            MemoryDataType.Int16 when buf.Length >= 2 => BitConverter.ToUInt16(buf, 0).ToString("X"),
+            MemoryDataType.Int32 when buf.Length >= 4 => BitConverter.ToUInt32(buf, 0).ToString("X"),
+            MemoryDataType.Int64 when buf.Length >= 8 => BitConverter.ToUInt64(buf, 0).ToString("X"),
+            _ => currentValue // Float/Double/String — hex doesn't apply meaningfully
+        };
+    }
 
     private static string FormatBytes(long bytes) =>
         bytes switch

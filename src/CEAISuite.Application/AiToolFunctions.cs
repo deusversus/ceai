@@ -150,8 +150,12 @@ public sealed partial class AiToolFunctions(
     public async Task<string> StartScan(
         [Description("Process ID to scan")] int processId,
         [Description("Data type: Int32, Int64, Float, Double")] string dataType,
-        [Description("Scan type: ExactValue, UnknownInitialValue, ArrayOfBytes")] string scanType,
-        [Description("Value to search for. ArrayOfBytes: '48 8B ?? ??' with ?? wildcards")] string? value)
+        [Description("Scan type: ExactValue, UnknownInitialValue, ArrayOfBytes, BitChanged")] string scanType,
+        [Description("Value to search for. ArrayOfBytes: '48 8B ?? ??' with ?? wildcards")] string? value,
+        [Description("Scan alignment in bytes (0=auto, 1/2/4/8). Default: 0")] int alignment = 0,
+        [Description("Float comparison tolerance. Default: null (exact match)")] float? floatEpsilon = null,
+        [Description("Only scan writable regions. Default: true")] bool writableOnly = true,
+        [Description("Suspend process during scan for consistency. Default: false")] bool pauseProcess = false)
     {
         try
         {
@@ -159,7 +163,12 @@ public sealed partial class AiToolFunctions(
             var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
             var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
             scanService.ResetScan();
-            var overview = await scanService.StartScanAsync(processId, dt, st, value ?? "");
+            var options = new ScanOptions(
+                Alignment: alignment,
+                FloatEpsilon: floatEpsilon,
+                WritableOnly: writableOnly,
+                SuspendProcess: pauseProcess);
+            var overview = await scanService.StartScanAsync(processId, dt, st, value ?? "", options);
             var topResults = overview.Results.Take(10)
                 .Select(r => $"  {r.Address} = {r.CurrentValue}");
             return $"Scan complete: {overview.ResultCount:N0} results found.\n{string.Join('\n', topResults)}";
@@ -168,6 +177,17 @@ public sealed partial class AiToolFunctions(
         {
             return $"StartScan failed: {ex.Message}";
         }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Undo the last scan refinement, restoring the previous result set.")]
+    public Task<string> UndoScan()
+    {
+        var overview = scanService.UndoScan();
+        if (overview is null)
+            return Task.FromResult("No scan to undo. The undo history is empty.");
+        return Task.FromResult($"Undo complete: {overview.ResultCount:N0} results restored (scan type: {overview.ScanType}).");
     }
 
     [ConcurrencySafe]

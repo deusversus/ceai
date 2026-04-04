@@ -64,6 +64,12 @@ public partial class ScannerViewModel : ObservableObject
     [ObservableProperty] private string? _floatEpsilon;
     [ObservableProperty] private bool _writableOnly = true;
 
+    private ScanOptions BuildScanOptions() => new(
+        WritableOnly: WritableOnly,
+        FloatEpsilon: float.TryParse(FloatEpsilon, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var eps) ? eps : null,
+        ShowAsHex: ShowAsHex);
+
     [RelayCommand]
     private async Task StartNewScanAsync()
     {
@@ -82,11 +88,13 @@ public partial class ScannerViewModel : ObservableObject
             ScanDetails = "Initial scan in progress.";
             ScanResults.Clear();
 
+            var options = BuildScanOptions();
             var overview = await _scanService.StartScanAsync(
                 pid.Value,
                 SelectedDataType,
                 SelectedScanType,
-                ScanValue);
+                ScanValue,
+                options);
 
             ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
             ScanStatus = $"{overview.ResultCount:N0} results found";
@@ -116,9 +124,11 @@ public partial class ScannerViewModel : ObservableObject
             ScanStatus = "Refining...";
             ScanDetails = "Next scan in progress.";
 
+            var options = BuildScanOptions();
             var overview = await _scanService.RefineScanAsync(
                 SelectedScanType,
-                ScanValue);
+                ScanValue,
+                options);
 
             ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
             ScanStatus = $"{overview.ResultCount:N0} results remaining";

@@ -193,8 +193,8 @@ public sealed class PointerScannerService(IEngineFacade engine)
         static string Key(PointerPath p) =>
             $"{p.ModuleName}+{p.ModuleOffset:X}:{string.Join(",", p.Offsets.Select(o => o.ToString("X")))}";
 
-        var keysA = mapA.Paths.ToDictionary(Key, p => p);
-        var keysB = mapB.Paths.ToDictionary(Key, p => p);
+        var keysA = mapA.Paths.DistinctBy(Key).ToDictionary(Key, p => p);
+        var keysB = mapB.Paths.DistinctBy(Key).ToDictionary(Key, p => p);
 
         var commonKeys = keysA.Keys.Intersect(keysB.Keys).ToList();
         var onlyInFirstKeys = keysA.Keys.Except(keysB.Keys).ToList();

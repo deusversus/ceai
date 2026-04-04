@@ -917,7 +917,7 @@ public partial class AddressTableViewModel : ObservableObject
         // Phase 7D: Group header activation — toggle all children recursively
         if (node.IsGroup)
         {
-            var activate = !node.Children.Any(c => c.IsActive);
+            var activate = !node.Children.All(c => c.IsActive);
             await ActivateGroupRecursiveAsync(node, activate);
             OnPropertyChanged(nameof(Roots));
             _outputLog.Append("AddressTable", "Info",

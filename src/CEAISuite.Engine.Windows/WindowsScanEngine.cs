@@ -473,6 +473,7 @@ public sealed class WindowsScanEngine : IScanEngine
                             try
                             {
                                 var localResults = new List<ScanResultEntry>();
+                                var lastReportedCount = 0;
                                 foreach (var region in chunks[threadIdx])
                                 {
                                     cancellationToken.ThrowIfCancellationRequested();
@@ -491,8 +492,11 @@ public sealed class WindowsScanEngine : IScanEngine
                                         ScanRegionForInitialWithOptions(readAddr, regionBytes, constraints, valueSize, step, options, localResults, cancellationToken);
                                     }
 
+                                    // Report delta since last report
+                                    var delta = localResults.Count - lastReportedCount;
+                                    if (delta > 0) Interlocked.Add(ref totalResults, delta);
+                                    lastReportedCount = localResults.Count;
                                     Interlocked.Increment(ref regionsCompleted);
-                                    Interlocked.Add(ref totalResults, 0); // just a read barrier
                                     progress?.Report(new ScanProgress(regionsCompleted, regions.Length, totalBytesScanned,
                                         Interlocked.CompareExchange(ref totalResults, 0, 0), sw.Elapsed.TotalSeconds));
                                 }
@@ -684,6 +688,7 @@ public sealed class WindowsScanEngine : IScanEngine
         {
             ScanType.ExactValue => string.Equals(currentValue, constraints.Value, StringComparison.OrdinalIgnoreCase),
             ScanType.UnknownInitialValue => true,
+            ScanType.BitChanged => true, // initial scan records baseline (like UnknownInitialValue)
             ScanType.BiggerThan => CompareValues(currentValue, constraints.Value ?? "0", constraints.DataType) > 0,
             ScanType.SmallerThan => CompareValues(currentValue, constraints.Value ?? "0", constraints.DataType) < 0,
             ScanType.ValueBetween => IsValueBetween(currentValue, constraints.Value, constraints.DataType),

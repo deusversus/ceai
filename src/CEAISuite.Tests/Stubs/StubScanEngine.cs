@@ -75,7 +75,10 @@ public sealed class StubScanEngine : IScanEngine
         {
             results.Add(new ScanResultEntry((nuint)0x1000, "100", null, new byte[] { 100, 0, 0, 0 }, group.Label));
         }
+        var primaryConstraints = groups.Count > 0
+            ? groups[0].Constraints
+            : new ScanConstraints(MemoryDataType.Int32, ScanType.ExactValue, null);
         return Task.FromResult(new ScanResultSet(
-            "grouped-scan", processId, groups[0].Constraints, results, 1, 1024, DateTimeOffset.UtcNow));
+            "grouped-scan", processId, primaryConstraints, results, 1, 1024, DateTimeOffset.UtcNow));
     }
 }

@@ -68,9 +68,11 @@ public sealed class ScanService(IScanEngine scanEngine)
         if (_scanHistory.Count >= MaxHistoryDepth)
         {
             // Drop oldest entry by rebuilding stack (Stack doesn't support random removal)
+            // items[0] = top (most recent), items[^1] = bottom (oldest)
             var items = _scanHistory.ToArray();
             _scanHistory.Clear();
-            for (int i = items.Length - 2; i >= 0; i--)
+            // Keep items 0..MaxHistoryDepth-2 (drop the oldest), push in reverse to preserve order
+            for (int i = MaxHistoryDepth - 2; i >= 0; i--)
                 _scanHistory.Push(items[i]);
         }
         _scanHistory.Push(new ScanHistoryEntry(_lastScanResults, _lastScanResults.Constraints, DateTimeOffset.UtcNow));

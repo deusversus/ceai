@@ -42,6 +42,7 @@ public partial class MainViewModel : ObservableObject
     private readonly ProcessWatchdogService _watchdog;
     private readonly IScreenCaptureEngine _screenCaptureEngine;
     private readonly ScriptGenerationService _scriptGenerationService;
+    private readonly IDispatcherService _dispatcher;
 
     public MainViewModel(
         WorkspaceDashboardService dashboardService,
@@ -64,7 +65,8 @@ public partial class MainViewModel : ObservableObject
         ScannerViewModel scannerVm,
         ProcessWatchdogService watchdog,
         IScreenCaptureEngine screenCaptureEngine,
-        ScriptGenerationService scriptGenerationService)
+        ScriptGenerationService scriptGenerationService,
+        IDispatcherService dispatcher)
     {
         _databasePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -93,6 +95,7 @@ public partial class MainViewModel : ObservableObject
         _watchdog = watchdog;
         _screenCaptureEngine = screenCaptureEngine;
         _scriptGenerationService = scriptGenerationService;
+        _dispatcher = dispatcher;
 
         // Sync toolbar combo selection when process attach/detach state changes
         _processContext.ProcessChanged += OnProcessContextChanged;
@@ -662,18 +665,19 @@ public partial class MainViewModel : ObservableObject
         var budget = _aiOperatorService.TokenBudget;
         if (budget.TotalRequests > 0)
         {
-            StatusBarTokenText = $"${budget.EstimatedCostUsd:F4} | {FormatTokenCount(budget.TotalInputTokens)}↑ {FormatTokenCount(budget.TotalOutputTokens)}↓";
+            var text = $"${budget.EstimatedCostUsd:F4} | {FormatTokenCount(budget.TotalInputTokens)}↑ {FormatTokenCount(budget.TotalOutputTokens)}↓";
+            _dispatcher.Invoke(() => StatusBarTokenText = text);
         }
     }
 
     private void OnWatchdogRollback(WatchdogRollbackEvent evt)
     {
-        StatusBarWatchdogText = $"⚠ Rollback 0x{evt.Address:X}";
+        _dispatcher.Invoke(() => StatusBarWatchdogText = $"⚠ Rollback 0x{evt.Address:X}");
         // Auto-clear after 5 seconds
         _ = Task.Run(async () =>
         {
             await Task.Delay(5000);
-            StatusBarWatchdogText = "";
+            _dispatcher.Invoke(() => StatusBarWatchdogText = "");
         });
     }
 

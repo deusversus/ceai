@@ -13,6 +13,14 @@ namespace CEAISuite.Engine.Windows;
 /// </summary>
 public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 {
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, nuint> _symbolTable = new(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyList<RegisteredSymbol> GetRegisteredSymbols() =>
+        _symbolTable.Select(kv => new RegisteredSymbol(kv.Key, kv.Value)).ToList();
+
+    public nuint? ResolveSymbol(string name) =>
+        _symbolTable.TryGetValue(name, out var addr) ? addr : null;
+
     private const uint ProcessAllAccess = 0x001FFFFF;
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
@@ -69,10 +77,18 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     }
 
     public Task<ScriptExecutionResult> EnableAsync(int processId, string script, CancellationToken ct = default) =>
-        Task.Run(() => ExecuteSection(processId, script, enable: true, ct), ct);
+        Task.Run(() =>
+        {
+            var processed = PreprocessIncludes(script);
+            return ExecuteSection(processId, processed, enable: true, ct);
+        }, ct);
 
     public Task<ScriptExecutionResult> DisableAsync(int processId, string script, CancellationToken ct = default) =>
-        Task.Run(() => ExecuteSection(processId, script, enable: false, ct), ct);
+        Task.Run(() =>
+        {
+            var processed = PreprocessIncludes(script);
+            return ExecuteSection(processId, processed, enable: false, ct);
+        }, ct);
 
     private ScriptExecutionResult ExecuteSection(int processId, string script, bool enable, CancellationToken ct)
     {
@@ -133,11 +149,14 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         }
     }
 
-    private static ScriptExecutionResult ExecuteSectionCore(ExecutionContext ctx, string section, CancellationToken ct)
+    private ScriptExecutionResult ExecuteSectionCore(ExecutionContext ctx, string section, CancellationToken ct)
     {
         var lines = ParseLines(section);
         var allocations = new List<ScriptAllocation>();
         var patches = new List<ScriptPatch>();
+        var registeredSymbols = new List<RegisteredSymbol>();
+        var strictMode = false;
+        var warnings = new List<string>();
 
         // Collect directives and code blocks in a single pass
         var defines = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -145,9 +164,16 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         var allocDirectives = new List<(string Name, string SizeExpr, string? NearExpr)>();
         var deallocDirectives = new List<string>();
         var assertDirectives = new List<(string AddrExpr, string BytePattern)>();
+        var registerSymbolNames = new List<string>();
+        var unregisterSymbolNames = new List<string>();
+        var createThreadDirectives = new List<string>();
+        var readMemDirectives = new List<(string SourceAddr, int Length)>();
+        var writeMemDirectives = new List<(string DestAddr, string BytePattern)>();
+        var loadLibraryDirectives = new List<string>();
         var codeBlocks = new List<CodeBlock>();
 
         CodeBlock? currentBlock = null;
+        var insideLuaBlock = false;
 
         foreach (var line in lines)
         {
@@ -158,10 +184,39 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
             var trimmed = line.Trim();
 
+            // {$strict} pragma
+            if (trimmed.Equals("{$strict}", StringComparison.OrdinalIgnoreCase))
+            {
+                strictMode = true;
+                continue;
+            }
+
+            // {$luacode} ... {$asm} block skipping
+            if (trimmed.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase))
+            {
+                insideLuaBlock = true;
+                warnings.Add("Lua code blocks are not supported (Phase 8). This section was skipped.");
+                continue;
+            }
+            if (trimmed.Equals("{$asm}", StringComparison.OrdinalIgnoreCase))
+            {
+                insideLuaBlock = false;
+                continue;
+            }
+            if (insideLuaBlock) continue;
+
             var defineMatch = DefineRegex().Match(trimmed);
             if (defineMatch.Success)
             {
                 defines[defineMatch.Groups[1].Value] = defineMatch.Groups[2].Value;
+                continue;
+            }
+
+            // var name = value (syntactic sugar for define)
+            var varMatch = VarDeclRegex().Match(trimmed);
+            if (varMatch.Success)
+            {
+                defines[varMatch.Groups[1].Value] = varMatch.Groups[2].Value;
                 continue;
             }
 
@@ -198,8 +253,51 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 continue;
             }
 
-            if (RegisterSymbolRegex().IsMatch(trimmed) || UnregisterSymbolRegex().IsMatch(trimmed))
+            // registersymbol / unregistersymbol — collect names for post-resolution execution
+            var regSymMatch = RegisterSymbolRegex().Match(trimmed);
+            if (regSymMatch.Success)
+            {
+                registerSymbolNames.Add(regSymMatch.Groups[1].Value);
                 continue;
+            }
+            var unregSymMatch = UnregisterSymbolRegex().Match(trimmed);
+            if (unregSymMatch.Success)
+            {
+                unregisterSymbolNames.Add(unregSymMatch.Groups[1].Value);
+                continue;
+            }
+
+            // createthread(address)
+            var ctMatch = CreateThreadRegex().Match(trimmed);
+            if (ctMatch.Success)
+            {
+                createThreadDirectives.Add(ctMatch.Groups[1].Value.Trim());
+                continue;
+            }
+
+            // readmem(sourceAddr, length)
+            var rmMatch = ReadMemRegex().Match(trimmed);
+            if (rmMatch.Success)
+            {
+                readMemDirectives.Add((rmMatch.Groups[1].Value.Trim(), int.Parse(rmMatch.Groups[2].Value.Trim())));
+                continue;
+            }
+
+            // writemem(destAddr, bytePattern)
+            var wmMatch = WriteMemRegex().Match(trimmed);
+            if (wmMatch.Success)
+            {
+                writeMemDirectives.Add((wmMatch.Groups[1].Value.Trim(), wmMatch.Groups[2].Value.Trim()));
+                continue;
+            }
+
+            // loadlibrary(dllPath)
+            var llMatch = LoadLibraryRegex().Match(trimmed);
+            if (llMatch.Success)
+            {
+                loadLibraryDirectives.Add(llMatch.Groups[1].Value.Trim());
+                continue;
+            }
 
             // aobscanmodule(symbolName, moduleName, bytePattern)
             var aobMatch = AobScanModuleRegex().Match(trimmed);
@@ -275,10 +373,25 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
                 currentBlock.Instructions.Add(trimmed);
             }
+            else if (strictMode)
+            {
+                // Strict mode: unrecognized lines outside code blocks are errors
+                return new ScriptExecutionResult(
+                    false,
+                    $"Strict mode: unrecognized directive or instruction outside code block: '{trimmed}'",
+                    allocations, patches);
+            }
         }
 
         // Phase 1: Resolve define chains (a define may reference another define)
         ResolveDefines(defines);
+
+        // Also add symbol table entries as define fallbacks for address resolution
+        foreach (var (symName, symAddr) in _symbolTable)
+        {
+            if (!defines.ContainsKey(symName))
+                defines[symName] = $"0x{symAddr:X}";
+        }
 
         // Phase 2: Resolve module+offset addresses in define values
         foreach (var key in defines.Keys.ToArray())
@@ -494,7 +607,87 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             ? $" Warning: {string.Join("; ", deallocErrors)}"
             : null;
 
-        return new ScriptExecutionResult(true, deallocWarning, allocations, patches);
+        // Phase 9: Execute registersymbol / unregistersymbol
+        foreach (var symName in registerSymbolNames)
+        {
+            if (defines.TryGetValue(symName, out var symVal))
+            {
+                var resolved = ResolveAddress(symVal, defines, ctx);
+                if (resolved is not null)
+                {
+                    _symbolTable[symName] = resolved.Value;
+                    registeredSymbols.Add(new RegisteredSymbol(symName, resolved.Value));
+                }
+            }
+        }
+        foreach (var symName in unregisterSymbolNames)
+        {
+            _symbolTable.TryRemove(symName, out _);
+        }
+
+        // Phase 10: Execute createthread directives
+        foreach (var addrExpr in createThreadDirectives)
+        {
+            ct.ThrowIfCancellationRequested();
+            var addr = ResolveAddress(ExpandSymbols(addrExpr, defines), defines, ctx);
+            if (addr is null)
+            {
+                return new ScriptExecutionResult(false,
+                    $"createthread failed: cannot resolve address '{addrExpr}'.",
+                    allocations, patches, registeredSymbols);
+            }
+
+            var threadHandle = CreateRemoteThread(ctx.ProcessHandle, IntPtr.Zero, 0,
+                (IntPtr)addr.Value, IntPtr.Zero, 0, out _);
+            if (threadHandle == IntPtr.Zero)
+            {
+                return new ScriptExecutionResult(false,
+                    $"createthread failed at 0x{addr.Value:X}: error {Marshal.GetLastWin32Error()}",
+                    allocations, patches, registeredSymbols);
+            }
+            WaitForSingleObject(threadHandle, 1000);
+            CloseHandle(threadHandle);
+        }
+
+        // Phase 11: Execute readmem directives
+        foreach (var (srcExpr, length) in readMemDirectives)
+        {
+            var addr = ResolveAddress(ExpandSymbols(srcExpr, defines), defines, ctx);
+            if (addr is null) continue;
+            var buf = new byte[length];
+            ReadProcessMemory(ctx.ProcessHandle, (IntPtr)addr.Value, buf, length, out _);
+            // readmem results are stored for use by writemem or db; here just log
+        }
+
+        // Phase 12: Execute writemem directives
+        foreach (var (destExpr, bytePattern) in writeMemDirectives)
+        {
+            var addr = ResolveAddress(ExpandSymbols(destExpr, defines), defines, ctx);
+            if (addr is null) continue;
+            var bytes = ParseByteString(bytePattern);
+            var origBytes = new byte[bytes.Length];
+            ReadProcessMemory(ctx.ProcessHandle, (IntPtr)addr.Value, origBytes, origBytes.Length, out _);
+            WriteProcessMemory(ctx.ProcessHandle, (IntPtr)addr.Value, bytes, bytes.Length, out _);
+            patches.Add(new ScriptPatch(addr.Value, origBytes, bytes));
+        }
+
+        // Phase 13: Execute loadlibrary directives
+        foreach (var dllPath in loadLibraryDirectives)
+        {
+            ct.ThrowIfCancellationRequested();
+            var loadResult = LoadLibraryInTarget(ctx.ProcessHandle, dllPath);
+            if (!loadResult)
+            {
+                warnings.Add($"loadlibrary('{dllPath}') may have failed (error {Marshal.GetLastWin32Error()}).");
+            }
+        }
+
+        var allWarnings = deallocWarning;
+        if (warnings.Count > 0)
+            allWarnings = (allWarnings ?? "") + " " + string.Join("; ", warnings);
+
+        return new ScriptExecutionResult(true, string.IsNullOrWhiteSpace(allWarnings) ? null : allWarnings.Trim(),
+            allocations, patches, registeredSymbols);
     }
 
     /// <summary>
@@ -918,6 +1111,68 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         return IntPtr.Size == 8;
     }
 
+    /// <summary>Recursively inline {$include filepath} directives. Max depth 10.</summary>
+    private static string PreprocessIncludes(string script, int depth = 0)
+    {
+        if (depth > 10)
+            throw new InvalidOperationException("Include depth exceeded 10 — possible circular include.");
+
+        var sb = new StringBuilder();
+        foreach (var line in script.Split('\n'))
+        {
+            var trimmed = line.Trim();
+            if (trimmed.StartsWith("{$include ", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith('}'))
+            {
+                var path = trimmed[10..^1].Trim();
+                if (File.Exists(path))
+                {
+                    var included = File.ReadAllText(path);
+                    sb.AppendLine(PreprocessIncludes(included, depth + 1));
+                }
+                else
+                {
+                    sb.AppendLine($"// Include not found: {path}");
+                }
+            }
+            else
+            {
+                sb.AppendLine(line);
+            }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Load a DLL into the target process using CreateRemoteThread + LoadLibraryW.</summary>
+    private static bool LoadLibraryInTarget(IntPtr processHandle, string dllPath)
+    {
+        var pathBytes = Encoding.Unicode.GetBytes(dllPath + '\0');
+        var pathAlloc = VirtualAllocEx(processHandle, IntPtr.Zero, (IntPtr)pathBytes.Length, MemCommit | MemReserve, 0x04 /* PAGE_READWRITE */);
+        if (pathAlloc == IntPtr.Zero) return false;
+
+        try
+        {
+            if (!WriteProcessMemory(processHandle, pathAlloc, pathBytes, pathBytes.Length, out _))
+                return false;
+
+            var kernel32 = GetModuleHandleW("kernel32.dll");
+            if (kernel32 == IntPtr.Zero) return false;
+
+            var loadLibAddr = GetProcAddress(kernel32, "LoadLibraryW");
+            if (loadLibAddr == IntPtr.Zero) return false;
+
+            var threadHandle = CreateRemoteThread(processHandle, IntPtr.Zero, 0, loadLibAddr, pathAlloc, 0, out _);
+            if (threadHandle == IntPtr.Zero) return false;
+
+            WaitForSingleObject(threadHandle, 5000);
+            CloseHandle(threadHandle);
+            return true;
+        }
+        finally
+        {
+            VirtualFreeEx(processHandle, pathAlloc, 0, MemRelease);
+        }
+    }
+
     #endregion
 
     #region Generated Regexes
@@ -937,11 +1192,26 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     [GeneratedRegex(@"^assert\(\s*(.+?)\s*,\s*((?:[0-9A-Fa-f]{2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
     private static partial Regex AssertRegex();
 
-    [GeneratedRegex(@"^registersymbol\(\s*\w+\s*\)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^registersymbol\(\s*(\w+)\s*\)$", RegexOptions.IgnoreCase)]
     private static partial Regex RegisterSymbolRegex();
 
-    [GeneratedRegex(@"^unregistersymbol\(\s*\w+\s*\)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^unregistersymbol\(\s*(\w+)\s*\)$", RegexOptions.IgnoreCase)]
     private static partial Regex UnregisterSymbolRegex();
+
+    [GeneratedRegex(@"^var\s+(\w+)\s*=\s*(.+)$", RegexOptions.IgnoreCase)]
+    private static partial Regex VarDeclRegex();
+
+    [GeneratedRegex(@"^createthread\s*\(\s*(.+?)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex CreateThreadRegex();
+
+    [GeneratedRegex(@"^readmem\s*\(\s*(.+?)\s*,\s*(\d+)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex ReadMemRegex();
+
+    [GeneratedRegex(@"^writemem\s*\(\s*(.+?)\s*,\s*((?:[0-9A-Fa-f]{2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex WriteMemRegex();
+
+    [GeneratedRegex(@"^loadlibrary\s*\(\s*(.+?)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex LoadLibraryRegex();
 
     [GeneratedRegex(@"^(\w+)\s*:$")]
     private static partial Regex LabelDefRegex();
@@ -1000,6 +1270,20 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWow64Process2(
         IntPtr processHandle, out ushort processMachine, out ushort nativeMachine);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr CreateRemoteThread(
+        IntPtr hProcess, IntPtr lpThreadAttributes, uint dwStackSize,
+        IntPtr lpStartAddress, IntPtr lpParameter, uint dwCreationFlags, out uint lpThreadId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandleW(string lpModuleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true)]
+    private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern int VirtualQueryEx(

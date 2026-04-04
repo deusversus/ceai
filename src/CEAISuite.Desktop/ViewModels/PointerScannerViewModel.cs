@@ -14,6 +14,7 @@ public partial class PointerScannerViewModel : ObservableObject
     private readonly AddressTableService _addressTableService;
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
+    private readonly IDialogService _dialogService;
     private CancellationTokenSource? _scanCts;
 
     private readonly IClipboardService _clipboard;
@@ -27,7 +28,8 @@ public partial class PointerScannerViewModel : ObservableObject
         IOutputLog outputLog,
         IClipboardService clipboard,
         INavigationService navigationService,
-        IAiContextService aiContext)
+        IAiContextService aiContext,
+        IDialogService dialogService)
     {
         _scannerService = scannerService;
         _addressTableService = addressTableService;
@@ -36,15 +38,18 @@ public partial class PointerScannerViewModel : ObservableObject
         _clipboard = clipboard;
         _navigationService = navigationService;
         _aiContext = aiContext;
+        _dialogService = dialogService;
     }
 
     [ObservableProperty] private string _targetAddress = "";
     [ObservableProperty] private int _maxDepth = 3;
     [ObservableProperty] private string _maxOffset = "0x2000";
+    [ObservableProperty] private string? _moduleFilter;
     [ObservableProperty] private ObservableCollection<PointerPathDisplayItem> _results = new();
     [ObservableProperty] private PointerPathDisplayItem? _selectedResult;
     [ObservableProperty] private string? _statusText;
     [ObservableProperty] private bool _isScanning;
+    [ObservableProperty] private bool _canResume;
 
     [RelayCommand]
     private async Task ScanAsync()
@@ -69,8 +74,10 @@ public partial class PointerScannerViewModel : ObservableObject
 
         try
         {
+            CanResume = false;
+            var modFilter = ParseModuleFilter(ModuleFilter);
             var paths = await _scannerService.ScanForPointersAsync(
-                pid.Value, addr, MaxDepth, maxOff, _scanCts.Token);
+                pid.Value, addr, MaxDepth, maxOff, modFilter, _scanCts.Token);
 
             foreach (var p in paths)
             {
@@ -87,7 +94,8 @@ public partial class PointerScannerViewModel : ObservableObject
         }
         catch (OperationCanceledException)
         {
-            StatusText = "Scan cancelled.";
+            CanResume = _scannerService.CanResume;
+            StatusText = CanResume ? "Scan cancelled. Can resume." : "Scan cancelled.";
         }
         catch (Exception ex)
         {
@@ -99,6 +107,143 @@ public partial class PointerScannerViewModel : ObservableObject
 
     [RelayCommand]
     private void CancelScan() => _scanCts?.Cancel();
+
+    [RelayCommand]
+    private async Task ResumeScanAsync()
+    {
+        if (!CanResume) { StatusText = "Nothing to resume."; return; }
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+
+        _scanCts?.Cancel();
+        _scanCts?.Dispose();
+        _scanCts = new CancellationTokenSource();
+        IsScanning = true;
+        StatusText = "Resuming scan...";
+
+        try
+        {
+            var paths = await _scannerService.ResumeScanAsync(pid.Value, _scanCts.Token);
+            Results.Clear();
+            foreach (var p in paths)
+            {
+                Results.Add(new PointerPathDisplayItem
+                {
+                    Chain = p.Display,
+                    ResolvedAddress = $"0x{p.ResolvedAddress:X}",
+                    ModuleName = p.ModuleName,
+                    Status = "Found",
+                    Source = p
+                });
+            }
+            StatusText = $"{Results.Count} pointer path(s) found (resumed).";
+            CanResume = false;
+        }
+        catch (OperationCanceledException)
+        {
+            CanResume = _scannerService.CanResume;
+            StatusText = CanResume ? "Scan cancelled. Can resume." : "Scan cancelled.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+        }
+        finally { IsScanning = false; }
+    }
+
+    // ── Pointer Map Save / Load / Compare ──
+
+    [RelayCommand]
+    private async Task SavePointerMapAsync()
+    {
+        if (Results.Count == 0) { StatusText = "No results to save."; return; }
+
+        var path = _dialogService.ShowSaveFileDialog("Pointer Maps (*.ptr)|*.ptr", "pointer_scan.ptr");
+        if (path is null) return;
+
+        var paths = Results.Where(r => r.Source is not null).Select(r => r.Source!).ToList();
+        var processName = _processContext.AttachedProcessName ?? "Unknown";
+        if (!TryParseAddress(TargetAddress, out var addr)) addr = 0;
+
+        var map = new PointerMapFile(processName, addr, DateTimeOffset.UtcNow, MaxDepth, 0x2000, paths);
+        await PointerScannerService.SavePointerMapAsync(path, map);
+        StatusText = $"Saved {paths.Count} pointer paths to {System.IO.Path.GetFileName(path)}";
+    }
+
+    [RelayCommand]
+    private async Task LoadPointerMapAsync()
+    {
+        var path = _dialogService.ShowOpenFileDialog("Pointer Maps (*.ptr)|*.ptr");
+        if (path is null) return;
+
+        try
+        {
+            var map = await PointerScannerService.LoadPointerMapAsync(path);
+            Results.Clear();
+            foreach (var p in map.Paths)
+            {
+                Results.Add(new PointerPathDisplayItem
+                {
+                    Chain = p.Display,
+                    ResolvedAddress = $"0x{p.ResolvedAddress:X}",
+                    ModuleName = p.ModuleName,
+                    Status = "Loaded",
+                    Source = p
+                });
+            }
+            TargetAddress = $"0x{map.OriginalTargetAddress:X}";
+            StatusText = $"Loaded {map.Paths.Count} paths from {System.IO.Path.GetFileName(path)} (scanned {map.ScanTimestamp:g})";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Load failed: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task ComparePointerMapsAsync()
+    {
+        var pathA = _dialogService.ShowOpenFileDialog("Pointer Maps (*.ptr)|*.ptr");
+        if (pathA is null) return;
+        var pathB = _dialogService.ShowOpenFileDialog("Pointer Maps (*.ptr)|*.ptr");
+        if (pathB is null) return;
+
+        try
+        {
+            var mapA = await PointerScannerService.LoadPointerMapAsync(pathA);
+            var mapB = await PointerScannerService.LoadPointerMapAsync(pathB);
+            var comparison = PointerScannerService.CompareMaps(mapA, mapB);
+
+            // Show common paths in results
+            Results.Clear();
+            foreach (var p in comparison.CommonPaths)
+            {
+                Results.Add(new PointerPathDisplayItem
+                {
+                    Chain = p.Display,
+                    ResolvedAddress = $"0x{p.ResolvedAddress:X}",
+                    ModuleName = p.ModuleName,
+                    Status = "Common",
+                    Source = p
+                });
+            }
+
+            StatusText = $"Comparison: {comparison.CommonPaths.Count} common, " +
+                $"{comparison.OnlyInFirst.Count} only in first, {comparison.OnlyInSecond.Count} only in second " +
+                $"({comparison.OverlapRatio:P0} overlap)";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Compare failed: {ex.Message}";
+        }
+    }
+
+    private static IReadOnlyList<string>? ParseModuleFilter(string? filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter)) return null;
+        return filter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(s => s.Length > 0).ToList();
+    }
 
     [RelayCommand]
     private async Task ValidatePathsAsync()

@@ -127,9 +127,20 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     /// <summary>Parent node reference for CE-style offset resolution.</summary>
     public AddressTableNode? Parent { get; set; }
     /// <summary>CE ShowAsSigned flag. false = display as unsigned (default for CE).</summary>
-    public bool ShowAsSigned { get; set; }
+    private bool _showAsSigned;
+    public bool ShowAsSigned
+    {
+        get => _showAsSigned;
+        set { if (_showAsSigned != value) { _showAsSigned = value; Notify(); NotifyDisplayProperties(); } }
+    }
+
     /// <summary>CE ShowAsHex flag. true = display integer values in hexadecimal.</summary>
-    public bool ShowAsHex { get; set; }
+    private bool _showAsHex;
+    public bool ShowAsHex
+    {
+        get => _showAsHex;
+        set { if (_showAsHex != value) { _showAsHex = value; Notify(); Notify(nameof(DisplayType)); NotifyDisplayProperties(); } }
+    }
     /// <summary>CE DropDownList: value-to-name mapping (e.g., item ID → item name).</summary>
     public Dictionary<int, string>? DropDownList { get; set; }
 

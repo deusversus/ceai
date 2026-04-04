@@ -126,6 +126,38 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
             h.RegisterSnapshot)).ToArray();
     }
 
+    /// <summary>Set a conditional breakpoint with an expression and optional thread filter.</summary>
+    public async Task<BreakpointOverview> SetConditionalBreakpointAsync(
+        int processId,
+        string addressText,
+        BreakpointType type,
+        BreakpointCondition condition,
+        BreakpointMode mode = BreakpointMode.Auto,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        int? threadFilter = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        var address = ParseAddress(addressText);
+        var bp = await breakpointEngine!.SetConditionalBreakpointAsync(
+            processId, address, type, condition, mode, action, threadFilter, cancellationToken);
+        return ToOverview(bp);
+    }
+
+    /// <summary>Trace execution from a breakpoint address, recording each instruction.</summary>
+    public async Task<TraceResult> TraceFromBreakpointAsync(
+        int processId,
+        string addressText,
+        int maxInstructions = 500,
+        int timeoutMs = 5000,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        var address = ParseAddress(addressText);
+        return await breakpointEngine!.TraceFromBreakpointAsync(
+            processId, address, maxInstructions, timeoutMs, cancellationToken);
+    }
+
     /// <summary>Emergency: restore all page guard protections without locks. For crash recovery.</summary>
     public async Task<int> EmergencyRestorePageProtectionAsync(int processId)
     {

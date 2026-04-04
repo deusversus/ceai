@@ -511,14 +511,115 @@ public partial class AddressTableViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ShowAsHex()
+    private void ToggleShowAsHex()
     {
         if (SelectedNode is null || SelectedNode.IsGroup || SelectedNode.IsScriptEntry) return;
-        if (SelectedNode.Notes?.Contains("[HEX]") == true)
-            SelectedNode.Notes = SelectedNode.Notes.Replace("[HEX] ", "");
-        else
-            SelectedNode.Notes = $"[HEX] {SelectedNode.Notes ?? ""}".Trim();
-        RefreshUI();
+        SelectedNode.ShowAsHex = !SelectedNode.ShowAsHex;
+        RefreshUI($"{SelectedNode.Label}: {(SelectedNode.ShowAsHex ? "Hex display ON" : "Hex display OFF")}");
+    }
+
+    [RelayCommand]
+    private void ToggleShowAsSigned()
+    {
+        if (SelectedNode is null || SelectedNode.IsGroup || SelectedNode.IsScriptEntry) return;
+        SelectedNode.ShowAsSigned = !SelectedNode.ShowAsSigned;
+        RefreshUI($"{SelectedNode.Label}: {(SelectedNode.ShowAsSigned ? "Signed display" : "Unsigned display")}");
+    }
+
+    // ── Increase / Decrease Value ──
+
+    [RelayCommand]
+    private async Task IncreaseValueAsync() => await AdjustValueAsync(1);
+
+    [RelayCommand]
+    private async Task DecreaseValueAsync() => await AdjustValueAsync(-1);
+
+    private async Task AdjustValueAsync(int delta)
+    {
+        if (SelectedNode is null || SelectedNode.IsGroup || SelectedNode.IsScriptEntry) return;
+        var node = SelectedNode;
+        if (string.IsNullOrEmpty(node.CurrentValue) || node.CurrentValue == "??" || node.CurrentValue == "???") return;
+
+        // Strip dropdown suffix if present ("2904 : Dagger" → "2904")
+        var valueStr = node.CurrentValue;
+        if (valueStr.Contains(" : "))
+            valueStr = valueStr[..valueStr.IndexOf(" : ")];
+        valueStr = valueStr.Trim();
+
+        string newValue;
+        try
+        {
+            newValue = node.DataType switch
+            {
+                MemoryDataType.Byte => Math.Clamp(byte.Parse(valueStr) + delta, byte.MinValue, byte.MaxValue).ToString(),
+                MemoryDataType.Int16 => node.ShowAsHex
+                    ? ((short)(short.Parse(valueStr, System.Globalization.NumberStyles.HexNumber) + delta)).ToString()
+                    : ((short)(short.Parse(valueStr) + delta)).ToString(),
+                MemoryDataType.Int32 => node.ShowAsHex
+                    ? ((int)(int.Parse(valueStr, System.Globalization.NumberStyles.HexNumber) + delta)).ToString()
+                    : ((int)(int.Parse(valueStr) + delta)).ToString(),
+                MemoryDataType.Int64 => node.ShowAsHex
+                    ? ((long)(long.Parse(valueStr, System.Globalization.NumberStyles.HexNumber) + delta)).ToString()
+                    : ((long)(long.Parse(valueStr) + delta)).ToString(),
+                MemoryDataType.Float => (float.Parse(valueStr) + delta).ToString("G9"),
+                MemoryDataType.Double => (double.Parse(valueStr) + delta).ToString("G17"),
+                _ => valueStr // Pointer, String, ByteArray — no-op
+            };
+        }
+        catch
+        {
+            return; // unparseable value — ignore
+        }
+
+        if (newValue == valueStr) return;
+
+        node.PreviousValue = node.CurrentValue;
+        node.CurrentValue = newValue;
+        if (node.IsLocked) node.LockedValue = newValue;
+
+        var pid = _processContext.AttachedProcessId;
+        if (pid is not null)
+        {
+            try { await _addressTableService.WriteValueAsync(pid.Value, node); }
+            catch { /* best effort */ }
+        }
+
+        RefreshUI($"{node.Label}: {node.PreviousValue} → {newValue}");
+    }
+
+    // ── Dropdown Value Configuration ──
+
+    [RelayCommand]
+    private void ConfigureDropDown()
+    {
+        if (SelectedNode is null || SelectedNode.IsGroup || SelectedNode.IsScriptEntry) return;
+
+        var current = "";
+        if (SelectedNode.DropDownList is not null)
+            current = string.Join("\n", SelectedNode.DropDownList.Select(kv => $"{kv.Key}={kv.Value}"));
+
+        var result = _dialogService.ShowInput("Configure Dropdown",
+            "Enter value=name pairs, one per line (e.g., 0=Off\\n1=On).\nLeave empty to clear.",
+            current);
+        if (result is null) return; // cancelled
+
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            SelectedNode.DropDownList = null;
+            RefreshUI($"{SelectedNode.Label}: dropdown cleared");
+            return;
+        }
+
+        var dict = new Dictionary<int, string>();
+        foreach (var line in result.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var eqIdx = line.IndexOf('=');
+            if (eqIdx > 0 && int.TryParse(line[..eqIdx].Trim(), out var key))
+                dict[key] = line[(eqIdx + 1)..].Trim();
+        }
+
+        SelectedNode.DropDownList = dict.Count > 0 ? dict : null;
+        RefreshUI($"{SelectedNode.Label}: dropdown configured with {dict.Count} entries");
     }
 
     // ── Navigation commands (raise events for MainWindow) ──
@@ -813,6 +914,17 @@ public partial class AddressTableViewModel : ObservableObject
 
     public async Task HandleActiveCheckBoxClickAsync(AddressTableNode node)
     {
+        // Phase 7D: Group header activation — toggle all children recursively
+        if (node.IsGroup)
+        {
+            var activate = !node.Children.Any(c => c.IsActive);
+            await ActivateGroupRecursiveAsync(node, activate);
+            OnPropertyChanged(nameof(Roots));
+            _outputLog.Append("AddressTable", "Info",
+                $"Group '{node.Label}': {(activate ? "activated" : "deactivated")} all children");
+            return;
+        }
+
         if (node.IsScriptEntry)
         {
             var pid = _processContext.AttachedProcessId;
@@ -866,11 +978,74 @@ public partial class AddressTableViewModel : ObservableObject
         }
     }
 
+    // ── Group Activation Helper ──
+
+    private async Task ActivateGroupRecursiveAsync(AddressTableNode group, bool activate)
+    {
+        foreach (var child in group.Children)
+        {
+            if (child.IsGroup)
+            {
+                await ActivateGroupRecursiveAsync(child, activate);
+            }
+            else if (child.IsScriptEntry)
+            {
+                if (child.IsScriptEnabled != activate)
+                {
+                    child.IsScriptEnabled = activate;
+                    // Attempt to enable/disable the script via the AA engine
+                    var pid = _processContext.AttachedProcessId;
+                    if (pid is not null && _autoAssemblerEngine is not null && child.AssemblerScript is not null)
+                    {
+                        try
+                        {
+                            if (activate)
+                            {
+                                var result = await _autoAssemblerEngine.EnableAsync(pid.Value, child.AssemblerScript);
+                                child.IsScriptEnabled = result.Success;
+                                child.ScriptStatus = result.Success
+                                    ? $"Enabled ({result.Allocations.Count} allocs, {result.Patches.Count} patches)"
+                                    : $"FAILED: {result.Error}";
+                            }
+                            else
+                            {
+                                var result = await _autoAssemblerEngine.DisableAsync(pid.Value, child.AssemblerScript);
+                                child.ScriptStatus = result.Success ? "Disabled" : $"Disable failed: {result.Error}";
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            child.IsScriptEnabled = false;
+                            child.ScriptStatus = $"Error: {ex.Message}";
+                        }
+                    }
+                }
+            }
+            else
+            {
+                child.IsLocked = activate;
+                child.LockedValue = activate ? child.CurrentValue : null;
+            }
+        }
+    }
+
     // ── Editing support (called from MainWindow thin wrappers) ──
 
     public void EditNodeValue(AddressTableNode node)
     {
-        var result = _dialogService.ShowInput("Change Value", "New value:", node.CurrentValue);
+        string? result;
+
+        // Phase 7D: If dropdown is configured, present choices
+        if (node.DropDownList is { Count: > 0 })
+        {
+            var choices = string.Join(", ", node.DropDownList.Select(kv => $"{kv.Key}={kv.Value}"));
+            result = _dialogService.ShowInput("Change Value",
+                $"Enter value ({choices}):", node.CurrentValue);
+        }
+        else
+        {
+            result = _dialogService.ShowInput("Change Value", "New value:", node.CurrentValue);
+        }
         if (result is null) return;
 
         node.PreviousValue = node.CurrentValue;

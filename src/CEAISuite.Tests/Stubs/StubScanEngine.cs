@@ -10,6 +10,9 @@ public sealed class StubScanEngine : IScanEngine
     public ScanResultSet? NextScanResult { get; set; }
     public ScanResultSet? NextRefineResult { get; set; }
     public IReadOnlyList<MemoryRegionDescriptor>? NextRegions { get; set; }
+    public bool SuspendProcessCalled { get; private set; }
+    public ScanOptions? LastOptions { get; private set; }
+    public List<ScanProgress> ReportedProgress { get; } = new();
 
     public Task<IReadOnlyList<MemoryRegionDescriptor>> EnumerateRegionsAsync(
         int processId, CancellationToken cancellationToken = default) =>
@@ -41,5 +44,38 @@ public sealed class StubScanEngine : IScanEngine
             TotalBytesScanned: 20480,
             CompletedAtUtc: DateTimeOffset.UtcNow);
         return Task.FromResult(result);
+    }
+
+    public Task<ScanResultSet> StartScanAsync(
+        int processId, ScanConstraints constraints, ScanOptions options,
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        LastOptions = options;
+        if (options.SuspendProcess) SuspendProcessCalled = true;
+        progress?.Report(new ScanProgress(1, 1, 1024, 0, 0.01));
+        ReportedProgress.Add(new ScanProgress(1, 1, 1024, 0, 0.01));
+        return StartScanAsync(processId, constraints, cancellationToken);
+    }
+
+    public Task<ScanResultSet> RefineScanAsync(
+        ScanResultSet previousResults, ScanConstraints refinement, ScanOptions options,
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        LastOptions = options;
+        return RefineScanAsync(previousResults, refinement, cancellationToken);
+    }
+
+    public Task<ScanResultSet> GroupedScanAsync(
+        int processId, IReadOnlyList<GroupedScanConstraint> groups, ScanOptions options,
+        IProgress<ScanProgress>? progress = null, CancellationToken cancellationToken = default)
+    {
+        LastOptions = options;
+        var results = new List<ScanResultEntry>();
+        foreach (var group in groups)
+        {
+            results.Add(new ScanResultEntry((nuint)0x1000, "100", null, new byte[] { 100, 0, 0, 0 }, group.Label));
+        }
+        return Task.FromResult(new ScanResultSet(
+            "grouped-scan", processId, groups[0].Constraints, results, 1, 1024, DateTimeOffset.UtcNow));
     }
 }

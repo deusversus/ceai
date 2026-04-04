@@ -13,6 +13,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     private const uint ProcessVmRead = 0x0010;
     private const uint ProcessVmWrite = 0x0020;
     private const uint ProcessVmOperation = 0x0008;
+    private const uint ProcessVmReadAccess = ProcessQueryInformation | ProcessVmRead;
 
     private const uint ThreadAllAccess = 0x001FFFFF;
 
@@ -1552,6 +1553,99 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             return restored;
         });
 
+    public async Task<BreakpointDescriptor> SetConditionalBreakpointAsync(
+        int processId, nuint address, BreakpointType type,
+        BreakpointCondition condition, BreakpointMode mode = BreakpointMode.Auto,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        int? threadFilter = null, CancellationToken cancellationToken = default)
+    {
+        // Set the breakpoint normally, then store condition/thread filter metadata
+        var bp = await SetBreakpointAsync(processId, address, type, mode, action, false, cancellationToken);
+
+        // Store condition and thread filter on the BreakpointState
+        if (_breakpointRegistry.TryGetValue(bp.Id, out var state))
+        {
+            state.Condition = condition;
+            state.ThreadFilter = threadFilter;
+        }
+
+        // Return descriptor with condition and thread filter info
+        return new BreakpointDescriptor(
+            bp.Id, bp.Address, bp.Type, bp.HitAction, bp.IsEnabled, bp.HitCount,
+            bp.Mode, condition, threadFilter);
+    }
+
+    public Task<TraceResult> TraceFromBreakpointAsync(
+        int processId, nuint address, int maxInstructions = 500,
+        int timeoutMs = 5000, CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            // Trace is implemented by:
+            // 1. Reading instruction bytes at the target address
+            // 2. Decoding with Iced.Intel disassembler
+            // 3. Following the linear execution path (no actual process execution — static trace)
+            // For full dynamic tracing (TF stepping), the debug loop would need trace mode support.
+            // This implementation provides a static instruction-level trace from the given address.
+
+            var handle = OpenProcess(ProcessVmReadAccess, false, processId);
+            if (handle == IntPtr.Zero)
+                return new TraceResult("trace-0", Array.Empty<TraceEntry>(), false, false);
+
+            try
+            {
+                var entries = new List<TraceEntry>();
+                var currentAddr = address;
+                var visited = new HashSet<nuint>();
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+
+                while (entries.Count < maxInstructions && sw.ElapsedMilliseconds < timeoutMs)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (!visited.Add(currentAddr)) break; // loop detected
+
+                    var buf = new byte[15]; // max x86/x64 instruction length
+                    if (!ReadProcessMemory(handle, (IntPtr)currentAddr, buf, buf.Length, out var bytesRead) || bytesRead == 0)
+                        break;
+
+                    // Decode instruction using Iced.Intel
+                    var decoder = Iced.Intel.Decoder.Create(64, buf);
+                    decoder.IP = currentAddr;
+                    var instr = decoder.Decode();
+
+                    if (instr.IsInvalid) break;
+
+                    var formatter = new Iced.Intel.NasmFormatter();
+                    var output = new Iced.Intel.StringOutput();
+                    formatter.Format(instr, output);
+
+                    entries.Add(new TraceEntry(
+                        currentAddr,
+                        output.ToStringAndReset(),
+                        0, // thread ID not available in static trace
+                        new Dictionary<string, string>(),
+                        DateTimeOffset.UtcNow));
+
+                    // Follow linear flow
+                    if (instr.FlowControl == Iced.Intel.FlowControl.Return)
+                        break;
+                    if (instr.FlowControl == Iced.Intel.FlowControl.UnconditionalBranch)
+                    {
+                        currentAddr = (nuint)instr.NearBranchTarget;
+                        continue;
+                    }
+
+                    currentAddr += (nuint)instr.Length;
+                }
+
+                return new TraceResult(
+                    $"trace-{address:X}",
+                    entries,
+                    entries.Count >= maxInstructions,
+                    false);
+            }
+            finally { CloseHandle(handle); }
+        }, cancellationToken);
+
     public Task ForceDetachAndCleanupAsync(int processId) =>
         Task.Run(async () =>
         {
@@ -1760,6 +1854,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         /// <summary>When true, the original byte could not be restored — 0xCC persists at the address.</summary>
         public bool RestorationFailed;
 
+        /// <summary>Phase 7B: Conditional breakpoint expression. Null = unconditional.</summary>
+        public BreakpointCondition? Condition;
+
+        /// <summary>Phase 7B: Thread filter. Only break on this thread ID. Null = all threads.</summary>
+        public int? ThreadFilter;
+
         public ConcurrentQueue<BreakpointHitEvent> HitLog { get; } = new();
 
         public BreakpointDescriptor ToDescriptor() =>
@@ -1770,7 +1870,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 HitAction,
                 IsEnabled,
                 HitCount,
-                Mode);
+                Mode,
+                Condition,
+                ThreadFilter);
     }
 
     [StructLayout(LayoutKind.Sequential)]

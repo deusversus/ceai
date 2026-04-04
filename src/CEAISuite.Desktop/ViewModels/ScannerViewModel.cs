@@ -57,6 +57,13 @@ public partial class ScannerViewModel : ObservableObject
     [ObservableProperty]
     private MemoryDataType _selectedDataType = MemoryDataType.Int32;
 
+    // ── Phase 7A Properties ──
+
+    [ObservableProperty] private bool _canUndo;
+    [ObservableProperty] private bool _showAsHex;
+    [ObservableProperty] private string? _floatEpsilon;
+    [ObservableProperty] private bool _writableOnly = true;
+
     [RelayCommand]
     private async Task StartNewScanAsync()
     {
@@ -116,6 +123,7 @@ public partial class ScannerViewModel : ObservableObject
             ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
             ScanStatus = $"{overview.ResultCount:N0} results remaining";
             ScanDetails = $"Refined with {overview.ScanType}, type={overview.DataType}";
+            CanUndo = _scanService.CanUndo;
             _outputLog.Append("Scanner", "Info", $"Refinement complete: {overview.ResultCount:N0} results remaining.");
         }
         catch (Exception ex)
@@ -131,7 +139,32 @@ public partial class ScannerViewModel : ObservableObject
         ScanResults.Clear();
         ScanStatus = null;
         ScanDetails = null;
+        CanUndo = false;
         _outputLog.Append("Scanner", "Info", "Scan reset. Ready for a new scan.");
+    }
+
+    [RelayCommand]
+    private void UndoScan()
+    {
+        var overview = _scanService.UndoScan();
+        if (overview is null)
+        {
+            _outputLog.Append("Scanner", "Warn", "No scan to undo.");
+            return;
+        }
+
+        ScanResults = new System.Collections.ObjectModel.ObservableCollection<ScanResultOverview>(overview.Results);
+        ScanStatus = $"{overview.ResultCount:N0} results (undo)";
+        ScanDetails = $"Restored previous scan ({overview.ScanType})";
+        CanUndo = _scanService.CanUndo;
+        _outputLog.Append("Scanner", "Info", $"Undo scan: {overview.ResultCount:N0} results restored.");
+    }
+
+    [RelayCommand]
+    private void ToggleHexDisplay()
+    {
+        ShowAsHex = !ShowAsHex;
+        _outputLog.Append("Scanner", "Info", ShowAsHex ? "Hex display enabled." : "Hex display disabled.");
     }
 
     [RelayCommand]

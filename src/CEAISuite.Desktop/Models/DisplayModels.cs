@@ -334,6 +334,17 @@ public sealed class BreakpointHitDetailItem
     public IReadOnlyList<RegisterDisplayItem> Registers { get; init; } = [];
 }
 
+// ── Phase 7B: Trace display model ──
+
+public sealed class TraceEntryDisplayItem
+{
+    public string Address { get; init; } = "";
+    public string Disassembly { get; init; } = "";
+    public int ThreadId { get; init; }
+    public bool IsCallInstruction { get; init; }
+    public bool IsRetInstruction { get; init; }
+}
+
 // ── Phase 4 display models ──
 
 public sealed class ModuleDisplayItem

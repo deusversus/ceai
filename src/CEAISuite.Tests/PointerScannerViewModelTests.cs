@@ -15,7 +15,7 @@ public class PointerScannerViewModelTests
         var scannerService = new PointerScannerService(_engineFacade);
         var addressTableService = new AddressTableService(_engineFacade);
         return new PointerScannerViewModel(scannerService, addressTableService, _processContext, _outputLog,
-            new StubClipboardService(), new StubNavigationService(), new StubAiContextService());
+            new StubClipboardService(), new StubNavigationService(), new StubAiContextService(), new StubDialogService());
     }
 
     [Fact]

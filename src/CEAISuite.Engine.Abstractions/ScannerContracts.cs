@@ -11,7 +11,8 @@ public enum ScanType
     ArrayOfBytes,
     BiggerThan,
     SmallerThan,
-    ValueBetween
+    ValueBetween,
+    BitChanged
 }
 
 public sealed record MemoryRegionDescriptor(
@@ -26,11 +27,48 @@ public sealed record ScanConstraints(
     ScanType ScanType,
     string? Value);
 
+public sealed record ScanOptions(
+    int Alignment = 0,
+    bool WritableOnly = true,
+    bool SuspendProcess = false,
+    float? FloatEpsilon = null,
+    int MaxThreads = 0,
+    bool IncludeMemoryMappedFiles = false,
+    int? BitPosition = null,
+    bool ShowAsHex = false);
+
+public sealed record ScanProgress(
+    int RegionsCompleted,
+    int TotalRegions,
+    long BytesScanned,
+    int ResultsSoFar,
+    double ElapsedSeconds);
+
+public sealed record ScanHistoryEntry(
+    ScanResultSet Results,
+    ScanConstraints Constraints,
+    DateTimeOffset Timestamp);
+
+public sealed record GroupedScanConstraint(
+    string Label,
+    ScanConstraints Constraints);
+
+public sealed record CustomTypeDefinition(
+    string Name,
+    int SizeBytes,
+    IReadOnlyList<CustomTypeField> Fields);
+
+public sealed record CustomTypeField(
+    string Name,
+    int OffsetBytes,
+    MemoryDataType FieldType);
+
 public sealed record ScanResultEntry(
     nuint Address,
     string CurrentValue,
     string? PreviousValue,
-    IReadOnlyList<byte> RawBytes);
+    IReadOnlyList<byte> RawBytes,
+    string? GroupLabel = null);
 
 public sealed record ScanResultSet(
     string ScanId,
@@ -57,5 +95,26 @@ public interface IScanEngine
     Task<ScanResultSet> RefineScanAsync(
         ScanResultSet previousResults,
         ScanConstraints refinement,
+        CancellationToken cancellationToken = default);
+
+    Task<ScanResultSet> StartScanAsync(
+        int processId,
+        ScanConstraints constraints,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    Task<ScanResultSet> RefineScanAsync(
+        ScanResultSet previousResults,
+        ScanConstraints refinement,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default);
+
+    Task<ScanResultSet> GroupedScanAsync(
+        int processId,
+        IReadOnlyList<GroupedScanConstraint> groups,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
         CancellationToken cancellationToken = default);
 }

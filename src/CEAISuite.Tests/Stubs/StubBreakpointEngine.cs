@@ -6,6 +6,7 @@ public sealed class StubBreakpointEngine : IBreakpointEngine
 {
     private readonly List<BreakpointDescriptor> _breakpoints = new();
     private readonly Dictionary<string, List<BreakpointHitEvent>> _hitLogs = new();
+    public TraceResult? NextTraceResult { get; set; }
 
     public void AddCannedBreakpoint(BreakpointDescriptor bp) => _breakpoints.Add(bp);
     public void AddCannedHits(string bpId, params BreakpointHitEvent[] hits) =>
@@ -24,6 +25,27 @@ public sealed class StubBreakpointEngine : IBreakpointEngine
         var bp = new BreakpointDescriptor($"bp-{_breakpoints.Count}", address, type, action, true, 0, mode);
         _breakpoints.Add(bp);
         return Task.FromResult(bp);
+    }
+
+    public Task<BreakpointDescriptor> SetConditionalBreakpointAsync(
+        int processId, nuint address, BreakpointType type,
+        BreakpointCondition condition, BreakpointMode mode = BreakpointMode.Auto,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        int? threadFilter = null, CancellationToken cancellationToken = default)
+    {
+        var bp = new BreakpointDescriptor(
+            $"bp-cond-{_breakpoints.Count}", address, type, action, true, 0, mode, condition, threadFilter);
+        _breakpoints.Add(bp);
+        return Task.FromResult(bp);
+    }
+
+    public Task<TraceResult> TraceFromBreakpointAsync(
+        int processId, nuint address, int maxInstructions = 500,
+        int timeoutMs = 5000, CancellationToken cancellationToken = default)
+    {
+        var result = NextTraceResult ?? new TraceResult(
+            $"bp-trace-{_breakpoints.Count}", new List<TraceEntry>(), false, false);
+        return Task.FromResult(result);
     }
 
     public Task<bool> RemoveBreakpointAsync(int processId, string breakpointId,

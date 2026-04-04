@@ -5,13 +5,17 @@ public sealed record ScriptExecutionResult(
     bool Success,
     string? Error,
     IReadOnlyList<ScriptAllocation> Allocations,
-    IReadOnlyList<ScriptPatch> Patches);
+    IReadOnlyList<ScriptPatch> Patches,
+    IReadOnlyList<RegisteredSymbol>? RegisteredSymbols = null);
 
 /// <summary>A block of memory allocated in the target process by an AA script.</summary>
 public sealed record ScriptAllocation(string Name, nuint Address, int Size);
 
 /// <summary>A patch applied to the target process (original bytes saved for restore).</summary>
 public sealed record ScriptPatch(nuint Address, byte[] OriginalBytes, byte[] NewBytes);
+
+/// <summary>A symbol registered via the registersymbol() AA directive.</summary>
+public sealed record RegisteredSymbol(string Name, nuint Address);
 
 /// <summary>Result of parsing/validating an AA script without executing it.</summary>
 public sealed record ScriptParseResult(
@@ -35,4 +39,10 @@ public interface IAutoAssemblerEngine
 
     /// <summary>Parse and validate an AA script without executing it.</summary>
     ScriptParseResult Parse(string script);
+
+    /// <summary>Get all symbols registered via registersymbol() across all scripts.</summary>
+    IReadOnlyList<RegisteredSymbol> GetRegisteredSymbols();
+
+    /// <summary>Resolve a single symbol name to its address. Returns null if not found.</summary>
+    nuint? ResolveSymbol(string name);
 }

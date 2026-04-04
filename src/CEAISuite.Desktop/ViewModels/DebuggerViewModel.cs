@@ -156,7 +156,49 @@ public partial class DebuggerViewModel : ObservableObject
         }
     }
 
-    // ── Placeholder commands — disabled until Phase 7 engine stepping support ──
+    // ── Break-and-Trace ──
+
+    [ObservableProperty] private ObservableCollection<TraceEntryDisplayItem> _traceEntries = new();
+    [ObservableProperty] private string _traceAddress = "";
+    [ObservableProperty] private int _traceMaxInstructions = 500;
+
+    [RelayCommand]
+    private async Task StartTraceAsync()
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        if (string.IsNullOrWhiteSpace(TraceAddress)) { StatusText = "Enter a trace address."; return; }
+
+        try
+        {
+            StatusText = "Tracing...";
+            var result = await _breakpointService.TraceFromBreakpointAsync(
+                pid.Value, TraceAddress, TraceMaxInstructions);
+
+            TraceEntries.Clear();
+            foreach (var entry in result.Entries)
+            {
+                TraceEntries.Add(new TraceEntryDisplayItem
+                {
+                    Address = $"0x{entry.InstructionAddress:X}",
+                    Disassembly = entry.Disassembly,
+                    ThreadId = entry.ThreadId,
+                    IsCallInstruction = entry.Disassembly.StartsWith("call", StringComparison.OrdinalIgnoreCase),
+                    IsRetInstruction = entry.Disassembly.StartsWith("ret", StringComparison.OrdinalIgnoreCase)
+                });
+            }
+            StatusText = $"Trace: {result.Entries.Count} instructions" +
+                (result.MaxDepthReached ? " (max depth)" : "") +
+                (result.WasTruncated ? " (truncated)" : "");
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Trace error: {ex.Message}";
+            _outputLog.Append("Debugger", "Error", $"Trace failed: {ex.Message}");
+        }
+    }
+
+    // ── Placeholder commands — disabled until full stepping engine support ──
     [RelayCommand(CanExecute = nameof(CanStep))] private void StepIn() { }
     [RelayCommand(CanExecute = nameof(CanStep))] private void StepOver() { }
     [RelayCommand(CanExecute = nameof(CanStep))] private void StepOut() { }

@@ -93,7 +93,9 @@ public sealed record BreakpointDescriptor(
     BreakpointHitAction HitAction,
     bool IsEnabled,
     int HitCount,
-    BreakpointMode Mode = BreakpointMode.Hardware);
+    BreakpointMode Mode = BreakpointMode.Hardware,
+    BreakpointCondition? Condition = null,
+    int? ThreadFilter = null);
 
 public sealed record BreakpointHitEvent(
     string BreakpointId,
@@ -108,6 +110,34 @@ public sealed record AccessTraceEntry(
     string AccessType,
     int ThreadId,
     DateTimeOffset TimestampUtc);
+
+// ─── Conditional Breakpoints ─────────────────────────────────────────
+
+public enum BreakpointConditionType
+{
+    RegisterCompare,
+    MemoryCompare,
+    HitCount
+}
+
+public sealed record BreakpointCondition(
+    string Expression,
+    BreakpointConditionType Type);
+
+// ─── Break-and-Trace ────────────────────────────────────────────────
+
+public sealed record TraceEntry(
+    nuint InstructionAddress,
+    string Disassembly,
+    int ThreadId,
+    IReadOnlyDictionary<string, string> RegisterSnapshot,
+    DateTimeOffset TimestampUtc);
+
+public sealed record TraceResult(
+    string BreakpointId,
+    IReadOnlyList<TraceEntry> Entries,
+    bool MaxDepthReached,
+    bool WasTruncated);
 
 // ─── Breakpoint Lifecycle ─────────────────────────────────────────────
 
@@ -176,6 +206,25 @@ public interface IBreakpointEngine
     Task<IReadOnlyList<BreakpointHitEvent>> GetHitLogAsync(
         string breakpointId,
         int maxEntries = 50,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Set a breakpoint with a condition expression and optional thread filter.</summary>
+    Task<BreakpointDescriptor> SetConditionalBreakpointAsync(
+        int processId,
+        nuint address,
+        BreakpointType type,
+        BreakpointCondition condition,
+        BreakpointMode mode = BreakpointMode.Auto,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        int? threadFilter = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>Trace execution from a breakpoint address, recording each instruction.</summary>
+    Task<TraceResult> TraceFromBreakpointAsync(
+        int processId,
+        nuint address,
+        int maxInstructions = 500,
+        int timeoutMs = 5000,
         CancellationToken cancellationToken = default);
 
     /// <summary>Emergency: restore all page guard protections without locks. For crash recovery.</summary>

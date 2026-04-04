@@ -419,6 +419,361 @@ public sealed class WindowsScanEngine : IScanEngine
             _ => throw new ArgumentOutOfRangeException(nameof(dataType))
         };
 
+    // ── Phase 7A: New IScanEngine overloads ──
+
+    private const uint ProcessSuspendResume = 0x0800;
+    private const uint MemMapped = 0x40000;
+
+    public Task<ScanResultSet> StartScanAsync(
+        int processId,
+        ScanConstraints constraints,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var accessFlags = ProcessQueryInformation | ProcessVmRead;
+            if (options.SuspendProcess) accessFlags |= ProcessSuspendResume;
+
+            var handle = OpenProcess(accessFlags, false, processId);
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException($"Unable to open process {processId}.");
+
+            try
+            {
+                if (options.SuspendProcess) NtSuspendProcess(handle);
+                try
+                {
+                    var regions = EnumerateRegionsCore(handle, options)
+                        .Where(r => r.IsReadable && (!options.WritableOnly || r.IsWritable))
+                        .ToArray();
+
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    var valueSize = GetValueSize(constraints.DataType);
+                    var step = options.Alignment > 0 ? options.Alignment : valueSize;
+                    var threadCount = options.MaxThreads > 0 ? options.MaxThreads : Math.Max(1, Environment.ProcessorCount);
+
+                    // Partition regions across threads
+                    var chunks = Enumerable.Range(0, threadCount)
+                        .Select(i => regions.Where((_, idx) => idx % threadCount == i).ToArray())
+                        .ToArray();
+
+                    var totalResults = 0;
+                    var regionsCompleted = 0;
+                    var totalBytesScanned = 0L;
+                    var allResults = new List<ScanResultEntry>[threadCount];
+
+                    Parallel.For(0, threadCount, new ParallelOptions { MaxDegreeOfParallelism = threadCount, CancellationToken = cancellationToken },
+                        threadIdx =>
+                        {
+                            var threadHandle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, processId);
+                            if (threadHandle == IntPtr.Zero) return;
+                            try
+                            {
+                                var localResults = new List<ScanResultEntry>();
+                                foreach (var region in chunks[threadIdx])
+                                {
+                                    cancellationToken.ThrowIfCancellationRequested();
+                                    if (Interlocked.CompareExchange(ref totalResults, 0, 0) >= MaxScanResults) break;
+
+                                    // Chunked reading for large regions (7A.6)
+                                    const int chunkSize = 64 * 1024 * 1024;
+                                    for (long regionOffset = 0; regionOffset < region.RegionSize; regionOffset += chunkSize)
+                                    {
+                                        var readSize = (int)Math.Min(region.RegionSize - regionOffset, chunkSize);
+                                        var readAddr = region.BaseAddress + (nuint)regionOffset;
+                                        var regionBytes = ReadRegion(threadHandle, readAddr, readSize);
+                                        if (regionBytes is null) continue;
+
+                                        Interlocked.Add(ref totalBytesScanned, regionBytes.Length);
+                                        ScanRegionForInitialWithOptions(readAddr, regionBytes, constraints, valueSize, step, options, localResults, cancellationToken);
+                                    }
+
+                                    Interlocked.Increment(ref regionsCompleted);
+                                    Interlocked.Add(ref totalResults, 0); // just a read barrier
+                                    progress?.Report(new ScanProgress(regionsCompleted, regions.Length, totalBytesScanned,
+                                        Interlocked.CompareExchange(ref totalResults, 0, 0), sw.Elapsed.TotalSeconds));
+                                }
+                                allResults[threadIdx] = localResults;
+                            }
+                            finally { CloseHandle(threadHandle); }
+                        });
+
+                    // Merge results
+                    var merged = new List<ScanResultEntry>();
+                    foreach (var list in allResults)
+                    {
+                        if (list is null) continue;
+                        merged.AddRange(list);
+                        if (merged.Count >= MaxScanResults) break;
+                    }
+                    if (merged.Count > MaxScanResults)
+                        merged = merged.Take(MaxScanResults).ToList();
+
+                    return new ScanResultSet(
+                        $"scan-{Guid.NewGuid().ToString("N")[..8]}",
+                        processId, constraints, merged, regions.Length,
+                        Interlocked.Read(ref totalBytesScanned),
+                        DateTimeOffset.UtcNow,
+                        merged.Count >= MaxScanResults);
+                }
+                finally { if (options.SuspendProcess) NtResumeProcess(handle); }
+            }
+            finally { CloseHandle(handle); }
+        }, cancellationToken);
+
+    public Task<ScanResultSet> RefineScanAsync(
+        ScanResultSet previousResults,
+        ScanConstraints refinement,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, previousResults.ProcessId);
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException($"Unable to open process {previousResults.ProcessId}.");
+
+            try
+            {
+                var valueSize = GetValueSize(refinement.DataType);
+                var refined = new List<ScanResultEntry>();
+
+                foreach (var previous in previousResults.Results)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (refined.Count >= MaxScanResults) break;
+
+                    var buffer = new byte[valueSize];
+                    if (!ReadProcessMemory(handle, (IntPtr)previous.Address, buffer, valueSize, out var bytesRead) || bytesRead != valueSize)
+                        continue;
+
+                    var currentValue = FormatValue(buffer, refinement.DataType);
+                    var matches = EvaluateConstraint(currentValue, previous.CurrentValue, refinement, options, buffer);
+
+                    if (matches)
+                        refined.Add(new ScanResultEntry(previous.Address, currentValue, previous.CurrentValue, buffer));
+                }
+
+                return new ScanResultSet(
+                    previousResults.ScanId, previousResults.ProcessId, refinement,
+                    refined, previousResults.TotalRegionsScanned, previousResults.TotalBytesScanned,
+                    DateTimeOffset.UtcNow, refined.Count >= MaxScanResults);
+            }
+            finally { CloseHandle(handle); }
+        }, cancellationToken);
+
+    public Task<ScanResultSet> GroupedScanAsync(
+        int processId,
+        IReadOnlyList<GroupedScanConstraint> groups,
+        ScanOptions options,
+        IProgress<ScanProgress>? progress = null,
+        CancellationToken cancellationToken = default) =>
+        Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, processId);
+            if (handle == IntPtr.Zero)
+                throw new InvalidOperationException($"Unable to open process {processId}.");
+
+            try
+            {
+                var regions = EnumerateRegionsCore(handle, options)
+                    .Where(r => r.IsReadable && (!options.WritableOnly || r.IsWritable))
+                    .ToArray();
+
+                var results = new List<ScanResultEntry>();
+                var totalBytesScanned = 0L;
+
+                foreach (var region in regions)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    if (results.Count >= MaxScanResults) break;
+
+                    var regionBytes = ReadRegion(handle, region.BaseAddress, (int)Math.Min(region.RegionSize, 64 * 1024 * 1024));
+                    if (regionBytes is null) continue;
+                    totalBytesScanned += regionBytes.Length;
+
+                    // Apply each group's constraints against the same buffer
+                    foreach (var group in groups)
+                    {
+                        var valueSize = GetValueSize(group.Constraints.DataType);
+                        var step = options.Alignment > 0 ? options.Alignment : valueSize;
+
+                        for (var offset = 0; offset <= regionBytes.Length - valueSize; offset += step)
+                        {
+                            if (results.Count >= MaxScanResults) break;
+
+                            var slice = regionBytes[offset..(offset + valueSize)];
+                            var currentValue = FormatValue(slice, group.Constraints.DataType);
+                            var matches = EvaluateInitialConstraint(currentValue, group.Constraints, options, slice);
+
+                            if (matches)
+                            {
+                                var address = region.BaseAddress + (nuint)offset;
+                                results.Add(new ScanResultEntry(address, currentValue, null, slice.ToArray(), group.Label));
+                            }
+                        }
+                    }
+                }
+
+                var primaryConstraints = groups.Count > 0 ? groups[0].Constraints : new ScanConstraints(MemoryDataType.Int32, ScanType.ExactValue, null);
+                return new ScanResultSet(
+                    $"scan-{Guid.NewGuid().ToString("N")[..8]}",
+                    processId, primaryConstraints, results, regions.Length,
+                    totalBytesScanned, DateTimeOffset.UtcNow,
+                    results.Count >= MaxScanResults);
+            }
+            finally { CloseHandle(handle); }
+        }, cancellationToken);
+
+    // ── Scan helpers with options ──
+
+    private static void ScanRegionForInitialWithOptions(
+        nuint regionBase, byte[] regionBytes,
+        ScanConstraints constraints, int valueSize, int step,
+        ScanOptions options, List<ScanResultEntry> results,
+        CancellationToken ct)
+    {
+        if (constraints.ScanType == ScanType.ArrayOfBytes && !string.IsNullOrWhiteSpace(constraints.Value))
+        {
+            ScanRegionForAob(regionBase, regionBytes, constraints.Value, results);
+            return;
+        }
+
+        var matchCount = 0;
+        for (var offset = 0; offset <= regionBytes.Length - valueSize; offset += step)
+        {
+            if (results.Count >= MaxScanResults) return;
+            if (++matchCount % 10_000 == 0) ct.ThrowIfCancellationRequested();
+
+            var slice = regionBytes[offset..(offset + valueSize)];
+            var currentValue = FormatValue(slice, constraints.DataType);
+            var matches = EvaluateInitialConstraint(currentValue, constraints, options, slice);
+
+            if (matches)
+            {
+                var address = regionBase + (nuint)offset;
+                results.Add(new ScanResultEntry(address, currentValue, null, slice.ToArray()));
+            }
+        }
+    }
+
+    private static bool EvaluateInitialConstraint(string currentValue, ScanConstraints constraints, ScanOptions options, byte[] rawBytes)
+    {
+        // Float epsilon for ExactValue
+        if (options.FloatEpsilon.HasValue && constraints.ScanType == ScanType.ExactValue
+            && constraints.Value is not null
+            && (constraints.DataType is MemoryDataType.Float or MemoryDataType.Double))
+        {
+            if (constraints.DataType == MemoryDataType.Float
+                && float.TryParse(constraints.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var targetF)
+                && float.TryParse(currentValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var currentF))
+                return Math.Abs(currentF - targetF) <= options.FloatEpsilon.Value;
+
+            if (constraints.DataType == MemoryDataType.Double
+                && double.TryParse(constraints.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var targetD)
+                && double.TryParse(currentValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var currentD))
+                return Math.Abs(currentD - targetD) <= options.FloatEpsilon.Value;
+        }
+
+        return constraints.ScanType switch
+        {
+            ScanType.ExactValue => string.Equals(currentValue, constraints.Value, StringComparison.OrdinalIgnoreCase),
+            ScanType.UnknownInitialValue => true,
+            ScanType.BiggerThan => CompareValues(currentValue, constraints.Value ?? "0", constraints.DataType) > 0,
+            ScanType.SmallerThan => CompareValues(currentValue, constraints.Value ?? "0", constraints.DataType) < 0,
+            ScanType.ValueBetween => IsValueBetween(currentValue, constraints.Value, constraints.DataType),
+            _ => false
+        };
+    }
+
+    private static bool EvaluateConstraint(string currentValue, string? previousValue, ScanConstraints refinement, ScanOptions options, byte[] rawBytes)
+    {
+        // BitChanged handling
+        if (refinement.ScanType == ScanType.BitChanged && previousValue is not null)
+        {
+            if (byte.TryParse(previousValue, out var prevByte) && rawBytes.Length > 0)
+            {
+                var currByte = rawBytes[0];
+                if (options.BitPosition.HasValue)
+                    return ((prevByte >> options.BitPosition.Value) & 1) != ((currByte >> options.BitPosition.Value) & 1);
+                return prevByte != currByte;
+            }
+            return false;
+        }
+
+        // Float epsilon for refinement ExactValue
+        if (options.FloatEpsilon.HasValue && refinement.ScanType == ScanType.ExactValue
+            && refinement.Value is not null
+            && (refinement.DataType is MemoryDataType.Float or MemoryDataType.Double))
+        {
+            if (refinement.DataType == MemoryDataType.Float
+                && float.TryParse(refinement.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var targetF)
+                && float.TryParse(currentValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var currentF))
+                return Math.Abs(currentF - targetF) <= options.FloatEpsilon.Value;
+
+            if (refinement.DataType == MemoryDataType.Double
+                && double.TryParse(refinement.Value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var targetD)
+                && double.TryParse(currentValue, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var currentD))
+                return Math.Abs(currentD - targetD) <= options.FloatEpsilon.Value;
+        }
+
+        return refinement.ScanType switch
+        {
+            ScanType.ExactValue => string.Equals(currentValue, refinement.Value, StringComparison.OrdinalIgnoreCase),
+            ScanType.Increased => CompareValues(currentValue, previousValue ?? currentValue, refinement.DataType) > 0,
+            ScanType.Decreased => CompareValues(currentValue, previousValue ?? currentValue, refinement.DataType) < 0,
+            ScanType.Changed => !string.Equals(currentValue, previousValue, StringComparison.OrdinalIgnoreCase),
+            ScanType.Unchanged => string.Equals(currentValue, previousValue, StringComparison.OrdinalIgnoreCase),
+            ScanType.UnknownInitialValue => true,
+            ScanType.BiggerThan => CompareValues(currentValue, refinement.Value ?? "0", refinement.DataType) > 0,
+            ScanType.SmallerThan => CompareValues(currentValue, refinement.Value ?? "0", refinement.DataType) < 0,
+            ScanType.ValueBetween => IsValueBetween(currentValue, refinement.Value, refinement.DataType),
+            _ => false
+        };
+    }
+
+    /// <summary>Region enumeration with options support (writable-only filter, memory-mapped files).</summary>
+    private static List<MemoryRegionDescriptor> EnumerateRegionsCore(IntPtr processHandle, ScanOptions options)
+    {
+        var regions = new List<MemoryRegionDescriptor>();
+        var address = nuint.Zero;
+        var mbiSize = Marshal.SizeOf<MemoryBasicInformation>();
+
+        while (true)
+        {
+            var bytesReturned = VirtualQueryEx(processHandle, (IntPtr)address, out var mbi, mbiSize);
+            if (bytesReturned == 0) break;
+
+            if (mbi.State == MemCommit && mbi.RegionSize > 0)
+            {
+                // Include MEM_MAPPED regions if option is set
+                var isMapped = (mbi.Type & MemMapped) != 0;
+                if (!isMapped || options.IncludeMemoryMappedFiles)
+                {
+                    var isReadable = IsReadableProtection(mbi.Protect);
+                    var isWritable = IsWritableProtection(mbi.Protect);
+                    var isExecutable = IsExecutableProtection(mbi.Protect);
+
+                    regions.Add(new MemoryRegionDescriptor(
+                        (nuint)(ulong)mbi.BaseAddress,
+                        (long)(ulong)mbi.RegionSize,
+                        isReadable, isWritable, isExecutable));
+                }
+            }
+
+            var nextAddress = (ulong)mbi.BaseAddress + (ulong)mbi.RegionSize;
+            if (nextAddress <= (ulong)address) break;
+            address = (nuint)nextAddress;
+        }
+
+        return regions;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct MemoryBasicInformation
     {
@@ -454,4 +809,10 @@ public sealed class WindowsScanEngine : IScanEngine
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtSuspendProcess(IntPtr processHandle);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtResumeProcess(IntPtr processHandle);
 }

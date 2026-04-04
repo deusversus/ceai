@@ -57,11 +57,15 @@ public sealed class AiChatStore
 
         foreach (var file in Directory.GetFiles(ChatsDir, "*.json"))
         {
+            // Skip companion metadata files (e.g., chat-xxx.session.json)
+            if (file.EndsWith(".session.json", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             try
             {
                 var json = File.ReadAllText(file);
                 var session = JsonSerializer.Deserialize<AiChatSession>(json, JsonOpts);
-                if (session is not null)
+                if (session is not null && !string.IsNullOrEmpty(session.Id))
                     sessions.Add(session);
             }
             catch { /* skip corrupt files */ }
@@ -74,6 +78,10 @@ public sealed class AiChatStore
     {
         var path = Path.Combine(ChatsDir, $"{chatId}.json");
         if (File.Exists(path)) File.Delete(path);
+
+        // Also delete companion metadata file if it exists
+        var sessionPath = Path.Combine(ChatsDir, $"{chatId}.session.json");
+        if (File.Exists(sessionPath)) File.Delete(sessionPath);
     }
 
     public void Rename(string chatId, string newTitle)

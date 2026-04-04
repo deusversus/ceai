@@ -23,6 +23,9 @@ public sealed class WindowsEngineFacade : IEngineFacade
     private IntPtr _cachedProcessHandle;
     // 4D: Cached architecture per attached process
     private string? _cachedArchitecture;
+    // Cached attachment result — avoids redundant module enumeration when
+    // AttachAsync is called twice for the same PID (InspectProcess + AddressTable).
+    private EngineAttachment? _cachedAttachment;
 
     public int? AttachedProcessId
     {
@@ -85,33 +88,107 @@ public sealed class WindowsEngineFacade : IEngineFacade
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                using var process = Process.GetProcessById(processId);
-
-                try
+                // Return cached attachment if we already successfully attached to this PID.
+                // This avoids redundant module enumeration when AttachAsync is called
+                // twice in quick succession (once from InspectProcess, once for AddressTable).
+                lock (_attachLock)
                 {
-                    var modules = process.Modules
-                        .Cast<ProcessModule>()
-                        .Select(
-                            module => new ModuleDescriptor(
-                                module.ModuleName,
-                                unchecked((nuint)module.BaseAddress.ToInt64()),
-                                module.ModuleMemorySize))
-                        .OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase)
-                        .ToArray();
+                    if (_cachedAttachment is not null && _cachedAttachment.ProcessId == processId)
+                        return _cachedAttachment;
+                }
 
-                    lock (_attachLock)
+                // Retry module enumeration with backoff — the target process may still
+                // be loading DLLs (loader lock held), especially when the game is
+                // launched after CEAI is already running.
+                const int maxAttempts = 4;
+                Exception? lastException = null;
+
+                for (var attempt = 1; attempt <= maxAttempts; attempt++)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    try
                     {
-                        _attachedProcessId = process.Id;
-                    }
+                        using var process = Process.GetProcessById(processId);
 
-                    return new EngineAttachment(process.Id, process.ProcessName, modules);
+                        // Verify the process handle is usable before enumerating modules.
+                        // OpenProcess with QUERY_LIMITED can succeed even when VM_READ
+                        // would fail (e.g. during process init or anticheat hooks).
+                        var testHandle = OpenProcess(CachedHandleAccess, false, process.Id);
+                        if (testHandle == IntPtr.Zero)
+                        {
+                            var errorCode = Marshal.GetLastWin32Error();
+                            throw new Win32Exception(errorCode,
+                                $"Cannot open process with required access (error {errorCode}). " +
+                                "The process may still be initializing or is protected.");
+                        }
+
+                        // Handle is good — cache it now so we don't re-open later
+                        lock (_attachLock)
+                        {
+                            _attachedProcessId = process.Id;
+                            if (_cachedProcessHandle != IntPtr.Zero)
+                                CloseHandle(_cachedProcessHandle);
+                            _cachedProcessHandle = testHandle;
+                        }
+
+                        var modules = process.Modules
+                            .Cast<ProcessModule>()
+                            .Select(
+                                module => new ModuleDescriptor(
+                                    module.ModuleName,
+                                    unchecked((nuint)module.BaseAddress.ToInt64()),
+                                    module.ModuleMemorySize))
+                            .OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
+
+                        var attachment = new EngineAttachment(process.Id, process.ProcessName, modules);
+                        lock (_attachLock)
+                        {
+                            _cachedAttachment = attachment;
+                        }
+                        return attachment;
+                    }
+                    catch (Win32Exception exception) when (attempt < maxAttempts)
+                    {
+                        lastException = exception;
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[EngineFacade] AttachAsync attempt {attempt}/{maxAttempts} for PID {processId} failed: {exception.Message}");
+                        // Backoff: 250ms, 500ms, 1000ms
+                        Thread.Sleep(250 * (1 << (attempt - 1)));
+                    }
+                    catch (Win32Exception exception)
+                    {
+                        lastException = exception;
+                    }
+                    catch (InvalidOperationException) when (attempt < maxAttempts)
+                    {
+                        // Process.GetProcessById can throw if process exited between retries
+                        System.Diagnostics.Debug.WriteLine(
+                            $"[EngineFacade] AttachAsync attempt {attempt}/{maxAttempts}: process {processId} not found, retrying...");
+                        Thread.Sleep(250 * (1 << (attempt - 1)));
+                    }
                 }
-                catch (Win32Exception exception)
+
+                // All retries exhausted — clean up partial attach state
+                lock (_attachLock)
                 {
-                    throw new InvalidOperationException(
-                        $"Unable to enumerate modules for process {process.ProcessName} ({process.Id}).",
-                        exception);
+                    if (_attachedProcessId == processId)
+                    {
+                        _attachedProcessId = null;
+                        if (_cachedProcessHandle != IntPtr.Zero)
+                        {
+                            CloseHandle(_cachedProcessHandle);
+                            _cachedProcessHandle = IntPtr.Zero;
+                        }
+                        _cachedAttachment = null;
+                    }
                 }
+
+                throw new InvalidOperationException(
+                    $"Unable to attach to process {processId} after {maxAttempts} attempts. " +
+                    "The process may still be initializing — try again in a few seconds.",
+                    lastException);
             },
             cancellationToken);
 
@@ -128,6 +205,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
             }
             // 4D: Invalidate cached architecture
             _cachedArchitecture = null;
+            _cachedAttachment = null;
         }
     }
 

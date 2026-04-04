@@ -15,16 +15,26 @@ public partial class StructureDissectorViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private readonly IClipboardService _clipboard;
 
+    private readonly INavigationService _navigationService;
+    private readonly AddressTableService _addressTableService;
+    private readonly IAiContextService _aiContext;
+
     public StructureDissectorViewModel(
         StructureDissectorService dissectorService,
         IProcessContext processContext,
         IOutputLog outputLog,
-        IClipboardService clipboard)
+        IClipboardService clipboard,
+        INavigationService navigationService,
+        AddressTableService addressTableService,
+        IAiContextService aiContext)
     {
         _dissectorService = dissectorService;
         _processContext = processContext;
         _outputLog = outputLog;
         _clipboard = clipboard;
+        _navigationService = navigationService;
+        _addressTableService = addressTableService;
+        _aiContext = aiContext;
     }
 
     [ObservableProperty] private string _baseAddress = "";
@@ -192,6 +202,55 @@ public partial class StructureDissectorViewModel : ObservableObject
     {
         BaseAddress = address;
         _ = DissectAsync();
+    }
+
+    // ── Cross-panel context menu commands ──
+
+    [RelayCommand]
+    private void CopyFieldValue()
+    {
+        if (SelectedField is null) return;
+        _clipboard.SetText(SelectedField.DisplayValue);
+    }
+
+    [RelayCommand]
+    private void CopyFieldOffset()
+    {
+        if (SelectedField is null) return;
+        _clipboard.SetText(SelectedField.OffsetHex);
+    }
+
+    [RelayCommand]
+    private void BrowseFieldMemory()
+    {
+        if (SelectedField is null || !TryParseAddress(BaseAddress, out var baseAddr)) return;
+        var absoluteAddr = (ulong)baseAddr + (ulong)SelectedField.Offset;
+        _navigationService.ShowDocument("memoryBrowser", $"0x{absoluteAddr:X}");
+    }
+
+    [RelayCommand]
+    private void AddFieldToTable()
+    {
+        if (SelectedField is null || !TryParseAddress(BaseAddress, out var baseAddr)) return;
+        var absoluteAddr = $"0x{(ulong)baseAddr + (ulong)SelectedField.Offset:X}";
+        var dt = SelectedField.ProbableType switch
+        {
+            "Float" => CEAISuite.Engine.Abstractions.MemoryDataType.Float,
+            "Double" => CEAISuite.Engine.Abstractions.MemoryDataType.Double,
+            "Int64" or "Pointer" => CEAISuite.Engine.Abstractions.MemoryDataType.Int64,
+            _ => CEAISuite.Engine.Abstractions.MemoryDataType.Int32
+        };
+        var name = string.IsNullOrWhiteSpace(SelectedField.Name) ? $"Field +{SelectedField.OffsetHex}" : SelectedField.Name;
+        _addressTableService.AddEntry(absoluteAddr, dt, SelectedField.DisplayValue, name);
+        StatusText = $"Added {name} to address table.";
+    }
+
+    [RelayCommand]
+    private void AskAi()
+    {
+        if (SelectedField is null) return;
+        _aiContext.SendContext("Structure Dissector",
+            $"Field at {BaseAddress}+{SelectedField.OffsetHex}: {SelectedField.ProbableType} = {SelectedField.DisplayValue} ({SelectedField.ConfidencePercent} confidence)");
     }
 
     private static bool TryParseAddress(string text, out nuint address)

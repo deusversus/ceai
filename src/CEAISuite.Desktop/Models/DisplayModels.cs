@@ -1,4 +1,6 @@
+using System.IO;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 
 namespace CEAISuite.Desktop.Models;
@@ -10,6 +12,34 @@ public sealed class AiChatDisplayItem
     public string Content { get; set; } = "";
     public string Timestamp { get; init; } = "";
     public Brush Background { get; init; } = Brushes.Transparent;
+
+    /// <summary>Optional image data for messages that included an image attachment.</summary>
+    public byte[]? ImageData { get; init; }
+
+    private BitmapImage? _imageSource;
+    /// <summary>Lazily-created BitmapImage for XAML binding. Null if no image.</summary>
+    public BitmapImage? ImageSource
+    {
+        get
+        {
+            if (_imageSource is not null || ImageData is null) return _imageSource;
+            try
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.StreamSource = new MemoryStream(ImageData);
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.DecodePixelHeight = 200; // thumbnail size
+                bmp.EndInit();
+                bmp.Freeze();
+                _imageSource = bmp;
+            }
+            catch { /* corrupt image — leave null */ }
+            return _imageSource;
+        }
+    }
+
+    public bool HasImage => ImageData is not null;
 }
 
 // ── Structured content blocks for live streaming display ──
@@ -98,6 +128,36 @@ public sealed class AttachmentChip
     public string Label { get; init; } = "Pasted";
     public string Preview { get; init; } = "";
     public string FullText { get; init; } = "";
+
+    /// <summary>Raw image bytes (PNG/JPG). Null for text attachments.</summary>
+    public byte[]? ImageData { get; init; }
+    /// <summary>MIME type, e.g. "image/png". Null for text attachments.</summary>
+    public string? MediaType { get; init; }
+    /// <summary>True when this attachment contains an image.</summary>
+    public bool IsImage => ImageData is not null;
+
+    private BitmapImage? _thumbnail;
+    /// <summary>Lazily-created thumbnail for chip display.</summary>
+    public BitmapImage? Thumbnail
+    {
+        get
+        {
+            if (_thumbnail is not null || ImageData is null) return _thumbnail;
+            try
+            {
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                bmp.StreamSource = new MemoryStream(ImageData);
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.DecodePixelHeight = 32; // small chip thumbnail
+                bmp.EndInit();
+                bmp.Freeze();
+                _thumbnail = bmp;
+            }
+            catch { /* corrupt image */ }
+            return _thumbnail;
+        }
+    }
 }
 
 public sealed class OutputLogEntry

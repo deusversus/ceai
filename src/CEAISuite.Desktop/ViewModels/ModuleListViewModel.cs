@@ -17,18 +17,22 @@ public partial class ModuleListViewModel : ObservableObject
 
     private List<ModuleDisplayItem> _allModules = [];
 
+    private readonly IAiContextService _aiContext;
+
     public ModuleListViewModel(
         IEngineFacade engineFacade,
         IProcessContext processContext,
         IOutputLog outputLog,
         INavigationService navigationService,
-        IClipboardService clipboard)
+        IClipboardService clipboard,
+        IAiContextService aiContext)
     {
         _engineFacade = engineFacade;
         _processContext = processContext;
         _outputLog = outputLog;
         _navigationService = navigationService;
         _clipboard = clipboard;
+        _aiContext = aiContext;
 
         _processContext.ProcessChanged += () => _ = RefreshAsync();
     }
@@ -89,6 +93,30 @@ public partial class ModuleListViewModel : ObservableObject
             ? _allModules
             : _allModules.Where(m => m.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase)).ToList();
         Modules = new ObservableCollection<ModuleDisplayItem>(filtered);
+    }
+
+    // ── Cross-panel context menu commands ──
+
+    [RelayCommand]
+    private void BrowseMemory()
+    {
+        if (SelectedModule is null) return;
+        _navigationService.ShowDocument("memoryBrowser", SelectedModule.BaseAddress);
+    }
+
+    [RelayCommand]
+    private void DissectModule()
+    {
+        if (SelectedModule is null) return;
+        _navigationService.ShowDocument("structureDissector", SelectedModule.BaseAddress);
+    }
+
+    [RelayCommand]
+    private void AskAi()
+    {
+        if (SelectedModule is null) return;
+        _aiContext.SendContext("Module",
+            $"Module: {SelectedModule.Name} @ {SelectedModule.BaseAddress} (Size: {SelectedModule.Size}, Path: {SelectedModule.Path})");
     }
 
     private static string FormatSize(long bytes) => bytes switch

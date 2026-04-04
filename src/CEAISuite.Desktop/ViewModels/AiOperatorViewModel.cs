@@ -159,23 +159,35 @@ public partial class AiOperatorViewModel : ObservableObject
 
         var inputText = InputText?.Trim();
 
-        // Build message: attachments prepended as context blocks
-        var parts = new List<string>();
+        // Separate text and image attachments
+        var textParts = new List<string>();
+        var imageAttachments = new List<(byte[] Data, string MediaType)>();
+
         foreach (var att in Attachments)
         {
-            parts.Add($"<context label=\"{att.Label}\">\n{att.FullText}\n</context>");
+            if (att.IsImage && att.ImageData is not null && att.MediaType is not null)
+                imageAttachments.Add((att.ImageData, att.MediaType));
+            else
+                textParts.Add($"<context label=\"{att.Label}\">\n{att.FullText}\n</context>");
         }
         if (!string.IsNullOrEmpty(inputText))
-            parts.Add(inputText);
+            textParts.Add(inputText);
 
-        var message = string.Join("\n\n", parts);
-        if (string.IsNullOrEmpty(message)) return;
+        var message = string.Join("\n\n", textParts);
+        if (string.IsNullOrEmpty(message) && imageAttachments.Count == 0) return;
 
         InputText = "";
         Attachments.Clear();
 
-        // Show user message immediately before starting AI work
-        _aiOperatorService.AddUserMessageToHistory(message);
+        // Show user message and add to history (with images if present)
+        if (imageAttachments.Count > 0)
+        {
+            _aiOperatorService.AddUserMessageWithImages(message, imageAttachments);
+        }
+        else
+        {
+            _aiOperatorService.AddUserMessageToHistory(message);
+        }
         RefreshChatDisplay();
 
         _streamingCts = new CancellationTokenSource();
@@ -420,11 +432,27 @@ public partial class AiOperatorViewModel : ObservableObject
         }
     }
 
+    private static readonly HashSet<string> ImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+        { ".png", ".jpg", ".jpeg", ".bmp", ".gif", ".webp" };
+
+    private static string? GetMediaType(string ext) => ext.ToLowerInvariant() switch
+    {
+        ".png" => "image/png",
+        ".jpg" or ".jpeg" => "image/jpeg",
+        ".bmp" => "image/bmp",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        _ => null
+    };
+
     [RelayCommand]
     private void AttachContext()
     {
         var files = _dialogService.ShowOpenFilesDialog(
-            "Text files|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv|All files|*.*");
+            "All supported|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv;*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|" +
+            "Images|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.webp|" +
+            "Text files|*.txt;*.md;*.cs;*.json;*.xml;*.log;*.csv|" +
+            "All files|*.*");
         if (files is null) return;
 
         foreach (var file in files)
@@ -432,14 +460,33 @@ public partial class AiOperatorViewModel : ObservableObject
             try
             {
                 var info = new FileInfo(file);
-                if (info.Length > 100_000)
+                var ext = info.Extension;
+
+                if (ImageExtensions.Contains(ext))
                 {
-                    _dialogService.ShowWarning("File Too Large",
-                        $"{info.Name} is too large ({info.Length / 1024}KB). Max 100KB.");
-                    continue;
+                    // Image file — binary read, 5MB limit
+                    if (info.Length > 5_000_000)
+                    {
+                        _dialogService.ShowWarning("Image Too Large",
+                            $"{info.Name} is too large ({info.Length / 1024}KB). Max 5MB for images.");
+                        continue;
+                    }
+                    var bytes = File.ReadAllBytes(file);
+                    var mediaType = GetMediaType(ext) ?? "image/png";
+                    AddImageAttachment(Path.GetFileName(file), bytes, mediaType);
                 }
-                var content = File.ReadAllText(file);
-                AddAttachment(Path.GetFileName(file), content);
+                else
+                {
+                    // Text file — UTF-8 read, 100KB limit
+                    if (info.Length > 100_000)
+                    {
+                        _dialogService.ShowWarning("File Too Large",
+                            $"{info.Name} is too large ({info.Length / 1024}KB). Max 100KB for text files.");
+                        continue;
+                    }
+                    var content = File.ReadAllText(file);
+                    AddAttachment(Path.GetFileName(file), content);
+                }
             }
             catch (Exception ex)
             {
@@ -492,7 +539,7 @@ public partial class AiOperatorViewModel : ObservableObject
 
     // ── Public Methods ──
 
-    /// <summary>Add an attachment chip (used by drag-drop and paste handlers in MainWindow).</summary>
+    /// <summary>Add a text attachment chip (used by drag-drop and paste handlers in MainWindow).</summary>
     public void AddAttachment(string label, string fullText)
     {
         var lines = fullText.Split('\n');
@@ -508,6 +555,26 @@ public partial class AiOperatorViewModel : ObservableObject
         });
     }
 
+    /// <summary>Add an image attachment chip from file bytes.</summary>
+    public void AddImageAttachment(string label, byte[] data, string mediaType)
+    {
+        var sizeKb = data.Length / 1024;
+        Attachments.Add(new AttachmentChip
+        {
+            Label = label,
+            Preview = $"Image ({sizeKb}KB)",
+            FullText = $"[Image: {label}, {sizeKb}KB, {mediaType}]",
+            ImageData = data,
+            MediaType = mediaType
+        });
+    }
+
+    /// <summary>Add an image from raw PNG bytes (used by clipboard paste and programmatic injection).</summary>
+    public void AddImageFromBytes(string label, byte[] pngData)
+    {
+        AddImageAttachment(label, pngData, "image/png");
+    }
+
     /// <summary>Rebuild the chat display items from the service's display history.</summary>
     public void RefreshChatDisplay()
     {
@@ -519,7 +586,8 @@ public partial class AiOperatorViewModel : ObservableObject
             RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
             Content = msg.Content,
             Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt"),
-            Background = msg.Role == "user" ? userBrush : aiBrush
+            Background = msg.Role == "user" ? userBrush : aiBrush,
+            ImageData = msg.ImageDataList?.FirstOrDefault()
         }).ToList();
 
         ChatMessages.Clear();

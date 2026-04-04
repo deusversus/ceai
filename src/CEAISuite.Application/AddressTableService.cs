@@ -40,6 +40,7 @@ public sealed class AddressTableNode : INotifyPropertyChanged
         Notify(nameof(DisplayIcon));
         Notify(nameof(StatusTooltip));
         Notify(nameof(ValueColor));
+        Notify(nameof(ValueForeground));
     }
 
     public string Id { get; set; }
@@ -72,11 +73,41 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     public string CurrentValue
     {
         get => _currentValue;
-        set { if (_currentValue != value) { _currentValue = value; Notify(); NotifyDisplayProperties(); } }
+        set
+        {
+            if (_currentValue != value)
+            {
+                // Track change for UI highlighting (Phase 6)
+                if (!string.IsNullOrEmpty(_currentValue) && !string.IsNullOrEmpty(value))
+                    ValueJustChanged = true;
+                _currentValue = value;
+                Notify();
+                NotifyDisplayProperties();
+            }
+        }
+    }
+
+    private bool _valueJustChanged;
+    /// <summary>Briefly true when CurrentValue changes during auto-refresh. UI uses this for flash highlighting.</summary>
+    public bool ValueJustChanged
+    {
+        get => _valueJustChanged;
+        set { if (_valueJustChanged != value) { _valueJustChanged = value; Notify(); Notify(nameof(ValueForeground)); } }
     }
 
     public string? PreviousValue { get; set; }
     public string? Notes { get; set; }
+
+    private string? _userColor;
+    /// <summary>User-selected color for this row (Phase 6). Hex string like "#FF4444".</summary>
+    public string? UserColor
+    {
+        get => _userColor;
+        set { if (_userColor != value) { _userColor = value; Notify(); Notify(nameof(RowBackground)); } }
+    }
+
+    /// <summary>Row background: user color at reduced opacity, or transparent.</summary>
+    public string RowBackground => UserColor is not null ? UserColor + "33" : "#00000000";
 
     private bool _isLocked;
     public bool IsLocked
@@ -171,6 +202,13 @@ public sealed class AddressTableNode : INotifyPropertyChanged
           (!string.IsNullOrEmpty(Notes) ? $"\n\n{Notes}" : "");
 
     public string ValueColor => IsLocked ? "#CC4444" : "#000000";
+
+    /// <summary>Foreground for value column: red flash when changed, then normal color.</summary>
+    public string ValueForeground => ValueJustChanged ? "#FF4444"
+        : IsScriptEntry ? (IsScriptEnabled ? "#22AA22" : "#AA2222")
+        : IsLocked ? "#CC4444"
+        : CurrentValue == "???" ? "#999999"
+        : "#CCCCCC";
 
     public AddressTableNode(string id, string label, bool isGroup)
     {

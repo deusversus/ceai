@@ -24,7 +24,8 @@ public class DisassemblerViewModelTests
 
         return new DisassemblerViewModel(
             disassemblyService, breakpointService, signatureService, addressTableService,
-            _processContext, _navigationService, _outputLog, _dialogService, _clipboard);
+            _processContext, _navigationService, _outputLog, _dialogService, _clipboard,
+            new StubAiContextService());
     }
 
     [Fact]

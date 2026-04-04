@@ -167,15 +167,33 @@
                 <Expander Grid.Row="1" Header="Bookmarks" Foreground="{DynamicResource PrimaryForeground}"
                           IsExpanded="False" Margin="0,4,0,0">
                     <ListBox ItemsSource="{Binding Bookmarks}" Background="Transparent" BorderThickness="0"
-                             Foreground="{DynamicResource PrimaryForeground}" MaxHeight="120">
+                             Foreground="{DynamicResource PrimaryForeground}" MaxHeight="120"
+                             Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>
-                                <TextBlock Text="{Binding Label}" Cursor="Hand" Foreground="{DynamicResource AccentForeground}">
+                                <TextBlock Text="{Binding Label}" Cursor="Hand" Foreground="{DynamicResource AccentForeground}"
+                                           Tag="{Binding Tag, RelativeSource={RelativeSource AncestorType=ListBox}}">
                                     <TextBlock.InputBindings>
                                         <MouseBinding Gesture="LeftDoubleClick"
-                                                      Command="{Binding DataContext.GoToBookmarkCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                      Command="{Binding Tag.GoToBookmarkCommand, RelativeSource={RelativeSource AncestorType=ListBox}}"
                                                       CommandParameter="{Binding}" />
                                     </TextBlock.InputBindings>
+                                    <TextBlock.ContextMenu>
+                                        <ContextMenu Background="{DynamicResource ContextMenuBackground}"
+                                                     Foreground="{DynamicResource ContextMenuForeground}"
+                                                     BorderBrush="{DynamicResource ContextMenuBorder}">
+                                            <MenuItem Header="Go To"
+                                                      Command="{Binding PlacementTarget.Tag.GoToBookmarkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <MenuItem Header="Copy Address"
+                                                      Command="{Binding PlacementTarget.Tag.CopyBookmarkAddressCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                            <Separator />
+                                            <MenuItem Header="Delete"
+                                                      Command="{Binding PlacementTarget.Tag.DeleteBookmarkCommand, RelativeSource={RelativeSource AncestorType=ContextMenu}}"
+                                                      CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}" />
+                                        </ContextMenu>
+                                    </TextBlock.ContextMenu>
                                 </TextBlock>
                             </DataTemplate>
                         </ListBox.ItemTemplate>

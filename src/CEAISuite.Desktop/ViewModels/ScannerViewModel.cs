@@ -14,16 +14,26 @@ public partial class ScannerViewModel : ObservableObject
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
 
+    private readonly INavigationService _navigationService;
+    private readonly IClipboardService _clipboard;
+    private readonly IAiContextService _aiContext;
+
     public ScannerViewModel(
         ScanService scanService,
         AddressTableService addressTableService,
         IProcessContext processContext,
-        IOutputLog outputLog)
+        IOutputLog outputLog,
+        INavigationService navigationService,
+        IClipboardService clipboard,
+        IAiContextService aiContext)
     {
         _scanService = scanService;
         _addressTableService = addressTableService;
         _processContext = processContext;
         _outputLog = outputLog;
+        _navigationService = navigationService;
+        _clipboard = clipboard;
+        _aiContext = aiContext;
     }
 
     [ObservableProperty]
@@ -135,5 +145,43 @@ public partial class ScannerViewModel : ObservableObject
 
         _addressTableService.AddFromScanResult(selected, SelectedDataType);
         _outputLog.Append("Scanner", "Info", $"Added {selected.Address} to address table.");
+    }
+
+    // ── Cross-panel context menu commands ──
+
+    [RelayCommand]
+    private void CopyAddress()
+    {
+        if (SelectedScanResult is null) return;
+        _clipboard.SetText(SelectedScanResult.Address);
+    }
+
+    [RelayCommand]
+    private void CopyValue()
+    {
+        if (SelectedScanResult is null) return;
+        _clipboard.SetText(SelectedScanResult.CurrentValue);
+    }
+
+    [RelayCommand]
+    private void BrowseMemory()
+    {
+        if (SelectedScanResult is null) return;
+        _navigationService.ShowDocument("memoryBrowser", SelectedScanResult.Address);
+    }
+
+    [RelayCommand]
+    private void DisassembleHere()
+    {
+        if (SelectedScanResult is null) return;
+        _navigationService.ShowDocument("disassembler", SelectedScanResult.Address);
+    }
+
+    [RelayCommand]
+    private void AskAi()
+    {
+        if (SelectedScanResult is null) return;
+        _aiContext.SendContext("Scanner",
+            $"Scan result: {SelectedScanResult.Address} = {SelectedScanResult.CurrentValue} ({SelectedDataType})");
     }
 }

@@ -12,6 +12,8 @@ public partial class ProcessListViewModel : ObservableObject
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
 
+    private List<RunningProcessOverview> _allProcesses = [];
+
     public ProcessListViewModel(
         WorkspaceDashboardService dashboardService,
         IProcessContext processContext,
@@ -29,6 +31,11 @@ public partial class ProcessListViewModel : ObservableObject
 
     [ObservableProperty]
     private RunningProcessOverview? _selectedProcess;
+
+    [ObservableProperty]
+    private string _filterText = "";
+
+    partial void OnFilterTextChanged(string value) => ApplyFilter();
 
     [ObservableProperty]
     private string? _attachedProcessName;
@@ -88,8 +95,9 @@ public partial class ProcessListViewModel : ObservableObject
                 "CEAISuite",
                 "workspace.db");
             var dashboard = await _dashboardService.BuildAsync(databasePath);
-            Processes = new ObservableCollection<RunningProcessOverview>(dashboard.RunningProcesses);
-            _outputLog.Append("Processes", "Info", $"Refreshed: {dashboard.RunningProcesses.Count} processes found.");
+            _allProcesses = dashboard.RunningProcesses.ToList();
+            ApplyFilter();
+            _outputLog.Append("Processes", "Info", $"Refreshed: {_allProcesses.Count} processes found.");
         }
         catch (Exception ex)
         {
@@ -100,6 +108,18 @@ public partial class ProcessListViewModel : ObservableObject
     /// <summary>Replace the process list contents (called from MainWindow after initial load).</summary>
     public void SetProcesses(IReadOnlyList<RunningProcessOverview> processes)
     {
-        Processes = new ObservableCollection<RunningProcessOverview>(processes);
+        _allProcesses = processes.ToList();
+        ApplyFilter();
+    }
+
+    private void ApplyFilter()
+    {
+        var filtered = string.IsNullOrWhiteSpace(FilterText)
+            ? _allProcesses
+            : _allProcesses.Where(p =>
+                p.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase) ||
+                p.Id.ToString().Contains(FilterText, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        Processes = new ObservableCollection<RunningProcessOverview>(filtered);
     }
 }

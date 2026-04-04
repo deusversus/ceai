@@ -15,18 +15,25 @@ public partial class MemoryRegionsViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private readonly INavigationService _navigationService;
 
+    private readonly IClipboardService _clipboard;
+    private readonly IAiContextService _aiContext;
+
     public MemoryRegionsViewModel(
         IScanEngine scanEngine,
         IEngineFacade engineFacade,
         IProcessContext processContext,
         IOutputLog outputLog,
-        INavigationService navigationService)
+        INavigationService navigationService,
+        IClipboardService clipboard,
+        IAiContextService aiContext)
     {
         _scanEngine = scanEngine;
         _engineFacade = engineFacade;
         _processContext = processContext;
         _outputLog = outputLog;
         _navigationService = navigationService;
+        _clipboard = clipboard;
+        _aiContext = aiContext;
 
         _processContext.ProcessChanged += () => _ = RefreshAsync();
     }
@@ -110,6 +117,37 @@ public partial class MemoryRegionsViewModel : ObservableObject
                 return mod.Name;
         }
         return "";
+    }
+
+    // ── Cross-panel context menu commands ──
+
+    [RelayCommand]
+    private void CopyAddress()
+    {
+        if (SelectedRegion is null) return;
+        _clipboard.SetText(SelectedRegion.BaseAddress);
+    }
+
+    [RelayCommand]
+    private void CopyRegionInfo()
+    {
+        if (SelectedRegion is null) return;
+        _clipboard.SetText($"{SelectedRegion.BaseAddress} | {SelectedRegion.Size} | {SelectedRegion.Protection} | {SelectedRegion.OwnerModule}");
+    }
+
+    [RelayCommand]
+    private void DisassembleRegion()
+    {
+        if (SelectedRegion is null) return;
+        _navigationService.ShowDocument("disassembler", SelectedRegion.BaseAddress);
+    }
+
+    [RelayCommand]
+    private void AskAi()
+    {
+        if (SelectedRegion is null) return;
+        _aiContext.SendContext("Memory Region",
+            $"Region: {SelectedRegion.BaseAddress} | Size: {SelectedRegion.Size} | Protection: {SelectedRegion.Protection} | Module: {SelectedRegion.OwnerModule}");
     }
 
     private static string FormatSize(long bytes) => bytes switch

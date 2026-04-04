@@ -16,7 +16,8 @@ public class ScannerViewModelTests
     {
         var scanService = new ScanService(_scanEngine);
         var addressTableService = new AddressTableService(_engineFacade);
-        return new ScannerViewModel(scanService, addressTableService, _processContext, _outputLog);
+        return new ScannerViewModel(scanService, addressTableService, _processContext, _outputLog,
+            new StubNavigationService(), new StubClipboardService(), new StubAiContextService());
     }
 
     [Fact]

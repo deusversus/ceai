@@ -81,8 +81,48 @@ public sealed class AgentLoop
         return channel.Reader;
     }
 
+    /// <summary>
+    /// Run the agent loop on existing history WITHOUT adding a new user message.
+    /// Used when the caller has already injected a mixed-content message (e.g., text + image).
+    /// </summary>
+    public ChannelReader<AgentStreamEvent> RunStreamingContinueAsync(
+        ChatHistoryManager history,
+        Func<string>? contextProvider = null,
+        IReadOnlySet<string>? activeCategories = null,
+        CancellationToken cancellationToken = default)
+    {
+        var channel = Channel.CreateUnbounded<AgentStreamEvent>(
+            new UnboundedChannelOptions { SingleReader = true });
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await RunLoopAsync(null, history, channel.Writer,
+                    contextProvider, activeCategories, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Error("Stopped by user."));
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke("LOOP", $"Unhandled error: {ex}");
+                await channel.Writer.WriteAsync(
+                    new AgentStreamEvent.Error($"Agent error: {ex.Message}"));
+            }
+            finally
+            {
+                channel.Writer.TryComplete();
+            }
+        }, cancellationToken);
+
+        return channel.Reader;
+    }
+
     private async Task RunLoopAsync(
-        string userMessage,
+        string? userMessage,
         ChatHistoryManager history,
         ChannelWriter<AgentStreamEvent> channel,
         Func<string>? contextProvider,
@@ -91,12 +131,15 @@ public sealed class AgentLoop
     {
         var sw = Stopwatch.StartNew();
 
-        // Add user message with dynamic context
-        string? contextSuffix = null;
-        try { contextSuffix = contextProvider?.Invoke(); }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[AgentLoop] Context provider failed: {ex.Message}"); }
-        var fullContext = contextSuffix is not null ? $"[CURRENT STATE]\n{contextSuffix}" : null;
-        history.AddUserMessage(userMessage, fullContext);
+        // Add user message with dynamic context (skip if null — caller already added)
+        if (userMessage is not null)
+        {
+            string? contextSuffix = null;
+            try { contextSuffix = contextProvider?.Invoke(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[AgentLoop] Context provider failed: {ex.Message}"); }
+            var fullContext = contextSuffix is not null ? $"[CURRENT STATE]\n{contextSuffix}" : null;
+            history.AddUserMessage(userMessage, fullContext);
+        }
 
         var state = new AgentLoopState();
 

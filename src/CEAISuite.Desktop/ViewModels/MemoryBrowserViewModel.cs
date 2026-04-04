@@ -352,6 +352,22 @@ public partial class MemoryBrowserViewModel : ObservableObject
         _ = NavigateToAddressAsync(bookmark.Address);
     }
 
+    [RelayCommand]
+    private void DeleteBookmark(MemoryBookmark? bookmark)
+    {
+        if (bookmark is null) return;
+        Bookmarks.Remove(bookmark);
+        StatusText = $"Bookmark removed at 0x{bookmark.Address:X}.";
+    }
+
+    [RelayCommand]
+    private void CopyBookmarkAddress(MemoryBookmark? bookmark)
+    {
+        if (bookmark is null) return;
+        _clipboard.SetText($"0x{bookmark.Address:X}");
+        StatusText = $"Copied address 0x{bookmark.Address:X}.";
+    }
+
     // ── 5H: Structure Spider ──
 
     [RelayCommand]

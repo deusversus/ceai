@@ -12,7 +12,8 @@ public class ThreadListViewModelTests
     private readonly StubNavigationService _navigationService = new();
 
     private ThreadListViewModel CreateVm() =>
-        new(_callStackEngine, _engineFacade, _processContext, _outputLog, _navigationService);
+        new(_callStackEngine, _engineFacade, _processContext, _outputLog, _navigationService,
+            new StubClipboardService(), new StubAiContextService());
 
     [Fact]
     public async Task Refresh_NoProcess_SetsStatusError()

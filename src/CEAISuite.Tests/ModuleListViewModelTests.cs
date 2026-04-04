@@ -13,7 +13,7 @@ public class ModuleListViewModelTests
     private readonly StubClipboardService _clipboard = new();
 
     private ModuleListViewModel CreateVm() =>
-        new(_engineFacade, _processContext, _outputLog, _navigationService, _clipboard);
+        new(_engineFacade, _processContext, _outputLog, _navigationService, _clipboard, new StubAiContextService());
 
     [Fact]
     public async Task Refresh_NoProcess_SetsStatusError()

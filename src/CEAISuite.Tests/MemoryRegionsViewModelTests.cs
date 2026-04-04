@@ -13,7 +13,8 @@ public class MemoryRegionsViewModelTests
     private readonly StubNavigationService _navigationService = new();
 
     private MemoryRegionsViewModel CreateVm() =>
-        new(_scanEngine, _engineFacade, _processContext, _outputLog, _navigationService);
+        new(_scanEngine, _engineFacade, _processContext, _outputLog, _navigationService,
+            new StubClipboardService(), new StubAiContextService());
 
     [Fact]
     public async Task Refresh_NoProcess_SetsStatusError()

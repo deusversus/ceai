@@ -38,6 +38,10 @@ public partial class MainViewModel : ObservableObject
     private readonly ProcessListViewModel _processListVm;
     private readonly AiOperatorViewModel _aiOperatorVm;
     private readonly FindResultsViewModel _findResultsVm;
+    private readonly ScannerViewModel _scannerVm;
+    private readonly ProcessWatchdogService _watchdog;
+    private readonly IScreenCaptureEngine _screenCaptureEngine;
+    private readonly ScriptGenerationService _scriptGenerationService;
 
     public MainViewModel(
         WorkspaceDashboardService dashboardService,
@@ -56,7 +60,11 @@ public partial class MainViewModel : ObservableObject
         InspectionViewModel inspectionVm,
         ProcessListViewModel processListVm,
         AiOperatorViewModel aiOperatorVm,
-        FindResultsViewModel findResultsVm)
+        FindResultsViewModel findResultsVm,
+        ScannerViewModel scannerVm,
+        ProcessWatchdogService watchdog,
+        IScreenCaptureEngine screenCaptureEngine,
+        ScriptGenerationService scriptGenerationService)
     {
         _databasePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -81,9 +89,26 @@ public partial class MainViewModel : ObservableObject
         _processListVm = processListVm;
         _aiOperatorVm = aiOperatorVm;
         _findResultsVm = findResultsVm;
+        _scannerVm = scannerVm;
+        _watchdog = watchdog;
+        _screenCaptureEngine = screenCaptureEngine;
+        _scriptGenerationService = scriptGenerationService;
 
         // Sync toolbar combo selection when process attach/detach state changes
         _processContext.ProcessChanged += OnProcessContextChanged;
+
+        // Phase 6: Status bar — token usage updates when AI status changes
+        _aiOperatorService.StatusChanged += OnAiStatusChanged;
+
+        // Phase 6: Status bar — scan status
+        _scannerVm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ScannerViewModel.ScanStatus))
+                StatusBarScanText = _scannerVm.ScanStatus ?? "";
+        };
+
+        // Phase 6: Status bar — watchdog rollback alerts
+        _watchdog.OnAutoRollback += OnWatchdogRollback;
 
         // Wire AI operator with dynamic context injection
         _aiOperatorService.SetContextProvider(BuildAiContext);
@@ -113,6 +138,15 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private string _statusBarCenterText = "";
+
+    [ObservableProperty]
+    private string _statusBarTokenText = "";
+
+    [ObservableProperty]
+    private string _statusBarScanText = "";
+
+    [ObservableProperty]
+    private string _statusBarWatchdogText = "";
 
     [ObservableProperty]
     private ObservableCollection<ProcessComboItem> _processComboItems = new();
@@ -621,6 +655,80 @@ public partial class MainViewModel : ObservableObject
         _findResultsVm.Populate(items, description);
     }
 
+    // ── Phase 6: Status Bar Helpers ──
+
+    private void OnAiStatusChanged(string _)
+    {
+        var budget = _aiOperatorService.TokenBudget;
+        if (budget.TotalRequests > 0)
+        {
+            StatusBarTokenText = $"${budget.EstimatedCostUsd:F4} | {FormatTokenCount(budget.TotalInputTokens)}↑ {FormatTokenCount(budget.TotalOutputTokens)}↓";
+        }
+    }
+
+    private void OnWatchdogRollback(WatchdogRollbackEvent evt)
+    {
+        StatusBarWatchdogText = $"⚠ Rollback 0x{evt.Address:X}";
+        // Auto-clear after 5 seconds
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(5000);
+            StatusBarWatchdogText = "";
+        });
+    }
+
+    private static string FormatTokenCount(long tokens) => tokens switch
+    {
+        >= 1_000_000 => $"{tokens / 1_000_000.0:F1}M",
+        >= 1_000 => $"{tokens / 1_000.0:F1}K",
+        _ => tokens.ToString()
+    };
+
+    // ── Phase 6: Screenshot Capture & Report Export ──
+
+    public async Task CaptureScreenshotAsync()
+    {
+        if (Dashboard.CurrentInspection is null)
+        {
+            StatusBarCenterText = "Attach to a process first.";
+            return;
+        }
+
+        var pid = Dashboard.CurrentInspection.ProcessId;
+        var result = await _screenCaptureEngine.CaptureWindowAsync(pid);
+        if (result is null)
+        {
+            StatusBarCenterText = "Screenshot failed — window may be minimized.";
+            return;
+        }
+
+        UiActionRequested?.Invoke("SaveScreenshot", result);
+    }
+
+    public Task ExportReportAsync()
+    {
+        if (Dashboard.CurrentInspection is null)
+        {
+            StatusBarCenterText = "Attach to a process first.";
+            return Task.CompletedTask;
+        }
+
+        var inspection = Dashboard.CurrentInspection;
+        var markdown = _scriptGenerationService.SummarizeInvestigation(
+            inspection.ProcessName,
+            inspection.ProcessId,
+            _addressTableService.Entries.ToList(),
+            _scanService.LastScanResults is not null
+                ? _scanService.LastScanResults.Results.Take(10).Select(r =>
+                    new ScanResultOverview($"0x{r.Address:X}", r.CurrentValue, r.PreviousValue,
+                        Convert.ToHexString(r.RawBytes.ToArray()))).ToArray()
+                : null,
+            Dashboard.Disassembly);
+
+        UiActionRequested?.Invoke("SaveReport", markdown);
+        return Task.CompletedTask;
+    }
+
     // ── Lifecycle ──
 
     public async Task InitializeAsync()
@@ -635,6 +743,8 @@ public partial class MainViewModel : ObservableObject
     public void OnClosing()
     {
         _processContext.ProcessChanged -= OnProcessContextChanged;
+        _aiOperatorService.StatusChanged -= OnAiStatusChanged;
+        _watchdog.OnAutoRollback -= OnWatchdogRollback;
         _addressTableVm.StopAutoRefresh();
         _aiOperatorService.SaveCurrentChat();
     }

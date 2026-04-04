@@ -11,7 +11,7 @@ public class SimpleViewModelTests
     public void OutputLogViewModel_Clear_ClearsEntries()
     {
         var outputLog = new StubOutputLog();
-        var vm = new OutputLogViewModel(outputLog);
+        var vm = new OutputLogViewModel(outputLog, new StubClipboardService());
         outputLog.Append("Test", "Info", "Hello");
 
         vm.ClearCommand.Execute(null);

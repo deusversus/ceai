@@ -31,6 +31,13 @@ public partial class AddressTableViewModel : ObservableObject
     // ── Navigation events (subscribed by MainWindow) ──
     public event Action<nuint>? NavigateToMemoryBrowser;
     public event Action<string>? NavigateToDisassembly;
+
+    /// <summary>Add an entry from a drag-drop operation (address string like "0x...").</summary>
+    public void AddEntryFromDrop(string address)
+    {
+        _addressTableService.AddEntry(address, CEAISuite.Engine.Abstractions.MemoryDataType.Int32, "0", $"Dropped @ {address}");
+        _outputLog.Append("AddressTable", "Info", $"Added dropped address {address} to table.");
+    }
     public event Action<IReadOnlyList<FindResultDisplayItem>, string>? PopulateFindResults;
 
     [ObservableProperty]
@@ -70,6 +77,84 @@ public partial class AddressTableViewModel : ObservableObject
         Roots = _addressTableService.Roots;
     }
 
+    // ── Color Coding (Phase 6) ──
+
+    public static IReadOnlyList<(string Name, string Color)> AvailableColors { get; } = new[]
+    {
+        ("None", ""),
+        ("Red", "#FF4444"),
+        ("Green", "#44AA44"),
+        ("Blue", "#4488FF"),
+        ("Yellow", "#DDAA00"),
+        ("Purple", "#AA44CC"),
+        ("Orange", "#FF8800"),
+        ("Cyan", "#00AACC"),
+    };
+
+    [RelayCommand]
+    private void SetColor(string color)
+    {
+        if (SelectedNode is null) return;
+        SelectedNode.UserColor = string.IsNullOrEmpty(color) ? null : color;
+        _outputLog.Append("AddressTable", "Info", $"Set color {(string.IsNullOrEmpty(color) ? "cleared" : color)} on {SelectedNode.Label}");
+    }
+
+    // ── Column Sorting (Phase 6) ──
+
+    private string _sortColumn = "";
+    private bool _sortAscending = true;
+
+    [RelayCommand]
+    private void SortBy(string column)
+    {
+        if (_sortColumn == column)
+            _sortAscending = !_sortAscending;
+        else
+        {
+            _sortColumn = column;
+            _sortAscending = true;
+        }
+
+        SortCollection(_addressTableService.Roots);
+        OnPropertyChanged(nameof(Roots));
+    }
+
+    private void SortCollection(System.Collections.ObjectModel.ObservableCollection<AddressTableNode> nodes)
+    {
+        var sorted = nodes.OrderBy(n => 0).ToList(); // stable baseline
+        sorted = (_sortColumn switch
+        {
+            "Label" => _sortAscending
+                ? sorted.OrderBy(n => n.Label, StringComparer.OrdinalIgnoreCase).ToList()
+                : sorted.OrderByDescending(n => n.Label, StringComparer.OrdinalIgnoreCase).ToList(),
+            "Address" => _sortAscending
+                ? sorted.OrderBy(n => n.ResolvedAddress ?? 0).ToList()
+                : sorted.OrderByDescending(n => n.ResolvedAddress ?? 0).ToList(),
+            "Type" => _sortAscending
+                ? sorted.OrderBy(n => n.DataType.ToString()).ToList()
+                : sorted.OrderByDescending(n => n.DataType.ToString()).ToList(),
+            "Value" => _sortAscending
+                ? sorted.OrderBy(n => n.CurrentValue, StringComparer.OrdinalIgnoreCase).ToList()
+                : sorted.OrderByDescending(n => n.CurrentValue, StringComparer.OrdinalIgnoreCase).ToList(),
+            _ => sorted
+        });
+
+        // Reorder in-place
+        for (int i = 0; i < sorted.Count; i++)
+        {
+            var currentIndex = nodes.IndexOf(sorted[i]);
+            if (currentIndex != i)
+                nodes.Move(currentIndex, i);
+        }
+
+        // Recursively sort children
+        foreach (var node in nodes)
+        {
+            if (node.Children.Count > 0)
+                SortCollection(node.Children);
+        }
+    }
+
     // ── Helpers ──
 
     private void RefreshUI(string? statusMessage = null)
@@ -107,11 +192,27 @@ public partial class AddressTableViewModel : ObservableObject
                 OnPropertyChanged(nameof(Roots));
                 AddressTableStatus = $"{_addressTableService.Entries.Count} entries (live)";
             });
+
+            // Phase 6: Reset change highlighting after a brief flash
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(500);
+                _dispatcher.Invoke(() => ClearValueChangedFlags(_addressTableService.Roots));
+            });
         }
         catch { /* non-fatal */ }
         finally
         {
             _refreshTimer?.Change(_refreshIntervalMs, Timeout.Infinite);
+        }
+    }
+
+    private static void ClearValueChangedFlags(System.Collections.ObjectModel.ObservableCollection<AddressTableNode> nodes)
+    {
+        foreach (var node in nodes)
+        {
+            if (node.ValueJustChanged) node.ValueJustChanged = false;
+            ClearValueChangedFlags(node.Children);
         }
     }
 
@@ -432,6 +533,12 @@ public partial class AddressTableViewModel : ObservableObject
         if (addr == nuint.Zero)
         {
             try { addr = AddressTableService.ParseAddress(SelectedNode.Address); } catch { }
+        }
+
+        if (addr == nuint.Zero)
+        {
+            _outputLog.Append("AddressTable", "Warning", $"Cannot browse memory: address for '{SelectedNode.Label}' could not be resolved.");
+            return;
         }
 
         NavigateToMemoryBrowser?.Invoke(addr);

@@ -16,16 +16,26 @@ public partial class PointerScannerViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private CancellationTokenSource? _scanCts;
 
+    private readonly IClipboardService _clipboard;
+    private readonly INavigationService _navigationService;
+    private readonly IAiContextService _aiContext;
+
     public PointerScannerViewModel(
         PointerScannerService scannerService,
         AddressTableService addressTableService,
         IProcessContext processContext,
-        IOutputLog outputLog)
+        IOutputLog outputLog,
+        IClipboardService clipboard,
+        INavigationService navigationService,
+        IAiContextService aiContext)
     {
         _scannerService = scannerService;
         _addressTableService = addressTableService;
         _processContext = processContext;
         _outputLog = outputLog;
+        _clipboard = clipboard;
+        _navigationService = navigationService;
+        _aiContext = aiContext;
     }
 
     [ObservableProperty] private string _targetAddress = "";
@@ -151,6 +161,44 @@ public partial class PointerScannerViewModel : ObservableObject
             "0",
             path.Display);
         StatusText = $"Added to address table: {path.Display}";
+    }
+
+    // ── Cross-panel context menu commands ──
+
+    [RelayCommand]
+    private void CopyPath()
+    {
+        if (SelectedResult is null) return;
+        _clipboard.SetText(SelectedResult.Chain);
+    }
+
+    [RelayCommand]
+    private void CopyResolvedAddress()
+    {
+        if (SelectedResult is null) return;
+        _clipboard.SetText(SelectedResult.ResolvedAddress);
+    }
+
+    [RelayCommand]
+    private void BrowseResolved()
+    {
+        if (SelectedResult is null) return;
+        _navigationService.ShowDocument("memoryBrowser", SelectedResult.ResolvedAddress);
+    }
+
+    [RelayCommand]
+    private void DisassembleResolved()
+    {
+        if (SelectedResult is null) return;
+        _navigationService.ShowDocument("disassembler", SelectedResult.ResolvedAddress);
+    }
+
+    [RelayCommand]
+    private void AskAi()
+    {
+        if (SelectedResult is null) return;
+        _aiContext.SendContext("Pointer Scanner",
+            $"Pointer path: {SelectedResult.Chain} → {SelectedResult.ResolvedAddress} (Status: {SelectedResult.Status})");
     }
 
     private static bool TryParseAddress(string text, out nuint address)

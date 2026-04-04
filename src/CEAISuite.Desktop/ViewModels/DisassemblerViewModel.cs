@@ -42,6 +42,7 @@ public partial class DisassemblerViewModel : ObservableObject
         IOutputLog outputLog,
         IDialogService dialogService,
         IClipboardService clipboard,
+        IAiContextService aiContext,
         IAutoAssemblerEngine? autoAssemblerEngine = null)
     {
         _disassemblyService = disassemblyService;
@@ -54,7 +55,10 @@ public partial class DisassemblerViewModel : ObservableObject
         _dialogService = dialogService;
         _clipboard = clipboard;
         _autoAssemblerEngine = autoAssemblerEngine;
+        _aiContext = aiContext;
     }
+
+    private readonly IAiContextService _aiContext;
 
     [ObservableProperty] private string _goToAddress = "";
     [ObservableProperty] private ObservableCollection<DisassemblyLineDisplayItem> _lines = new();
@@ -370,6 +374,32 @@ public partial class DisassemblerViewModel : ObservableObject
         var match = Regex.Match(operands, @"0x[0-9A-Fa-f]+");
         if (!match.Success) return null;
         return ResolveModuleOffset(match.Value, modules);
+    }
+
+    // ── Cross-panel context menu commands ──
+
+    [RelayCommand]
+    private void AddToTable()
+    {
+        if (SelectedLine is null) return;
+        _addressTableService.AddEntry(SelectedLine.Address, Engine.Abstractions.MemoryDataType.ByteArray, "",
+            $"{SelectedLine.Mnemonic} {SelectedLine.Operands}");
+        StatusText = $"Added {SelectedLine.Address} to address table.";
+    }
+
+    [RelayCommand]
+    private void BrowseMemoryHere()
+    {
+        if (SelectedLine is null) return;
+        _navigationService.ShowDocument("memoryBrowser", SelectedLine.Address);
+    }
+
+    [RelayCommand]
+    private void AskAi()
+    {
+        if (SelectedLine is null) return;
+        _aiContext.SendContext("Disassembler",
+            $"Instruction at {SelectedLine.Address}: {SelectedLine.Mnemonic} {SelectedLine.Operands} (Bytes: {SelectedLine.HexBytes})");
     }
 
     private static bool TryParseHex(string text, out ulong value)

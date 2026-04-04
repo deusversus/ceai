@@ -32,6 +32,8 @@ public partial class MainWindow : Window
     private readonly InspectionViewModel _inspectionVm;
     private readonly ProcessListViewModel _processListVm;
     private readonly AiOperatorViewModel _aiOperatorVm;
+    private readonly DisassemblerViewModel _disassemblerVm;
+    private readonly StructureDissectorViewModel _structureDissectorVm;
 
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private readonly Dictionary<string, object> _xamlPanelContent = new();
@@ -76,7 +78,8 @@ public partial class MainWindow : Window
         ThreadListViewModel threadListVm,
         MemoryRegionsViewModel memoryRegionsVm,
         WorkspaceViewModel workspaceVm,
-        MemoryBrowserViewModel memoryBrowserVm)
+        MemoryBrowserViewModel memoryBrowserVm,
+        IAiContextService aiContextService)
     {
         InitializeComponent();
 
@@ -93,10 +96,17 @@ public partial class MainWindow : Window
         _inspectionVm = inspectionVm;
         _processListVm = processListVm;
         _aiOperatorVm = aiOperatorVm;
+        _disassemblerVm = disassemblerVm;
+        _structureDissectorVm = structureDissectorVm;
 
-        // Wire NavigationService to AvalonDock
+        // Wire NavigationService to AvalonDock (with parameter routing)
         navigationService.Configure(
-            (contentId, _) => ActivateDocument(contentId),
+            (contentId, parameter) =>
+            {
+                ActivateDocument(contentId);
+                if (parameter is string addrStr && !string.IsNullOrWhiteSpace(addrStr))
+                    RouteNavigationParameter(contentId, addrStr);
+            },
             contentId => ActivateAnchorable(contentId));
 
         // Apply saved theme
@@ -196,13 +206,10 @@ public partial class MainWindow : Window
         // Subscribe to AddressTableViewModel navigation events
         _addressTableVm.NavigateToMemoryBrowser += addr =>
         {
-            if (DataContext is WorkspaceDashboard dashboard && dashboard.CurrentInspection is not null)
-            {
-                MemoryBrowserTab.AttachProcess();
-                ActivateDocument("memoryBrowser");
-                if (addr != nuint.Zero)
-                    _ = MemoryBrowserTab.NavigateToAddress(addr);
-            }
+            // Ensure Memory Browser is attached (idempotent if already attached)
+            MemoryBrowserTab.AttachProcess();
+            ActivateDocument("memoryBrowser");
+            _ = MemoryBrowserTab.NavigateToAddress(addr);
         };
         _addressTableVm.NavigateToDisassembly += addrStr =>
         {
@@ -243,10 +250,24 @@ public partial class MainWindow : Window
                 StatusBarProcess.Text = _mainVm.StatusBarProcessText;
             else if (args.PropertyName == nameof(MainViewModel.StatusBarCenterText))
                 StatusBarCenter.Text = _mainVm.StatusBarCenterText;
+            else if (args.PropertyName == nameof(MainViewModel.StatusBarTokenText))
+                StatusBarTokens.Text = _mainVm.StatusBarTokenText;
+            else if (args.PropertyName == nameof(MainViewModel.StatusBarScanText))
+                StatusBarScan.Text = _mainVm.StatusBarScanText;
+            else if (args.PropertyName == nameof(MainViewModel.StatusBarWatchdogText))
+                StatusBarWatchdog.Text = _mainVm.StatusBarWatchdogText;
             else if (args.PropertyName == nameof(MainViewModel.ProcessComboItems))
                 ProcessComboBox.ItemsSource = _mainVm.ProcessComboItems;
             else if (args.PropertyName == nameof(MainViewModel.SelectedProcessComboItem))
                 ProcessComboBox.SelectedItem = _mainVm.SelectedProcessComboItem;
+        };
+
+        // Wire universal "Ask AI" context service
+        aiContextService.ContextRequested += (label, context) =>
+        {
+            _aiOperatorVm.AddAttachment(label, context);
+            ActivateAnchorable("aiOperator");
+            AiChatInputTextBox.Focus();
         };
 
         DataContext = _mainVm.Dashboard;
@@ -264,6 +285,53 @@ public partial class MainWindow : Window
                 break;
             case "DetachCleanup":
                 MemoryBrowserTab.Clear();
+                break;
+            case "SaveScreenshot" when param is CEAISuite.Engine.Abstractions.ScreenCaptureResult result:
+                var screenshotDlg = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "PNG Image|*.png",
+                    DefaultExt = ".png",
+                    FileName = $"capture_{result.WindowTitle.Replace(' ', '_')}_{DateTime.Now:yyyyMMdd_HHmmss}.png"
+                };
+                if (screenshotDlg.ShowDialog() == true)
+                {
+                    System.IO.File.WriteAllBytes(screenshotDlg.FileName, result.PngData);
+                    _mainVm.StatusBarCenterText = $"Screenshot saved: {screenshotDlg.FileName} ({result.Width}x{result.Height})";
+                }
+                break;
+            case "SaveReport" when param is string markdown:
+                var reportDlg = new Microsoft.Win32.SaveFileDialog
+                {
+                    Filter = "Markdown|*.md|Text|*.txt",
+                    DefaultExt = ".md",
+                    FileName = $"report_{DateTime.Now:yyyyMMdd_HHmmss}.md"
+                };
+                if (reportDlg.ShowDialog() == true)
+                {
+                    System.IO.File.WriteAllText(reportDlg.FileName, markdown);
+                    _mainVm.StatusBarCenterText = $"Report exported: {reportDlg.FileName}";
+                }
+                break;
+        }
+    }
+
+    private void RouteNavigationParameter(string contentId, string addrStr)
+    {
+        switch (contentId)
+        {
+            case "memoryBrowser":
+                MemoryBrowserTab.AttachProcess();
+                var cleaned = addrStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                    ? addrStr[2..] : addrStr;
+                if (ulong.TryParse(cleaned, System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture, out var mbAddr))
+                    _ = MemoryBrowserTab.NavigateToAddress((nuint)mbAddr);
+                break;
+            case "disassembler":
+                _disassemblerVm.NavigateToAddress(addrStr);
+                break;
+            case "structureDissector":
+                _structureDissectorVm.NavigateToAddress(addrStr);
                 break;
         }
     }
@@ -604,6 +672,12 @@ public partial class MainWindow : Window
         _addressTableVm.EditSelectedNode();
     }
 
+    private void SortAddressTable(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is string column)
+            _addressTableVm.SortByCommand.Execute(column);
+    }
+
     private void AddressTableTree_KeyDown(object sender, KeyEventArgs e)
     {
         SyncAddressTableSelection();
@@ -743,6 +817,9 @@ public partial class MainWindow : Window
 
     private void ShowAbout(object sender, RoutedEventArgs e) => _mainVm.ShowAbout();
 
+    private async void CaptureScreenshot(object sender, RoutedEventArgs e) => await _mainVm.CaptureScreenshotAsync();
+    private async void ExportReport(object sender, RoutedEventArgs e) => await _mainVm.ExportReportAsync();
+
     private void OnPreviewKeyUp(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.P && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)
@@ -849,6 +926,7 @@ public partial class MainWindow : Window
         {
             var data = new DataObject("CEAIContext",
                 $"[Module] {mod.Name} @ {mod.BaseAddress} (size: {mod.Size})");
+            data.SetData("CEAIAddress", mod.BaseAddress);
             DragDrop.DoDragDrop(lv, data, DragDropEffects.Copy);
         }
     }
@@ -882,6 +960,8 @@ public partial class MainWindow : Window
             }
 
             var data = new DataObject("CEAIContext", context);
+            if (!node.IsGroup && !node.IsScriptEntry && !string.IsNullOrEmpty(node.DisplayAddress))
+                data.SetData("CEAIAddress", node.DisplayAddress);
             DragDrop.DoDragDrop(AddressTableTree, data, DragDropEffects.Copy);
         }
     }
@@ -904,10 +984,97 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    // ── Drag and Drop: Scanner Source ──
+
+    private void ScanResults_PreviewMouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+        => _dragStartPoint = e.GetPosition(null);
+
+    private void ScanResults_PreviewMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed) return;
+        var diff = _dragStartPoint - e.GetPosition(null);
+        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
+            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+
+        if (ScanResultsList.SelectedItem is ScanResultOverview result)
+        {
+            var data = new DataObject("CEAIContext",
+                $"[Scan Result] {result.Address} = {result.CurrentValue}");
+            data.SetData("CEAIAddress", result.Address);
+            DragDrop.DoDragDrop(ScanResultsList, data, DragDropEffects.Copy);
+        }
+    }
+
+    // ── Drag and Drop: Cross-Panel Drop Targets ──
+
+    private void AddressPanel_DragOver(object sender, DragEventArgs e)
+    {
+        e.Effects = (e.Data.GetDataPresent("CEAIAddress") || e.Data.GetDataPresent("CEAIContext"))
+            ? DragDropEffects.Copy : DragDropEffects.None;
+        e.Handled = true;
+    }
+
+    private void MemoryBrowser_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData("CEAIAddress") is string addr)
+        {
+            MemoryBrowserTab.AttachProcess();
+            RouteNavigationParameter("memoryBrowser", addr);
+        }
+        e.Handled = true;
+    }
+
+    private void Disassembler_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData("CEAIAddress") is string addr)
+            RouteNavigationParameter("disassembler", addr);
+        e.Handled = true;
+    }
+
+    private void AddressTable_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData("CEAIAddress") is string addr)
+        {
+            _addressTableVm.AddEntryFromDrop(addr);
+        }
+        e.Handled = true;
+    }
+
+    private void StructureDissector_Drop(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetData("CEAIAddress") is string addr)
+            RouteNavigationParameter("structureDissector", addr);
+        e.Handled = true;
+    }
+
     // ── Paste Handler ──
 
     private void OnChatInputPaste(object sender, DataObjectPastingEventArgs e)
     {
+        // Check for clipboard image first (e.g., Ctrl+V after Print Screen)
+        if (e.DataObject.GetDataPresent(DataFormats.Bitmap))
+        {
+            var bitmapSource = e.DataObject.GetData(DataFormats.Bitmap) as System.Windows.Media.Imaging.BitmapSource;
+            if (bitmapSource is not null)
+            {
+                e.CancelCommand();
+                try
+                {
+                    var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder();
+                    encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmapSource));
+                    using var ms = new System.IO.MemoryStream();
+                    encoder.Save(ms);
+                    _aiOperatorVm.AddImageFromBytes("Pasted image", ms.ToArray());
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Paste image failed: {ex.Message}");
+                }
+                return;
+            }
+        }
+
+        // Fall back to text paste handling
         if (e.DataObject.GetDataPresent(DataFormats.UnicodeText))
         {
             var text = e.DataObject.GetData(DataFormats.UnicodeText) as string;

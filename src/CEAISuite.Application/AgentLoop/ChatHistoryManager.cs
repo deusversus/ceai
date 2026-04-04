@@ -35,6 +35,16 @@ public sealed class ChatHistoryManager
             _messages.Add(new ChatMessage(ChatRole.User, content));
     }
 
+    /// <summary>Add a user message with mixed content (text + images), optionally appending dynamic context.</summary>
+    public void AddUserMessage(IList<AIContent> contents, string? contextSuffix = null)
+    {
+        if (contextSuffix is not null)
+            contents.Add(new TextContent($"\n\n{contextSuffix}"));
+
+        lock (_lock)
+            _messages.Add(new ChatMessage(ChatRole.User, contents));
+    }
+
     /// <summary>Add an assistant message (may contain text + FunctionCallContent).</summary>
     public void AddAssistantMessage(ChatMessage message)
     {

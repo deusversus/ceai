@@ -145,6 +145,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IDispatcherService, DispatcherService>();
         services.AddSingleton<IClipboardService, ClipboardService>();
         services.AddSingleton<IThemeService, ThemeService>();
+        services.AddSingleton<IAiContextService, AiContextService>();
         services.AddSingleton<NavigationService>();
         services.AddSingleton<INavigationService>(sp => sp.GetRequiredService<NavigationService>());
 

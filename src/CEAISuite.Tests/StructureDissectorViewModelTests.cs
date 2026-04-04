@@ -14,7 +14,9 @@ public class StructureDissectorViewModelTests
     private StructureDissectorViewModel CreateVm()
     {
         var dissectorService = new StructureDissectorService(_engineFacade);
-        return new StructureDissectorViewModel(dissectorService, _processContext, _outputLog, _clipboard);
+        var addressTableService = new AddressTableService(_engineFacade);
+        return new StructureDissectorViewModel(dissectorService, _processContext, _outputLog, _clipboard,
+            new StubNavigationService(), addressTableService, new StubAiContextService());
     }
 
     [Fact]

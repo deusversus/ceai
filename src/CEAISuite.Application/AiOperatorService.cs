@@ -15,6 +15,9 @@ public sealed record AiChatMessage(string Role, string Content, DateTimeOffset T
     public List<AiToolCallInfo>? ToolCalls { get; init; }
     /// <summary>Tool results returned during this message (null if none).</summary>
     public List<AiToolResultInfo>? ToolResults { get; init; }
+    /// <summary>Image data attached to this message (for display purposes). Not serialized to chat store.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<byte[]>? ImageDataList { get; init; }
 }
 
 public sealed record AiToolCallInfo(string CallId, string Name, string? ArgumentsJson);
@@ -608,6 +611,33 @@ public sealed class AiOperatorService
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
     }
 
+    /// <summary>
+    /// Adds a user message with images to both display history and the LLM history.
+    /// The text portion is stored in display history; images are added to the LLM
+    /// ChatMessage as DataContent so vision-capable models can see them.
+    /// </summary>
+    public void AddUserMessageWithImages(string textPart, IList<(byte[] Data, string MediaType)> images)
+    {
+        // Display history only stores text (images are too large to serialize)
+        var imageLabels = string.Join(", ", images.Select((img, i) => $"[Image {i + 1}: {img.MediaType}, {img.Data.Length / 1024}KB]"));
+        _displayHistory.Add(new AiChatMessage("user", $"{textPart}\n{imageLabels}", DateTimeOffset.UtcNow)
+        {
+            ImageDataList = images.Select(i => i.Data).ToList()
+        });
+
+        // Build mixed-content message for the LLM
+        var contents = new List<Microsoft.Extensions.AI.AIContent>();
+        if (!string.IsNullOrWhiteSpace(textPart))
+            contents.Add(new Microsoft.Extensions.AI.TextContent(textPart));
+        foreach (var (data, mediaType) in images)
+            contents.Add(new Microsoft.Extensions.AI.DataContent(data, mediaType));
+
+        _historyManager?.AddUserMessage(contents);
+    }
+
+    /// <summary>Pending image data keyed by chat message for later UI display.</summary>
+    private readonly Dictionary<string, List<byte[]>> _messageImages = new();
+
     public ChannelReader<AgentStreamEvent> SendMessageStreamingAsync(
         string userMessage, CancellationToken cancellationToken = default)
     {
@@ -724,7 +754,7 @@ public sealed class AiOperatorService
                     await outerChannel.Writer.WriteAsync(evt, cancellationToken);
                 }
 
-                // Pending images — inject into the history and run additional loop turns
+                // Pending images — inject as DataContent so vision-capable models can analyze them
                 if (_toolFunctions is not null)
                 {
                     int imagesProcessed = 0;
@@ -733,10 +763,19 @@ public sealed class AiOperatorService
                     {
                         imagesProcessed++;
                         UpdateStatus($"Analyzing screenshot ({imagesProcessed})...");
-                        // For the new loop, inject the image as a user message and run another loop
-                        var imageDesc = $"[Screenshot: {img.Description}]";
-                        var imageReader = _agentLoop!.RunStreamingAsync(
-                            imageDesc, _historyManager!, _contextProvider,
+
+                        // Build mixed-content user message with actual image bytes
+                        var imageContents = new List<Microsoft.Extensions.AI.AIContent>
+                        {
+                            new Microsoft.Extensions.AI.TextContent(
+                                $"[Screenshot: {img.Description}] Analyze this screenshot of the target process window."),
+                            new Microsoft.Extensions.AI.DataContent(img.PngData, "image/png")
+                        };
+                        _historyManager!.AddUserMessage(imageContents);
+
+                        // Run the agent loop on existing history (message already added)
+                        var imageReader = _agentLoop!.RunStreamingContinueAsync(
+                            _historyManager!, _contextProvider,
                             _loadedCategories, cancellationToken);
                         await foreach (var evt in imageReader.ReadAllAsync(cancellationToken))
                         {

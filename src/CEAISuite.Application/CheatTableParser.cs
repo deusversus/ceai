@@ -130,6 +130,15 @@ public sealed class CheatTableParser
                 continue;
             }
 
+            // CE inheritance: children inherit ShowAsHex / DropDownList from their parent group
+            // when the child entry itself doesn't explicitly set them.
+            var effectiveShowAsHex = entry.ShowAsHex || (parent?.ShowAsHex ?? false);
+            var effectiveDropDown = entry.DropDownList is not null
+                ? new Dictionary<int, string>(entry.DropDownList)
+                : parent?.DropDownList is not null
+                    ? new Dictionary<int, string>(parent.DropDownList)
+                    : null;
+
             var node = new AddressTableNode($"ct-{entry.Id}", entry.Description, false)
             {
                 Address = entry.Address,
@@ -142,8 +151,8 @@ public sealed class CheatTableParser
                 AssemblerScript = entry.AssemblerScript,
                 Parent = parent,
                 ShowAsSigned = entry.ShowAsSigned,
-                ShowAsHex = entry.ShowAsHex,
-                DropDownList = entry.DropDownList is not null ? new Dictionary<int, string>(entry.DropDownList) : null
+                ShowAsHex = effectiveShowAsHex,
+                DropDownList = effectiveDropDown
             };
 
             // Import any children
@@ -279,12 +288,15 @@ public sealed class CheatTableParser
                 if (colonIdx <= 0) continue;
                 var valueStr = line[..colonIdx].Trim();
                 var name = line[(colonIdx + 1)..].Trim();
-                // CE dropdown values can be decimal or hex (with 0x prefix or matching ShowAsHex)
-                if (int.TryParse(valueStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
-                    dropDownList.TryAdd(intVal, name);
-                else if (valueStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                // CE dropdown values: when ShowAsHex=1, bare values (no 0x prefix) are hex.
+                // Always handle explicit 0x prefix first, then context-dependent parsing.
+                if (valueStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                     && int.TryParse(valueStr[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexVal))
                     dropDownList.TryAdd(hexVal, name);
+                else if (showAsHex && int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var showHexVal))
+                    dropDownList.TryAdd(showHexVal, name);
+                else if (int.TryParse(valueStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
+                    dropDownList.TryAdd(intVal, name);
                 else if (int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rawHexVal))
                     dropDownList.TryAdd(rawHexVal, name);
             }

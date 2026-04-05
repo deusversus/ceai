@@ -430,7 +430,7 @@
                     <avalonDock:LayoutPanel Orientation="Vertical" DockWidth="*">
                         <avalonDock:LayoutDocumentPane DockHeight="*">
                             <avalonDock:LayoutDocument Title="Address Table" ContentId="addressTable">
-                                <DockPanel x:Name="AddressTableContent" Background="{DynamicResource SidebarBackground}">
+                                <DockPanel x:Name="AddressTableContent" Background="{DynamicResource SidebarBackground}" Grid.IsSharedSizeScope="True">
                                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
                                         <TextBlock Text="ADDRESS TABLE" FontSize="11" FontWeight="SemiBold"
                                                    Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
@@ -446,28 +446,37 @@
                                         <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
                                     </StackPanel>
-                                    <!-- Column headers (clickable for sorting) -->
+                                    <!-- Column headers (clickable for sorting, drag-resizable via GridSplitters) -->
                                     <Grid DockPanel.Dock="Top" Margin="22,0,0,2">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="28" />
-                                            <ColumnDefinition Width="24" />
-                                            <ColumnDefinition Width="200" />
-                                            <ColumnDefinition Width="160" />
-                                            <ColumnDefinition Width="70" />
-                                            <ColumnDefinition Width="140" />
+                                            <ColumnDefinition Width="28" SharedSizeGroup="ATChk" />
+                                            <ColumnDefinition Width="24" SharedSizeGroup="ATIcon" />
+                                            <ColumnDefinition Width="200" MinWidth="60" SharedSizeGroup="ATDesc" />
+                                            <ColumnDefinition Width="Auto" /><!-- splitter -->
+                                            <ColumnDefinition Width="160" MinWidth="60" SharedSizeGroup="ATAddr" />
+                                            <ColumnDefinition Width="Auto" /><!-- splitter -->
+                                            <ColumnDefinition Width="100" MinWidth="40" SharedSizeGroup="ATType" />
+                                            <ColumnDefinition Width="Auto" /><!-- splitter -->
+                                            <ColumnDefinition Width="*" MinWidth="60" SharedSizeGroup="ATVal" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Grid.Column="0" Text="" FontSize="11" />
                                         <TextBlock Grid.Column="1" Text="" FontSize="11" />
                                         <TextBlock Grid.Column="2" Text="Description" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Label"
                                                    ToolTip="Click to sort by description" />
-                                        <TextBlock Grid.Column="3" Text="Address" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
+                                        <GridSplitter Grid.Column="3" Width="3" Background="Transparent" Cursor="SizeWE"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+                                        <TextBlock Grid.Column="4" Text="Address" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Address"
                                                    ToolTip="Click to sort by address" />
-                                        <TextBlock Grid.Column="4" Text="Type" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
+                                        <GridSplitter Grid.Column="5" Width="3" Background="Transparent" Cursor="SizeWE"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+                                        <TextBlock Grid.Column="6" Text="Type" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Type"
                                                    ToolTip="Click to sort by data type" />
-                                        <TextBlock Grid.Column="5" Text="Value" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
+                                        <GridSplitter Grid.Column="7" Width="3" Background="Transparent" Cursor="SizeWE"
+                                                      HorizontalAlignment="Center" VerticalAlignment="Stretch" />
+                                        <TextBlock Grid.Column="8" Text="Value" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Value"
                                                    ToolTip="Click to sort by value" />
                                     </Grid>
@@ -537,25 +546,29 @@
                                                 <Grid Margin="2" ToolTip="{Binding StatusTooltip}"
                                                       Background="{Binding RowBackground, Converter={StaticResource BrushConv}}">
                                                     <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="28" />
-                                                        <ColumnDefinition Width="24" />
-                                                        <ColumnDefinition Width="200" />
-                                                        <ColumnDefinition Width="160" />
-                                                        <ColumnDefinition Width="70" />
-                                                        <ColumnDefinition Width="140" />
+                                                        <ColumnDefinition SharedSizeGroup="ATChk" />
+                                                        <ColumnDefinition SharedSizeGroup="ATIcon" />
+                                                        <ColumnDefinition SharedSizeGroup="ATDesc" />
+                                                        <ColumnDefinition Width="3" /><!-- splitter gap -->
+                                                        <ColumnDefinition SharedSizeGroup="ATAddr" />
+                                                        <ColumnDefinition Width="3" /><!-- splitter gap -->
+                                                        <ColumnDefinition SharedSizeGroup="ATType" />
+                                                        <ColumnDefinition Width="3" /><!-- splitter gap -->
+                                                        <ColumnDefinition SharedSizeGroup="ATVal" />
                                                     </Grid.ColumnDefinitions>
                                                     <CheckBox Grid.Column="0"
                                                               IsChecked="{Binding IsActive, Mode=TwoWay}"
                                                               Click="ActiveCheckBox_Click"
                                                               VerticalAlignment="Center" />
                                                     <TextBlock Grid.Column="1" Text="{Binding DisplayIcon}" />
-                                                    <TextBlock Grid.Column="2" Text="{Binding Label}" FontWeight="SemiBold" />
-                                                    <TextBlock Grid.Column="3" Text="{Binding DisplayAddress}" Foreground="{DynamicResource AccentForeground}" />
-                                                    <TextBlock Grid.Column="4" Text="{Binding DisplayType}" Foreground="{DynamicResource SecondaryForeground}" />
-                                                    <TextBlock Grid.Column="5"
+                                                    <TextBlock Grid.Column="2" Text="{Binding Label}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="4" Text="{Binding DisplayAddress}" Foreground="{DynamicResource AccentForeground}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="6" Text="{Binding DisplayType}" Foreground="{DynamicResource SecondaryForeground}" TextTrimming="CharacterEllipsis" />
+                                                    <TextBlock Grid.Column="8"
                                                                Text="{Binding DisplayValue}"
                                                                Foreground="{Binding ValueForeground, Converter={StaticResource BrushConv}}"
-                                                               FontWeight="{Binding DisplayValueWeight}" />
+                                                               FontWeight="{Binding DisplayValueWeight}"
+                                                               TextTrimming="CharacterEllipsis" />
                                                 </Grid>
                                             </HierarchicalDataTemplate>
                                         </TreeView.ItemTemplate>

@@ -20,7 +20,9 @@ public sealed record CheatTableEntry(
     IReadOnlyList<CheatTableEntry> Children,
     bool ShowAsSigned = true,
     bool ShowAsHex = false,
-    IReadOnlyDictionary<int, string>? DropDownList = null);
+    IReadOnlyDictionary<int, string>? DropDownList = null,
+    string? DropDownListLink = null,
+    string? RawDropDownText = null);
 
 /// <summary>
 /// Represents a parsed Cheat Engine .CT file.
@@ -86,10 +88,55 @@ public sealed class CheatTableParser
     /// </summary>
     public IReadOnlyList<AddressTableNode> ToAddressTableNodes(CheatTableFile ctFile)
     {
-        return ConvertToNodes(ctFile.Entries);
+        // Build a global lookup of Description → raw DropDownList text for resolving <DropDownListLink>.
+        // CE allows entries to reference another entry's dropdown by its description (e.g., "[List]Item ID").
+        // We store raw text and re-parse with the consumer's ShowAsHex so ambiguous values like "2904"
+        // are correctly interpreted as hex when the consuming entry has ShowAsHex=1.
+        var dropDownRawLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        BuildDropDownRawLookup(ctFile.Entries, dropDownRawLookup);
+        return ConvertToNodes(ctFile.Entries, null, dropDownRawLookup);
     }
 
-    private static List<AddressTableNode> ConvertToNodes(IReadOnlyList<CheatTableEntry> entries, AddressTableNode? parent = null)
+    /// <summary>Recursively collect raw DropDownList text from all entries, keyed by cleaned description.
+    /// Raw text is stored so linked consumers can re-parse with their own ShowAsHex context.</summary>
+    private static void BuildDropDownRawLookup(IReadOnlyList<CheatTableEntry> entries, Dictionary<string, string> lookup)
+    {
+        foreach (var entry in entries)
+        {
+            if (!string.IsNullOrEmpty(entry.RawDropDownText))
+                lookup.TryAdd(entry.Description, entry.RawDropDownText);
+            BuildDropDownRawLookup(entry.Children, lookup);
+        }
+    }
+
+    /// <summary>Parse CE dropdown text ("value:name\n...") into int→string map, interpreting values as hex when showAsHex is true.</summary>
+    internal static Dictionary<int, string>? ParseDropDownText(string? text, bool showAsHex)
+    {
+        if (string.IsNullOrEmpty(text)) return null;
+        var dict = new Dictionary<int, string>();
+        foreach (var line in text.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            var colonIdx = line.IndexOf(':');
+            if (colonIdx <= 0) continue;
+            var valueStr = line[..colonIdx].Trim();
+            var name = line[(colonIdx + 1)..].Trim();
+            if (valueStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                && int.TryParse(valueStr[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexVal))
+                dict.TryAdd(hexVal, name);
+            else if (showAsHex && int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var showHexVal))
+                dict.TryAdd(showHexVal, name);
+            else if (int.TryParse(valueStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
+                dict.TryAdd(intVal, name);
+            else if (int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rawHexVal))
+                dict.TryAdd(rawHexVal, name);
+        }
+        return dict.Count > 0 ? dict : null;
+    }
+
+    private static List<AddressTableNode> ConvertToNodes(
+        IReadOnlyList<CheatTableEntry> entries,
+        AddressTableNode? parent,
+        Dictionary<string, string> dropDownRawLookup)
     {
         var nodes = new List<AddressTableNode>();
         foreach (var entry in entries)
@@ -107,7 +154,7 @@ public sealed class CheatTableParser
                     ShowAsHex = entry.ShowAsHex,
                     DropDownList = entry.DropDownList is not null ? new Dictionary<int, string>(entry.DropDownList) : null
                 };
-                foreach (var child in ConvertToNodes(entry.Children, group))
+                foreach (var child in ConvertToNodes(entry.Children, group, dropDownRawLookup))
                     group.Children.Add(child);
                 nodes.Add(group);
                 continue;
@@ -124,7 +171,7 @@ public sealed class CheatTableParser
                     Parent = parent
                 };
                 // Also import any children the script entry may have
-                foreach (var child in ConvertToNodes(entry.Children, scriptNode))
+                foreach (var child in ConvertToNodes(entry.Children, scriptNode, dropDownRawLookup))
                     scriptNode.Children.Add(child);
                 nodes.Add(scriptNode);
                 continue;
@@ -133,11 +180,16 @@ public sealed class CheatTableParser
             // CE inheritance: children inherit ShowAsHex / DropDownList from their parent group
             // when the child entry itself doesn't explicitly set them.
             var effectiveShowAsHex = entry.ShowAsHex || (parent?.ShowAsHex ?? false);
-            var effectiveDropDown = entry.DropDownList is not null
-                ? new Dictionary<int, string>(entry.DropDownList)
-                : parent?.DropDownList is not null
-                    ? new Dictionary<int, string>(parent.DropDownList)
-                    : null;
+
+            // Resolve DropDownList: own > DropDownListLink (re-parsed with consumer's ShowAsHex) > parent inheritance
+            Dictionary<int, string>? effectiveDropDown = null;
+            if (entry.DropDownList is { Count: > 0 })
+                effectiveDropDown = new Dictionary<int, string>(entry.DropDownList);
+            else if (entry.DropDownListLink is not null
+                     && dropDownRawLookup.TryGetValue(entry.DropDownListLink, out var rawText))
+                effectiveDropDown = ParseDropDownText(rawText, effectiveShowAsHex);
+            else if (parent?.DropDownList is not null)
+                effectiveDropDown = new Dictionary<int, string>(parent.DropDownList);
 
             var node = new AddressTableNode($"ct-{entry.Id}", entry.Description, false)
             {
@@ -156,7 +208,7 @@ public sealed class CheatTableParser
             };
 
             // Import any children
-            foreach (var child in ConvertToNodes(entry.Children, node))
+            foreach (var child in ConvertToNodes(entry.Children, node, dropDownRawLookup))
                 node.Children.Add(child);
 
             nodes.Add(node);
@@ -277,31 +329,13 @@ public sealed class CheatTableParser
         var showAsHex = el.Element("ShowAsHex")?.Value == "1";
 
         // CE DropDownList: newline-separated "value:description" pairs for value-to-name mapping
-        Dictionary<int, string>? dropDownList = null;
         var dropDownText = el.Element("DropDownList")?.Value;
-        if (!string.IsNullOrEmpty(dropDownText))
-        {
-            dropDownList = new Dictionary<int, string>();
-            foreach (var line in dropDownText.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
-            {
-                var colonIdx = line.IndexOf(':');
-                if (colonIdx <= 0) continue;
-                var valueStr = line[..colonIdx].Trim();
-                var name = line[(colonIdx + 1)..].Trim();
-                // CE dropdown values: when ShowAsHex=1, bare values (no 0x prefix) are hex.
-                // Always handle explicit 0x prefix first, then context-dependent parsing.
-                if (valueStr.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                    && int.TryParse(valueStr[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexVal))
-                    dropDownList.TryAdd(hexVal, name);
-                else if (showAsHex && int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var showHexVal))
-                    dropDownList.TryAdd(showHexVal, name);
-                else if (int.TryParse(valueStr, NumberStyles.Integer, CultureInfo.InvariantCulture, out var intVal))
-                    dropDownList.TryAdd(intVal, name);
-                else if (int.TryParse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var rawHexVal))
-                    dropDownList.TryAdd(rawHexVal, name);
-            }
-            if (dropDownList.Count == 0) dropDownList = null;
-        }
+        var dropDownList = ParseDropDownText(dropDownText, showAsHex);
+
+        // CE DropDownListLink: reference to another entry's DropDownList by description
+        var dropDownListLink = el.Element("DropDownListLink")?.Value;
+        if (dropDownListLink is not null)
+            dropDownListLink = CleanDescription(dropDownListLink);
 
         // Parse nested child entries
         var children = new List<CheatTableEntry>();
@@ -316,7 +350,7 @@ public sealed class CheatTableParser
         return new CheatTableEntry(
             id, description, address, dataType, lastValue,
             isPointer, offsets, isGroupHeader, assemblerScript, children,
-            showAsSigned, showAsHex, dropDownList);
+            showAsSigned, showAsHex, dropDownList, dropDownListLink, dropDownText);
     }
 
     private static MemoryDataType MapVariableType(string ceType) =>

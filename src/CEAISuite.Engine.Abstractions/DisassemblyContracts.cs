@@ -5,7 +5,8 @@ public sealed record DisassembledInstruction(
     string HexBytes,
     string Mnemonic,
     string Operands,
-    int Length);
+    int Length,
+    string? SymbolName = null);
 
 public sealed record DisassemblyResult(
     nuint StartAddress,

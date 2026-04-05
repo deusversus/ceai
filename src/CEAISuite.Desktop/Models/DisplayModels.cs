@@ -301,6 +301,7 @@ public sealed partial class DisassemblyLineDisplayItem : ObservableObject
     public bool IsCallOrJump { get; init; }
     public string? XrefLabel { get; init; }
     public string? ModuleOffset { get; init; }
+    public string? SymbolName { get; init; }
 
     [ObservableProperty]
     private string _comment = "";

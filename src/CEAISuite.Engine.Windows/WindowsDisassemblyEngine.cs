@@ -4,7 +4,7 @@ using Iced.Intel;
 
 namespace CEAISuite.Engine.Windows;
 
-public sealed class WindowsDisassemblyEngine : IDisassemblyEngine
+public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null) : IDisassemblyEngine
 {
     private const uint ProcessQueryInformation = 0x0400;
     private const uint ProcessVmRead = 0x0010;
@@ -76,12 +76,15 @@ public sealed class WindowsDisassemblyEngine : IDisassemblyEngine
                             operands = spaceIdx >= 0 ? formatted[(spaceIdx + 1)..].TrimStart() : "";
                         }
 
+                        var symbolName = symbolEngine?.ResolveAddress((nuint)instr.IP)?.DisplayName;
+
                         instructions.Add(new DisassembledInstruction(
                             (nuint)instr.IP,
                             hexBytes,
                             mnemonic,
                             operands,
-                            instr.Length));
+                            instr.Length,
+                            symbolName));
 
                         totalBytes += instr.Length;
                     }

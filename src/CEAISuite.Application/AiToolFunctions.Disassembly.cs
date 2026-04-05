@@ -176,7 +176,7 @@ public sealed partial class AiToolFunctions
                 protection = protectionString,
                 resolved = symbolicNote,
                 startAddress = overview.StartAddress,
-                instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
+                instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands, l.SymbolName }),
                 count = overview.Lines.Count,
                 returned = capped.Count,
                 truncated = wasTruncated,
@@ -188,7 +188,7 @@ public sealed partial class AiToolFunctions
         {
             resolved = symbolicNote,
             startAddress = overview.StartAddress,
-            instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands }),
+            instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands, l.SymbolName }),
             count = overview.Lines.Count,
             returned = capped.Count,
             truncated = wasTruncated,

@@ -324,7 +324,8 @@ public partial class DisassemblerViewModel : ObservableObject
                     Mnemonic = instr.Mnemonic,
                     Operands = instr.Operands,
                     IsCallOrJump = isCallJmp,
-                    ModuleOffset = ResolveModuleOffset(instr.Address, modules),
+                    SymbolName = instr.SymbolName,
+                    ModuleOffset = instr.SymbolName ?? ResolveModuleOffset(instr.Address, modules),
                     XrefLabel = isCallJmp ? ResolveXrefTarget(instr.Operands, modules) : null
                 };
 

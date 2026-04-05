@@ -7,7 +7,8 @@ public sealed record DisassemblyLineOverview(
     string Address,
     string HexBytes,
     string Mnemonic,
-    string Operands);
+    string Operands,
+    string? SymbolName = null);
 
 public sealed record DisassemblyOverview(
     string StartAddress,
@@ -31,7 +32,8 @@ public sealed class DisassemblyService(IDisassemblyEngine disassemblyEngine)
                     $"0x{instr.Address:X}",
                     instr.HexBytes,
                     instr.Mnemonic,
-                    instr.Operands))
+                    instr.Operands,
+                    instr.SymbolName))
             .ToArray();
 
         return new DisassemblyOverview(

@@ -48,7 +48,9 @@ public partial class App : System.Windows.Application
         // ── Engine implementations (singletons) ──
         services.AddSingleton<IEngineFacade, WindowsEngineFacade>();
         services.AddSingleton<IScanEngine, WindowsScanEngine>();
-        services.AddSingleton<IDisassemblyEngine, WindowsDisassemblyEngine>();
+        services.AddSingleton<ISymbolEngine, WindowsSymbolEngine>();
+        services.AddSingleton<IDisassemblyEngine>(sp =>
+            new WindowsDisassemblyEngine(sp.GetRequiredService<ISymbolEngine>()));
         services.AddSingleton<IBreakpointEngine, WindowsBreakpointEngine>();
         services.AddSingleton<IAutoAssemblerEngine, WindowsAutoAssemblerEngine>();
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();

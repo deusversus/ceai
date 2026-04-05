@@ -730,7 +730,7 @@
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Address" Width="130" DisplayMemberBinding="{Binding Address}" />
-                                                <GridViewColumn Header="Module" Width="140" DisplayMemberBinding="{Binding ModuleOffset}" />
+                                                <GridViewColumn Header="Symbol" Width="180" DisplayMemberBinding="{Binding ModuleOffset}" />
                                                 <GridViewColumn Header="Bytes" Width="120" DisplayMemberBinding="{Binding HexBytes}" />
                                                 <GridViewColumn Header="Mnemonic" Width="80" DisplayMemberBinding="{Binding Mnemonic}" />
                                                 <GridViewColumn Header="Operands" Width="200" DisplayMemberBinding="{Binding Operands}" />

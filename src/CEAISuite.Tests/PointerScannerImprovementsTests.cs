@@ -200,4 +200,35 @@ public class PointerScannerImprovementsTests
         var service = new PointerScannerService(new StubEngineFacade());
         Assert.False(service.CanResume);
     }
+
+    // ── Edge-case tests ──
+
+    [Fact]
+    public async Task LoadPointerMap_NonExistentFile_Throws()
+    {
+        var bogusPath = Path.Combine(Path.GetTempPath(), $"nonexistent_{Guid.NewGuid():N}.ptr");
+        await Assert.ThrowsAsync<FileNotFoundException>(
+            () => PointerScannerService.LoadPointerMapAsync(bogusPath));
+    }
+
+    [Fact]
+    public async Task SaveLoadRoundTrip_EmptyPaths()
+    {
+        var tmpPath = Path.Combine(Path.GetTempPath(), $"empty_ptr_{Guid.NewGuid():N}.ptr");
+        try
+        {
+            var original = new PointerMapFile("game.exe", (nuint)0x50000, DateTimeOffset.UtcNow, 3, 0x2000,
+                Array.Empty<PointerPath>());
+
+            await PointerScannerService.SavePointerMapAsync(tmpPath, original);
+            var loaded = await PointerScannerService.LoadPointerMapAsync(tmpPath);
+
+            Assert.Equal(original.TargetProcess, loaded.TargetProcess);
+            Assert.Empty(loaded.Paths);
+        }
+        finally
+        {
+            if (File.Exists(tmpPath)) File.Delete(tmpPath);
+        }
+    }
 }

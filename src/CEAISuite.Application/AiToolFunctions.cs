@@ -195,12 +195,19 @@ public sealed partial class AiToolFunctions(
     [Description("Refine previous scan with a new constraint.")]
     public async Task<string> RefineScan(
         [Description("Scan type: ExactValue, Increased, Decreased, Changed, Unchanged")] string scanType,
-        [Description("Value to match (for ExactValue) or empty")] string? value)
+        [Description("Value to match (for ExactValue) or empty")] string? value,
+        [Description("Scan alignment in bytes (0=auto, 1/2/4/8). Default: 0")] int alignment = 0,
+        [Description("Float comparison tolerance. Default: null (exact match)")] float? floatEpsilon = null,
+        [Description("Only scan writable regions. Default: true")] bool writableOnly = true)
     {
         try
         {
             var st = Enum.Parse<ScanType>(scanType, ignoreCase: true);
-            var overview = await scanService.RefineScanAsync(st, value ?? "");
+            var options = new ScanOptions(
+                Alignment: alignment,
+                FloatEpsilon: floatEpsilon,
+                WritableOnly: writableOnly);
+            var overview = await scanService.RefineScanAsync(st, value ?? "", options);
             var topResults = overview.Results.Take(10)
                 .Select(r => $"  {r.Address} = {r.CurrentValue} (was {r.PreviousValue})");
             return $"Refinement complete: {overview.ResultCount:N0} results remaining.\n{string.Join('\n', topResults)}";

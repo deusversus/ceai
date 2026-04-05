@@ -144,4 +144,35 @@ public class BreakpointImprovementsTests
         Assert.Single(result.Entries);
         Assert.Equal("nop", result.Entries[0].Disassembly);
     }
+
+    // ── Edge-case tests ──
+
+    [Fact]
+    public async Task RemoveConditionalBreakpoint_ClearsCondition()
+    {
+        var engine = new StubBreakpointEngine();
+        var condition = new BreakpointCondition("RAX == 0x1000", BreakpointConditionType.RegisterCompare);
+
+        var bp = await engine.SetConditionalBreakpointAsync(
+            1234, (nuint)0x5000, BreakpointType.HardwareExecute, condition);
+
+        var removed = await engine.RemoveBreakpointAsync(1234, bp.Id);
+        Assert.True(removed);
+
+        var remaining = await engine.ListBreakpointsAsync(1234);
+        Assert.DoesNotContain(remaining, b => b.Id == bp.Id);
+    }
+
+    [Fact]
+    public async Task TraceFromBreakpoint_DefaultResult_EmptyEntries()
+    {
+        var engine = new StubBreakpointEngine();
+        // No NextTraceResult set — uses default empty trace
+
+        var result = await engine.TraceFromBreakpointAsync(1234, (nuint)0x1000);
+
+        Assert.Empty(result.Entries);
+        Assert.False(result.MaxDepthReached);
+        Assert.False(result.WasTruncated);
+    }
 }

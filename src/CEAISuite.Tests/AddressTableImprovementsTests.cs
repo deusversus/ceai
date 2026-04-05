@@ -157,6 +157,7 @@ public class AddressTableImprovementsTests
 
         // No crash, no change — groups are ignored
         Assert.True(group.IsGroup);
+        Assert.True(string.IsNullOrEmpty(group.CurrentValue));
     }
 
     // ── 7D.4: Group Activation ──
@@ -281,5 +282,34 @@ public class AddressTableImprovementsTests
         vm.ConfigureDropDownCommand.Execute(null);
 
         Assert.Null(node.DropDownList);
+    }
+
+    // ── Edge-case tests ──
+
+    [Fact]
+    public async Task IncreaseValue_Int32Max_Wraps()
+    {
+        var (vm, svc) = Create();
+        var node = MakeLeaf(value: int.MaxValue.ToString());
+        svc.Roots.Add(node);
+        vm.SelectedNode = node;
+
+        await vm.IncreaseValueCommand.ExecuteAsync(null);
+
+        // Should wrap to Int32.MinValue or handle gracefully
+        Assert.NotEqual(int.MaxValue.ToString(), node.CurrentValue);
+    }
+
+    [Fact]
+    public async Task DecreaseValue_AtZero()
+    {
+        var (vm, svc) = Create();
+        var node = MakeLeaf(value: "0");
+        svc.Roots.Add(node);
+        vm.SelectedNode = node;
+
+        await vm.DecreaseValueCommand.ExecuteAsync(null);
+
+        Assert.Equal("-1", node.CurrentValue);
     }
 }

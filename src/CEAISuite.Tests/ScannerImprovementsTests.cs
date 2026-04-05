@@ -21,6 +21,9 @@ public class ScannerImprovementsTests
             progressReporter);
 
         Assert.NotEmpty(stub.ReportedProgress);
+        Assert.Equal(1, stub.ReportedProgress[0].RegionsCompleted);
+        Assert.Equal(1, stub.ReportedProgress[0].TotalRegions);
+        Assert.Equal(1024, stub.ReportedProgress[0].BytesScanned);
     }
 
     // ── 7A.2: Alignment ──
@@ -169,10 +172,20 @@ public class ScannerImprovementsTests
     // ── 7A.10: BitChanged ──
 
     [Fact]
-    public void BitChanged_ScanTypeExists()
+    public async Task BitChanged_ScanPassesTypeToEngine()
     {
-        var scanType = ScanType.BitChanged;
-        Assert.Equal(ScanType.BitChanged, scanType);
+        var stub = new StubScanEngine();
+        var svc = new ScanService(stub);
+
+        stub.NextScanResult = new ScanResultSet("s", 1,
+            new ScanConstraints(MemoryDataType.Int32, ScanType.BitChanged, null),
+            new List<ScanResultEntry> { new((nuint)0x1000, "0xFF", null, new byte[] { 0xFF, 0, 0, 0 }) },
+            10, 40960, DateTimeOffset.UtcNow);
+
+        var overview = await svc.StartScanAsync(1, MemoryDataType.Int32, ScanType.BitChanged, null);
+
+        Assert.Equal(1, overview.ResultCount);
+        Assert.Equal(ScanType.BitChanged.ToString(), overview.ScanType);
     }
 
     // ── 7A.11: Custom Type Definitions ──
@@ -191,8 +204,16 @@ public class ScannerImprovementsTests
         });
 
         svc.RegisterCustomType(customType);
-        // No exception = success
+
+        var retrieved = svc.GetCustomType("Vec3");
+        Assert.NotNull(retrieved);
+        Assert.Equal("Vec3", retrieved!.Name);
+        Assert.Equal(12, retrieved.SizeBytes);
+        Assert.Equal(3, retrieved.Fields.Count);
+        Assert.Equal("X", retrieved.Fields[0].Name);
+
         svc.UnregisterCustomType("Vec3");
+        Assert.Null(svc.GetCustomType("Vec3"));
     }
 
     // ── Service-level ScanOptions wiring ──
@@ -292,5 +313,27 @@ public class ScannerImprovementsTests
     {
         var options = new ScanOptions(IncludeMemoryMappedFiles: true);
         Assert.True(options.IncludeMemoryMappedFiles);
+    }
+
+    // ── Edge-case tests ──
+
+    [Fact]
+    public async Task Alignment_NegativeValue_PassedToEngine()
+    {
+        var stub = new StubScanEngine();
+        var svc = new ScanService(stub);
+
+        await svc.StartScanAsync(1, MemoryDataType.Int32, ScanType.ExactValue, "1",
+            new ScanOptions(Alignment: -1));
+
+        Assert.NotNull(stub.LastOptions);
+        Assert.Equal(-1, stub.LastOptions!.Alignment);
+    }
+
+    [Fact]
+    public void MaxThreads_DefaultIsZero()
+    {
+        var options = new ScanOptions();
+        Assert.Equal(0, options.MaxThreads);
     }
 }

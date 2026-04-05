@@ -11,7 +11,9 @@ public sealed record BreakpointOverview(
     string HitAction,
     bool IsEnabled,
     int HitCount,
-    string Mode = "Hardware");
+    string Mode = "Hardware",
+    string? Condition = null,
+    int? ThreadFilter = null);
 
 public sealed record BreakpointHitOverview(
     string BreakpointId,
@@ -180,7 +182,8 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
     }
 
     private static BreakpointOverview ToOverview(BreakpointDescriptor bp) =>
-        new(bp.Id, $"0x{bp.Address:X}", bp.Type.ToString(), bp.HitAction.ToString(), bp.IsEnabled, bp.HitCount, bp.Mode.ToString());
+        new(bp.Id, $"0x{bp.Address:X}", bp.Type.ToString(), bp.HitAction.ToString(), bp.IsEnabled, bp.HitCount,
+            bp.Mode.ToString(), bp.Condition?.Expression, bp.ThreadFilter);
 
     private static nuint ParseAddress(string addressText)
     {

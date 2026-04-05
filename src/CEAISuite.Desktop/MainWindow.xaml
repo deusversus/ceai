@@ -1142,6 +1142,15 @@
                                                       ToolTip="Display scan results in hexadecimal" />
                                             <CheckBox Content="Writable only" IsChecked="{Binding WritableOnly}" VerticalAlignment="Center" FontSize="11" Margin="0,0,8,0"
                                                       ToolTip="Only scan writable memory regions" />
+                                            <TextBlock Text="Align:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0" />
+                                            <ComboBox SelectedValue="{Binding Alignment}" SelectedValuePath="Tag" FontSize="11" Width="60" VerticalContentAlignment="Center" Margin="0,0,8,0"
+                                                      ToolTip="Scan alignment in bytes (Auto = use value size)">
+                                                <ComboBoxItem Tag="0" Content="Auto" IsSelected="True" />
+                                                <ComboBoxItem Tag="1" Content="1" />
+                                                <ComboBoxItem Tag="2" Content="2" />
+                                                <ComboBoxItem Tag="4" Content="4" />
+                                                <ComboBoxItem Tag="8" Content="8" />
+                                            </ComboBox>
                                             <TextBlock Text="Epsilon:" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" FontSize="11" Margin="0,0,4,0" />
                                             <TextBox Width="60" Text="{Binding FloatEpsilon, UpdateSourceTrigger=PropertyChanged}" FontSize="11" VerticalContentAlignment="Center" Padding="4,2"
                                                      Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
@@ -1252,6 +1261,18 @@
                                                 <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0" Command="{Binding RemoveSelectedCommand}" />
                                                 <Button Content="Remove All" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RemoveAllCommand}" />
                                             </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Margin="8,2,8,4">
+                                                <TextBox Text="{Binding ConditionalBpAddress, UpdateSourceTrigger=PropertyChanged}" Width="100" FontSize="11" VerticalContentAlignment="Center"
+                                                         Padding="4,2" ToolTip="Address (hex)" Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}"
+                                                         BorderBrush="{DynamicResource InputBorder}" />
+                                                <TextBox Text="{Binding ConditionExpression, UpdateSourceTrigger=PropertyChanged}" Width="140" FontSize="11" VerticalContentAlignment="Center"
+                                                         Padding="4,2" Margin="4,0,0,0" ToolTip="Condition (e.g. RAX==100, [0x1000]!=0, hitcount>=5)"
+                                                         Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}" BorderBrush="{DynamicResource InputBorder}" />
+                                                <TextBox Text="{Binding ThreadFilterText, UpdateSourceTrigger=PropertyChanged}" Width="50" FontSize="11" VerticalContentAlignment="Center"
+                                                         Padding="4,2" Margin="4,0,0,0" ToolTip="Thread ID (optional)"
+                                                         Background="{DynamicResource InputBackground}" Foreground="{DynamicResource InputForeground}" BorderBrush="{DynamicResource InputBorder}" />
+                                                <Button Content="Set Conditional BP" FontSize="11" Margin="4,0,0,0" Command="{Binding SetConditionalBreakpointCommand}" />
+                                            </StackPanel>
                                             <ListView Grid.Row="1" ItemsSource="{Binding Breakpoints}" SelectedItem="{Binding SelectedBreakpoint}"
                                                       Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
                                                 <ListView.View>
@@ -1260,6 +1281,8 @@
                                                         <GridViewColumn Header="Type" Width="90" DisplayMemberBinding="{Binding Type}" />
                                                         <GridViewColumn Header="Mode" Width="80" DisplayMemberBinding="{Binding Mode}" />
                                                         <GridViewColumn Header="Hits" Width="50" DisplayMemberBinding="{Binding HitCount}" />
+                                                        <GridViewColumn Header="Condition" Width="120" DisplayMemberBinding="{Binding Condition}" />
+                                                        <GridViewColumn Header="Thread" Width="50" DisplayMemberBinding="{Binding ThreadFilter}" />
                                                         <GridViewColumn Header="Status" Width="70" DisplayMemberBinding="{Binding Status}" />
                                                     </GridView>
                                                 </ListView.View>

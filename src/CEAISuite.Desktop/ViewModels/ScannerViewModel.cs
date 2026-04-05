@@ -63,8 +63,10 @@ public partial class ScannerViewModel : ObservableObject
     [ObservableProperty] private bool _showAsHex;
     [ObservableProperty] private string? _floatEpsilon;
     [ObservableProperty] private bool _writableOnly = true;
+    [ObservableProperty] private int _alignment;
 
     private ScanOptions BuildScanOptions() => new(
+        Alignment: Alignment,
         WritableOnly: WritableOnly,
         FloatEpsilon: float.TryParse(FloatEpsilon, System.Globalization.NumberStyles.Float,
             System.Globalization.CultureInfo.InvariantCulture, out var eps) ? eps : null,

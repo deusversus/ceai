@@ -31,6 +31,7 @@ public sealed class ScanService(IScanEngine scanEngine)
 
     public void RegisterCustomType(CustomTypeDefinition typeDef) => _customTypes[typeDef.Name] = typeDef;
     public void UnregisterCustomType(string name) => _customTypes.Remove(name);
+    public CustomTypeDefinition? GetCustomType(string name) => _customTypes.TryGetValue(name, out var t) ? t : null;
 
     public ScanResultSet? LastScanResults => _lastScanResults;
 

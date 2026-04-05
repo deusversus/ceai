@@ -176,6 +176,8 @@ public sealed class BreakpointDisplayItem
     public string Mode { get; init; } = "";
     public int HitCount { get; init; }
     public string Status { get; init; } = "";
+    public string Condition { get; init; } = "";
+    public string ThreadFilter { get; init; } = "";
 }
 
 public sealed class HitLogDisplayItem

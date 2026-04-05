@@ -80,7 +80,9 @@ public partial class DebuggerViewModel : ObservableObject
                     Type = bp.Type,
                     Mode = bp.Mode,
                     HitCount = bp.HitCount,
-                    Status = bp.IsEnabled ? "Armed" : "Disabled"
+                    Status = bp.IsEnabled ? "Armed" : "Disabled",
+                    Condition = bp.Condition ?? "",
+                    ThreadFilter = bp.ThreadFilter?.ToString() ?? ""
                 });
             }
             StatusText = $"{ActiveBreakpoints.Count} breakpoint(s)";
@@ -195,6 +197,48 @@ public partial class DebuggerViewModel : ObservableObject
         {
             StatusText = $"Trace error: {ex.Message}";
             _outputLog.Append("Debugger", "Error", $"Trace failed: {ex.Message}");
+        }
+    }
+
+    // ── Conditional Breakpoint UI ──
+
+    [ObservableProperty] private string _conditionExpression = "";
+    [ObservableProperty] private string _threadFilterText = "";
+    [ObservableProperty] private string _conditionalBpAddress = "";
+
+    [RelayCommand]
+    private async Task SetConditionalBreakpointAsync()
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+        if (string.IsNullOrWhiteSpace(ConditionalBpAddress)) { StatusText = "Enter an address."; return; }
+        if (string.IsNullOrWhiteSpace(ConditionExpression)) { StatusText = "Enter a condition expression."; return; }
+
+        try
+        {
+            var condType = ConditionExpression.TrimStart('[') switch
+            {
+                _ when ConditionExpression.StartsWith('[') => BreakpointConditionType.MemoryCompare,
+                _ when ConditionExpression.StartsWith("hitcount", StringComparison.OrdinalIgnoreCase) => BreakpointConditionType.HitCount,
+                _ => BreakpointConditionType.RegisterCompare
+            };
+            var condition = new BreakpointCondition(ConditionExpression, condType);
+            int? threadFilter = int.TryParse(ThreadFilterText, out var tf) ? tf : null;
+
+            var bp = await _breakpointService.SetConditionalBreakpointAsync(
+                pid.Value, ConditionalBpAddress, BreakpointType.HardwareExecute, condition,
+                threadFilter: threadFilter);
+
+            StatusText = $"Conditional breakpoint set at {bp.Address}";
+            _outputLog.Append("Debugger", "Info",
+                $"Conditional BP at {bp.Address}: {ConditionExpression}" +
+                (threadFilter.HasValue ? $" (thread {threadFilter})" : ""));
+            await RefreshBreakpointsAsync();
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Error: {ex.Message}";
+            _outputLog.Append("Debugger", "Error", $"SetConditionalBreakpoint failed: {ex.Message}");
         }
     }
 

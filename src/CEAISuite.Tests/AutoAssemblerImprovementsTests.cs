@@ -102,7 +102,7 @@ public class AutoAssemblerImprovementsTests
     public void StrictMode_DetectedByRegex()
     {
         var line = "{$strict}";
-        Assert.True(line.Equals("{$strict}", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal("{$strict}", line, ignoreCase: true);
     }
 
     [Fact]
@@ -175,18 +175,46 @@ public class AutoAssemblerImprovementsTests
     [Fact]
     public void Include_CircularDetection()
     {
-        // Verify depth limit concept — 11 nested levels should be caught
-        var depth = 0;
-        var maxDepth = 10;
-
-        void SimulateInclude(int d)
+        // Create two temp files that include each other to test depth limit
+        var tmpDir = Path.Combine(Path.GetTempPath(), $"aa_test_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tmpDir);
+        try
         {
-            if (d > maxDepth)
-                throw new InvalidOperationException("Include depth exceeded.");
-            SimulateInclude(d + 1);
-        }
+            var fileA = Path.Combine(tmpDir, "a.aa");
+            var fileB = Path.Combine(tmpDir, "b.aa");
+            File.WriteAllText(fileA, $"{{$include {fileB}}}");
+            File.WriteAllText(fileB, $"{{$include {fileA}}}");
 
-        Assert.Throws<InvalidOperationException>(() => SimulateInclude(0));
+            // Simulate the recursive include with depth tracking (matches engine logic)
+            var maxDepth = 10;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            string ProcessIncludes(string path, int depth)
+            {
+                if (depth > maxDepth)
+                    throw new InvalidOperationException("Include depth exceeded.");
+                if (!visited.Add(path))
+                    throw new InvalidOperationException($"Circular include detected: {path}");
+                var content = File.ReadAllText(path);
+                foreach (var line in content.Split('\n'))
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("{$include ", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith('}'))
+                    {
+                        var includePath = trimmed[10..^1].Trim();
+                        if (File.Exists(includePath))
+                            ProcessIncludes(includePath, depth + 1);
+                    }
+                }
+                return content;
+            }
+
+            Assert.Throws<InvalidOperationException>(() => ProcessIncludes(fileA, 0));
+        }
+        finally
+        {
+            if (Directory.Exists(tmpDir)) Directory.Delete(tmpDir, recursive: true);
+        }
     }
 
     // ── Interface contract ──
@@ -211,5 +239,27 @@ public class AutoAssemblerImprovementsTests
         // Old-style construction without symbols still works
         var result = new ScriptExecutionResult(true, null, [], []);
         Assert.Null(result.RegisteredSymbols);
+    }
+
+    // ── Edge-case tests ──
+
+    [Fact]
+    public void UnregisterSymbol_NonExistent_NoThrow()
+    {
+        var engine = new StubAutoAssemblerEngine();
+        engine.UnregisterSymbol("doesNotExist");
+        Assert.Empty(engine.GetRegisteredSymbols());
+    }
+
+    [Fact]
+    public void RegisterSymbol_Duplicate_UpdatesAddress()
+    {
+        var engine = new StubAutoAssemblerEngine();
+        engine.RegisterSymbol("myVar", (nuint)0x1000);
+        engine.RegisterSymbol("myVar", (nuint)0x2000);
+
+        var symbols = engine.GetRegisteredSymbols();
+        Assert.Single(symbols);
+        Assert.Equal((nuint)0x2000, symbols[0].Address);
     }
 }

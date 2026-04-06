@@ -413,14 +413,22 @@ public partial class MainWindow : Window, IDisposable
         };
     }
 
+    private bool _maximizeButtonHovered;
+
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         const int WM_HOTKEY = 0x0312;
+        const int WM_NCHITTEST = 0x0084;
+        const int WM_NCMOUSEMOVE = 0x00A0;
+        const int WM_NCMOUSELEAVE = 0x02A2;
+        const int WM_NCLBUTTONDOWN = 0x00A1;
+        const int HTMAXBUTTON = 9;
+
         if (msg == WM_HOTKEY)
             handled = _hotkeyService.HandleHotkeyMessage(wParam.ToInt32());
 
         // WM_NCHITTEST — return HTMAXBUTTON when hovering maximize button for Windows 11 snap layouts
-        if (msg == 0x0084 && CaptionMaximizeButton != null)
+        if (msg == WM_NCHITTEST && CaptionMaximizeButton != null)
         {
             int xy = lParam.ToInt32();
             var screenPoint = new Point((short)(xy & 0xFFFF), (short)((xy >> 16) & 0xFFFF));
@@ -431,10 +439,45 @@ public partial class MainWindow : Window, IDisposable
                     btnPoint.Y >= 0 && btnPoint.Y <= CaptionMaximizeButton.ActualHeight)
                 {
                     handled = true;
-                    return new IntPtr(9); // HTMAXBUTTON
+                    return new IntPtr(HTMAXBUTTON);
                 }
             }
             catch { /* button not yet in visual tree */ }
+        }
+
+        if (CaptionMaximizeButton != null)
+        {
+            // WM_NCMOUSEMOVE — emulate hover highlight on maximize button
+            if (msg == WM_NCMOUSEMOVE)
+            {
+                bool overMax = wParam.ToInt32() == HTMAXBUTTON;
+                if (overMax != _maximizeButtonHovered)
+                {
+                    _maximizeButtonHovered = overMax;
+                    CaptionMaximizeButton.Background = overMax
+                        ? (Brush)FindResource("TitleBarButtonHoverBackground")
+                        : Brushes.Transparent;
+                }
+            }
+
+            // WM_NCMOUSELEAVE — clear hover when mouse leaves non-client area entirely
+            if (msg == WM_NCMOUSELEAVE && _maximizeButtonHovered)
+            {
+                _maximizeButtonHovered = false;
+                CaptionMaximizeButton.Background = Brushes.Transparent;
+            }
+
+            // WM_NCLBUTTONDOWN on HTMAXBUTTON — flash pressed state, then maximize/restore
+            if (msg == WM_NCLBUTTONDOWN && wParam.ToInt32() == HTMAXBUTTON)
+            {
+                CaptionMaximizeButton.Background = (Brush)FindResource("TitleBarButtonPressedBackground");
+                CaptionMaximizeRestore_Click(CaptionMaximizeButton, new RoutedEventArgs());
+                // Reset to hover since mouse is still over the button after the click
+                CaptionMaximizeButton.Background = (Brush)FindResource("TitleBarButtonHoverBackground");
+                _maximizeButtonHovered = true;
+                handled = true;
+                return IntPtr.Zero;
+            }
         }
 
         return IntPtr.Zero;

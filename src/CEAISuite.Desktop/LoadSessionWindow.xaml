@@ -1,7 +1,8 @@
 <Window x:Class="CEAISuite.Desktop.LoadSessionWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Load Session" Width="480" Height="340"
+        Title="Load Session"
+        Icon="icon.ico" Width="480" Height="340"
         WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
         Background="{DynamicResource WindowBackground}">
     <WindowChrome.WindowChrome>

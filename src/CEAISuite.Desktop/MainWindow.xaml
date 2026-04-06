@@ -9,6 +9,7 @@
         xmlns:avalonEdit="http://icsharpcode.net/sharpdevelop/avalonedit"
         mc:Ignorable="d"
         Title="CE AI Suite"
+        Icon="icon.ico"
         Height="860"
         Width="1500"
         MinHeight="700"
@@ -154,10 +155,10 @@
                     <TextBlock Text=" AI Suite" FontSize="12" VerticalAlignment="Center"
                                Foreground="{DynamicResource TitleBarForeground}" Margin="0,0,6,0" />
                 </StackPanel>
-                <ToolBarTray Background="Transparent" IsLocked="True"
-                             WindowChrome.IsHitTestVisibleInChrome="True">
+                <ToolBarTray Background="Transparent" IsLocked="True">
                     <ToolBar Background="Transparent" Band="0" BandIndex="0"
-                             OverflowMode="Never">
+                             OverflowMode="Never"
+                             WindowChrome.IsHitTestVisibleInChrome="True">
                         <ToolBar.Resources>
                             <!-- Override ToolBar's default chrome so children respect our theme -->
                             <Style TargetType="Button">

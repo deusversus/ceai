@@ -60,6 +60,23 @@ public partial class App : System.Windows.Application
         loggerFactory.AddSerilog(Log.Logger);
         ChatClientFactory.SetLogger(loggerFactory);
 
+        // ── First-run welcome dialog ──
+        var settingsService = Services.GetRequiredService<AppSettingsService>();
+        if (settingsService.IsFirstRun)
+        {
+            var welcome = new WelcomeDialog();
+            if (welcome.ShowDialog() == true)
+            {
+                if (!string.IsNullOrWhiteSpace(welcome.ApiKey))
+                    settingsService.Settings.OpenAiApiKey = welcome.ApiKey;
+                settingsService.Settings.Theme = welcome.SelectedTheme;
+                settingsService.Settings.DensityPreset = welcome.SelectedDensity;
+            }
+            // Mark first run complete regardless of OK/cancel
+            settingsService.Settings.FirstRunCompleted = true;
+            settingsService.Save();
+        }
+
         var mainWindow = Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
     }

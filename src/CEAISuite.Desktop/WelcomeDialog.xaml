@@ -1,0 +1,83 @@
+<Window x:Class="CEAISuite.Desktop.WelcomeDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Welcome to CE AI Suite"
+        Height="400" Width="500"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize"
+        Background="{DynamicResource WindowBackground}">
+
+    <Grid Margin="24">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Heading -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Let's get you set up"
+                       FontSize="22" FontWeight="SemiBold"
+                       Foreground="{DynamicResource PrimaryForeground}" />
+            <TextBlock Text="You can change these later in Settings."
+                       FontSize="12" Margin="0,4,0,0"
+                       Foreground="{DynamicResource SecondaryForeground}" />
+        </StackPanel>
+
+        <!-- Content sections -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <!-- Section 1: API Key -->
+                <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14"
+                           Foreground="{DynamicResource PrimaryForeground}" />
+                <TextBlock Text="Enter your AI provider API key"
+                           FontSize="12" Margin="0,2,0,8"
+                           Foreground="{DynamicResource SecondaryForeground}" />
+                <PasswordBox x:Name="ApiKeyBox" FontFamily="Consolas" FontSize="13"
+                             Padding="8,6" />
+
+                <Separator Margin="0,16,0,16" />
+
+                <!-- Section 2: Theme -->
+                <TextBlock Text="Theme" FontWeight="SemiBold" FontSize="14"
+                           Foreground="{DynamicResource PrimaryForeground}" />
+                <TextBlock Text="Choose your preferred appearance"
+                           FontSize="12" Margin="0,2,0,8"
+                           Foreground="{DynamicResource SecondaryForeground}" />
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="ThemeDark" Content="Dark" GroupName="Theme"
+                                 IsChecked="True" Margin="0,0,16,0"
+                                 Foreground="{DynamicResource PrimaryForeground}"
+                                 Checked="ThemeRadio_Checked" />
+                    <RadioButton x:Name="ThemeLight" Content="Light" GroupName="Theme"
+                                 Foreground="{DynamicResource PrimaryForeground}"
+                                 Checked="ThemeRadio_Checked" />
+                </StackPanel>
+
+                <Separator Margin="0,16,0,16" />
+
+                <!-- Section 3: Density -->
+                <TextBlock Text="UI Density" FontWeight="SemiBold" FontSize="14"
+                           Foreground="{DynamicResource PrimaryForeground}" />
+                <TextBlock Text="Controls default panel visibility"
+                           FontSize="12" Margin="0,2,0,8"
+                           Foreground="{DynamicResource SecondaryForeground}" />
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="DensityClean" Content="Clean" GroupName="Density"
+                                 Margin="0,0,16,0"
+                                 Foreground="{DynamicResource PrimaryForeground}" />
+                    <RadioButton x:Name="DensityBalanced" Content="Balanced" GroupName="Density"
+                                 IsChecked="True" Margin="0,0,16,0"
+                                 Foreground="{DynamicResource PrimaryForeground}" />
+                    <RadioButton x:Name="DensityDense" Content="Dense" GroupName="Density"
+                                 Foreground="{DynamicResource PrimaryForeground}" />
+                </StackPanel>
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Get Started button -->
+        <Button Grid.Row="2" Content="Get Started" FontSize="14" FontWeight="SemiBold"
+                Padding="24,10" HorizontalAlignment="Right" Margin="0,16,0,0"
+                Click="GetStarted_Click" IsDefault="True" />
+    </Grid>
+</Window>

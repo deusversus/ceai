@@ -245,6 +245,15 @@ public sealed class AddressTableNode : INotifyPropertyChanged
 
 public sealed class AddressTableService(IEngineFacade engineFacade)
 {
+    /// <summary>Optional diagnostic trace callback for debugging address table refresh issues.</summary>
+    public Action<string, string, string>? DiagnosticLog { get; set; }
+
+    private void Log(string level, string message)
+    {
+        System.Diagnostics.Debug.WriteLine($"[AddressTable] [{level}] {message}");
+        DiagnosticLog?.Invoke("AddressTable", level, message);
+    }
+
     private readonly ObservableCollection<AddressTableNode> _roots = new();
     private IReadOnlyList<ModuleDescriptor> _processModules = Array.Empty<ModuleDescriptor>();
     private bool _is32Bit;
@@ -397,17 +406,20 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
         {
             var attachment = await engineFacade.AttachAsync(processId, cancellationToken);
             var arch = "x64"; // default
-            try { arch = TryDetectArchitecture(processId); } catch { }
+            try { arch = TryDetectArchitecture(processId); }
+            catch (Exception archEx) { Log("Warning", $"Architecture detection failed for PID {processId}: {archEx.Message}"); }
             SetProcessContext(attachment.Modules, arch == "x86");
         }
-        catch
+        catch (Exception ex)
         {
             // AttachAsync failed — process may be dead or still loading.
             // Clear stale modules so we don't resolve with wrong ASLR bases.
+            Log("Warning", $"RefreshAllAsync: AttachAsync failed for PID {processId}: {ex.GetType().Name}: {ex.Message}");
             if (_processModules.Count > 0)
             {
                 _processModules = Array.Empty<ModuleDescriptor>();
                 ClearResolvedAddressCache(_roots);
+                Log("Warning", "Cleared stale module cache due to attach failure.");
             }
             return;
         }
@@ -496,9 +508,11 @@ public sealed class AddressTableService(IEngineFacade engineFacade)
                     await engineFacade.WriteValueAsync(processId, resolvedAddr, node.DataType, node.LockedValue, cancellationToken);
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 node.CurrentValue = "???";
+                // Only log occasionally to avoid flooding — read failures are common when process exits
+                Log("Debug", $"Read failed for \"{node.Label}\" at {node.Address}: {ex.GetType().Name}: {ex.Message}");
             }
             // Also recurse into any children of this entry
             if (node.Children.Count > 0)

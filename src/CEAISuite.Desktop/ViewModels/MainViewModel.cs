@@ -75,6 +75,9 @@ public partial class MainViewModel : ObservableObject
 
         _dashboardService = dashboardService;
         _addressTableService = addressTableService;
+        // Wire AddressTableService diagnostic log to Output panel
+        addressTableService.DiagnosticLog = (source, level, msg) =>
+            dispatcher.InvokeAsync(() => outputLog.Append(source, level, msg));
         _sessionService = sessionService;
         _breakpointService = breakpointService;
         _aiOperatorService = aiOperatorService;
@@ -97,6 +100,9 @@ public partial class MainViewModel : ObservableObject
         _findResultsVm = findResultsVm;
         _scannerVm = scannerVm;
         _watchdog = watchdog;
+        // Wire watchdog diagnostic log to Output panel
+        watchdog.DiagnosticLog = (source, level, msg) =>
+            dispatcher.InvokeAsync(() => outputLog.Append(source, level, msg));
         _screenCaptureEngine = screenCaptureEngine;
         _scriptGenerationService = scriptGenerationService;
         _dispatcher = dispatcher;

@@ -11,6 +11,15 @@ namespace CEAISuite.Application;
 /// </summary>
 public sealed class ProcessWatchdogService : IDisposable
 {
+    /// <summary>Optional diagnostic log callback: (source, level, message).</summary>
+    public Action<string, string, string>? DiagnosticLog { get; set; }
+
+    private void Log(string level, string message)
+    {
+        Debug.WriteLine($"[Watchdog] [{level}] {message}");
+        DiagnosticLog?.Invoke("Watchdog", level, message);
+    }
+
     // Configuration
     public int HeartbeatIntervalMs { get; set; } = 500;
     public int UnresponsiveThresholdMs { get; set; } = 3000;
@@ -97,9 +106,7 @@ public sealed class ProcessWatchdogService : IDisposable
                     try { earlyRollbackOk = await rollbackAction(); }
                     catch (Exception earlyRollbackEx)
                     {
-                        // 6B: Log rollback exception
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[Watchdog] Early rollback failed for {operationType} at 0x{address:X}: {earlyRollbackEx.Message}");
+                        Log("Error", $"Early rollback failed for {operationType} at 0x{address:X}: {earlyRollbackEx.Message}");
                     }
 
                     var earlyKey = MakeUnsafeKey(address, mode);
@@ -120,8 +127,7 @@ public sealed class ProcessWatchdogService : IDisposable
                     try { secondRollbackOk = await rollbackAction(); }
                     catch (Exception secondRollbackEx)
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[Watchdog] Secondary rollback failed for {operationType} at 0x{address:X}: {secondRollbackEx.Message}");
+                        Log("Error", $"Secondary rollback failed for {operationType} at 0x{address:X}: {secondRollbackEx.Message}");
                     }
 
                     var secondKey = MakeUnsafeKey(address, mode);
@@ -146,9 +152,7 @@ public sealed class ProcessWatchdogService : IDisposable
                 try { rollbackOk = await rollbackAction(); }
                 catch (Exception rollbackEx)
                 {
-                    // 6B: Log rollback exception instead of swallowing silently
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[Watchdog] Rollback failed for {operationType} at 0x{address:X}: {rollbackEx.Message}");
+                    Log("Error", $"Rollback failed for {operationType} at 0x{address:X}: {rollbackEx.Message}");
                 }
 
                 // Mark as unsafe
@@ -469,8 +473,7 @@ internal sealed class WatchdogMonitor : IDisposable
                         catch (Exception rollbackEx)
                         {
                             // 6B: Log rollback exception instead of swallowing
-                            System.Diagnostics.Debug.WriteLine(
-                                $"[Watchdog] Monitor rollback failed for {OperationType} at 0x{Address:X}: {rollbackEx.Message}");
+                            Debug.WriteLine($"[Watchdog] Monitor rollback failed for {OperationType} at 0x{Address:X}: {rollbackEx.Message}");
                         }
                         _onRollback(this, success);
                         return; // Stop monitoring

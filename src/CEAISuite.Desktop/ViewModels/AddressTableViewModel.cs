@@ -200,7 +200,10 @@ public partial class AddressTableViewModel : ObservableObject
                 _dispatcher.Invoke(() => ClearValueChangedFlags(_addressTableService.Roots));
             });
         }
-        catch { /* non-fatal */ }
+        catch (Exception ex)
+        {
+            _outputLog.Append("AddressTable", "Debug", $"Auto-refresh cycle error: {ex.GetType().Name}: {ex.Message}");
+        }
         finally
         {
             _refreshTimer?.Change(_refreshIntervalMs, Timeout.Infinite);
@@ -566,9 +569,10 @@ public partial class AddressTableViewModel : ObservableObject
                 _ => valueStr // Pointer, String, ByteArray — no-op
             };
         }
-        catch
+        catch (Exception ex)
         {
-            return; // unparseable value — ignore
+            _outputLog.Append("AddressTable", "Debug", $"Value inc/dec parse error for \"{node.Label}\": {ex.Message}");
+            return;
         }
 
         if (newValue == valueStr) return;
@@ -581,7 +585,7 @@ public partial class AddressTableViewModel : ObservableObject
         if (pid is not null)
         {
             try { await _addressTableService.WriteValueAsync(pid.Value, node); }
-            catch { /* best effort */ }
+            catch (Exception ex) { _outputLog.Append("AddressTable", "Warning", $"Value write failed for \"{node.Label}\": {ex.Message}"); }
         }
 
         RefreshUI($"{node.Label}: {node.PreviousValue} → {newValue}");
@@ -729,7 +733,7 @@ public partial class AddressTableViewModel : ObservableObject
                         instruction = $"{instr.Mnemonic} {instr.Operands}";
                     }
                 }
-                catch { /* disassembly unavailable */ }
+                catch (Exception ex) { _outputLog.Append("AddressTable", "Debug", $"Disassembly unavailable at 0x{hit.Address:X}: {ex.Message}"); }
 
                 var context = hit.Registers.Count > 0
                     ? string.Join("  ", hit.Registers.Take(6).Select(r => $"{r.Key}={r.Value}"))

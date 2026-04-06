@@ -65,6 +65,12 @@ public partial class ScannerViewModel : ObservableObject
     [ObservableProperty] private bool _writableOnly = true;
     [ObservableProperty] private int _alignment;
 
+    // ── Phase 9E-1: Progress Indicators ──
+
+    [ObservableProperty] private double _scanProgress;       // 0.0 to 1.0
+    [ObservableProperty] private bool _isScanInProgress;
+    [ObservableProperty] private string _scanProgressText = string.Empty; // "42% — 1,234 results"
+
     private ScanOptions BuildScanOptions() => new(
         Alignment: Alignment,
         WritableOnly: WritableOnly,
@@ -83,6 +89,12 @@ public partial class ScannerViewModel : ObservableObject
             return;
         }
 
+        var progress = new Progress<ScanProgress>(p =>
+        {
+            ScanProgress = p.TotalRegions > 0 ? (double)p.RegionsCompleted / p.TotalRegions : 0;
+            ScanProgressText = $"{ScanProgress:P0} \u2014 {p.ResultsSoFar:N0} results";
+        });
+        IsScanInProgress = true;
         try
         {
             _scanService.ResetScan();
@@ -96,7 +108,8 @@ public partial class ScannerViewModel : ObservableObject
                 SelectedDataType,
                 SelectedScanType,
                 ScanValue,
-                options);
+                options,
+                progress);
 
             ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
             ScanStatus = $"{overview.ResultCount:N0} results found";
@@ -107,6 +120,12 @@ public partial class ScannerViewModel : ObservableObject
         {
             ScanStatus = "Scan failed";
             _outputLog.Append("Scanner", "Error", $"Scan failed: {ex.Message}");
+        }
+        finally
+        {
+            IsScanInProgress = false;
+            ScanProgress = 0;
+            ScanProgressText = string.Empty;
         }
     }
 
@@ -121,6 +140,12 @@ public partial class ScannerViewModel : ObservableObject
             return;
         }
 
+        var progress = new Progress<ScanProgress>(p =>
+        {
+            ScanProgress = p.TotalRegions > 0 ? (double)p.RegionsCompleted / p.TotalRegions : 0;
+            ScanProgressText = $"{ScanProgress:P0} \u2014 {p.ResultsSoFar:N0} results";
+        });
+        IsScanInProgress = true;
         try
         {
             ScanStatus = "Refining...";
@@ -130,7 +155,8 @@ public partial class ScannerViewModel : ObservableObject
             var overview = await _scanService.RefineScanAsync(
                 SelectedScanType,
                 ScanValue,
-                options);
+                options,
+                progress);
 
             ScanResults = new ObservableCollection<ScanResultOverview>(overview.Results);
             ScanStatus = $"{overview.ResultCount:N0} results remaining";
@@ -141,6 +167,12 @@ public partial class ScannerViewModel : ObservableObject
         catch (Exception ex)
         {
             _outputLog.Append("Scanner", "Error", $"Refinement failed: {ex.Message}");
+        }
+        finally
+        {
+            IsScanInProgress = false;
+            ScanProgress = 0;
+            ScanProgressText = string.Empty;
         }
     }
 

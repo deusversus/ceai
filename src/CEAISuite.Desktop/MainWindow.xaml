@@ -907,6 +907,20 @@
                                             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
                                         </StackPanel>
                                     </StackPanel>
+                                    <!-- Phase 9E-1: Pointer Scan Progress Indicator -->
+                                    <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="3" Margin="4,0,4,2"
+                                                 Background="{DynamicResource InputBackground}" Foreground="#FF4CAF50">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsScanning}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
                                     <ListView ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}" FontFamily="Consolas" FontSize="12"
                                               Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
                                               BorderThickness="0">
@@ -1175,6 +1189,7 @@
                                 <Grid x:Name="ScannerContent" Background="{DynamicResource SidebarBackground}">
                                     <Grid.RowDefinitions>
                                         <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
                                         <RowDefinition Height="*" />
                                     </Grid.RowDefinitions>
                                     <StackPanel Grid.Row="0" Margin="8,8,8,4">
@@ -1237,7 +1252,36 @@
                                             </StackPanel>
                                         </Border>
                                     </StackPanel>
-                                    <ListView Grid.Row="1" x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
+                                    <!-- Phase 9E-1: Scan Progress Indicators -->
+                                    <StackPanel Grid.Row="1" Margin="4,0,4,2">
+                                        <ProgressBar Value="{Binding ScanProgress}" Maximum="1.0" Height="3"
+                                                     Background="{DynamicResource InputBackground}" Foreground="#FF4CAF50">
+                                            <ProgressBar.Style>
+                                                <Style TargetType="ProgressBar">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsScanInProgress}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </ProgressBar.Style>
+                                        </ProgressBar>
+                                        <TextBlock Text="{Binding ScanProgressText}" FontSize="10" Margin="0,2,0,0"
+                                                   Foreground="{DynamicResource SecondaryForeground}">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Collapsed" />
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding IsScanInProgress}" Value="True">
+                                                            <Setter Property="Visibility" Value="Visible" />
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </StackPanel>
+                                    <ListView Grid.Row="2" x:Name="ScanResultsList" ItemsSource="{Binding ScanResults}"
                                               SelectedItem="{Binding SelectedScanResult, Mode=TwoWay}"
                                               Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0"
                                               PreviewMouseLeftButtonDown="ScanResults_PreviewMouseLeftButtonDown"

@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -121,7 +122,7 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
         for (int i = 0; i < data.Length; i++)
         {
             await engineFacade.WriteValueAsync(processId, address + (nuint)i,
-                MemoryDataType.Byte, data[i].ToString(), ct);
+                MemoryDataType.Byte, data[i].ToString(CultureInfo.InvariantCulture), ct);
         }
     }
 

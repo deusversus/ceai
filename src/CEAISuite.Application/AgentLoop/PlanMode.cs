@@ -190,7 +190,7 @@ public sealed class PlanExecutor
     {
         // Try to extract JSON from the response (may be wrapped in markdown code blocks)
         var json = llmResponse.Trim();
-        if (json.StartsWith("```"))
+        if (json.StartsWith("```", StringComparison.Ordinal))
         {
             var start = json.IndexOf('{');
             var end = json.LastIndexOf('}');
@@ -349,6 +349,17 @@ public abstract record PlanProgressEvent
 /// </summary>
 public sealed class PlanModeState
 {
+    private static readonly System.Text.Json.JsonSerializerOptions s_saveJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+    };
+
+    private static readonly System.Text.Json.JsonSerializerOptions s_loadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     /// <summary>The plan being executed.</summary>
     public ExecutionPlan? Plan { get; set; }
 
@@ -369,11 +380,7 @@ public sealed class PlanModeState
         if (dir is not null && !Directory.Exists(dir))
             Directory.CreateDirectory(dir);
 
-        var json = System.Text.Json.JsonSerializer.Serialize(this, new System.Text.Json.JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-        });
+        var json = System.Text.Json.JsonSerializer.Serialize(this, s_saveJsonOptions);
         File.WriteAllText(path, json);
     }
 
@@ -386,10 +393,7 @@ public sealed class PlanModeState
         try
         {
             var json = File.ReadAllText(path);
-            return System.Text.Json.JsonSerializer.Deserialize<PlanModeState>(json, new System.Text.Json.JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-            });
+            return System.Text.Json.JsonSerializer.Deserialize<PlanModeState>(json, s_loadJsonOptions);
         }
         catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[PlanModeState] Failed to load saved state: {ex.Message}"); return null; }
     }

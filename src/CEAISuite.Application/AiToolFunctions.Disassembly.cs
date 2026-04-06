@@ -232,16 +232,16 @@ public sealed partial class AiToolFunctions
             var cap = _limits.MaxListRegions;
             var totalSize = filtered.Sum(r => r.RegionSize);
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Memory regions ({filtered.Count} {filter}, {FormatBytes(totalSize)} total, showing {Math.Min(cap, filtered.Count)}):");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Memory regions ({filtered.Count} {filter}, {FormatBytes(totalSize)} total, showing {Math.Min(cap, filtered.Count)}):");
             foreach (var r in filtered.Take(cap))
             {
                 var flags = $"{(r.IsReadable ? "R" : "-")}{(r.IsWritable ? "W" : "-")}{(r.IsExecutable ? "X" : "-")}";
                 var moduleName = FindOwningModule(r.BaseAddress, r.RegionSize, modules);
                 var moduleTag = moduleName is not null ? $" [{moduleName}]" : "";
-                sb.AppendLine($"  0x{r.BaseAddress:X} [{FormatBytes(r.RegionSize),-10}] {flags}{moduleTag}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  0x{r.BaseAddress:X} [{FormatBytes(r.RegionSize),-10}] {flags}{moduleTag}");
             }
             if (filtered.Count > cap)
-                sb.AppendLine($"  ... and {filtered.Count - cap} more regions (use filter to narrow)");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  ... and {filtered.Count - cap} more regions (use filter to narrow)");
             return sb.ToString();
         }
         catch (Exception ex) { return $"ListMemoryRegions failed: {ex.Message}"; }

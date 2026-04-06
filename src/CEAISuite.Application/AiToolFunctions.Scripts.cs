@@ -111,7 +111,7 @@ public sealed partial class AiToolFunctions
         if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"## Deep Validation: {node.Label}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"## Deep Validation: {node.Label}");
 
         int passed = 0, failed = 0, warnings = 0;
 
@@ -119,7 +119,7 @@ public sealed partial class AiToolFunctions
         var parseResult = autoAssemblerEngine.Parse(node.AssemblerScript);
         if (!parseResult.IsValid)
         {
-            sb.AppendLine($"❌ PARSE FAILED: {string.Join("; ", parseResult.Errors)}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"❌ PARSE FAILED: {string.Join("; ", parseResult.Errors)}");
             return sb.ToString();
         }
         sb.AppendLine("✅ Parse: valid syntax");
@@ -161,12 +161,12 @@ public sealed partial class AiToolFunctions
 
                         if (mod is null)
                         {
-                            sb.AppendLine($"❌ Assert at {addrStr}: module '{modName}' not found");
+                            sb.AppendLine(CultureInfo.InvariantCulture, $"❌ Assert at {addrStr}: module '{modName}' not found");
                             failed++;
                             continue;
                         }
 
-                        var offsetVal = ulong.Parse(offsetStr, NumberStyles.HexNumber);
+                        var offsetVal = ulong.Parse(offsetStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
                         assertAddr = (nuint)((ulong)mod.BaseAddress + offsetVal);
                     }
                     else
@@ -175,7 +175,7 @@ public sealed partial class AiToolFunctions
                     }
 
                     var expectedBytes = expectedHex.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-                        .Select(b => byte.Parse(b, NumberStyles.HexNumber))
+                        .Select(b => byte.Parse(b, NumberStyles.HexNumber, CultureInfo.InvariantCulture))
                         .ToArray();
 
                     var liveRead = await engineFacade.ReadMemoryAsync(processId, assertAddr, expectedBytes.Length);
@@ -183,22 +183,22 @@ public sealed partial class AiToolFunctions
 
                     if (liveBytes.SequenceEqual(expectedBytes))
                     {
-                        sb.AppendLine($"✅ Assert 0x{assertAddr:X}: live bytes match ({expectedHex})");
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"✅ Assert 0x{assertAddr:X}: live bytes match ({expectedHex})");
                         passed++;
                     }
                     else
                     {
-                        var liveHex = string.Join(" ", liveBytes.Select(b => b.ToString("X2")));
-                        sb.AppendLine($"❌ Assert 0x{assertAddr:X}: MISMATCH");
-                        sb.AppendLine($"   Expected: {expectedHex}");
-                        sb.AppendLine($"   Live:     {liveHex}");
+                        var liveHex = string.Join(" ", liveBytes.Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"❌ Assert 0x{assertAddr:X}: MISMATCH");
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"   Expected: {expectedHex}");
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"   Live:     {liveHex}");
                         sb.AppendLine($"   ⚠️ Script may be incompatible with current game version");
                         failed++;
                     }
                 }
                 catch (Exception ex)
                 {
-                    sb.AppendLine($"❌ Assert {addrStr}: verification failed ({ex.Message})");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"❌ Assert {addrStr}: verification failed ({ex.Message})");
                     failed++;
                 }
             }
@@ -227,7 +227,7 @@ public sealed partial class AiToolFunctions
                         var mod = attachment.Modules.FirstOrDefault(m =>
                             m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
                         if (mod is null) continue;
-                        hookAddr = (nuint)((ulong)mod.BaseAddress + ulong.Parse(offsetStr, NumberStyles.HexNumber));
+                        hookAddr = (nuint)((ulong)mod.BaseAddress + ulong.Parse(offsetStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture));
                     }
                     else
                     {
@@ -237,12 +237,12 @@ public sealed partial class AiToolFunctions
                     var region = await memoryProtectionEngine.QueryProtectionAsync(processId, hookAddr);
                     if (region.IsExecutable)
                     {
-                        sb.AppendLine($"✅ Hook target 0x{hookAddr:X}: executable ({(region.IsWritable ? "RWX" : "RX")})");
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"✅ Hook target 0x{hookAddr:X}: executable ({(region.IsWritable ? "RWX" : "RX")})");
                         passed++;
                     }
                     else
                     {
-                        sb.AppendLine($"⚠️ Hook target 0x{hookAddr:X}: NOT executable — hook may fail or crash");
+                        sb.AppendLine(CultureInfo.InvariantCulture, $"⚠️ Hook target 0x{hookAddr:X}: NOT executable — hook may fail or crash");
                         warnings++;
                     }
                 }
@@ -293,7 +293,7 @@ public sealed partial class AiToolFunctions
 
         // Summary
         sb.AppendLine();
-        sb.AppendLine($"## Summary: {passed} passed, {failed} failed, {warnings} warnings");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"## Summary: {passed} passed, {failed} failed, {warnings} warnings");
         if (failed > 0)
             sb.AppendLine("🛑 DO NOT ENABLE — script has critical issues that may crash or corrupt the game");
         else if (warnings > 0)
@@ -318,9 +318,9 @@ public sealed partial class AiToolFunctions
             return Task.FromResult("No symbols registered. Execute a script with registersymbol() first.");
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"{symbols.Count} registered symbol(s):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"{symbols.Count} registered symbol(s):");
         foreach (var sym in symbols)
-            sb.AppendLine($"  {sym.Name} = 0x{sym.Address:X}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  {sym.Name} = 0x{sym.Address:X}");
         return Task.FromResult(sb.ToString());
     }
 

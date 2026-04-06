@@ -235,16 +235,16 @@ public sealed partial class AiToolFunctions
         }
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Function boundary analysis around 0x{targetAddr:X}:");
-        sb.AppendLine($"  Start: {(foundStart ? $"0x{funcStart:X}" : $"not found (searched {searchRange} bytes back)")}");
-        sb.AppendLine($"  End:   {(foundEnd ? $"0x{funcEnd:X}" : $"not found (searched {searchRange} bytes forward)")}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Function boundary analysis around 0x{targetAddr:X}:");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Start: {(foundStart ? $"0x{funcStart:X}" : $"not found (searched {searchRange} bytes back)")}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  End:   {(foundEnd ? $"0x{funcEnd:X}" : $"not found (searched {searchRange} bytes forward)")}");
         if (foundStart && foundEnd)
         {
             var size = funcEnd - funcStart;
-            sb.AppendLine($"  Size:  {size} bytes (0x{size:X})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Size:  {size} bytes (0x{size:X})");
         }
         if (retCount > 1)
-            sb.AppendLine($"  Note:  {retCount} return instructions found (multiple exit paths)");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Note:  {retCount} return instructions found (multiple exit paths)");
         return sb.ToString().TrimEnd();
     }
 
@@ -282,7 +282,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult memResult;
                 try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                catch (Exception ex) { logger?.LogDebug(ex, "FindCallsTo: Failed to read memory at {Address}", readAddr); continue; }
+                catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "FindCallsTo: Failed to read memory at {Address}", readAddr); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 if (bytes.Length == 0) continue;
@@ -382,7 +382,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult memResult;
                 try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                catch (Exception ex) { logger?.LogDebug(ex, "SearchInstructionPattern: Failed to read memory at {Address}", readAddr); continue; }
+                catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "SearchInstructionPattern: Failed to read memory at {Address}", readAddr); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 if (bytes.Length == 0) continue;
@@ -519,10 +519,10 @@ public sealed partial class AiToolFunctions
 
         var resolvedAddr = node.ResolvedAddress.Value;
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"═══ TraceFieldWriters: {node.Label} ({node.Id}) ═══");
-        sb.AppendLine($"Resolved address: 0x{resolvedAddr:X}");
-        sb.AppendLine($"Data type: {node.DataType}");
-        sb.AppendLine($"Current value: {node.CurrentValue}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"═══ TraceFieldWriters: {node.Label} ({node.Id}) ═══");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Resolved address: 0x{resolvedAddr:X}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Data type: {node.DataType}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Current value: {node.CurrentValue}");
 
         // Step 2: Determine structure offset from parent or address pattern
         long? structOffset = null;
@@ -534,7 +534,7 @@ public sealed partial class AiToolFunctions
             structOffset = (long)((ulong)resolvedAddr - (ulong)node.Parent.ResolvedAddress.Value);
             offsetSource = $"parent-relative ({node.Parent.Label} + 0x{structOffset:X})";
         }
-        else if (node.Address.StartsWith("+") || node.Address.StartsWith("-"))
+        else if (node.Address.StartsWith('+') || node.Address.StartsWith('-'))
         {
             // Symbolic offset address like "+38"
             if (long.TryParse(node.Address.TrimStart('+'), System.Globalization.NumberStyles.HexNumber, null, out var parsed))
@@ -546,7 +546,7 @@ public sealed partial class AiToolFunctions
 
         if (structOffset.HasValue)
         {
-            sb.AppendLine($"Structure offset: 0x{structOffset.Value:X} (from {offsetSource})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Structure offset: 0x{structOffset.Value:X} (from {offsetSource})");
         }
         else
         {
@@ -562,13 +562,13 @@ public sealed partial class AiToolFunctions
 
         if (searchModules.Count == 0)
         {
-            sb.AppendLine($"⚠️ Module '{moduleName}' not found.");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"⚠️ Module '{moduleName}' not found.");
             return sb.ToString();
         }
 
         var modNames = string.Join(", ", searchModules.Select(m => m.Name).Take(5));
         if (searchModules.Count > 5) modNames += $" (+{searchModules.Count - 5} more)";
-        sb.AppendLine($"Searching: {modNames}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Searching: {modNames}");
         sb.AppendLine();
 
         var allResults = new List<(string Strategy, string Line)>();
@@ -576,7 +576,7 @@ public sealed partial class AiToolFunctions
         // Strategy A: If we have a structure offset, search for displacement-based memory operands
         if (structOffset.HasValue)
         {
-            sb.AppendLine($"── Strategy A: Instructions with memory displacement 0x{structOffset.Value:X} ──");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"── Strategy A: Instructions with memory displacement 0x{structOffset.Value:X} ──");
             var formatter = new MasmFormatter();
             var output = new StringOutput();
             int stratACount = 0;
@@ -640,7 +640,7 @@ public sealed partial class AiToolFunctions
         if (structOffset.HasValue && allResults.Count == 0 && structOffset.Value < 0x200)
         {
             var adjacentOffsets = new[] { structOffset.Value - 4, structOffset.Value + 4, structOffset.Value - 8, structOffset.Value + 8 };
-            sb.AppendLine($"── Strategy B: Adjacent offsets (±4, ±8 from 0x{structOffset.Value:X}) ──");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"── Strategy B: Adjacent offsets (±4, ±8 from 0x{structOffset.Value:X}) ──");
             int stratBCount = 0;
 
             foreach (var adjOff in adjacentOffsets.Where(o => o > 0))
@@ -749,7 +749,7 @@ public sealed partial class AiToolFunctions
 
                 if (funcStart != 0)
                 {
-                    sb.AppendLine($"  Writer 0x{writerAddr:X} → likely function at 0x{funcStart:X} in {containingMod.Name}");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  Writer 0x{writerAddr:X} → likely function at 0x{funcStart:X} in {containingMod.Name}");
                     sb.AppendLine($"    (use GetCallerGraph with this function address to find call sites)");
                 }
             }
@@ -761,7 +761,7 @@ public sealed partial class AiToolFunctions
         int writes = allResults.Count(r => r.Line.Contains("WRITE"));
         int reads = allResults.Count(r => r.Line.Contains("READ") && !r.Line.Contains("READWRITE"));
         int leas = allResults.Count(r => r.Line.Contains("LEA"));
-        sb.AppendLine($"Total: {allResults.Count} results ({writes} writes, {reads} reads, {leas} LEAs)");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Total: {allResults.Count} results ({writes} writes, {reads} reads, {leas} LEAs)");
 
         if (allResults.Count == 0)
         {

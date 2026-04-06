@@ -8,6 +8,8 @@ public sealed class WorkspaceDashboardService(
     IEngineFacade engineFacade,
     IInvestigationSessionRepository sessionRepository)
 {
+    private static readonly string[] s_initSteps = ["create_solution", "create_projects", "build_solution"];
+
     /// <summary>Most recently built dashboard (set by BuildAsync/InspectProcessAsync).</summary>
     public WorkspaceDashboard? CurrentDashboard { get; private set; }
     public async Task<WorkspaceDashboard> BuildAsync(string dataStorePath, CancellationToken cancellationToken = default)
@@ -78,7 +80,7 @@ public sealed class WorkspaceDashboardService(
         MemorySampleOverview? sample = null;
         var statusMessage = $"Attached to {process.Name} ({process.Id}) and loaded {inspection.Modules.Count} modules.";
 
-        var primaryModule = inspection.Modules.FirstOrDefault();
+        var primaryModule = inspection.Modules.Count > 0 ? inspection.Modules[0] : null;
         if (primaryModule is not null)
         {
             try
@@ -216,7 +218,7 @@ public sealed class WorkspaceDashboardService(
                 new AIActionLog(
                     "workspace-init",
                     "Initialize workspace",
-                    new[] { "create_solution", "create_projects", "build_solution" },
+                    s_initSteps,
                     "Initial workspace scaffold created and validated.",
                     true,
                     "Workspace ready for Milestone 1 development.")

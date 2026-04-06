@@ -23,7 +23,7 @@ public sealed class TokenLimits
     public int MaxSearchResults { get; init; } = 50;
     public int MaxChatSearchResults { get; init; } = 20;
     public bool FilterRegisters { get; init; } = true;
-    public bool DereferenceHookRegisters { get; init; } = false;
+    public bool DereferenceHookRegisters { get; init; }
 
     // ── Per-tool caps (new) ──
 

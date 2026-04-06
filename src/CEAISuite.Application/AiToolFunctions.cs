@@ -15,6 +15,7 @@ namespace CEAISuite.Application;
 /// Exposes engine capabilities as AI-callable tools via Microsoft.Extensions.AI function calling.
 /// Uses application-level services so the AI operates through the same layer as the UI.
 /// </summary>
+#pragma warning disable CS9113 // Parameter is unread — kept for DI constructor compatibility
 public sealed partial class AiToolFunctions(
     IEngineFacade engineFacade,
     WorkspaceDashboardService dashboardService,
@@ -64,7 +65,7 @@ public sealed partial class AiToolFunctions(
     private bool IsProcessAlive(int processId)
     {
         try { return !System.Diagnostics.Process.GetProcessById(processId).HasExited; }
-        catch (Exception ex) { logger?.LogDebug(ex, "IsProcessAlive check failed for PID {ProcessId}", processId); return false; }
+        catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "IsProcessAlive check failed for PID {ProcessId}", processId); return false; }
     }
 
     [ReadOnlyTool]
@@ -298,12 +299,12 @@ public sealed partial class AiToolFunctions(
         {
             if (n.IsGroup)
             {
-                sb.AppendLine($"{prefix}[{n.Id}] 📁 {n.Label} ({n.Children.Count} children)");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{prefix}[{n.Id}] 📁 {n.Label} ({n.Children.Count} children)");
                 FormatNodes(sb, n.Children, indent + 1);
             }
             else if (n.IsScriptEntry)
             {
-                sb.AppendLine($"{prefix}[{n.Id}] 📜 {n.Label} ({(n.IsScriptEnabled ? "ENABLED" : "disabled")})");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{prefix}[{n.Id}] 📜 {n.Label} ({(n.IsScriptEnabled ? "ENABLED" : "disabled")})");
             }
             else
             {
@@ -314,7 +315,7 @@ public sealed partial class AiToolFunctions(
                     : "";
                 var frozen = n.IsLocked ? " | FROZEN" : "";
                 var pointer = n.IsPointer ? " | ptr" : "";
-                sb.AppendLine($"{prefix}[{n.Id}] \"{n.Label}\" | {addrDisplay}{parentInfo} | value={n.CurrentValue} ({n.DataType}) | resolved={resolved}{pointer}{frozen}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{prefix}[{n.Id}] \"{n.Label}\" | {addrDisplay}{parentInfo} | value={n.CurrentValue} ({n.DataType}) | resolved={resolved}{pointer}{frozen}");
             }
         }
     }
@@ -354,7 +355,7 @@ public sealed partial class AiToolFunctions(
     {
         var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
         if (locked.Count == 0) return Task.FromResult("No locked entries to generate trainer from. Lock some address table entries first.");
-        var script = scriptGenerationService.GenerateTrainerScript(locked, processName);
+        var script = ScriptGenerationService.GenerateTrainerScript(locked, processName);
         return Task.FromResult($"Generated C# trainer script ({locked.Count} entries):\n\n{script}");
     }
 
@@ -365,7 +366,7 @@ public sealed partial class AiToolFunctions(
     {
         var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
         if (locked.Count == 0) return Task.FromResult("No locked entries. Lock entries first.");
-        var script = scriptGenerationService.GenerateAutoAssemblerScript(locked, processName);
+        var script = ScriptGenerationService.GenerateAutoAssemblerScript(locked, processName);
         return Task.FromResult($"Generated AA script ({locked.Count} entries):\n\n{script}");
     }
 
@@ -376,7 +377,7 @@ public sealed partial class AiToolFunctions(
     {
         var locked = addressTableService.Entries.Where(e => e.IsLocked).ToList();
         if (locked.Count == 0) return Task.FromResult("No locked entries. Lock entries first.");
-        var script = scriptGenerationService.GenerateLuaScript(locked, processName);
+        var script = ScriptGenerationService.GenerateLuaScript(locked, processName);
         return Task.FromResult($"Generated Lua script ({locked.Count} entries):\n\n{script}");
     }
 
@@ -391,7 +392,7 @@ public sealed partial class AiToolFunctions(
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "CEAISuite", "workspace.db"));
-        var summary = scriptGenerationService.SummarizeInvestigation(
+        var summary = ScriptGenerationService.SummarizeInvestigation(
             processName, processId, addressTableService.Entries.ToList(),
             scanService.LastScanResults is not null
                 ? scanService.LastScanResults.Results.Take(10).Select(r =>
@@ -420,9 +421,8 @@ public sealed partial class AiToolFunctions(
         if (!System.IO.File.Exists(filePath))
             return Task.FromResult($"File not found: {filePath}");
 
-        var parser = new CheatTableParser();
-        var ctFile = parser.ParseFile(filePath);
-        var nodes = parser.ToAddressTableNodes(ctFile);
+        var ctFile = CheatTableParser.ParseFile(filePath);
+        var nodes = CheatTableParser.ToAddressTableNodes(ctFile);
         addressTableService.ImportNodes(nodes);
 
         var scriptCount = CountScriptsInNodes(nodes);
@@ -523,7 +523,7 @@ public sealed partial class AiToolFunctions(
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Load a previously saved .PTR pointer map file.")]
-    public async Task<string> LoadPointerMap(
+    public static async Task<string> LoadPointerMap(
         [Description("File path to the .PTR file")] string filePath)
     {
         try
@@ -541,7 +541,7 @@ public sealed partial class AiToolFunctions(
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Compare two pointer map (.PTR) files to find common paths that survive across restarts.")]
-    public async Task<string> ComparePointerMaps(
+    public static async Task<string> ComparePointerMaps(
         [Description("Path to first .PTR file")] string filePathA,
         [Description("Path to second .PTR file")] string filePathB)
     {
@@ -552,13 +552,13 @@ public sealed partial class AiToolFunctions(
             var result = PointerScannerService.CompareMaps(mapA, mapB);
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Pointer map comparison: {result.OverlapRatio:P0} overlap");
-            sb.AppendLine($"  Common: {result.CommonPaths.Count} | Only in A: {result.OnlyInFirst.Count} | Only in B: {result.OnlyInSecond.Count}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Pointer map comparison: {result.OverlapRatio:P0} overlap");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Common: {result.CommonPaths.Count} | Only in A: {result.OnlyInFirst.Count} | Only in B: {result.OnlyInSecond.Count}");
             if (result.CommonPaths.Count > 0)
             {
                 sb.AppendLine("\nCommon paths (most stable):");
                 foreach (var p in result.CommonPaths.Take(20))
-                    sb.AppendLine($"  {p.Display}");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  {p.Display}");
             }
             return sb.ToString();
         }
@@ -595,13 +595,13 @@ public sealed partial class AiToolFunctions(
             var results = await scanService.GroupedScanAsync(processId, parsedGroups, new ScanOptions());
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Grouped scan: {results.Results.Count} total results across {parsedGroups.Count} groups");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Grouped scan: {results.Results.Count} total results across {parsedGroups.Count} groups");
             foreach (var group in parsedGroups)
             {
                 var groupResults = results.Results.Where(r => r.GroupLabel == group.Label).Take(10).ToList();
-                sb.AppendLine($"\n[{group.Label}] ({groupResults.Count} shown):");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"\n[{group.Label}] ({groupResults.Count} shown):");
                 foreach (var r in groupResults)
-                    sb.AppendLine($"  0x{r.Address:X} = {r.CurrentValue}");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"  0x{r.Address:X} = {r.CurrentValue}");
             }
             return sb.ToString();
         }
@@ -626,7 +626,7 @@ public sealed partial class AiToolFunctions(
         for (var i = 0; i < bytes.Length; i += 16)
         {
             var lineAddr = (nuint)((long)addr + i);
-            sb.Append($"{lineAddr:X16}  ");
+            sb.Append(CultureInfo.InvariantCulture, $"{lineAddr:X16}  ");
             var end = Math.Min(i + 16, bytes.Length);
             for (var j = i; j < i + 16; j++)
             {
@@ -663,17 +663,17 @@ public sealed partial class AiToolFunctions(
         var cap = _limits.MaxDissectFields;
         var capped = fields.Take(cap).ToList();
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Structure analysis at 0x{addr:X} ({fields.Count} fields, showing {capped.Count}, hint={typeHint}):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Structure analysis at 0x{addr:X} ({fields.Count} fields, showing {capped.Count}, hint={typeHint}):");
         if (clustersDetected > 0)
-            sb.AppendLine($"  Detected {clustersDetected} integer cluster(s) — consecutive game-stat-like Int32 values.");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Detected {clustersDetected} integer cluster(s) — consecutive game-stat-like Int32 values.");
         sb.AppendLine("Offset  | Type     | Value                | Confidence");
         sb.AppendLine("--------|----------|----------------------|-----------");
         foreach (var f in capped)
         {
-            sb.AppendLine($"+0x{f.Offset:X4} | {f.ProbableType,-8} | {f.DisplayValue,-20} | {f.Confidence:P0}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"+0x{f.Offset:X4} | {f.ProbableType,-8} | {f.DisplayValue,-20} | {f.Confidence:P0}");
         }
         if (fields.Count > cap)
-            sb.AppendLine($"... {fields.Count - cap} more fields omitted — reduce regionSize or increase limits.");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"... {fields.Count - cap} more fields omitted — reduce regionSize or increase limits.");
         return sb.ToString();
     }
 
@@ -769,7 +769,7 @@ public sealed partial class AiToolFunctions(
         if (bindings.Count == 0) return Task.FromResult("No hotkeys registered.");
         var sb = new System.Text.StringBuilder();
         foreach (var b in bindings)
-            sb.AppendLine($"ID {b.Id}: {b.Description}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"ID {b.Id}: {b.Description}");
         return Task.FromResult(sb.ToString().TrimEnd());
     }
 
@@ -813,9 +813,9 @@ public sealed partial class AiToolFunctions(
         var patches = patchUndoService.GetHistory(count);
         if (patches.Count == 0) return Task.FromResult("No patches recorded.");
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Undo: {patchUndoService.UndoCount} | Redo: {patchUndoService.RedoCount}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Undo: {patchUndoService.UndoCount} | Redo: {patchUndoService.RedoCount}");
         foreach (var p in patches)
-            sb.AppendLine($"  0x{p.Address:X} [{p.DataType}] = '{p.NewValue}' @ {p.Timestamp:HH:mm:ss}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  0x{p.Address:X} [{p.DataType}] = '{p.NewValue}' @ {p.Timestamp:HH:mm:ss}");
         return Task.FromResult(sb.ToString().TrimEnd());
     }
 
@@ -932,32 +932,32 @@ public sealed partial class AiToolFunctions(
         if (node is null) return Task.FromResult($"Node '{nodeId}' not found by ID or label.");
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"ID: {node.Id}");
-        sb.AppendLine($"Label: {node.Label}");
-        sb.AppendLine($"Type: {(node.IsGroup ? "Group" : node.IsScriptEntry ? "Script" : node.DataType.ToString())}");
-        sb.AppendLine($"symbolicAddress: {node.Address}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"ID: {node.Id}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Label: {node.Label}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Type: {(node.IsGroup ? "Group" : node.IsScriptEntry ? "Script" : node.DataType.ToString())}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"symbolicAddress: {node.Address}");
         if (node.ResolvedAddress.HasValue)
-            sb.AppendLine($"resolvedAddress: 0x{node.ResolvedAddress.Value:X}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"resolvedAddress: 0x{node.ResolvedAddress.Value:X}");
         else
             sb.AppendLine("resolvedAddress: (unresolved)");
-        sb.AppendLine($"isResolved: {node.ResolvedAddress.HasValue}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"isResolved: {node.ResolvedAddress.HasValue}");
         if (node.IsOffset && node.Parent is not null)
         {
-            sb.AppendLine($"parentBase: \"{node.Parent.Label}\" ({node.Parent.Id})");
-            sb.AppendLine($"offset: {node.Address}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"parentBase: \"{node.Parent.Label}\" ({node.Parent.Id})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"offset: {node.Address}");
         }
-        sb.AppendLine($"Value: {node.CurrentValue}");
-        if (node.IsLocked) sb.AppendLine($"FROZEN at: {node.LockedValue}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Value: {node.CurrentValue}");
+        if (node.IsLocked) sb.AppendLine(CultureInfo.InvariantCulture, $"FROZEN at: {node.LockedValue}");
         if (node.IsPointer)
-            sb.AppendLine($"Pointer chain: [{string.Join(", ", node.PointerOffsets.Select(o => $"0x{o:X}"))}]");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Pointer chain: [{string.Join(", ", node.PointerOffsets.Select(o => $"0x{o:X}"))}]");
         if (node.IsOffset) sb.AppendLine("Is parent-relative offset");
         if (node.Children.Count > 0)
         {
-            sb.AppendLine($"Children ({node.Children.Count}):");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Children ({node.Children.Count}):");
             foreach (var child in node.Children.Take(20))
-                sb.AppendLine($"  {child.Id}: {child.Label} = {child.CurrentValue} {(child.IsLocked ? "[FROZEN]" : "")}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {child.Id}: {child.Label} = {child.CurrentValue} {(child.IsLocked ? "[FROZEN]" : "")}");
             if (node.Children.Count > 20)
-                sb.AppendLine($"  ... and {node.Children.Count - 20} more");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  ... and {node.Children.Count - 20} more");
         }
         return Task.FromResult(sb.ToString());
     }
@@ -1058,16 +1058,16 @@ public sealed partial class AiToolFunctions(
         if (raw.Length < 8) return $"Could not read 8 bytes at {address}.";
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Memory probe at {address}:");
-        sb.AppendLine($"  Int16:  {BitConverter.ToInt16(raw, 0)}");
-        sb.AppendLine($"  UInt16: {BitConverter.ToUInt16(raw, 0)}");
-        sb.AppendLine($"  Int32:  {BitConverter.ToInt32(raw, 0)}");
-        sb.AppendLine($"  UInt32: {BitConverter.ToUInt32(raw, 0)}");
-        sb.AppendLine($"  Float:  {BitConverter.ToSingle(raw, 0):G9}");
-        sb.AppendLine($"  Int64:  {BitConverter.ToInt64(raw, 0)}");
-        sb.AppendLine($"  UInt64: {BitConverter.ToUInt64(raw, 0)}");
-        sb.AppendLine($"  Double: {BitConverter.ToDouble(raw, 0):G17}");
-        sb.AppendLine($"  Hex:    {Convert.ToHexString(raw)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Memory probe at {address}:");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Int16:  {BitConverter.ToInt16(raw, 0)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  UInt16: {BitConverter.ToUInt16(raw, 0)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Int32:  {BitConverter.ToInt32(raw, 0)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  UInt32: {BitConverter.ToUInt32(raw, 0)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Float:  {BitConverter.ToSingle(raw, 0):G9}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Int64:  {BitConverter.ToInt64(raw, 0)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  UInt64: {BitConverter.ToUInt64(raw, 0)}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Double: {BitConverter.ToDouble(raw, 0):G17}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"  Hex:    {Convert.ToHexString(raw)}");
         return sb.ToString();
     }
 
@@ -1194,14 +1194,14 @@ public sealed partial class AiToolFunctions(
         var raw = mem.Bytes.ToArray();
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Hex dump at 0x{addr:X} ({raw.Length} bytes):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Hex dump at 0x{addr:X} ({raw.Length} bytes):");
         for (int i = 0; i < raw.Length; i += 16)
         {
-            sb.Append($"  {addr + (nuint)i:X8}: ");
+            sb.Append(CultureInfo.InvariantCulture, $"  {addr + (nuint)i:X8}: ");
             var lineBytes = Math.Min(16, raw.Length - i);
             for (int j = 0; j < lineBytes; j++)
             {
-                sb.Append($"{raw[i + j]:X2} ");
+                sb.Append(CultureInfo.InvariantCulture, $"{raw[i + j]:X2} ");
                 if (j == 7) sb.Append(' ');
             }
             // ASCII representation
@@ -1368,8 +1368,8 @@ public sealed partial class AiToolFunctions(
         if (scope is not "current" && chatStore is not null)
         {
             var chats = scope == "all"
-                ? chatStore.ListAll()
-                : [chatStore.Load(scope)!];
+                ? AiChatStore.ListAll()
+                : [AiChatStore.Load(scope)!];
 
             foreach (var chat in chats)
             {
@@ -1385,11 +1385,11 @@ public sealed partial class AiToolFunctions(
         // Most recent first, capped
         var capped = results.OrderByDescending(r => r.timestamp).Take(maxResults).ToList();
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Found {results.Count} matches for \"{query}\" (showing {capped.Count}):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Found {results.Count} matches for \"{query}\" (showing {capped.Count}):");
         foreach (var (title, chatId, role, ts, snippet) in capped)
         {
-            sb.AppendLine($"  [{chatId}] {title} — {role} @ {ts:yyyy-MM-dd HH:mm}");
-            sb.AppendLine($"    ...{snippet}...");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  [{chatId}] {title} — {role} @ {ts:yyyy-MM-dd HH:mm}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"    ...{snippet}...");
         }
         return sb.ToString();
     }
@@ -1742,15 +1742,15 @@ public sealed partial class AiToolFunctions(
             {
                 var read = await engineFacade.ReadMemoryAsync(processId, addr, byteCount);
                 var bytes = read.Bytes.ToArray();
-                var hex = string.Join(" ", bytes.Select(b => b.ToString("X2")));
+                var hex = string.Join(" ", bytes.Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
 
                 bool changed = prevBytes is not null && !bytes.SequenceEqual(prevBytes);
-                string? prevHex = prevBytes is not null ? string.Join(" ", prevBytes.Select(b => b.ToString("X2"))) : null;
+                string? prevHex = prevBytes is not null ? string.Join(" ", prevBytes.Select(b => b.ToString("X2", CultureInfo.InvariantCulture))) : null;
 
                 snapshots.Add(new
                 {
                     sample = i + 1,
-                    timestamp = DateTimeOffset.UtcNow.ToString("HH:mm:ss.fff"),
+                    timestamp = DateTimeOffset.UtcNow.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
                     hex,
                     changed,
                     previousHex = changed ? prevHex : null,
@@ -1790,7 +1790,7 @@ public sealed partial class AiToolFunctions(
     [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Begin a named transaction group for compound breakpoint/hook operations. All operations in the group can be rolled back together. Returns the group ID.")]
-    public string BeginTransaction([Description("Name for this transaction group")] string name = "auto")
+    public static string BeginTransaction([Description("Name for this transaction group")] string name = "auto")
     {
         var groupId = $"txn-{name}-{Guid.NewGuid():N}"[..24];
         return JsonSerializer.Serialize(new { groupId, status = "open", message = $"Transaction group '{groupId}' created. Pass this groupId to subsequent BP/hook operations." }, _jsonOpts);
@@ -1818,7 +1818,7 @@ public sealed partial class AiToolFunctions(
             entries = entries.Take(50).Select(e => new
             {
                 e.OperationId, e.OperationType, address = $"0x{e.Address:X}",
-                e.Mode, e.GroupId, status = e.Status.ToString(), timestamp = e.Timestamp.ToString("HH:mm:ss")
+                e.Mode, e.GroupId, status = e.Status.ToString(), timestamp = e.Timestamp.ToString("HH:mm:ss", CultureInfo.InvariantCulture)
             }),
             count = entries.Count
         }, _jsonOpts);
@@ -2020,7 +2020,7 @@ public sealed partial class AiToolFunctions(
             r.ToolName,
             totalChars = r.TotalChars,
             totalLines = r.TotalLines,
-            storedAt = r.StoredAt.ToString("HH:mm:ss"),
+            storedAt = r.StoredAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
         }));
     }
 }

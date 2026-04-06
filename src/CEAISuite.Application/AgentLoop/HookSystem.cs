@@ -1,3 +1,5 @@
+using System.Globalization;
+
 namespace CEAISuite.Application.AgentLoop;
 
 /// <summary>
@@ -746,7 +748,7 @@ public sealed class CommandHook : PreToolHook
 
             // Pass tool context as environment variables
             psi.EnvironmentVariables["CEAI_TOOL_NAME"] = context.ToolName;
-            psi.EnvironmentVariables["CEAI_TURN_NUMBER"] = context.TurnNumber.ToString();
+            psi.EnvironmentVariables["CEAI_TURN_NUMBER"] = context.TurnNumber.ToString(CultureInfo.InvariantCulture);
             if (context.Arguments is not null)
             {
                 foreach (var (key, value) in context.Arguments)

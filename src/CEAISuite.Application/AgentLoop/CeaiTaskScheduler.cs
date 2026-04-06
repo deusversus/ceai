@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -124,7 +125,7 @@ public sealed class CeaiTaskScheduler : IDisposable
             var lines = _tasks.Select(t =>
             {
                 var status = t.Enabled ? "✓" : "○";
-                var lastRun = t.LastRunAt.HasValue ? t.LastRunAt.Value.ToString("g") : "never";
+                var lastRun = t.LastRunAt.HasValue ? t.LastRunAt.Value.ToString("g", CultureInfo.InvariantCulture) : "never";
                 return $"  {status} [{t.Id}] {t.Description} — cron: {t.CronExpression} — last: {lastRun}";
             });
             return $"Scheduled tasks ({_tasks.Count}):\n{string.Join("\n", lines)}";

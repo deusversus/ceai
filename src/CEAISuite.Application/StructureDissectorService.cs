@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -59,7 +60,7 @@ public sealed class StructureDissectorService(IEngineFacade engine)
             var val = BitConverter.ToInt32(bytes, offset);
             var confidence = ClassifyInt32(val);
             if (confidence > 0.1)
-                results.Add(new StructureField(offset, "Int32", val.ToString(), confidence));
+                results.Add(new StructureField(offset, "Int32", val.ToString(CultureInfo.InvariantCulture), confidence));
         }
 
         // Try Float
@@ -86,7 +87,7 @@ public sealed class StructureDissectorService(IEngineFacade engine)
             var val = BitConverter.ToInt64(bytes, offset);
             var confidence = ClassifyInt64(val);
             if (confidence > 0.1)
-                results.Add(new StructureField(offset, "Int64", val.ToString(), confidence));
+                results.Add(new StructureField(offset, "Int64", val.ToString(CultureInfo.InvariantCulture), confidence));
         }
 
         // Try Double
@@ -228,7 +229,7 @@ public sealed class StructureDissectorService(IEngineFacade engine)
                     int rawInt = BitConverter.ToInt32(bytes, off);
                     if (rawInt >= 1 && rawInt <= 100_000)
                     {
-                        fields[i] = new StructureField(off, "Int32", rawInt.ToString(), 0.8);
+                        fields[i] = new StructureField(off, "Int32", rawInt.ToString(CultureInfo.InvariantCulture), 0.8);
                     }
                 }
             }

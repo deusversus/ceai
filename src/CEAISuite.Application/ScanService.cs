@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -163,10 +164,10 @@ public sealed class ScanService(IScanEngine scanEngine)
         var buf = rawBytes is byte[] arr ? arr : rawBytes.ToArray();
         return dt switch
         {
-            MemoryDataType.Byte => buf[0].ToString("X2"),
-            MemoryDataType.Int16 when buf.Length >= 2 => BitConverter.ToUInt16(buf, 0).ToString("X"),
-            MemoryDataType.Int32 when buf.Length >= 4 => BitConverter.ToUInt32(buf, 0).ToString("X"),
-            MemoryDataType.Int64 when buf.Length >= 8 => BitConverter.ToUInt64(buf, 0).ToString("X"),
+            MemoryDataType.Byte => buf[0].ToString("X2", CultureInfo.InvariantCulture),
+            MemoryDataType.Int16 when buf.Length >= 2 => BitConverter.ToUInt16(buf, 0).ToString("X", CultureInfo.InvariantCulture),
+            MemoryDataType.Int32 when buf.Length >= 4 => BitConverter.ToUInt32(buf, 0).ToString("X", CultureInfo.InvariantCulture),
+            MemoryDataType.Int64 when buf.Length >= 8 => BitConverter.ToUInt64(buf, 0).ToString("X", CultureInfo.InvariantCulture),
             _ => currentValue // Float/Double/String — hex doesn't apply meaningfully
         };
     }

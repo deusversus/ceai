@@ -309,17 +309,17 @@ public sealed partial class AiToolFunctions
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Get breakpoint mode capability matrix.")]
-    public string GetBreakpointModeCapabilities()
+    public static string GetBreakpointModeCapabilities()
     {
         var caps = BreakpointService.GetModeCapabilities();
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("## Breakpoint Mode Capabilities");
         foreach (var c in caps)
         {
-            sb.AppendLine($"\n### {c.Mode} [{c.StabilityTier}]");
-            sb.AppendLine($"  {c.Description}");
-            sb.AppendLine($"  Execute hooks: {(c.SupportsExecuteHook ? "✓" : "✗")} | Data write watch: {(c.SupportsDataWriteWatch ? "✓" : "✗")}");
-            sb.AppendLine($"  Debugger: {(c.RequiresDebugger ? "required" : "none")} | Page protection: {(c.UsesPageProtection ? "yes" : "no")} | Thread suspend: {(c.UsesThreadSuspend ? "yes" : "no")}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"\n### {c.Mode} [{c.StabilityTier}]");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  {c.Description}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Execute hooks: {(c.SupportsExecuteHook ? "✓" : "✗")} | Data write watch: {(c.SupportsDataWriteWatch ? "✓" : "✗")}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Debugger: {(c.RequiresDebugger ? "required" : "none")} | Page protection: {(c.UsesPageProtection ? "yes" : "no")} | Thread suspend: {(c.UsesThreadSuspend ? "yes" : "no")}");
         }
         return sb.ToString();
     }
@@ -437,21 +437,21 @@ public sealed partial class AiToolFunctions
             }
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"## Probe: 0x{addr:X}");
-            sb.AppendLine($"Region: {regionKind}");
-            sb.AppendLine($"Module: {moduleName}");
-            sb.AppendLine($"Protection: {protectionStr}");
-            sb.AppendLine($"Executable: {isExecutable} | Writable: {isWritable} | Readable: {isReadable}");
-            sb.AppendLine($"Risk level: {riskLevel}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"## Probe: 0x{addr:X}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Region: {regionKind}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Module: {moduleName}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Protection: {protectionStr}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Executable: {isExecutable} | Writable: {isWritable} | Readable: {isReadable}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Risk level: {riskLevel}");
             sb.AppendLine();
             sb.AppendLine("Recommended modes:");
-            foreach (var r in recommended) sb.AppendLine($"  ✓ {r}");
+            foreach (var r in recommended) sb.AppendLine(CultureInfo.InvariantCulture, $"  ✓ {r}");
             sb.AppendLine("Avoid:");
-            foreach (var a in avoid) sb.AppendLine($"  ✗ {a}");
+            foreach (var a in avoid) sb.AppendLine(CultureInfo.InvariantCulture, $"  ✗ {a}");
             if (warnings.Count > 0)
             {
                 sb.AppendLine("Warnings:");
-                foreach (var w in warnings) sb.AppendLine($"  ⚠️ {w}");
+                foreach (var w in warnings) sb.AppendLine(CultureInfo.InvariantCulture, $"  ⚠️ {w}");
             }
             return sb.ToString();
         }
@@ -521,15 +521,15 @@ public sealed partial class AiToolFunctions
                 return $"Trace from {address}: no instructions decoded (address may be invalid or unreadable).";
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Trace from {address}: {result.Entries.Count} instructions");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Trace from {address}: {result.Entries.Count} instructions");
             if (result.MaxDepthReached) sb.AppendLine("⚠ Max instruction limit reached.");
             if (result.WasTruncated) sb.AppendLine("⚠ Trace was truncated.");
 
             foreach (var entry in result.Entries.Take(50))
-                sb.AppendLine($"  0x{entry.InstructionAddress:X}: {entry.Disassembly}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  0x{entry.InstructionAddress:X}: {entry.Disassembly}");
 
             if (result.Entries.Count > 50)
-                sb.AppendLine($"  ... ({result.Entries.Count - 50} more)");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  ... ({result.Entries.Count - 50} more)");
 
             return sb.ToString();
         }

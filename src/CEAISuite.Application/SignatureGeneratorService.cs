@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -35,7 +36,7 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
 
         for (var i = 0; i < bytes.Length; i++)
         {
-            pattern[i] = wildcardPositions.Contains(i) ? "??" : bytes[i].ToString("X2");
+            pattern[i] = wildcardPositions.Contains(i) ? "??" : bytes[i].ToString("X2", CultureInfo.InvariantCulture);
         }
 
         var sig = string.Join(" ", pattern);
@@ -68,7 +69,7 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
             if (parts[i] is "?" or "??" or "*")
                 wildcardMask[i] = true;
             else
-                patternBytes[i] = byte.Parse(parts[i], System.Globalization.NumberStyles.HexNumber);
+                patternBytes[i] = byte.Parse(parts[i], System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture);
         }
 
         var matchCount = 0;

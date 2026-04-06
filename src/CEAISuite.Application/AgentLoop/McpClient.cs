@@ -316,7 +316,7 @@ public sealed class SseMcpTransport : IMcpTransport
     /// Read the initial "endpoint" SSE event that tells us the POST URL.
     /// The server sends: event: endpoint\ndata: /message?sessionId=xxx
     /// </summary>
-    private async Task<string> ReadEndpointFromSse(StreamReader reader, string baseUrl, CancellationToken ct)
+    private static async Task<string> ReadEndpointFromSse(StreamReader reader, string baseUrl, CancellationToken ct)
     {
         string? eventType = null;
 
@@ -418,7 +418,7 @@ public sealed class SseMcpTransport : IMcpTransport
             _connected = false;
             // Cancel all pending requests
             foreach (var (_, tcs) in _pendingRequests)
-                tcs.TrySetCanceled();
+                tcs.TrySetCanceled(ct);
             _pendingRequests.Clear();
         }
     }

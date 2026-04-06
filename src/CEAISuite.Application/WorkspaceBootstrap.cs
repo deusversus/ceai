@@ -19,6 +19,7 @@ public sealed record WorkspaceOverview(
 
 public static class WorkspaceBootstrap
 {
+    private static readonly string[] s_defaultModuleScopes = ["main module", "engine DLLs"];
     public static WorkspaceOverview CreateOverview()
     {
         var layers = new[]
@@ -58,7 +59,7 @@ public static class WorkspaceBootstrap
             "Windows x64 local analysis",
             "game.exe",
             "Windows x64",
-            new[] { "main module", "engine DLLs" });
+            s_defaultModuleScopes);
 
         return new WorkspaceOverview(
             "CE AI Suite",

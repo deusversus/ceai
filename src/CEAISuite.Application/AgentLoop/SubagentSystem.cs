@@ -220,7 +220,7 @@ public sealed class SubagentManager
         }
     }
 
-    private string BuildSubagentPrompt(SubagentRequest request)
+    private static string BuildSubagentPrompt(SubagentRequest request)
     {
         var prompt = $"""
             You are a focused subagent working on a specific subtask.

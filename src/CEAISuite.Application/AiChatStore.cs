@@ -34,7 +34,7 @@ public sealed class AiChatStore
         try { Directory.CreateDirectory(ChatsDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to create chats directory: {ex.Message}"); }
     }
 
-    public void Save(AiChatSession session)
+    public static void Save(AiChatSession session)
     {
         session.UpdatedAt = DateTimeOffset.UtcNow;
         var path = Path.Combine(ChatsDir, $"{session.Id}.json");
@@ -42,7 +42,7 @@ public sealed class AiChatStore
         File.WriteAllText(path, json);
     }
 
-    public AiChatSession? Load(string chatId)
+    public static AiChatSession? Load(string chatId)
     {
         var path = Path.Combine(ChatsDir, $"{chatId}.json");
         if (!File.Exists(path)) return null;
@@ -50,7 +50,7 @@ public sealed class AiChatStore
         return JsonSerializer.Deserialize<AiChatSession>(json, JsonOpts);
     }
 
-    public List<AiChatSession> ListAll()
+    public static List<AiChatSession> ListAll()
     {
         var sessions = new List<AiChatSession>();
         if (!Directory.Exists(ChatsDir)) return sessions;
@@ -74,7 +74,7 @@ public sealed class AiChatStore
         return sessions.OrderByDescending(s => s.UpdatedAt).ToList();
     }
 
-    public void Delete(string chatId)
+    public static void Delete(string chatId)
     {
         var path = Path.Combine(ChatsDir, $"{chatId}.json");
         if (File.Exists(path)) File.Delete(path);
@@ -84,7 +84,7 @@ public sealed class AiChatStore
         if (File.Exists(sessionPath)) File.Delete(sessionPath);
     }
 
-    public void Rename(string chatId, string newTitle)
+    public static void Rename(string chatId, string newTitle)
     {
         var session = Load(chatId);
         if (session is null) return;

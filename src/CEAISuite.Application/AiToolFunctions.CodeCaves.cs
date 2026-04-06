@@ -121,7 +121,7 @@ public sealed partial class AiToolFunctions
             {
                 address = $"0x{h.Address:X}",
                 threadId = h.ThreadId,
-                timestamp = h.TimestampUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ"),
+                timestamp = h.TimestampUtc.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture),
                 registers = trimmedRegs,
                 dereferences
             });
@@ -197,7 +197,7 @@ public sealed partial class AiToolFunctions
             var addr = ParseAddress(address);
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"## Dry-Run Hook Preview: 0x{addr:X}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"## Dry-Run Hook Preview: 0x{addr:X}");
 
             bool canHook = true;
 
@@ -213,7 +213,7 @@ public sealed partial class AiToolFunctions
                 else
                 {
                     string prot = region.IsWritable ? "RWX" : "RX";
-                    sb.AppendLine($"✅ Region is executable ({prot})");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"✅ Region is executable ({prot})");
                 }
             }
 
@@ -243,7 +243,7 @@ public sealed partial class AiToolFunctions
             }
 
             sb.AppendLine();
-            sb.AppendLine($"### Stolen Bytes: {stolenBytes} (minimum required: {minJmpSize})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"### Stolen Bytes: {stolenBytes} (minimum required: {minJmpSize})");
             if (stolenBytes < minJmpSize)
             {
                 sb.AppendLine("❌ Insufficient bytes — cannot fit JMP detour");
@@ -258,7 +258,7 @@ public sealed partial class AiToolFunctions
             sb.AppendLine("### Instructions to be relocated:");
             foreach (var instr in stolenInstructions)
             {
-                sb.AppendLine($"  {instr.Address}: [{instr.HexBytes}] {instr.Mnemonic} {instr.Operands}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {instr.Address}: [{instr.HexBytes}] {instr.Mnemonic} {instr.Operands}");
             }
 
             // 3. RIP-relative analysis
@@ -277,10 +277,10 @@ public sealed partial class AiToolFunctions
 
             // 4. Read the actual bytes that would be overwritten
             var liveRead = await engineFacade.ReadMemoryAsync(processId, addr, stolenBytes);
-            var hexDump = string.Join(" ", liveRead.Bytes.Take(stolenBytes).Select(b => b.ToString("X2")));
+            var hexDump = string.Join(" ", liveRead.Bytes.Take(stolenBytes).Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
             sb.AppendLine();
             sb.AppendLine($"### Bytes to be overwritten:");
-            sb.AppendLine($"  {hexDump}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  {hexDump}");
 
             // 5. Trampoline layout estimate
             int trampolineSize =
@@ -291,8 +291,8 @@ public sealed partial class AiToolFunctions
 
             sb.AppendLine();
             sb.AppendLine($"### Estimated Trampoline Size:");
-            sb.AppendLine($"  Without register capture: ~{trampolineSize} bytes");
-            sb.AppendLine($"  With register capture: ~{withCapture} bytes");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  Without register capture: ~{trampolineSize} bytes");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  With register capture: ~{withCapture} bytes");
 
             // 6. Verify stolen bytes end on a clean instruction boundary
             bool cleanBoundary = stolenBytes == stolenInstructions.Sum(i => i.HexBytes.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
@@ -307,7 +307,7 @@ public sealed partial class AiToolFunctions
             if (canHook)
             {
                 sb.AppendLine("### Verdict: ✅ SAFE TO HOOK");
-                sb.AppendLine($"  {stolenInstructions.Count} instruction(s) will be relocated ({stolenBytes} bytes)");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  {stolenInstructions.Count} instruction(s) will be relocated ({stolenBytes} bytes)");
                 if (hasRipRelative)
                     sb.AppendLine("  RIP-relative fixups will be applied automatically");
             }

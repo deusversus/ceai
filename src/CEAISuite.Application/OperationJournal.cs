@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 
 namespace CEAISuite.Application;
@@ -77,7 +78,7 @@ public sealed class OperationJournal
             {
                 operationId = entry.OperationId,
                 operationType = entry.OperationType,
-                address = entry.Address.ToString(),
+                address = entry.Address.ToString(CultureInfo.InvariantCulture),
                 mode = entry.Mode,
                 groupId = entry.GroupId,
                 timestamp = entry.Timestamp,
@@ -107,7 +108,7 @@ public sealed class OperationJournal
                     var opId = root.GetProperty("operationId").GetString()!;
                     var opType = root.GetProperty("operationType").GetString()!;
                     var addrStr = root.GetProperty("address").GetString()!;
-                    var addr = nuint.Parse(addrStr);
+                    var addr = nuint.Parse(addrStr, CultureInfo.InvariantCulture);
                     var mode = root.GetProperty("mode").GetString()!;
                     var groupId = root.TryGetProperty("groupId", out var gp) ? gp.GetString() : null;
                     var ts = root.GetProperty("timestamp").GetDateTimeOffset();

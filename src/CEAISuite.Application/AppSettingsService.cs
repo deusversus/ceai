@@ -35,7 +35,7 @@ public sealed class AppSettings
     public string Model { get; set; } = "gpt-5.4";
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
-    public bool AutoHideMenuBar { get; set; } = false;
+    public bool AutoHideMenuBar { get; set; }
     public string Theme { get; set; } = "System";
 
     /// <summary>UI density preset: "Clean", "Balanced", "Dense". Controls default panel visibility.</summary>
@@ -48,7 +48,7 @@ public sealed class AppSettings
     public int MaxConversationMessages { get; set; } = 40;
 
     /// <summary>Minimum seconds between AI requests. 0 = disabled.</summary>
-    public int RateLimitSeconds { get; set; } = 0;
+    public int RateLimitSeconds { get; set; }
 
     /// <summary>If true, queue and wait for cooldown; if false, reject with error.</summary>
     public bool RateLimitWait { get; set; } = true;
@@ -108,7 +108,7 @@ public sealed class AppSettings
     // ── Plan Mode ──
 
     /// <summary>Require plan mode for requests that involve destructive operations.</summary>
-    public bool RequirePlanForDestructive { get; set; } = false;
+    public bool RequirePlanForDestructive { get; set; }
     public List<string> FallbackModels { get; set; } = [];
     public string PermissionMode { get; set; } = "Normal";
 
@@ -117,7 +117,7 @@ public sealed class AppSettings
     /// Read-only tools start executing before the full response arrives.
     /// Default: false (conservative; enable for lower latency on tool-heavy conversations).
     /// </summary>
-    public bool EnableEarlyToolExecution { get; set; } = false;
+    public bool EnableEarlyToolExecution { get; set; }
 }
 
 /// <summary>Settings entry for a configured MCP server.</summary>
@@ -152,6 +152,7 @@ public sealed class AppSettingsService
     private static readonly string SettingsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite");
     private static readonly string SettingsPath = Path.Combine(SettingsDir, "settings.json");
+    private static readonly JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
 
     private readonly ILogger<AppSettingsService>? _logger;
     private AppSettings _settings = new();
@@ -282,8 +283,7 @@ public sealed class AppSettingsService
         }
 
         Directory.CreateDirectory(SettingsDir);
-        var options = new JsonSerializerOptions { WriteIndented = true };
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(_settings, options));
+        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(_settings, s_indentedJsonOptions));
         SettingsChanged?.Invoke();
     }
 

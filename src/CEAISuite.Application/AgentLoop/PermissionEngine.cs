@@ -15,6 +15,15 @@ namespace CEAISuite.Application.AgentLoop;
 /// </summary>
 public sealed class PermissionEngine
 {
+    private static readonly System.Text.Json.JsonSerializerOptions s_saveJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+    };
+    private static readonly System.Text.Json.JsonSerializerOptions s_loadJsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
     private readonly List<PermissionRule> _rules = [];
     private readonly object _rulesLock = new();
     private readonly IReadOnlySet<string> _dangerousToolNames;
@@ -222,11 +231,7 @@ public sealed class PermissionEngine
         List<PermissionRule> snapshot;
         lock (_rulesLock) snapshot = _rules.ToList();
 
-        var json = System.Text.Json.JsonSerializer.Serialize(snapshot, new System.Text.Json.JsonSerializerOptions
-        {
-            WriteIndented = true,
-            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-        });
+        var json = System.Text.Json.JsonSerializer.Serialize(snapshot, s_saveJsonOptions);
 
         var dir = Path.GetDirectoryName(path);
         if (dir is not null && !Directory.Exists(dir))
@@ -244,10 +249,7 @@ public sealed class PermissionEngine
         try
         {
             var json = File.ReadAllText(path);
-            var rules = System.Text.Json.JsonSerializer.Deserialize<List<PermissionRule>>(json, new System.Text.Json.JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true,
-            });
+            var rules = System.Text.Json.JsonSerializer.Deserialize<List<PermissionRule>>(json, s_loadJsonOptions);
 
             if (rules is not null)
             {

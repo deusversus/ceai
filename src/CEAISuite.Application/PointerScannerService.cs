@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
 
@@ -191,7 +192,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
     public static PointerMapComparison CompareMaps(PointerMapFile mapA, PointerMapFile mapB)
     {
         static string Key(PointerPath p) =>
-            $"{p.ModuleName}+{p.ModuleOffset:X}:{string.Join(",", p.Offsets.Select(o => o.ToString("X")))}";
+            $"{p.ModuleName}+{p.ModuleOffset:X}:{string.Join(",", p.Offsets.Select(o => o.ToString("X", CultureInfo.InvariantCulture)))}";
 
         var keysA = mapA.Paths.DistinctBy(Key).ToDictionary(Key, p => p);
         var keysB = mapB.Paths.DistinctBy(Key).ToDictionary(Key, p => p);

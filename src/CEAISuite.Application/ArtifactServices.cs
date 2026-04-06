@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
@@ -6,13 +7,13 @@ namespace CEAISuite.Application;
 
 public sealed class ScriptGenerationService
 {
-    public string GenerateTrainerScript(IReadOnlyList<AddressTableEntry> entries, string processName)
+    public static string GenerateTrainerScript(IReadOnlyList<AddressTableEntry> entries, string processName)
     {
         var sb = new StringBuilder();
         sb.AppendLine("// CE AI Suite - Auto-generated Trainer Script");
-        sb.AppendLine($"// Target: {processName}");
-        sb.AppendLine($"// Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
-        sb.AppendLine($"// Entries: {entries.Count}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"// Target: {processName}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"// Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"// Entries: {entries.Count}");
         sb.AppendLine();
         sb.AppendLine("using System.Diagnostics;");
         sb.AppendLine("using System.Runtime.InteropServices;");
@@ -32,7 +33,7 @@ public sealed class ScriptGenerationService
         sb.AppendLine();
         sb.AppendLine("    public static void Apply()");
         sb.AppendLine("    {");
-        sb.AppendLine($"        var process = Process.GetProcessesByName(\"{processName.Replace(".exe", "")}\").FirstOrDefault();");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"        var process = Process.GetProcessesByName(\"{processName.Replace(".exe", "")}\").FirstOrDefault();");
         sb.AppendLine("        if (process is null) { Console.WriteLine(\"Process not found.\"); return; }");
         sb.AppendLine();
         sb.AppendLine("        var handle = OpenProcess(0x0028, false, process.Id); // VM_WRITE | VM_OPERATION");
@@ -44,8 +45,8 @@ public sealed class ScriptGenerationService
             if (entry.IsLocked && entry.LockedValue is not null)
             {
                 var bytes = GetValueBytes(entry.DataType.ToString(), entry.LockedValue);
-                sb.AppendLine($"        // {entry.Label}: {entry.DataType} = {entry.LockedValue}");
-                sb.AppendLine($"        WriteValue(handle, (IntPtr){entry.Address}, new byte[] {{ {bytes} }});");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"        // {entry.Label}: {entry.DataType} = {entry.LockedValue}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"        WriteValue(handle, (IntPtr){entry.Address}, new byte[] {{ {bytes} }});");
                 sb.AppendLine();
             }
         }
@@ -63,29 +64,29 @@ public sealed class ScriptGenerationService
         return sb.ToString();
     }
 
-    public string GenerateAutoAssemblerScript(IReadOnlyList<AddressTableEntry> entries, string processName)
+    public static string GenerateAutoAssemblerScript(IReadOnlyList<AddressTableEntry> entries, string processName)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"// CE AI Suite - Auto Assembler Script");
-        sb.AppendLine($"// Target: {processName}");
-        sb.AppendLine($"// Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"// Target: {processName}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"// Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine();
         sb.AppendLine("[ENABLE]");
         sb.AppendLine();
 
         foreach (var entry in entries.Where(e => e.IsLocked && e.LockedValue is not null))
         {
-            sb.AppendLine($"// {entry.Label}");
-            sb.AppendLine($"alloc(newmem_{entry.Id},2048)");
-            sb.AppendLine($"label(returnhere_{entry.Id})");
-            sb.AppendLine($"label(originalcode_{entry.Id})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"// {entry.Label}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"alloc(newmem_{entry.Id},2048)");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"label(returnhere_{entry.Id})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"label(originalcode_{entry.Id})");
             sb.AppendLine();
-            sb.AppendLine($"newmem_{entry.Id}:");
-            sb.AppendLine($"  // overwrite with {entry.LockedValue} ({entry.DataType})");
-            sb.AppendLine($"  mov [{entry.Address}],{FormatAAValue(entry.DataType, entry.LockedValue!)}");
-            sb.AppendLine($"  jmp returnhere_{entry.Id}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"newmem_{entry.Id}:");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  // overwrite with {entry.LockedValue} ({entry.DataType})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  mov [{entry.Address}],{FormatAAValue(entry.DataType, entry.LockedValue!)}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  jmp returnhere_{entry.Id}");
             sb.AppendLine();
-            sb.AppendLine($"originalcode_{entry.Id}:");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"originalcode_{entry.Id}:");
             sb.AppendLine($"  // original bytes go here");
             sb.AppendLine();
         }
@@ -94,20 +95,20 @@ public sealed class ScriptGenerationService
         sb.AppendLine();
         foreach (var entry in entries.Where(e => e.IsLocked && e.LockedValue is not null))
         {
-            sb.AppendLine($"dealloc(newmem_{entry.Id})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"dealloc(newmem_{entry.Id})");
         }
 
         return sb.ToString();
     }
 
-    public string GenerateLuaScript(IReadOnlyList<AddressTableEntry> entries, string processName)
+    public static string GenerateLuaScript(IReadOnlyList<AddressTableEntry> entries, string processName)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"-- CE AI Suite - Lua Script");
-        sb.AppendLine($"-- Target: {processName}");
-        sb.AppendLine($"-- Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"-- Target: {processName}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"-- Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine();
-        sb.AppendLine($"local processName = \"{processName.Replace(".exe", "")}\"");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"local processName = \"{processName.Replace(".exe", "")}\"");
         sb.AppendLine();
         sb.AppendLine("-- Open the process");
         sb.AppendLine("local pid = getProcessIDFromProcessName(processName .. \".exe\")");
@@ -129,8 +130,8 @@ public sealed class ScriptGenerationService
                 MemoryDataType.Double => "writeDouble",
                 _ => "writeInteger"
             };
-            sb.AppendLine($"-- {entry.Label}");
-            sb.AppendLine($"{writeFunc}(\"{entry.Address}\", {entry.LockedValue})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"-- {entry.Label}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{writeFunc}(\"{entry.Address}\", {entry.LockedValue})");
         }
 
         sb.AppendLine();
@@ -139,7 +140,7 @@ public sealed class ScriptGenerationService
         return sb.ToString();
     }
 
-    public string SummarizeInvestigation(
+    public static string SummarizeInvestigation(
         string processName,
         int processId,
         IReadOnlyList<AddressTableEntry> addressEntries,
@@ -148,8 +149,8 @@ public sealed class ScriptGenerationService
     {
         var sb = new StringBuilder();
         sb.AppendLine("# Investigation Summary");
-        sb.AppendLine($"**Target:** {processName} (PID {processId})");
-        sb.AppendLine($"**Date:** {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Target:** {processName} (PID {processId})");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"**Date:** {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine();
 
         sb.AppendLine("## Address Table");
@@ -159,10 +160,10 @@ public sealed class ScriptGenerationService
         }
         else
         {
-            sb.AppendLine($"{addressEntries.Count} entries tracked:");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{addressEntries.Count} entries tracked:");
             foreach (var e in addressEntries)
             {
-                sb.AppendLine($"- **{e.Label}** @ `{e.Address}` ({e.DataType}) = {e.CurrentValue}{(e.IsLocked ? " [LOCKED]" : "")}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"- **{e.Label}** @ `{e.Address}` ({e.DataType}) = {e.CurrentValue}{(e.IsLocked ? " [LOCKED]" : "")}");
             }
         }
         sb.AppendLine();
@@ -174,17 +175,17 @@ public sealed class ScriptGenerationService
         }
         else
         {
-            sb.AppendLine($"{scanResults.Count} results from last scan.");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{scanResults.Count} results from last scan.");
         }
         sb.AppendLine();
 
         if (disassembly is not null)
         {
             sb.AppendLine("## Disassembly");
-            sb.AppendLine($"From `{disassembly.StartAddress}` — {disassembly.Lines.Count} instructions:");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"From `{disassembly.StartAddress}` — {disassembly.Lines.Count} instructions:");
             foreach (var line in disassembly.Lines.Take(10))
             {
-                sb.AppendLine($"  `{line.Address}` {line.Mnemonic} {line.Operands}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  `{line.Address}` {line.Mnemonic} {line.Operands}");
             }
         }
 
@@ -205,11 +206,11 @@ public sealed class ScriptGenerationService
         {
             byte[] bytes = dataType switch
             {
-                "Int32" => BitConverter.GetBytes(int.Parse(value)),
-                "Int64" => BitConverter.GetBytes(long.Parse(value)),
-                "Float" => BitConverter.GetBytes(float.Parse(value)),
-                "Double" => BitConverter.GetBytes(double.Parse(value)),
-                _ => BitConverter.GetBytes(int.Parse(value))
+                "Int32" => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture)),
+                "Int64" => BitConverter.GetBytes(long.Parse(value, CultureInfo.InvariantCulture)),
+                "Float" => BitConverter.GetBytes(float.Parse(value, CultureInfo.InvariantCulture)),
+                "Double" => BitConverter.GetBytes(double.Parse(value, CultureInfo.InvariantCulture)),
+                _ => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture))
             };
             return string.Join(", ", bytes.Select(b => $"0x{b:X2}"));
         }
@@ -223,7 +224,8 @@ public sealed class ScriptGenerationService
 
 public sealed class AddressTableExportService
 {
-    public string ExportToJson(IReadOnlyList<AddressTableEntry> entries)
+    private static readonly JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
+    public static string ExportToJson(IReadOnlyList<AddressTableEntry> entries)
     {
         var exportEntries = entries.Select(e => new
         {
@@ -236,10 +238,10 @@ public sealed class AddressTableExportService
             e.LockedValue
         });
 
-        return JsonSerializer.Serialize(exportEntries, new JsonSerializerOptions { WriteIndented = true });
+        return JsonSerializer.Serialize(exportEntries, s_indentedJsonOptions);
     }
 
-    public IReadOnlyList<AddressTableEntry> ImportFromJson(string json)
+    public static IReadOnlyList<AddressTableEntry> ImportFromJson(string json)
     {
         using var doc = JsonDocument.Parse(json);
         var entries = new List<AddressTableEntry>();

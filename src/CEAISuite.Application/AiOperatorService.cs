@@ -175,8 +175,14 @@ internal static class ToolCategories
 }
 
 [SupportedOSPlatform("windows")]
-public sealed class AiOperatorService
+public sealed class AiOperatorService : IDisposable
 {
+    private static readonly System.Text.Json.JsonSerializerOptions s_sessionMetaJsonOptions = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+    };
     private IChatClient _baseChatClient;
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
@@ -1463,7 +1469,7 @@ public sealed class AiOperatorService
             }
         }
 
-        _chatStore.Save(new AiChatSession
+        AiChatStore.Save(new AiChatSession
         {
             Id = CurrentChatId,
             Title = CurrentChatTitle,
@@ -1475,12 +1481,7 @@ public sealed class AiOperatorService
         try
         {
             _sessionMetadata.Id = CurrentChatId;
-            var metaJson = System.Text.Json.JsonSerializer.Serialize(_sessionMetadata, new System.Text.Json.JsonSerializerOptions
-            {
-                WriteIndented = true,
-                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
-                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-            });
+            var metaJson = System.Text.Json.JsonSerializer.Serialize(_sessionMetadata, s_sessionMetaJsonOptions);
             var metaDir = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "CEAISuite", "chats");
@@ -1541,7 +1542,7 @@ public sealed class AiOperatorService
         if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
             SaveCurrentChat();
 
-        var chatSession = _chatStore.Load(chatId);
+        var chatSession = AiChatStore.Load(chatId);
         if (chatSession is null) return;
 
         CurrentChatId = chatSession.Id;
@@ -1562,12 +1563,12 @@ public sealed class AiOperatorService
     }
 
     /// <summary>List all saved chats, most recent first.</summary>
-    public List<AiChatSession> ListChats() => _chatStore.ListAll();
+    public static List<AiChatSession> ListChats() => AiChatStore.ListAll();
 
     /// <summary>Delete a chat by ID.</summary>
     public void DeleteChat(string chatId)
     {
-        _chatStore.Delete(chatId);
+        AiChatStore.Delete(chatId);
         if (chatId == CurrentChatId) NewChat();
         ChatListChanged?.Invoke();
     }
@@ -1575,7 +1576,7 @@ public sealed class AiOperatorService
     /// <summary>Rename a chat.</summary>
     public void RenameChat(string chatId, string newTitle)
     {
-        _chatStore.Rename(chatId, newTitle);
+        AiChatStore.Rename(chatId, newTitle);
         if (chatId == CurrentChatId) CurrentChatTitle = newTitle;
         ChatListChanged?.Invoke();
     }
@@ -1764,9 +1765,19 @@ public sealed class AiOperatorService
         catch (Exception ex) { Log("PLUGIN", $"Plugin loading failed: {ex.Message}"); }
     }
 
+    public void Dispose()
+    {
+        _mcpManager.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        if (_pluginHost is not null)
+            _pluginHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        _taskScheduler?.Dispose();
+    }
+
     private sealed class StubChatClient : IChatClient
     {
+#pragma warning disable CA1822 // Interface implementation cannot be static
         public ChatClientMetadata Metadata => new("stub");
+#pragma warning restore CA1822
 
         public Task<ChatResponse> GetResponseAsync(
             IEnumerable<ChatMessage> messages,

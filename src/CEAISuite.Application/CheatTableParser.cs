@@ -43,7 +43,7 @@ public sealed class CheatTableParser
     /// <summary>
     /// Parse a .CT file from a file path.
     /// </summary>
-    public CheatTableFile ParseFile(string filePath)
+    public static CheatTableFile ParseFile(string filePath)
     {
         var xml = File.ReadAllText(filePath);
         var fileName = Path.GetFileName(filePath);
@@ -53,7 +53,7 @@ public sealed class CheatTableParser
     /// <summary>
     /// Parse a .CT file from raw XML content.
     /// </summary>
-    public CheatTableFile Parse(string xml, string fileName = "unknown.ct")
+    public static CheatTableFile Parse(string xml, string fileName = "unknown.ct")
     {
         var doc = XDocument.Parse(xml);
         var root = doc.Root
@@ -76,7 +76,7 @@ public sealed class CheatTableParser
     /// <summary>
     /// Convert parsed CT entries into AddressTableEntry objects (flat, for backward compat).
     /// </summary>
-    public IReadOnlyList<AddressTableEntry> ToAddressTableEntries(CheatTableFile ctFile)
+    public static IReadOnlyList<AddressTableEntry> ToAddressTableEntries(CheatTableFile ctFile)
     {
         var result = new List<AddressTableEntry>();
         FlattenEntries(ctFile.Entries, result, null);
@@ -86,7 +86,7 @@ public sealed class CheatTableParser
     /// <summary>
     /// Convert parsed CT entries into a tree of AddressTableNode, preserving group hierarchy.
     /// </summary>
-    public IReadOnlyList<AddressTableNode> ToAddressTableNodes(CheatTableFile ctFile)
+    public static IReadOnlyList<AddressTableNode> ToAddressTableNodes(CheatTableFile ctFile)
     {
         // Build a global lookup of Description → raw DropDownList text for resolving <DropDownListLink>.
         // CE allows entries to reference another entry's dropdown by its description (e.g., "[List]Item ID").
@@ -216,7 +216,7 @@ public sealed class CheatTableParser
         return nodes;
     }
 
-    private void FlattenEntries(
+    private static void FlattenEntries(
         IReadOnlyList<CheatTableEntry> entries,
         List<AddressTableEntry> result,
         string? groupPrefix)

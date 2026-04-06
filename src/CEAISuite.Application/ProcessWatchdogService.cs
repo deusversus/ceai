@@ -12,6 +12,7 @@ namespace CEAISuite.Application;
 /// </summary>
 public sealed class ProcessWatchdogService : IDisposable
 {
+    private static readonly System.Text.Json.JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
     private readonly ILogger<ProcessWatchdogService>? _logger;
 
     public ProcessWatchdogService(ILogger<ProcessWatchdogService>? logger = null)
@@ -24,7 +25,8 @@ public sealed class ProcessWatchdogService : IDisposable
 
     private void Log(string level, string message)
     {
-        _logger?.LogDebug("[{Level}] {Message}", level, message);
+        if (_logger is not null && _logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("[{Level}] {Message}", level, message);
         DiagnosticLog?.Invoke("Watchdog", level, message);
     }
 
@@ -244,7 +246,7 @@ public sealed class ProcessWatchdogService : IDisposable
                 }
             };
 
-            var json = System.Text.Json.JsonSerializer.Serialize(entry, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+            var json = System.Text.Json.JsonSerializer.Serialize(entry, s_indentedJsonOptions);
             var fileName = $"freeze-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{monitor.OperationId[..8]}.json";
             File.WriteAllText(Path.Combine(logDir, fileName), json);
         }

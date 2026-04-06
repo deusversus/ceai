@@ -180,7 +180,7 @@ public sealed class AddressTableNode : INotifyPropertyChanged
 
     // Tree structure
     public ObservableCollection<AddressTableNode> Children { get; } = new();
-    public bool IsExpanded { get; set; } = false;
+    public bool IsExpanded { get; set; }
 
     // Display helpers (computed — fire from setters above)
     public string DisplayValue => IsGroup ? $"[{Children.Count} items]"
@@ -251,7 +251,8 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
 
     private void Log(string level, string message)
     {
-        logger?.LogDebug("[{Level}] {Message}", level, message);
+        if (logger is not null && logger.IsEnabled(LogLevel.Debug))
+            logger.LogDebug("[{Level}] {Message}", level, message);
         DiagnosticLog?.Invoke("AddressTable", level, message);
     }
 
@@ -459,7 +460,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                         var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
                         node.ResolvedAddress = resolvedAddr != nuint.Zero ? resolvedAddr : null;
                     }
-                    catch (Exception ex) { logger?.LogDebug(ex, "Failed to resolve address for node {Label}", node.Label); node.ResolvedAddress = null; }
+                    catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "Failed to resolve address for node {Label}", node.Label); node.ResolvedAddress = null; }
                 }
                 // If group has a pointer chain but failed to resolve, skip children
                 // (they depend on this group's address and would read garbage)
@@ -584,10 +585,10 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         var buf = raw is byte[] arr ? arr : raw.ToArray();
         return dt switch
         {
-            MemoryDataType.Byte => buf[0].ToString(),
-            MemoryDataType.Int16 => BitConverter.ToUInt16(buf, 0).ToString(),
-            MemoryDataType.Int32 => BitConverter.ToUInt32(buf, 0).ToString(),
-            MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString(),
+            MemoryDataType.Byte => buf[0].ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int16 => BitConverter.ToUInt16(buf, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int32 => BitConverter.ToUInt32(buf, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString(CultureInfo.InvariantCulture),
             _ => null // Float/Double/String — no signed/unsigned distinction
         };
     }
@@ -598,10 +599,10 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         var buf = raw is byte[] arr ? arr : raw.ToArray();
         return dt switch
         {
-            MemoryDataType.Byte => buf[0].ToString("X2"),
-            MemoryDataType.Int16 => BitConverter.ToUInt16(buf, 0).ToString("X"),
-            MemoryDataType.Int32 => BitConverter.ToUInt32(buf, 0).ToString("X"),
-            MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString("X"),
+            MemoryDataType.Byte => buf[0].ToString("X2", CultureInfo.InvariantCulture),
+            MemoryDataType.Int16 => BitConverter.ToUInt16(buf, 0).ToString("X", CultureInfo.InvariantCulture),
+            MemoryDataType.Int32 => BitConverter.ToUInt32(buf, 0).ToString("X", CultureInfo.InvariantCulture),
+            MemoryDataType.Int64 => BitConverter.ToUInt64(buf, 0).ToString("X", CultureInfo.InvariantCulture),
             _ => null // Float/Double/String — hex doesn't apply
         };
     }
@@ -609,7 +610,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
     private static bool TryParseDisplayInt(string displayValue, bool isHex, out int result)
     {
         // Strip any existing lookup suffix ("2904 : Dagger" → "2904")
-        var valueStr = displayValue.Contains(" : ") ? displayValue[..displayValue.IndexOf(" : ")] : displayValue;
+        var valueStr = displayValue.Contains(" : ", StringComparison.Ordinal) ? displayValue[..displayValue.IndexOf(" : ", StringComparison.Ordinal)] : displayValue;
         valueStr = valueStr.Trim();
 
         if (isHex)
@@ -679,7 +680,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         {
             var offsetStr = addr[1..].Trim();
             var offset = ParseHexOffset(offsetStr);
-            var mainMod = _processModules.FirstOrDefault();
+            var mainMod = _processModules.Count > 0 ? _processModules[0] : null;
             if (mainMod is null) return nuint.Zero;
             return (nuint)((long)mainMod.BaseAddress + offset);
         }
@@ -693,7 +694,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         if (string.IsNullOrWhiteSpace(s)) return 0;
         s = s.Trim();
         if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
-        return long.Parse(s, System.Globalization.NumberStyles.HexNumber);
+        return long.Parse(s, System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture);
     }
 
     /// <summary>Import a flat list of entries as root nodes (for backward compat).</summary>
@@ -756,8 +757,8 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
     {
         var normalized = addressText.Trim();
         if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            return (nuint)ulong.Parse(normalized[2..], System.Globalization.NumberStyles.HexNumber);
-        return (nuint)ulong.Parse(normalized);
+            return (nuint)ulong.Parse(normalized[2..], System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        return (nuint)ulong.Parse(normalized, CultureInfo.InvariantCulture);
     }
 
     /// <summary>Write a node's current value to process memory.</summary>

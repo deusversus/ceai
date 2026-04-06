@@ -149,7 +149,7 @@ public sealed partial class AiToolFunctions
 
             // Get pointer paths from the address table entries that have pointer chains
             var entries = addressTableService.Entries;
-            var pointerEntries = entries.Where(e => e.Label.Contains("→") || e.Label.Contains("ptr", StringComparison.OrdinalIgnoreCase)).ToList();
+            var pointerEntries = entries.Where(e => e.Label.Contains('→') || e.Label.Contains("ptr", StringComparison.OrdinalIgnoreCase)).ToList();
 
             var target = ParseAddress(targetAddress);
             if (pointerEntries.Count == 0)
@@ -215,7 +215,7 @@ public sealed partial class AiToolFunctions
             if (allStacks.Count == 0) return "No thread stacks could be captured.";
 
             var sb = new System.Text.StringBuilder();
-            sb.AppendLine($"Captured stacks for {allStacks.Count} thread(s):");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Captured stacks for {allStacks.Count} thread(s):");
             foreach (var (tid, frames) in allStacks.OrderByDescending(kv => kv.Value.Count).Take(4))
             {
                 sb.AppendLine(FormatCallStack(tid, frames));

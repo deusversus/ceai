@@ -705,7 +705,7 @@ public static class SkillLoader
             var line = lines[i];
 
             // Continuation line (indented) — belongs to active list or folded scalar
-            if ((line.StartsWith("  ") || line.StartsWith("\t")) && (activeList is not null || inFoldedScalar))
+            if ((line.StartsWith("  ", StringComparison.Ordinal) || line.StartsWith('\t')) && (activeList is not null || inFoldedScalar))
             {
                 var trimmed = line.Trim();
 
@@ -719,7 +719,7 @@ public static class SkillLoader
                     continue;
                 }
 
-                if (activeList is not null && trimmed.StartsWith("- "))
+                if (activeList is not null && trimmed.StartsWith("- ", StringComparison.Ordinal))
                 {
                     var item = trimmed[2..].Trim();
                     switch (activeList)
@@ -822,7 +822,7 @@ public static class SkillLoader
     /// </summary>
     public static (string? Frontmatter, string? Body) SplitFrontmatter(string content)
     {
-        if (!content.StartsWith("---"))
+        if (!content.StartsWith("---", StringComparison.Ordinal))
             return (null, content);
 
         var endIdx = content.IndexOf("---", 3, StringComparison.Ordinal);

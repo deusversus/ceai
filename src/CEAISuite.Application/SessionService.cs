@@ -5,6 +5,7 @@ namespace CEAISuite.Application;
 
 public sealed class SessionService(IInvestigationSessionRepository repository)
 {
+    private static readonly string[] s_lockedTags = ["locked"];
     public async Task<string> SaveSessionAsync(
         string? processName,
         int? processId,
@@ -22,7 +23,7 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
             e.DataType.ToString(),
             e.CurrentValue,
             e.Notes,
-            e.IsLocked ? new[] { "locked" } : Array.Empty<string>()
+            e.IsLocked ? s_lockedTags : Array.Empty<string>()
         )).ToArray();
 
         var domainActions = actionLog.Select(a => new AIActionLog(

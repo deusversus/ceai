@@ -124,7 +124,7 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
             h.BreakpointId,
             $"0x{h.Address:X}",
             h.ThreadId,
-            h.TimestampUtc.ToString("HH:mm:ss.fff"),
+            h.TimestampUtc.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
             h.RegisterSnapshot)).ToArray();
     }
 

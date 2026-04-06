@@ -492,3 +492,4 @@ $RECYCLE.BIN/
 *.key
 *.pem
 *.env.local
+.claude/worktrees/

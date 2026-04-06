@@ -13,7 +13,13 @@ namespace CEAISuite.Engine.Windows;
 /// </summary>
 public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 {
+    private readonly ILuaScriptEngine? _luaEngine;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, nuint> _symbolTable = new(StringComparer.OrdinalIgnoreCase);
+
+    public WindowsAutoAssemblerEngine(ILuaScriptEngine? luaEngine = null)
+    {
+        _luaEngine = luaEngine;
+    }
 
     public IReadOnlyList<RegisteredSymbol> GetRegisteredSymbols() =>
         _symbolTable.Select(kv => new RegisteredSymbol(kv.Key, kv.Value)).ToList();
@@ -68,10 +74,10 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             errors.Add("Script must contain at least an [ENABLE] or [DISABLE] section.");
 
         if (enableSection is not null)
-            ValidateSection(enableSection, "[ENABLE]", errors, warnings);
+            ValidateSection(enableSection, "[ENABLE]", errors, warnings, _luaEngine is not null);
 
         if (disableSection is not null)
-            ValidateSection(disableSection, "[DISABLE]", errors, warnings);
+            ValidateSection(disableSection, "[DISABLE]", errors, warnings, _luaEngine is not null);
 
         return new ScriptParseResult(errors.Count == 0, errors, warnings, enableSection, disableSection);
     }
@@ -174,6 +180,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
         CodeBlock? currentBlock = null;
         var insideLuaBlock = false;
+        var luaBlockBuilder = new StringBuilder();
 
         foreach (var line in lines)
         {
@@ -191,19 +198,37 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 continue;
             }
 
-            // {$luacode} ... {$asm} block skipping
+            // {$luacode} ... {$asm} block handling
             if (trimmed.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase))
             {
                 insideLuaBlock = true;
-                warnings.Add("Lua code blocks are not supported (Phase 8). This section was skipped.");
+                luaBlockBuilder.Clear();
                 continue;
             }
             if (trimmed.Equals("{$asm}", StringComparison.OrdinalIgnoreCase))
             {
+                if (insideLuaBlock && luaBlockBuilder.Length > 0)
+                {
+                    if (_luaEngine is not null)
+                    {
+                        var luaResult = _luaEngine.ExecuteAsync(luaBlockBuilder.ToString(), ctx.ProcessId, ct)
+                            .GetAwaiter().GetResult();
+                        if (!luaResult.Success)
+                            return new ScriptExecutionResult(false, $"Lua error: {luaResult.Error}", [], []);
+                    }
+                    else
+                    {
+                        warnings.Add("Lua code block skipped (Lua engine not available).");
+                    }
+                }
                 insideLuaBlock = false;
                 continue;
             }
-            if (insideLuaBlock) continue;
+            if (insideLuaBlock)
+            {
+                luaBlockBuilder.AppendLine(line);
+                continue;
+            }
 
             var defineMatch = DefineRegex().Match(trimmed);
             if (defineMatch.Success)
@@ -342,7 +367,19 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             }
 
             if (trimmed.StartsWith("LuaCall(", StringComparison.OrdinalIgnoreCase))
+            {
+                if (_luaEngine is not null)
+                {
+                    // Extract function name: LuaCall(funcName) or LuaCall(funcName())
+                    var funcExpr = trimmed["LuaCall(".Length..].TrimEnd(')', ' ');
+                    if (!funcExpr.Contains('('))
+                        funcExpr += "()"; // Add call parens if not present
+                    var luaResult = _luaEngine.EvaluateAsync(funcExpr, ct).GetAwaiter().GetResult();
+                    if (!luaResult.Success)
+                        return new ScriptExecutionResult(false, $"LuaCall error: {luaResult.Error}", [], []);
+                }
                 continue;
+            }
 
             // Label definition: "name:"
             var labelDefMatch = LabelDefRegex().Match(trimmed);
@@ -851,7 +888,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         return count;
     }
 
-    private static void ValidateSection(string section, string sectionName, List<string> errors, List<string> warnings)
+    private static void ValidateSection(string section, string sectionName, List<string> errors, List<string> warnings, bool luaAvailable = false)
     {
         var lines = ParseLines(section);
 
@@ -863,7 +900,8 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
             if (trimmed.StartsWith("LuaCall(", StringComparison.OrdinalIgnoreCase))
             {
-                warnings.Add($"{sectionName}: LuaCall directive will be skipped (CE Lua engine not available).");
+                if (!luaAvailable)
+                    warnings.Add($"{sectionName}: LuaCall directive will be skipped (Lua engine not available).");
                 continue;
             }
 

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CEAISuite.Application\CEAISuite.Application.csproj" />
+    <ProjectReference Include="..\CEAISuite.Engine.Lua\CEAISuite.Engine.Lua.csproj" />
     <ProjectReference Include="..\CEAISuite.Engine.Windows\CEAISuite.Engine.Windows.csproj" />
     <ProjectReference Include="..\CEAISuite.Persistence.Sqlite\CEAISuite.Persistence.Sqlite.csproj" />
   </ItemGroup>

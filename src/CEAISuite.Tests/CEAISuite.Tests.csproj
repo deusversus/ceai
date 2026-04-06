@@ -25,6 +25,7 @@
     <ProjectReference Include="..\CEAISuite.Application\CEAISuite.Application.csproj" />
     <ProjectReference Include="..\CEAISuite.Domain\CEAISuite.Domain.csproj" />
     <ProjectReference Include="..\CEAISuite.Engine.Abstractions\CEAISuite.Engine.Abstractions.csproj" />
+    <ProjectReference Include="..\CEAISuite.Engine.Lua\CEAISuite.Engine.Lua.csproj" />
     <ProjectReference Include="..\CEAISuite.Engine.Windows\CEAISuite.Engine.Windows.csproj" />
     <ProjectReference Include="..\CEAISuite.Persistence.Sqlite\CEAISuite.Persistence.Sqlite.csproj" />
     <ProjectReference Include="..\CEAISuite.Desktop\CEAISuite.Desktop.csproj" />

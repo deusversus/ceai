@@ -7,6 +7,7 @@ using CEAISuite.Desktop.Services;
 using CEAISuite.Desktop.ViewModels;
 using CEAISuite.Domain;
 using CEAISuite.Engine.Abstractions;
+using CEAISuite.Engine.Lua;
 using CEAISuite.Engine.Windows;
 using CEAISuite.Persistence.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
@@ -77,7 +78,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IDisassemblyEngine>(sp =>
             new WindowsDisassemblyEngine(sp.GetRequiredService<ISymbolEngine>()));
         services.AddSingleton<IBreakpointEngine, WindowsBreakpointEngine>();
-        services.AddSingleton<IAutoAssemblerEngine, WindowsAutoAssemblerEngine>();
+        services.AddSingleton<ILuaScriptEngine>(sp =>
+            new MoonSharpLuaEngine(
+                sp.GetRequiredService<IEngineFacade>(),
+                sp.GetService<IAutoAssemblerEngine>()));
+        services.AddSingleton<IAutoAssemblerEngine>(sp =>
+            new WindowsAutoAssemblerEngine(sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
         services.AddSingleton<ICodeCaveEngine, WindowsCodeCaveEngine>();
         services.AddSingleton<IScreenCaptureEngine, WindowsScreenCaptureEngine>();

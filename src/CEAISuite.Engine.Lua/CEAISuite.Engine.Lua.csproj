@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- TFM, nullable, analyzers inherited from Directory.Build.props -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\CEAISuite.Engine.Abstractions\CEAISuite.Engine.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MoonSharp" Version="2.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CEAISuite.Tests" />
+  </ItemGroup>
+
+</Project>

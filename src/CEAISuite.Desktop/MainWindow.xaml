@@ -30,8 +30,8 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Row 1: Update Banner (collapsed by default) -->
-        <Border Grid.Row="1" Background="#2E7D32" Padding="8,4"
+        <!-- Row 1: Update Banner (collapsed by default, DataContext = MainViewModel) -->
+        <Border x:Name="UpdateBanner" Grid.Row="1" Background="#2E7D32" Padding="8,4"
                 Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVisibility}}">
             <DockPanel>
                 <Button DockPanel.Dock="Right" Content="Skip" Padding="8,2" Margin="4,0,0,0"

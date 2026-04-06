@@ -189,6 +189,9 @@ public partial class MainWindow : Window, IDisposable
         DebuggerContent.DataContext = debuggerVm;
         LuaConsoleContent.DataContext = luaConsoleVm;
 
+        // Update banner (top-level Grid has no DataContext, so wire explicitly)
+        UpdateBanner.DataContext = mainVm;
+
         // Wire Phase 4 sidebar DataContexts
         ModulesContent.DataContext = moduleListVm;
         ThreadsContent.DataContext = threadListVm;

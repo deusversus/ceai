@@ -6,8 +6,28 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="{DynamicResource WindowBackground}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="0" CornerRadius="0" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
     <!-- All default styles inherited from Themes/SharedStyles.xaml (merged at App level) -->
-    <Grid Margin="16">
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="30" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <!-- Custom Title Bar -->
+        <Border Grid.Row="0" Background="{DynamicResource TitleBarBackground}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource CaptionCloseButton}" Click="CaptionClose_Click">
+                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="1" Data="M 0,0 L 10,10 M 10,0 L 0,10" Width="10" Height="10" Stretch="Uniform" />
+                </Button>
+                <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           VerticalAlignment="Center" Margin="10,0" FontSize="12"
+                           Foreground="{DynamicResource TitleBarForeground}" />
+            </DockPanel>
+        </Border>
+    <Grid Grid.Row="1" Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
@@ -249,6 +269,7 @@
 
             <TabItem Header="General">
                 <Border Background="{DynamicResource PanelBackground}">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Padding="0">
                     <StackPanel Margin="16">
                         <TextBlock Text="Address Table Refresh Interval" FontWeight="SemiBold" FontSize="14" />
                         <TextBlock Text="How often to refresh values in the address table (milliseconds)"
@@ -308,7 +329,86 @@
 
                         <TextBlock Text="Set to 0 to disable rate limiting."
                                    Foreground="{DynamicResource TertiaryForeground}" Margin="0,6,0,0" FontSize="11" FontStyle="Italic" />
+
+                        <Separator Margin="0,20,0,20" />
+
+                        <CheckBox x:Name="AutoHideMenuBarCheck" Content="Auto-hide menu bar"
+                                  FontSize="13" />
+
+                        <Grid Margin="0,10,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Max conversation messages" VerticalAlignment="Center" FontSize="12" />
+                            <TextBox x:Name="MaxConversationMessagesBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                            <TextBlock Grid.Column="2" Text="0 = unlimited" FontSize="10" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Auto-save interval (minutes)" VerticalAlignment="Center" FontSize="12" />
+                            <TextBox x:Name="AutoSaveIntervalBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                            <TextBlock Grid.Column="2" Text="1 – 60" FontSize="10" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Log retention (days)" VerticalAlignment="Center" FontSize="12" />
+                            <TextBox x:Name="LogRetentionBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                            <TextBlock Grid.Column="2" Text="1 – 365" FontSize="10" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Separator Margin="0,14,0,14" />
+
+                        <!-- Lua -->
+                        <TextBlock Text="Lua" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Script execution settings"
+                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" />
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="80" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Lua execution timeout (seconds)" VerticalAlignment="Center" FontSize="12" />
+                            <TextBox x:Name="LuaTimeoutBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                            <TextBlock Grid.Column="2" Text="1 – 300" FontSize="10" Margin="8,0,0,0"
+                                       Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                        </Grid>
+
+                        <Separator Margin="0,14,0,14" />
+
+                        <!-- Memory Browser -->
+                        <TextBlock Text="Memory Browser" FontWeight="SemiBold" FontSize="14" />
+                        <TextBlock Text="Hex view display settings"
+                                   Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,8" />
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="200" />
+                                <ColumnDefinition Width="80" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="Memory browser bytes per row" VerticalAlignment="Center" FontSize="12" />
+                            <ComboBox x:Name="MemBrowserBytesCombo" Grid.Column="1">
+                                <ComboBoxItem Content="8" />
+                                <ComboBoxItem Content="16" />
+                                <ComboBoxItem Content="32" />
+                            </ComboBox>
+                        </Grid>
                     </StackPanel>
+                    </ScrollViewer>
                 </Border>
             </TabItem>
 
@@ -411,6 +511,42 @@
                             <TextBlock x:Name="ProfileDescription" FontSize="11" FontStyle="Italic"
                                        Foreground="{DynamicResource TertiaryForeground}" Margin="0,6,0,0"
                                        TextWrapping="Wrap" />
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- Scanning -->
+                            <TextBlock Text="Scanning" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Memory scan thread and data type defaults"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="80" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Scan thread count" VerticalAlignment="Center" FontSize="12" />
+                                <TextBox x:Name="ScanThreadCountBox" Grid.Column="1" FontFamily="Consolas" Padding="4,3" />
+                                <TextBlock Grid.Column="2" Text="1 – 32" FontSize="10" Margin="8,0,0,0"
+                                           Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
+                            </Grid>
+
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="200" />
+                                    <ColumnDefinition Width="80" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Default scan data type" VerticalAlignment="Center" FontSize="12" />
+                                <ComboBox x:Name="DefaultScanDataTypeCombo" Grid.Column="1">
+                                    <ComboBoxItem Content="Byte" />
+                                    <ComboBoxItem Content="Int16" />
+                                    <ComboBoxItem Content="Int32" />
+                                    <ComboBoxItem Content="Int64" />
+                                    <ComboBoxItem Content="Float" />
+                                    <ComboBoxItem Content="Double" />
+                                    <ComboBoxItem Content="String" />
+                                </ComboBox>
+                            </Grid>
 
                             <Separator Margin="0,16,0,16" />
 
@@ -869,5 +1005,6 @@
             <Button Content="Cancel" Padding="20,8" Margin="8,0,0,0" Click="CancelSettings"
                     IsCancel="True" />
         </StackPanel>
+    </Grid>
     </Grid>
 </Window>

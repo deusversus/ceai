@@ -6,8 +6,28 @@
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="{DynamicResource WindowBackground}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="0" CornerRadius="0" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
 
-    <Grid Margin="24">
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="30" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <!-- Custom Title Bar -->
+        <Border Grid.Row="0" Background="{DynamicResource TitleBarBackground}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Style="{StaticResource CaptionCloseButton}" Click="CaptionClose_Click">
+                    <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                          StrokeThickness="1" Data="M 0,0 L 10,10 M 10,0 L 0,10" Width="10" Height="10" Stretch="Uniform" />
+                </Button>
+                <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           VerticalAlignment="Center" Margin="10,0" FontSize="12"
+                           Foreground="{DynamicResource TitleBarForeground}" />
+            </DockPanel>
+        </Border>
+    <Grid Grid.Row="1" Margin="24">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -79,5 +99,6 @@
         <Button Grid.Row="2" Content="Get Started" FontSize="14" FontWeight="SemiBold"
                 Padding="24,10" HorizontalAlignment="Right" Margin="0,16,0,0"
                 Click="GetStarted_Click" IsDefault="True" />
+    </Grid>
     </Grid>
 </Window>

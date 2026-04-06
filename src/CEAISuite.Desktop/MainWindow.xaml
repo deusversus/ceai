@@ -14,6 +14,12 @@
         MinHeight="700"
         MinWidth="1100"
         Background="{DynamicResource WindowBackground}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="34"
+                      ResizeBorderThickness="4"
+                      CornerRadius="0"
+                      GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
     <Window.Resources>
         <local:StringToBrushConverter x:Key="BrushConv" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
@@ -22,7 +28,7 @@
              SystemColors are updated at runtime in UpdateSystemSelectionColors(). -->
     </Window.Resources>
 
-    <Grid>
+    <Grid x:Name="RootGrid">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
@@ -44,17 +50,42 @@
             </DockPanel>
         </Border>
 
-        <!-- Row 0: Command Bar -->
-        <Border Grid.Row="0" Background="{DynamicResource MenuBarBackground}"
+        <!-- Row 0: Custom Title Bar (merged with command bar) -->
+        <Border Grid.Row="0" Background="{DynamicResource TitleBarBackground}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
             <DockPanel>
-                <!-- Right side: Emergency Stop + Hamburger menu + Settings gear -->
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
-                    <Button Content="⚠ Stop" Padding="8,3" FontSize="11"
-                            Click="CmdEmergencyStop" Foreground="OrangeRed" FontWeight="SemiBold"
-                            Style="{StaticResource ToolbarButton}"
-                            ToolTip="Emergency: rollback all patches + force detach (Ctrl+Shift+Esc)" />
-                    <Menu Background="Transparent" VerticalAlignment="Center">
+                <!-- ── Right side: caption buttons ── -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button x:Name="CaptionCloseButton" Style="{StaticResource CaptionCloseButton}"
+                            Click="CaptionClose_Click" ToolTip="Close">
+                        <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1" Data="M 0,0 L 10,10 M 10,0 L 0,10"
+                              Width="10" Height="10" Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="CaptionMaximizeButton" Style="{StaticResource CaptionButton}"
+                            Click="CaptionMaximizeRestore_Click" ToolTip="Maximize">
+                        <Path x:Name="MaximizeIcon"
+                              Stroke="{DynamicResource TitleBarForeground}"
+                              StrokeThickness="1" Fill="Transparent"
+                              Data="M 0,0 H 10 V 10 H 0 Z"
+                              Width="10" Height="10" Stretch="Uniform" />
+                    </Button>
+                    <Button Style="{StaticResource CaptionButton}"
+                            Click="CaptionMinimize_Click" ToolTip="Minimize">
+                        <Path Stroke="{DynamicResource TitleBarForeground}"
+                              StrokeThickness="1" Data="M 0,5 H 10"
+                              Width="10" Height="10" Stretch="None" />
+                    </Button>
+                </StackPanel>
+
+                <!-- ── Right side: app controls (before caption buttons) ── -->
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,2,0">
+                    <Border Width="1" Background="{DynamicResource BorderBrush}" Margin="4,6" />
+                    <Button Content="⚙" FontSize="14" Padding="8,4" ToolTip="Settings"
+                            Click="OpenSettings" Style="{StaticResource ToolbarButton}"
+                            WindowChrome.IsHitTestVisibleInChrome="True" />
+                    <Menu Background="Transparent" VerticalAlignment="Center"
+                          WindowChrome.IsHitTestVisibleInChrome="True">
                         <MenuItem Header="⋯" FontSize="14" FontWeight="Bold" ToolTip="Menu (Alt)"
                                   Padding="8,4">
                             <MenuItem Header="_Windows">
@@ -109,12 +140,22 @@
                             <MenuItem Header="E_xit" Click="ExitApp" />
                         </MenuItem>
                     </Menu>
-                    <Button Content="⚙" FontSize="14" Padding="8,4" ToolTip="Settings"
-                            Click="OpenSettings" Style="{StaticResource ToolbarButton}" />
+                    <Button Content="⚠ Stop" Padding="8,3" FontSize="11"
+                            Click="CmdEmergencyStop" Foreground="OrangeRed" FontWeight="SemiBold"
+                            Style="{StaticResource ToolbarButton}"
+                            WindowChrome.IsHitTestVisibleInChrome="True"
+                            ToolTip="Emergency: rollback all patches + force detach (Ctrl+Shift+Esc)" />
                 </StackPanel>
 
-                <!-- Left side: Command buttons -->
-                <ToolBarTray DockPanel.Dock="Left" Background="Transparent" IsLocked="True">
+                <!-- ── Left side: App title + Command buttons ── -->
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                    <TextBlock Text="CE" FontWeight="Bold" FontSize="12" VerticalAlignment="Center"
+                               Foreground="{DynamicResource PrimaryForeground}" />
+                    <TextBlock Text=" AI Suite" FontSize="12" VerticalAlignment="Center"
+                               Foreground="{DynamicResource TitleBarForeground}" Margin="0,0,6,0" />
+                </StackPanel>
+                <ToolBarTray Background="Transparent" IsLocked="True"
+                             WindowChrome.IsHitTestVisibleInChrome="True">
                     <ToolBar Background="Transparent" Band="0" BandIndex="0"
                              OverflowMode="Never">
                         <ToolBar.Resources>

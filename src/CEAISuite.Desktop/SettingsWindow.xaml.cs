@@ -157,6 +157,37 @@ public partial class SettingsWindow : Window, IDisposable
 
         RequirePlanCheck.IsChecked = s.RequirePlanForDestructive;
         EarlyToolExecutionCheck.IsChecked = s.EnableEarlyToolExecution;
+
+        // Additional General settings
+        AutoHideMenuBarCheck.IsChecked = s.AutoHideMenuBar;
+        MaxConversationMessagesBox.Text = s.MaxConversationMessages.ToString(CultureInfo.InvariantCulture);
+        AutoSaveIntervalBox.Text = s.AutoSaveIntervalMinutes.ToString(CultureInfo.InvariantCulture);
+        LogRetentionBox.Text = s.LogRetentionDays.ToString(CultureInfo.InvariantCulture);
+
+        // Scanning
+        ScanThreadCountBox.Text = s.ScanThreadCount.ToString(CultureInfo.InvariantCulture);
+        foreach (ComboBoxItem item in DefaultScanDataTypeCombo.Items)
+        {
+            if ((string)item.Content == s.DefaultScanDataType)
+            {
+                DefaultScanDataTypeCombo.SelectedItem = item;
+                break;
+            }
+        }
+
+        // Lua
+        LuaTimeoutBox.Text = s.LuaExecutionTimeoutSeconds.ToString(CultureInfo.InvariantCulture);
+
+        // Memory Browser
+        var bytesPerRow = s.MemoryBrowserBytesPerRow.ToString(CultureInfo.InvariantCulture);
+        foreach (ComboBoxItem item in MemBrowserBytesCombo.Items)
+        {
+            if ((string)item.Content == bytesPerRow)
+            {
+                MemBrowserBytesCombo.SelectedItem = item;
+                break;
+            }
+        }
     }
 
     private string GetSelectedProvider()
@@ -553,6 +584,30 @@ public partial class SettingsWindow : Window, IDisposable
         s.RequirePlanForDestructive = RequirePlanCheck.IsChecked == true;
         s.EnableEarlyToolExecution = EarlyToolExecutionCheck.IsChecked == true;
 
+        // Additional General settings
+        s.AutoHideMenuBar = AutoHideMenuBarCheck.IsChecked == true;
+        if (int.TryParse(MaxConversationMessagesBox.Text, out var maxMsg) && maxMsg >= 0)
+            s.MaxConversationMessages = maxMsg;
+        if (int.TryParse(AutoSaveIntervalBox.Text, out var autoSave) && autoSave >= 1)
+            s.AutoSaveIntervalMinutes = autoSave;
+        if (int.TryParse(LogRetentionBox.Text, out var logDays) && logDays >= 1)
+            s.LogRetentionDays = logDays;
+
+        // Scanning
+        if (int.TryParse(ScanThreadCountBox.Text, out var threads) && threads >= 1)
+            s.ScanThreadCount = Math.Min(threads, 32);
+        if (DefaultScanDataTypeCombo.SelectedItem is ComboBoxItem scanTypeItem)
+            s.DefaultScanDataType = (string)scanTypeItem.Content;
+
+        // Lua
+        if (int.TryParse(LuaTimeoutBox.Text, out var luaTimeout) && luaTimeout >= 1)
+            s.LuaExecutionTimeoutSeconds = Math.Min(luaTimeout, 300);
+
+        // Memory Browser
+        if (MemBrowserBytesCombo.SelectedItem is ComboBoxItem memItem &&
+            int.TryParse((string)memItem.Content, out var bytesPerRow) && bytesPerRow > 0)
+            s.MemoryBrowserBytesPerRow = bytesPerRow;
+
         _settingsService.Save();
 
         MessageBox.Show("Settings saved. Provider and model changes take effect on next message.",
@@ -800,4 +855,6 @@ public partial class SettingsWindow : Window, IDisposable
             DeviceFlowStatusText.Text = "Code copied! Waiting for authorization…";
         }
     }
+
+    private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();
 }

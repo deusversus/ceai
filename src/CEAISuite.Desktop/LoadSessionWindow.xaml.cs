@@ -20,6 +20,7 @@ public sealed partial class LoadSessionWindow : Window
         Func<Task<IReadOnlyList<SavedInvestigationSession>>> refreshSessions)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowChromeHelper.EnableRoundedCorners(this);
         _sessions = sessions.ToList();
         _deleteSession = deleteSession;
         _refreshSessions = refreshSessions;
@@ -62,4 +63,6 @@ public sealed partial class LoadSessionWindow : Window
         DialogResult = false;
         Close();
     }
+
+    private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();
 }

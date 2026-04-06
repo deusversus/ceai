@@ -388,6 +388,8 @@ public partial class MainWindow : Window, IDisposable
         var source = System.Windows.Interop.HwndSource.FromHwnd(hwnd);
         source?.AddHook(WndProc);
 
+        WindowChromeHelper.EnableRoundedCorners(this);
+
         await _mainVm.InitializeAsync();
 
         // Check for updates in the background (fire-and-forget)
@@ -416,6 +418,25 @@ public partial class MainWindow : Window, IDisposable
         const int WM_HOTKEY = 0x0312;
         if (msg == WM_HOTKEY)
             handled = _hotkeyService.HandleHotkeyMessage(wParam.ToInt32());
+
+        // WM_NCHITTEST — return HTMAXBUTTON when hovering maximize button for Windows 11 snap layouts
+        if (msg == 0x0084 && CaptionMaximizeButton != null)
+        {
+            int xy = lParam.ToInt32();
+            var screenPoint = new Point((short)(xy & 0xFFFF), (short)((xy >> 16) & 0xFFFF));
+            try
+            {
+                var btnPoint = CaptionMaximizeButton.PointFromScreen(screenPoint);
+                if (btnPoint.X >= 0 && btnPoint.X <= CaptionMaximizeButton.ActualWidth &&
+                    btnPoint.Y >= 0 && btnPoint.Y <= CaptionMaximizeButton.ActualHeight)
+                {
+                    handled = true;
+                    return new IntPtr(9); // HTMAXBUTTON
+                }
+            }
+            catch { /* button not yet in visual tree */ }
+        }
+
         return IntPtr.Zero;
     }
 
@@ -881,6 +902,38 @@ public partial class MainWindow : Window, IDisposable
     }
 
     private void ExitApp(object sender, RoutedEventArgs e) => Close();
+
+    // ─── Custom Title Bar Caption Buttons ────────────────────────────────
+
+    private void CaptionMinimize_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+
+    private void CaptionMaximizeRestore_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+
+    private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+
+        // Toggle maximize/restore icon
+        if (MaximizeIcon != null)
+        {
+            MaximizeIcon.Data = WindowState == WindowState.Maximized
+                ? System.Windows.Media.Geometry.Parse("M 0,2 H 8 V 10 H 0 Z M 2,0 H 10 V 8")
+                : System.Windows.Media.Geometry.Parse("M 0,0 H 10 V 10 H 0 Z");
+        }
+
+        if (CaptionMaximizeButton != null)
+        {
+            CaptionMaximizeButton.ToolTip = WindowState == WindowState.Maximized ? "Restore Down" : "Maximize";
+        }
+
+        // Compensate for invisible resize border when maximized
+        RootGrid.Margin = WindowState == WindowState.Maximized
+            ? new Thickness(7) : new Thickness(0);
+    }
 
     private async void MenuUndo(object sender, RoutedEventArgs e) => await _mainVm.PerformUndoAsync();
     private async void MenuRedo(object sender, RoutedEventArgs e) => await _mainVm.PerformRedoAsync();

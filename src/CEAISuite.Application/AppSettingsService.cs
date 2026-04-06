@@ -119,6 +119,32 @@ public sealed class AppSettings
     /// </summary>
     public bool EnableEarlyToolExecution { get; set; }
 
+    // ── General ──
+
+    /// <summary>Auto-save interval in minutes for address table and session data.</summary>
+    public int AutoSaveIntervalMinutes { get; set; } = 5;
+
+    /// <summary>Number of days to retain log files before cleanup.</summary>
+    public int LogRetentionDays { get; set; } = 14;
+
+    // ── Scanning ──
+
+    /// <summary>Number of threads to use for memory scans.</summary>
+    public int ScanThreadCount { get; set; } = Environment.ProcessorCount;
+
+    /// <summary>Default data type for new scans (Byte, Int16, Int32, Int64, Float, Double, String).</summary>
+    public string DefaultScanDataType { get; set; } = "Int32";
+
+    // ── Lua ──
+
+    /// <summary>Maximum execution time in seconds for Lua scripts before timeout.</summary>
+    public int LuaExecutionTimeoutSeconds { get; set; } = 30;
+
+    // ── Memory Browser ──
+
+    /// <summary>Number of bytes displayed per row in the Memory Browser hex view.</summary>
+    public int MemoryBrowserBytesPerRow { get; set; } = 16;
+
     /// <summary>Set to true after the first-run welcome dialog has been completed.</summary>
     public bool FirstRunCompleted { get; set; }
 

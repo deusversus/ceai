@@ -102,4 +102,12 @@
     <SolidColorBrush x:Key="HexBookmarkGutter"       Color="#B8860B" />
     <SolidColorBrush x:Key="ErrorForeground"          Color="#CC0000" />
 
+    <!-- Title Bar (custom chrome) -->
+    <SolidColorBrush x:Key="TitleBarBackground"              Color="#EAEAEA" />
+    <SolidColorBrush x:Key="TitleBarForeground"              Color="#6E6E6E" />
+    <SolidColorBrush x:Key="TitleBarButtonHoverBackground"   Color="#D0D0D0" />
+    <SolidColorBrush x:Key="TitleBarButtonPressedBackground" Color="#B0B0B0" />
+    <SolidColorBrush x:Key="TitleBarCloseHoverBackground"    Color="#E81123" />
+    <SolidColorBrush x:Key="TitleBarCloseHoverForeground"    Color="#FFFFFF" />
+
 </ResourceDictionary>

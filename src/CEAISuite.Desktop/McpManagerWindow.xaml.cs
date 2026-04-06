@@ -16,6 +16,7 @@ public partial class McpManagerWindow : Window
     public McpManagerWindow(AppSettingsService settingsService)
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowChromeHelper.EnableRoundedCorners(this);
         _settingsService = settingsService;
         LoadServers();
     }
@@ -196,6 +197,25 @@ public partial class McpManagerWindow : Window
                 dict[line[..eq].Trim()] = line[(eq + 1)..].Trim();
         }
         return dict.Count > 0 ? dict : null;
+    }
+
+    // ─── Custom Title Bar ────────────────────────────────────────────────
+    private void CaptionMinimize_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState.Minimized;
+    private void CaptionMaximizeRestore_Click(object sender, RoutedEventArgs e) =>
+        WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+    private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();
+    protected override void OnStateChanged(EventArgs e)
+    {
+        base.OnStateChanged(e);
+        if (MaximizeIcon != null)
+            MaximizeIcon.Data = WindowState == WindowState.Maximized
+                ? System.Windows.Media.Geometry.Parse("M 0,2 H 8 V 10 H 0 Z M 2,0 H 10 V 8")
+                : System.Windows.Media.Geometry.Parse("M 0,0 H 10 V 10 H 0 Z");
+        if (CaptionMaximizeButton != null)
+            CaptionMaximizeButton.ToolTip = WindowState == WindowState.Maximized ? "Restore Down" : "Maximize";
+        RootGrid.Margin = WindowState == WindowState.Maximized
+            ? new Thickness(7) : new Thickness(0);
     }
 }
 

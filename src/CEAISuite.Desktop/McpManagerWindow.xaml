@@ -6,8 +6,37 @@
         WindowStartupLocation="CenterOwner"
         ResizeMode="CanResize"
         Background="{DynamicResource WindowBackground}">
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="30" ResizeBorderThickness="4" CornerRadius="0" GlassFrameThickness="0" />
+    </WindowChrome.WindowChrome>
 
-    <Grid Margin="16">
+    <Grid x:Name="RootGrid">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="30" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <!-- Custom Title Bar -->
+        <Border Grid.Row="0" Background="{DynamicResource TitleBarBackground}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                    <Button Style="{StaticResource CaptionCloseButton}" Click="CaptionClose_Click">
+                        <Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}"
+                              StrokeThickness="1" Data="M 0,0 L 10,10 M 10,0 L 0,10" Width="10" Height="10" Stretch="Uniform" />
+                    </Button>
+                    <Button x:Name="CaptionMaximizeButton" Style="{StaticResource CaptionButton}" Click="CaptionMaximizeRestore_Click" ToolTip="Maximize">
+                        <Path x:Name="MaximizeIcon" Stroke="{DynamicResource TitleBarForeground}"
+                              StrokeThickness="1" Fill="Transparent" Data="M 0,0 H 10 V 10 H 0 Z" Width="10" Height="10" Stretch="Uniform" />
+                    </Button>
+                    <Button Style="{StaticResource CaptionButton}" Click="CaptionMinimize_Click" ToolTip="Minimize">
+                        <Path Stroke="{DynamicResource TitleBarForeground}" StrokeThickness="1" Data="M 0,5 H 10" Width="10" Height="10" Stretch="None" />
+                    </Button>
+                </StackPanel>
+                <TextBlock Text="{Binding Title, RelativeSource={RelativeSource AncestorType=Window}}"
+                           VerticalAlignment="Center" Margin="10,0" FontSize="12"
+                           Foreground="{DynamicResource TitleBarForeground}" />
+            </DockPanel>
+        </Border>
+    <Grid Grid.Row="1" Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
@@ -95,5 +124,6 @@
             <Button Content="Save" Click="Save_Click" Padding="16,6" FontWeight="SemiBold" Margin="0,0,8,0" />
             <Button Content="Close" Click="Close_Click" Padding="16,6" />
         </StackPanel>
+    </Grid>
     </Grid>
 </Window>

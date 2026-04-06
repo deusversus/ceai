@@ -7,6 +7,7 @@ public partial class WelcomeDialog : Window
     public WelcomeDialog()
     {
         InitializeComponent();
+        SourceInitialized += (_, _) => WindowChromeHelper.EnableRoundedCorners(this);
     }
 
     /// <summary>The API key entered by the user (plaintext).</summary>
@@ -32,4 +33,6 @@ public partial class WelcomeDialog : Window
         var theme = ThemeLight?.IsChecked == true ? AppTheme.Light : AppTheme.Dark;
         ThemeManager.ApplyTheme(theme);
     }
+
+    private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();
 }

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CEAISuite.Engine.Abstractions;
 using MoonSharp.Interpreter;
 
@@ -8,19 +9,18 @@ namespace CEAISuite.Engine.Lua;
 /// Forms are represented as Lua tables with method bindings; the actual WPF rendering
 /// is delegated to <see cref="ILuaFormHost"/>.
 /// </summary>
-internal static class CeFormBindings
+internal sealed class CeFormBindings
 {
-    private static int _nextFormId;
-    private static int _nextElementId;
-    private static readonly Dictionary<string, LuaFormDescriptor> _forms = new();
-    private static readonly Dictionary<string, DynValue> _clickCallbacks = new();
+    private int _nextFormId;
+    private int _nextElementId;
+    private readonly ConcurrentDictionary<string, LuaFormDescriptor> _forms = new();
+    private readonly ConcurrentDictionary<string, DynValue> _callbacks = new();
 
-    public static void Register(Script script, ILuaFormHost formHost)
+    public void Register(Script script, ILuaFormHost formHost)
     {
         _forms.Clear();
-        _clickCallbacks.Clear();
+        _callbacks.Clear();
 
-        // createForm(visible) → returns form table
         script.Globals["createForm"] = (Func<DynValue, DynValue>)(visibleArg =>
         {
             var formId = $"form_{Interlocked.Increment(ref _nextFormId)}";
@@ -31,22 +31,22 @@ internal static class CeFormBindings
             formTable["_id"] = formId;
             formTable["_type"] = "form";
 
-            formTable["show"] = (Action)(() => formHost.ShowForm(form));
+            formTable["show"] = (Action)(() => formHost.ShowForm(_forms.GetValueOrDefault(formId) ?? form));
             formTable["hide"] = (Action)(() => formHost.CloseForm(formId));
             formTable["close"] = (Action)(() =>
             {
                 formHost.CloseForm(formId);
-                _forms.Remove(formId);
+                _forms.TryRemove(formId, out _);
             });
             formTable["setCaption"] = (Action<string>)(caption =>
             {
-                var updated = form with { Title = caption };
-                _forms[formId] = updated;
+                if (_forms.TryGetValue(formId, out var f))
+                    _forms[formId] = f with { Title = caption };
             });
             formTable["setSize"] = (Action<int, int>)((w, h) =>
             {
-                var updated = form with { Width = w, Height = h };
-                _forms[formId] = updated;
+                if (_forms.TryGetValue(formId, out var f))
+                    _forms[formId] = f with { Width = w, Height = h };
             });
 
             var visible = visibleArg.IsNil() || visibleArg.Boolean;
@@ -55,99 +55,111 @@ internal static class CeFormBindings
             return DynValue.NewTable(formTable);
         });
 
-        // createButton(form) → returns button table
         script.Globals["createButton"] = (Func<Table, DynValue>)(formTable =>
         {
             var formId = formTable.Get("_id").String;
             var elementId = $"btn_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaButtonElement(elementId, 10, 10, 100, 30) { Caption = "Button" };
-
-            if (_forms.TryGetValue(formId, out var form))
-                form.Elements.Add(element);
-
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
-            return DynValue.NewTable(elemTable);
+            AddElementToForm(formId, element);
+            return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        // createLabel(form) → returns label table
         script.Globals["createLabel"] = (Func<Table, DynValue>)(formTable =>
         {
             var formId = formTable.Get("_id").String;
             var elementId = $"lbl_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaLabelElement(elementId, 10, 10, 150, 20) { Caption = "Label" };
-
-            if (_forms.TryGetValue(formId, out var form))
-                form.Elements.Add(element);
-
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
-            return DynValue.NewTable(elemTable);
+            AddElementToForm(formId, element);
+            return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        // createEdit(form) → returns edit table
         script.Globals["createEdit"] = (Func<Table, DynValue>)(formTable =>
         {
             var formId = formTable.Get("_id").String;
             var elementId = $"edit_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaEditElement(elementId, 10, 10, 150, 25);
-
-            if (_forms.TryGetValue(formId, out var form))
-                form.Elements.Add(element);
-
+            AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            // Edit-specific: getText / setText
+            elemTable["getText"] = (Func<DynValue>)(() =>
+            {
+                var text = formHost.GetElementText(formId, elementId);
+                return text is not null ? DynValue.NewString(text) : DynValue.NewString("");
+            });
+            elemTable["setText"] = (Action<string>)(text =>
+            {
+                element.Text = text;
+                formHost.UpdateElement(formId, element);
+            });
             return DynValue.NewTable(elemTable);
         });
 
-        // createCheckBox(form) → returns checkbox table
         script.Globals["createCheckBox"] = (Func<Table, DynValue>)(formTable =>
         {
             var formId = formTable.Get("_id").String;
             var elementId = $"chk_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaCheckBoxElement(elementId, 10, 10, 150, 20) { Caption = "CheckBox" };
-
-            if (_forms.TryGetValue(formId, out var form))
-                form.Elements.Add(element);
-
+            AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            // CheckBox-specific: getChecked / setChecked
+            elemTable["getChecked"] = (Func<bool>)(() =>
+                formHost.GetElementChecked(formId, elementId) ?? element.IsChecked);
+            elemTable["setChecked"] = (Action<bool>)(val =>
+            {
+                element.IsChecked = val;
+                formHost.UpdateElement(formId, element);
+            });
             return DynValue.NewTable(elemTable);
         });
 
-        // createTimer(form, intervalMs) → returns timer table
         script.Globals["createTimer"] = (Func<Table, DynValue, DynValue>)((formTable, intervalArg) =>
         {
             var formId = formTable.Get("_id").String;
             var elementId = $"tmr_{Interlocked.Increment(ref _nextElementId)}";
             var interval = intervalArg.IsNil() ? 1000 : (int)intervalArg.Number;
             var element = new LuaTimerElement(elementId, interval) { Enabled = true };
-
-            if (_forms.TryGetValue(formId, out var form))
-                form.Elements.Add(element);
-
+            AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["setInterval"] = (Action<int>)(ms =>
             {
-                var updated = element with { IntervalMs = ms };
-                formHost.UpdateElement(formId, updated);
+                element.IntervalMs = ms;
+                formHost.StopTimer(formId, elementId);
+                formHost.StartTimer(formId, elementId, ms);
             });
+            elemTable["setEnabled"] = (Action<bool>)(enabled =>
+            {
+                element.Enabled = enabled;
+                if (enabled) formHost.StartTimer(formId, elementId, element.IntervalMs);
+                else formHost.StopTimer(formId, elementId);
+            });
+            // Start the timer
+            formHost.StartTimer(formId, elementId, interval);
             return DynValue.NewTable(elemTable);
         });
 
         // Wire click events back to Lua callbacks
-        formHost.ElementClicked += (formId, elementId) =>
+        formHost.ElementClicked += (fId, eId) =>
         {
-            var key = $"{formId}:{elementId}";
-            if (_clickCallbacks.TryGetValue(key, out var callback))
+            var key = $"{fId}:{eId}:onClick";
+            if (_callbacks.TryGetValue(key, out var callback))
                 script.Call(callback);
         };
 
-        formHost.TimerFired += (formId, timerId) =>
+        formHost.TimerFired += (fId, tId) =>
         {
-            var key = $"{formId}:{timerId}";
-            if (_clickCallbacks.TryGetValue(key, out var callback))
+            var key = $"{fId}:{tId}:onTimer";
+            if (_callbacks.TryGetValue(key, out var callback))
                 script.Call(callback);
         };
     }
 
-    private static Table CreateElementTable(
+    private void AddElementToForm(string formId, LuaFormElement element)
+    {
+        if (_forms.TryGetValue(formId, out var form))
+            form.Elements.Add(element);
+    }
+
+    private Table CreateElementTable(
         Script script, string formId, string elementId, LuaFormElement element, ILuaFormHost formHost)
     {
         var table = new Table(script);
@@ -163,27 +175,31 @@ internal static class CeFormBindings
 
         table["setPosition"] = (Action<int, int>)((x, y) =>
         {
-            // Records are immutable — update via the form's element list
-            // For simplicity, update the Caption which triggers a re-render
+            element.X = x;
+            element.Y = y;
             formHost.UpdateElement(formId, element);
         });
 
         table["setSize"] = (Action<int, int>)((w, h) =>
         {
+            element.Width = w;
+            element.Height = h;
             formHost.UpdateElement(formId, element);
         });
 
-        // onClick callback registration
-        table["__newindex"] = (Action<Table, DynValue, DynValue>)((self, key, value) =>
+        // Callback registration via property assignment: element.onClick = function() ... end
+        var callbacks = _callbacks;
+        table.MetaTable = new Table(script);
+        table.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
         {
-            if (key.String == "onClick" || key.String == "onTimer")
+            var keyStr = key.String;
+            if (keyStr is "onClick" or "onTimer")
             {
-                var callbackKey = $"{formId}:{elementId}";
-                _clickCallbacks[callbackKey] = value;
+                callbacks[$"{formId}:{elementId}:{keyStr}"] = value;
             }
             else
             {
-                self.Set(key, value);
+                table.Set(key.String, value);
             }
         });
 

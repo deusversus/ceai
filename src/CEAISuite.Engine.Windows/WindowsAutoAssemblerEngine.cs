@@ -27,6 +27,12 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     public nuint? ResolveSymbol(string name) =>
         _symbolTable.TryGetValue(name, out var addr) ? addr : null;
 
+    public void RegisterSymbol(string name, nuint address) =>
+        _symbolTable[name] = address;
+
+    public void UnregisterSymbol(string name) =>
+        _symbolTable.TryRemove(name, out _);
+
     private const uint ProcessAllAccess = 0x001FFFFF;
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
@@ -181,6 +187,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         CodeBlock? currentBlock = null;
         var insideLuaBlock = false;
         var luaBlockBuilder = new StringBuilder();
+        var luaBlockIndex = 0;
 
         foreach (var line in lines)
         {
@@ -203,18 +210,20 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             {
                 insideLuaBlock = true;
                 luaBlockBuilder.Clear();
+                luaBlockIndex++;
                 continue;
             }
             if (trimmed.Equals("{$asm}", StringComparison.OrdinalIgnoreCase))
             {
                 if (insideLuaBlock && luaBlockBuilder.Length > 0)
                 {
-                    if (_luaEngineFactory() is not null)
+                    var luaEngineInBlock = _luaEngineFactory();
+                    if (luaEngineInBlock is not null)
                     {
-                        var luaResult = _luaEngineFactory().ExecuteAsync(luaBlockBuilder.ToString(), ctx.ProcessId, ct)
+                        var luaResult = luaEngineInBlock.ExecuteAsync(luaBlockBuilder.ToString(), ctx.ProcessId, ct)
                             .GetAwaiter().GetResult();
                         if (!luaResult.Success)
-                            return new ScriptExecutionResult(false, $"Lua error: {luaResult.Error}", [], []);
+                            return new ScriptExecutionResult(false, $"Lua block #{luaBlockIndex} error: {luaResult.Error}", [], []);
                     }
                     else
                     {
@@ -368,13 +377,23 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
             if (trimmed.StartsWith("LuaCall(", StringComparison.OrdinalIgnoreCase))
             {
-                if (_luaEngineFactory() is not null)
+                var luaCallEngine = _luaEngineFactory();
+                if (luaCallEngine is not null)
                 {
-                    // Extract function name: LuaCall(funcName) or LuaCall(funcName())
-                    var funcExpr = trimmed["LuaCall(".Length..].TrimEnd(')', ' ');
+                    // Extract content between balanced LuaCall( ... )
+                    var inner = trimmed["LuaCall(".Length..];
+                    // Find the matching closing paren (skip nested parens)
+                    var depth = 1;
+                    var endIdx = 0;
+                    for (int ci = 0; ci < inner.Length && depth > 0; ci++)
+                    {
+                        if (inner[ci] == '(') depth++;
+                        else if (inner[ci] == ')') { depth--; if (depth == 0) { endIdx = ci; break; } }
+                    }
+                    var funcExpr = endIdx > 0 ? inner[..endIdx].Trim() : inner.TrimEnd(')', ' ');
                     if (!funcExpr.Contains('('))
-                        funcExpr += "()"; // Add call parens if not present
-                    var luaResult = _luaEngineFactory().EvaluateAsync(funcExpr, ct).GetAwaiter().GetResult();
+                        funcExpr += "()";
+                    var luaResult = luaCallEngine.EvaluateAsync(funcExpr, ct).GetAwaiter().GetResult();
                     if (!luaResult.Success)
                         return new ScriptExecutionResult(false, $"LuaCall error: {luaResult.Error}", [], []);
                 }
@@ -417,6 +436,23 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                     false,
                     $"Strict mode: unrecognized directive or instruction outside code block: '{trimmed}'",
                     allocations, patches);
+            }
+        }
+
+        // Execute any trailing {$luacode} block that wasn't closed with {$asm}
+        if (insideLuaBlock && luaBlockBuilder.Length > 0)
+        {
+            var luaEngine = _luaEngineFactory();
+            if (luaEngine is not null)
+            {
+                var luaResult = luaEngine.ExecuteAsync(luaBlockBuilder.ToString(), ctx.ProcessId, ct)
+                    .GetAwaiter().GetResult();
+                if (!luaResult.Success)
+                    return new ScriptExecutionResult(false, $"Lua error: {luaResult.Error}", allocations, patches);
+            }
+            else
+            {
+                warnings.Add("Trailing Lua code block skipped (Lua engine not available).");
             }
         }
 

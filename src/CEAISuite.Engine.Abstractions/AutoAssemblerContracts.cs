@@ -45,4 +45,10 @@ public interface IAutoAssemblerEngine
 
     /// <summary>Resolve a single symbol name to its address. Returns null if not found.</summary>
     nuint? ResolveSymbol(string name);
+
+    /// <summary>Register a symbol name→address mapping (used by Lua scripts and AA directives).</summary>
+    void RegisterSymbol(string name, nuint address);
+
+    /// <summary>Remove a previously registered symbol.</summary>
+    void UnregisterSymbol(string name);
 }

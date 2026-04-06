@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
 using CEAISuite.Engine.Abstractions;
@@ -12,15 +13,20 @@ public partial class LuaConsoleViewModel : ObservableObject
     private readonly ILuaScriptEngine? _luaEngine;
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
+    private readonly IDialogService _dialogService;
+    private readonly List<string> _commandHistory = new();
+    private int _historyIndex = -1;
 
     public LuaConsoleViewModel(
         ILuaScriptEngine? luaEngine,
         IProcessContext processContext,
-        IOutputLog outputLog)
+        IOutputLog outputLog,
+        IDialogService dialogService)
     {
         _luaEngine = luaEngine;
         _processContext = processContext;
         _outputLog = outputLog;
+        _dialogService = dialogService;
     }
 
     [ObservableProperty]
@@ -47,6 +53,7 @@ public partial class LuaConsoleViewModel : ObservableObject
         }
 
         var code = InputText;
+        PushHistory(code);
         AddEntry("input", code);
         InputText = string.Empty;
         IsExecuting = true;
@@ -90,6 +97,7 @@ public partial class LuaConsoleViewModel : ObservableObject
         }
 
         var expression = InputText;
+        PushHistory(expression);
         AddEntry("input", $"= {expression}");
         InputText = string.Empty;
         IsExecuting = true;
@@ -126,6 +134,65 @@ public partial class LuaConsoleViewModel : ObservableObject
     {
         _luaEngine?.Reset();
         AddEntry("output", "Lua state reset.");
+    }
+
+    [RelayCommand]
+    private void LoadFile()
+    {
+        var path = _dialogService.ShowOpenFileDialog("Lua Scripts (*.lua)|*.lua|All Files (*.*)|*.*");
+        if (path is null) return;
+
+        try
+        {
+            InputText = File.ReadAllText(path);
+            AddEntry("output", $"Loaded: {Path.GetFileName(path)}");
+        }
+        catch (Exception ex)
+        {
+            AddEntry("error", $"Failed to load file: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void SaveHistory()
+    {
+        var path = _dialogService.ShowSaveFileDialog("Text Files (*.txt)|*.txt|All Files (*.*)|*.*", "lua_console_history.txt");
+        if (path is null) return;
+
+        try
+        {
+            var lines = History.Select(e => $"[{e.Timestamp}] [{e.Type}] {e.Text}");
+            File.WriteAllLines(path, lines);
+            AddEntry("output", $"History saved to: {Path.GetFileName(path)}");
+        }
+        catch (Exception ex)
+        {
+            AddEntry("error", $"Failed to save history: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
+    private void HistoryUp()
+    {
+        if (_commandHistory.Count == 0) return;
+        if (_historyIndex < 0) _historyIndex = _commandHistory.Count;
+        _historyIndex = Math.Max(0, _historyIndex - 1);
+        InputText = _commandHistory[_historyIndex];
+    }
+
+    [RelayCommand]
+    private void HistoryDown()
+    {
+        if (_commandHistory.Count == 0 || _historyIndex < 0) return;
+        _historyIndex = Math.Min(_commandHistory.Count, _historyIndex + 1);
+        InputText = _historyIndex < _commandHistory.Count ? _commandHistory[_historyIndex] : string.Empty;
+    }
+
+    private void PushHistory(string code)
+    {
+        if (_commandHistory.Count == 0 || _commandHistory[^1] != code)
+            _commandHistory.Add(code);
+        _historyIndex = -1; // Reset cursor
     }
 
     private void AddEntry(string type, string text)

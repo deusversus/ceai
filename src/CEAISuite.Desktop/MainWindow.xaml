@@ -1126,6 +1126,10 @@
                                                 Command="{Binding ClearCommand}" />
                                         <Button Content="Reset" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0"
                                                 Command="{Binding ResetEngineCommand}" ToolTip="Reset Lua state" />
+                                        <Button Content="Load" Style="{StaticResource ToolbarButton}" Margin="8,0,4,0"
+                                                Command="{Binding LoadFileCommand}" ToolTip="Load .lua file into input" />
+                                        <Button Content="Save" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0"
+                                                Command="{Binding SaveHistoryCommand}" ToolTip="Save console history to file" />
                                     </StackPanel>
 
                                     <Grid>
@@ -1155,7 +1159,12 @@
                                                  AcceptsReturn="True" MinHeight="60" MaxHeight="150"
                                                  Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
                                                  BorderBrush="{DynamicResource BorderBrush}"
-                                                 ToolTip="Enter Lua code. Press Enter to execute." />
+                                                 ToolTip="Enter Lua code. Ctrl+Up/Down for history.">
+                                            <TextBox.InputBindings>
+                                                <KeyBinding Key="Up" Modifiers="Ctrl" Command="{Binding HistoryUpCommand}" />
+                                                <KeyBinding Key="Down" Modifiers="Ctrl" Command="{Binding HistoryDownCommand}" />
+                                            </TextBox.InputBindings>
+                                        </TextBox>
                                     </Grid>
                                 </DockPanel>
                             </avalonDock:LayoutDocument>

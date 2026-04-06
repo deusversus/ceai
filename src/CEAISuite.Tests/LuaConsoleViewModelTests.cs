@@ -9,9 +9,10 @@ public sealed class LuaConsoleViewModelTests
     private readonly StubLuaScriptEngine _luaStub = new();
     private readonly StubProcessContext _processContext = new();
     private readonly StubOutputLog _outputLog = new();
+    private readonly StubDialogService _dialogService = new();
 
     private LuaConsoleViewModel CreateVm(bool withEngine = true) =>
-        new(withEngine ? _luaStub : null, _processContext, _outputLog);
+        new(withEngine ? _luaStub : null, _processContext, _outputLog, _dialogService);
 
     [Fact]
     public async Task Execute_ValidScript_AddsOutputToHistory()

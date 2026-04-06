@@ -24,12 +24,52 @@ public sealed record BreakpointHitOverview(
 
 /// <summary>
 /// Application-level service wrapping IBreakpointEngine for the UI and AI operator.
+/// Supports optional Lua callback registration for breakpoint hits.
 /// </summary>
-public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
+public sealed class BreakpointService(
+    IBreakpointEngine? breakpointEngine,
+    ILuaScriptEngine? luaScriptEngine = null)
 {
     private bool IsAvailable => breakpointEngine is not null;
 
     private readonly ConcurrentDictionary<string, BreakpointLifecycleStatus> _lifecycleStatuses = new();
+    private readonly ConcurrentDictionary<string, string> _luaCallbacks = new(); // bpId → luaFuncName
+    private readonly ConcurrentDictionary<string, int> _lastProcessedHitCount = new();
+
+    /// <summary>Register a Lua function to be called when a breakpoint is hit.</summary>
+    public void RegisterLuaCallback(string breakpointId, string luaFunctionName)
+    {
+        _luaCallbacks[breakpointId] = luaFunctionName;
+        _lastProcessedHitCount[breakpointId] = 0;
+        luaScriptEngine?.RegisterBreakpointCallback(luaFunctionName);
+    }
+
+    /// <summary>Unregister a Lua callback for a breakpoint.</summary>
+    public void UnregisterLuaCallback(string breakpointId)
+    {
+        _luaCallbacks.TryRemove(breakpointId, out _);
+        _lastProcessedHitCount.TryRemove(breakpointId, out _);
+    }
+
+    /// <summary>Check if any breakpoints have pending Lua callbacks and invoke them.</summary>
+    private async Task InvokePendingLuaCallbacksAsync(
+        string breakpointId,
+        IReadOnlyList<BreakpointHitEvent> hits,
+        CancellationToken ct)
+    {
+        if (luaScriptEngine is null || !_luaCallbacks.TryGetValue(breakpointId, out var funcName))
+            return;
+
+        var lastProcessed = _lastProcessedHitCount.GetValueOrDefault(breakpointId, 0);
+        var newHits = hits.Skip(lastProcessed).ToList();
+        if (newHits.Count == 0) return;
+
+        foreach (var hit in newHits)
+        {
+            await luaScriptEngine.InvokeBreakpointCallbackAsync(funcName, hit, ct).ConfigureAwait(false);
+        }
+        _lastProcessedHitCount[breakpointId] = hits.Count;
+    }
 
     public void UpdateLifecycleStatus(string bpId, BreakpointLifecycleStatus status)
         => _lifecycleStatuses[bpId] = status;
@@ -120,6 +160,10 @@ public sealed class BreakpointService(IBreakpointEngine? breakpointEngine)
     {
         EnsureAvailable();
         var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, maxEntries, cancellationToken);
+
+        // Invoke pending Lua callbacks for new hits
+        await InvokePendingLuaCallbacksAsync(breakpointId, hits, cancellationToken).ConfigureAwait(false);
+
         return hits.Select(h => new BreakpointHitOverview(
             h.BreakpointId,
             $"0x{h.Address:X}",

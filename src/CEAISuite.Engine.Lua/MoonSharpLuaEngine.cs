@@ -163,10 +163,13 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         RegisterPrint(script);
 
         if (_engineFacade is not null)
-            CeApiBindings.Register(script, this, _engineFacade, _autoAssembler);
+            CeApiBindings.Register(script, this, _engineFacade, _autoAssembler, _formHost);
 
         if (_formHost is not null)
-            CeFormBindings.Register(script, _formHost);
+        {
+            var formBindings = new CeFormBindings();
+            formBindings.Register(script, _formHost);
+        }
 
         return script;
     }

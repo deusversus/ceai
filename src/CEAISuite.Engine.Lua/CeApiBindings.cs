@@ -15,14 +15,15 @@ internal static class CeApiBindings
         Script script,
         MoonSharpLuaEngine engine,
         IEngineFacade engineFacade,
-        IAutoAssemblerEngine? autoAssembler)
+        IAutoAssemblerEngine? autoAssembler,
+        ILuaFormHost? formHost = null)
     {
         RegisterMemoryRead(script, engine, engineFacade, autoAssembler);
         RegisterMemoryWrite(script, engine, engineFacade, autoAssembler);
         RegisterProcessFunctions(script, engine, engineFacade);
         RegisterAddressFunctions(script, engine, engineFacade, autoAssembler);
         RegisterAutoAssemblerFunctions(script, engine, engineFacade, autoAssembler);
-        RegisterUtilityFunctions(script, engine);
+        RegisterUtilityFunctions(script, engine, formHost);
     }
 
     // ── Memory Read ──
@@ -30,6 +31,9 @@ internal static class CeApiBindings
     private static void RegisterMemoryRead(
         Script script, MoonSharpLuaEngine engine, IEngineFacade facade, IAutoAssemblerEngine? aa)
     {
+        script.Globals["readByte"] = (Func<string, DynValue>)(addr =>
+            ReadTyped(addr, MemoryDataType.Byte, engine, facade, aa));
+
         script.Globals["readInteger"] = (Func<string, DynValue>)(addr =>
             ReadTyped(addr, MemoryDataType.Int32, engine, facade, aa));
 
@@ -91,6 +95,9 @@ internal static class CeApiBindings
     private static void RegisterMemoryWrite(
         Script script, MoonSharpLuaEngine engine, IEngineFacade facade, IAutoAssemblerEngine? aa)
     {
+        script.Globals["writeByte"] = (Action<string, DynValue>)((addr, val) =>
+            WriteTyped(addr, val, MemoryDataType.Byte, engine, facade, aa));
+
         script.Globals["writeInteger"] = (Action<string, DynValue>)((addr, val) =>
             WriteTyped(addr, val, MemoryDataType.Int32, engine, facade, aa));
 
@@ -196,32 +203,26 @@ internal static class CeApiBindings
                 : DynValue.Nil;
         });
 
-        // Symbol registration (delegates to AA engine)
-        if (aa is not null)
+        // Symbol registration — syncs both Lua globals and AA engine symbol table
+        script.Globals["registerSymbol"] = (Action<string, DynValue>)((name, addrVal) =>
         {
-            script.Globals["registerSymbol"] = (Action<string, DynValue>)((name, addrVal) =>
-            {
-                // Accept both number and hex string
-                nuint addr;
-                if (addrVal.Type == DataType.Number)
-                    addr = (nuint)(ulong)addrVal.Number;
-                else if (addrVal.Type == DataType.String && LuaAddressResolver.TryParseHex(addrVal.String, out var parsed))
-                    addr = (nuint)parsed;
-                else
-                    throw new ScriptRuntimeException("registerSymbol: expected address number or hex string");
+            nuint addr;
+            if (addrVal.Type == DataType.Number)
+                addr = (nuint)(ulong)addrVal.Number;
+            else if (addrVal.Type == DataType.String && LuaAddressResolver.TryParseHex(addrVal.String, out var parsed))
+                addr = (nuint)parsed;
+            else
+                throw new ScriptRuntimeException($"registerSymbol: '{name}' requires an address number or hex string, got {addrVal.Type}");
 
-                // Use reflection or internal knowledge — for now, the AA engine's symbol table
-                // is exposed via the RegisteredSymbol mechanism. We call registersymbol through
-                // the AA script execution path.
-                // Workaround: set global in Lua + store mapping in a CE-side table
-                script.Globals[name] = addrVal;
-            });
+            script.Globals[name] = DynValue.NewNumber((double)(ulong)addr);
+            aa?.RegisterSymbol(name, addr);
+        });
 
-            script.Globals["unregisterSymbol"] = (Action<string>)(name =>
-            {
-                script.Globals[name] = DynValue.Nil;
-            });
-        }
+        script.Globals["unregisterSymbol"] = (Action<string>)(name =>
+        {
+            script.Globals[name] = DynValue.Nil;
+            aa?.UnregisterSymbol(name);
+        });
     }
 
     // ── Auto Assembler Functions ──
@@ -247,7 +248,7 @@ internal static class CeApiBindings
 
     // ── Utility Functions ──
 
-    private static void RegisterUtilityFunctions(Script script, MoonSharpLuaEngine engine)
+    private static void RegisterUtilityFunctions(Script script, MoonSharpLuaEngine engine, ILuaFormHost? formHost)
     {
         script.Globals["sleep"] = (Action<int>)(ms =>
         {
@@ -260,8 +261,19 @@ internal static class CeApiBindings
 
         script.Globals["showMessage"] = (Action<string>)(msg =>
         {
-            // Route through print for now — in Phase 8F, this could show a dialog
-            script.Call(script.Globals.Get("print"), DynValue.NewString(msg));
+            if (formHost is not null)
+                formHost.ShowMessageDialog(msg, "Lua Script");
+            else
+                script.Call(script.Globals.Get("print"), DynValue.NewString(msg));
+        });
+
+        script.Globals["inputQuery"] = (Func<string, string, DynValue, DynValue>)((title, prompt, defaultArg) =>
+        {
+            if (formHost is null)
+                throw new ScriptRuntimeException("inputQuery requires a form host (GUI mode).");
+            var defaultVal = defaultArg.IsNil() ? "" : defaultArg.String;
+            var result = formHost.ShowInputDialog(title, prompt, defaultVal);
+            return result is not null ? DynValue.NewString(result) : DynValue.Nil;
         });
 
         script.Globals["stringToHex"] = (Func<string, string>)(str =>

@@ -104,7 +104,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<AddressTableExportService>();
         services.AddSingleton<SessionService>();
         services.AddSingleton<BreakpointService>(sp =>
-            new BreakpointService(sp.GetRequiredService<IBreakpointEngine>()));
+            new BreakpointService(
+                sp.GetRequiredService<IBreakpointEngine>(),
+                sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<GlobalHotkeyService>();
         services.AddSingleton<PatchUndoService>();
         services.AddSingleton<MemorySnapshotService>();
@@ -195,7 +197,8 @@ public partial class App : System.Windows.Application
             new LuaConsoleViewModel(
                 sp.GetService<ILuaScriptEngine>(),
                 sp.GetRequiredService<IProcessContext>(),
-                sp.GetRequiredService<IOutputLog>()));
+                sp.GetRequiredService<IOutputLog>(),
+                sp.GetRequiredService<IDialogService>()));
         services.AddSingleton<BreakpointsViewModel>();
         services.AddSingleton<ScriptsViewModel>();
 

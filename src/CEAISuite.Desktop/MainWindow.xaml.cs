@@ -460,8 +460,9 @@ public partial class MainWindow : Window, IDisposable
                 }
             }
 
-            // WM_NCMOUSELEAVE — clear hover when mouse leaves non-client area entirely
-            if (msg == WM_NCMOUSELEAVE && _maximizeButtonHovered)
+            // WM_MOUSEMOVE / WM_NCMOUSELEAVE — clear hover when mouse moves to client area or leaves
+            const int WM_MOUSEMOVE = 0x0200;
+            if ((msg == WM_NCMOUSELEAVE || msg == WM_MOUSEMOVE) && _maximizeButtonHovered)
             {
                 _maximizeButtonHovered = false;
                 CaptionMaximizeButton.Background = Brushes.Transparent;

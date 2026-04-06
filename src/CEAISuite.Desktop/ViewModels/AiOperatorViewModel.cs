@@ -8,6 +8,7 @@ using CEAISuite.Desktop.Services;
 using CEAISuite.Engine.Abstractions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Desktop.ViewModels;
 
@@ -27,6 +28,7 @@ public partial class AiOperatorViewModel : ObservableObject
     private readonly IDispatcherService _dispatcher;
     private readonly IThemeService _themeService;
     private readonly IClipboardService _clipboard;
+    private readonly ILogger<AiOperatorViewModel> _logger;
 
     private CancellationTokenSource? _streamingCts;
     private bool _suppressChatSwitch;
@@ -47,8 +49,10 @@ public partial class AiOperatorViewModel : ObservableObject
         IOutputLog outputLog,
         IDispatcherService dispatcher,
         IThemeService themeService,
-        IClipboardService clipboard)
+        IClipboardService clipboard,
+        ILogger<AiOperatorViewModel> logger)
     {
+        _logger = logger;
         _aiOperatorService = aiOperatorService;
         _appSettingsService = appSettingsService;
         _processContext = processContext;
@@ -533,7 +537,7 @@ public partial class AiOperatorViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"Model switch failed: {ex.Message}");
+            _logger.LogWarning(ex, "Model switch failed");
         }
     }
 

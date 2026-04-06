@@ -13,6 +13,7 @@ using CEAISuite.Desktop.Services;
 using CEAISuite.Desktop.ViewModels;
 using CEAISuite.Engine.Abstractions;
 using ICSharpCode.AvalonEdit.Highlighting;
+using Microsoft.Extensions.Logging;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 
 namespace CEAISuite.Desktop;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
     private readonly AiOperatorService _aiOperatorService;
     private readonly IEngineFacade _engineFacade;
     private readonly IOutputLog _outputLog;
+    private readonly ILogger<MainWindow> _logger;
     private readonly ObservableCollection<OutputLogEntry> _outputLogEntries;
 
     // ── ViewModels ──
@@ -79,10 +81,12 @@ public partial class MainWindow : Window
         MemoryRegionsViewModel memoryRegionsVm,
         WorkspaceViewModel workspaceVm,
         MemoryBrowserViewModel memoryBrowserVm,
-        IAiContextService aiContextService)
+        IAiContextService aiContextService,
+        ILogger<MainWindow> logger)
     {
         InitializeComponent();
 
+        _logger = logger;
         _engineFacade = engineFacade;
         _hotkeyService = hotkeyService;
         _appSettingsService = appSettingsService;
@@ -1078,7 +1082,7 @@ public partial class MainWindow : Window
                 }
                 catch (Exception ex)
                 {
-                    System.Diagnostics.Debug.WriteLine($"Paste image failed: {ex.Message}");
+                    _logger.LogWarning(ex, "Paste image failed");
                 }
                 return;
             }
@@ -1306,7 +1310,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"SaveLayout failed: {ex.Message}");
+            _logger.LogWarning(ex, "SaveLayout failed");
         }
     }
 
@@ -1386,7 +1390,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"RestoreLayout failed: {ex.Message}");
+            _logger.LogWarning(ex, "RestoreLayout failed");
             try { File.Delete(LayoutFilePath); } catch { }
         }
     }

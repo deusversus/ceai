@@ -8,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CEAISuite.Domain;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Desktop.ViewModels;
 
@@ -43,6 +44,7 @@ public partial class MainViewModel : ObservableObject
     private readonly IScreenCaptureEngine _screenCaptureEngine;
     private readonly ScriptGenerationService _scriptGenerationService;
     private readonly IDispatcherService _dispatcher;
+    private readonly ILogger<MainViewModel> _logger;
 
     public MainViewModel(
         WorkspaceDashboardService dashboardService,
@@ -66,8 +68,10 @@ public partial class MainViewModel : ObservableObject
         ProcessWatchdogService watchdog,
         IScreenCaptureEngine screenCaptureEngine,
         ScriptGenerationService scriptGenerationService,
-        IDispatcherService dispatcher)
+        IDispatcherService dispatcher,
+        ILogger<MainViewModel> logger)
     {
+        _logger = logger;
         _databasePath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "CEAISuite",
@@ -134,7 +138,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"AI provider init failed: {ex.Message}");
+            _logger.LogWarning(ex, "AI provider init failed");
         }
         _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
         _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
@@ -232,7 +236,7 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"AI provider reconfigure failed: {ex.Message}");
+            _logger.LogWarning(ex, "AI provider reconfigure failed");
             _aiOperatorService.Reconfigure(null);
         }
     }

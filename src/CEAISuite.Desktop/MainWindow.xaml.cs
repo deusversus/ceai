@@ -894,12 +894,15 @@ public partial class MainWindow : Window, IDisposable
                 return;
             }
 
-            // PID not found — likely stale after game restart. Refresh and retry by name.
-            _outputLog.Append("Attach", "Info", $"CmdAttachProcess: PID {item.Pid} stale, refreshing process list and retrying by name \"{item.Name}\"...");
+            // PID not found — likely stale after game restart. Refresh both process lists and retry by name.
+            _outputLog.Append("Attach", "Info", $"CmdAttachProcess: PID {item.Pid} stale, refreshing process lists and retrying by name \"{item.Name}\"...");
             await _mainVm.RefreshProcessComboAsync();
             ProcessComboBox.ItemsSource = _mainVm.ProcessComboItems;
+            // Also sync the sidebar process list (RefreshProcessComboAsync updates Dashboard but not ProcessListViewModel)
+            if (_mainVm.Dashboard is { RunningProcesses: not null })
+                _processListVm.SetProcesses(_mainVm.Dashboard.RunningProcesses);
 
-            // Try matching by name (game restarted with new PID)
+            // Try matching by name in the freshly-refreshed process list
             match = _processListVm.Processes.FirstOrDefault(p =>
                 string.Equals(p.Name, item.Name, StringComparison.OrdinalIgnoreCase));
             if (match is not null)

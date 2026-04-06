@@ -81,9 +81,10 @@ public partial class MainViewModel : ObservableObject
         _appSettingsService = appSettingsService;
         _patchUndoService = patchUndoService;
         _engineFacade = engineFacade;
-        // Wire engine diagnostic trace to Output panel
+        // Wire engine diagnostic trace to Output panel (marshal to UI thread — Trace fires from Task.Run)
         if (engineFacade is CEAISuite.Engine.Windows.WindowsEngineFacade winFacade)
-            winFacade.DiagnosticTrace = msg => outputLog.Append("Engine", "Debug", msg);
+            winFacade.DiagnosticTrace = msg =>
+                dispatcher.InvokeAsync(() => outputLog.Append("Engine", "Debug", msg));
         _processContext = processContext;
         _outputLog = outputLog;
         _dialogService = dialogService;

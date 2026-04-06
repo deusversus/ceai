@@ -278,6 +278,7 @@ public sealed class AddressTableExportService
     /// <summary>
     /// Serialize the full address-table tree to a lightweight JSON file for crash recovery.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static")]
     public async Task ExportRecoveryAsync(IReadOnlyList<AddressTableNode> roots, string filePath)
     {
         var dtos = roots.Select(RecoveryNodeDto.FromNode).ToList();
@@ -291,6 +292,7 @@ public sealed class AddressTableExportService
     /// Deserialize a recovery JSON file back into address-table nodes.
     /// Returns null if the file does not exist or is corrupt.
     /// </summary>
+    [System.Diagnostics.CodeAnalysis.SuppressMessage("Performance", "CA1822:Mark members as static")]
     public async Task<IReadOnlyList<AddressTableNode>?> ImportRecoveryAsync(string filePath)
     {
         if (!File.Exists(filePath)) return null;

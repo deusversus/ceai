@@ -13,7 +13,7 @@ public sealed class LuaAutoAssemblerIntegrationTests : IDisposable
 
     public LuaAutoAssemblerIntegrationTests()
     {
-        _aaWithLua = new WindowsAutoAssemblerEngine(_luaStub);
+        _aaWithLua = new WindowsAutoAssemblerEngine(() => _luaStub);
         _aaWithoutLua = new WindowsAutoAssemblerEngine(null);
     }
 
@@ -125,7 +125,7 @@ public sealed class LuaAutoAssemblerIntegrationTests : IDisposable
     [Fact]
     public void Constructor_AcceptsLuaEngine()
     {
-        var engine = new WindowsAutoAssemblerEngine(_luaStub);
+        var engine = new WindowsAutoAssemblerEngine(() => _luaStub);
         Assert.NotNull(engine);
     }
 

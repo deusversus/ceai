@@ -85,7 +85,7 @@ public partial class App : System.Windows.Application
                 sp.GetService<IAutoAssemblerEngine>(),
                 formHost: sp.GetService<ILuaFormHost>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
-            new WindowsAutoAssemblerEngine(sp.GetService<ILuaScriptEngine>()));
+            new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
         services.AddSingleton<ICodeCaveEngine, WindowsCodeCaveEngine>();
         services.AddSingleton<IScreenCaptureEngine, WindowsScreenCaptureEngine>();

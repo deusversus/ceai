@@ -13,12 +13,12 @@ namespace CEAISuite.Engine.Windows;
 /// </summary>
 public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 {
-    private readonly ILuaScriptEngine? _luaEngine;
+    private readonly Func<ILuaScriptEngine?> _luaEngineFactory;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, nuint> _symbolTable = new(StringComparer.OrdinalIgnoreCase);
 
-    public WindowsAutoAssemblerEngine(ILuaScriptEngine? luaEngine = null)
+    public WindowsAutoAssemblerEngine(Func<ILuaScriptEngine?>? luaEngineFactory = null)
     {
-        _luaEngine = luaEngine;
+        _luaEngineFactory = luaEngineFactory ?? (() => null);
     }
 
     public IReadOnlyList<RegisteredSymbol> GetRegisteredSymbols() =>
@@ -74,10 +74,10 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             errors.Add("Script must contain at least an [ENABLE] or [DISABLE] section.");
 
         if (enableSection is not null)
-            ValidateSection(enableSection, "[ENABLE]", errors, warnings, _luaEngine is not null);
+            ValidateSection(enableSection, "[ENABLE]", errors, warnings, _luaEngineFactory() is not null);
 
         if (disableSection is not null)
-            ValidateSection(disableSection, "[DISABLE]", errors, warnings, _luaEngine is not null);
+            ValidateSection(disableSection, "[DISABLE]", errors, warnings, _luaEngineFactory() is not null);
 
         return new ScriptParseResult(errors.Count == 0, errors, warnings, enableSection, disableSection);
     }
@@ -209,9 +209,9 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             {
                 if (insideLuaBlock && luaBlockBuilder.Length > 0)
                 {
-                    if (_luaEngine is not null)
+                    if (_luaEngineFactory() is not null)
                     {
-                        var luaResult = _luaEngine.ExecuteAsync(luaBlockBuilder.ToString(), ctx.ProcessId, ct)
+                        var luaResult = _luaEngineFactory().ExecuteAsync(luaBlockBuilder.ToString(), ctx.ProcessId, ct)
                             .GetAwaiter().GetResult();
                         if (!luaResult.Success)
                             return new ScriptExecutionResult(false, $"Lua error: {luaResult.Error}", [], []);
@@ -368,13 +368,13 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
             if (trimmed.StartsWith("LuaCall(", StringComparison.OrdinalIgnoreCase))
             {
-                if (_luaEngine is not null)
+                if (_luaEngineFactory() is not null)
                 {
                     // Extract function name: LuaCall(funcName) or LuaCall(funcName())
                     var funcExpr = trimmed["LuaCall(".Length..].TrimEnd(')', ' ');
                     if (!funcExpr.Contains('('))
                         funcExpr += "()"; // Add call parens if not present
-                    var luaResult = _luaEngine.EvaluateAsync(funcExpr, ct).GetAwaiter().GetResult();
+                    var luaResult = _luaEngineFactory().EvaluateAsync(funcExpr, ct).GetAwaiter().GetResult();
                     if (!luaResult.Success)
                         return new ScriptExecutionResult(false, $"LuaCall error: {luaResult.Error}", [], []);
                 }

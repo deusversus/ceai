@@ -880,7 +880,7 @@ public partial class MainWindow : Window, IDisposable
 
     #region Command Bar Handlers
 
-    private void CmdAttachProcess(object sender, RoutedEventArgs e)
+    private async void CmdAttachProcess(object sender, RoutedEventArgs e)
     {
         if (ProcessComboBox.SelectedItem is ProcessComboItem item)
         {
@@ -893,7 +893,27 @@ public partial class MainWindow : Window, IDisposable
                 InspectSelectedProcess(sender, e);
                 return;
             }
-            _outputLog.Append("Attach", "Warning", $"CmdAttachProcess: PID {item.Pid} not found in process list ({_processListVm.Processes.Count} processes). Stale combo selection?");
+
+            // PID not found — likely stale after game restart. Refresh and retry by name.
+            _outputLog.Append("Attach", "Info", $"CmdAttachProcess: PID {item.Pid} stale, refreshing process list and retrying by name \"{item.Name}\"...");
+            await _mainVm.RefreshProcessComboAsync();
+            ProcessComboBox.ItemsSource = _mainVm.ProcessComboItems;
+
+            // Try matching by name (game restarted with new PID)
+            match = _processListVm.Processes.FirstOrDefault(p =>
+                string.Equals(p.Name, item.Name, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                _outputLog.Append("Attach", "Info", $"CmdAttachProcess: found {item.Name} at new PID {match.Id} after refresh.");
+                _processListVm.SelectedProcess = match;
+                // Update combo selection to new PID
+                var newComboItem = _mainVm.ProcessComboItems.FirstOrDefault(c => c.Pid == match.Id);
+                if (newComboItem is not null)
+                    ProcessComboBox.SelectedItem = newComboItem;
+                InspectSelectedProcess(sender, e);
+                return;
+            }
+            _outputLog.Append("Attach", "Warning", $"CmdAttachProcess: \"{item.Name}\" not found even after refresh ({_processListVm.Processes.Count} processes). Process may have exited.");
         }
         else
         {

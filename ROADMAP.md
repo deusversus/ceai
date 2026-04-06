@@ -278,71 +278,71 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-## Phase 7: Engine Feature Gaps
+## Phase 7: Engine Feature Gaps ✅ COMPLETE
 
 **Goal:** Fill the engine-level gaps that limit what both the AI and UI can do. These are the features that require new P/Invoke work, not just UI.
 
-### 7A — Scanning Improvements (Review §2.1: 60% → target 85%)
+**Result:** All 5 sub-phases complete. Multi-threaded scanning with Parallel.For, conditional/thread-specific breakpoints, break-and-trace, full AA directive set (aobscanmodule, registersymbol, createthread, readmem/writemem, loadlibrary), address table hex/signed/dropdown/group activation, pointer map save/load/compare. 385 tests passing.
 
-| Item | Review Source | Details |
-|------|-------------|---------|
-| Multi-threaded scanning | §8 #5 Critical | Partition regions across threads, proper progress reporting |
-| Fast scan alignment | §2.1 gap | Configurable 1/2/4/8 byte alignment for speed |
-| Undo scan | §2.1 gap | Revert to previous narrowing step (store scan history) |
-| Hex/decimal toggle in scan UI | §2.1 gap | Per-scan display mode |
-| Round float tolerance | §2.1 gap | Configurable epsilon for float comparisons |
-| Larger region support | §2.1 gap | Remove 16MB/region cap, handle full 48-bit address space |
-| Writable-only toggle | §2.1 gap | Filter by page protection during scan |
-| Grouped scans | §2.1 gap | Scan for multiple values simultaneously |
-| Paused process scanning | §2.1 gap | Suspend target during scan for consistency |
-| Bit-level scanning | §2.1 gap | Scan for individual bit changes |
-| Custom type definitions | §2.1 gap | User-defined structures as scan types |
-| Memory-mapped file scanning | §2.1 gap | Scan memory-mapped files in target |
+### 7A — Scanning Improvements ✅ (Review §2.1: 60% → 90%)
 
-### 7B — Breakpoint & Debugging Improvements (Review §2.2: 70% → target 85%)
+| Item | Status | Notes |
+|------|--------|-------|
+| Multi-threaded scanning | ✅ Done | Parallel.For with configurable MaxDegreeOfParallelism, progress reporting |
+| Fast scan alignment | ✅ Done | ScanOptions.Alignment (1/2/4/8 byte, default = value size) |
+| Undo scan | ✅ Done | ScanService undo stack (max depth 20), CanUndo property |
+| Hex/decimal toggle in scan UI | ✅ Done | "Hex" checkbox in scanner panel + ScanOptions.ShowAsHex |
+| Round float tolerance | ✅ Done | ScanOptions.FloatEpsilon for configurable epsilon |
+| Larger region support | ✅ Done | Full 48-bit address space scanning |
+| Writable-only toggle | ✅ Done | ScanOptions.WritableOnly (default true) + UI checkbox |
+| Grouped scans | ✅ Done | GroupedScanAsync interface + ScanOptions support |
+| Paused process scanning | ✅ Done | SuspendProcess flag in ScanOptions |
+| Bit-level scanning | ✅ Done | ScanType.BitChanged + ScanOptions.BitPosition |
+| Custom type definitions | ✅ Done | Register/lookup/unregister custom scan types |
+| Memory-mapped file scanning | ✅ Done | IncludeMemoryMappedFiles flag in ScanOptions |
 
-| Item | Review Source | Details |
-|------|-------------|---------|
-| Conditional breakpoints | §2.2 gap, §8 #8 High | Break only when expression is true (register/memory conditions) |
-| Break-and-trace | §2.2 gap | Trace execution path from breakpoint |
-| Changed register highlighting | §2.2 gap | Highlight registers that changed since last hit |
-| Thread-specific breakpoints | §2.2 gap | Break only on specific thread |
-| Breakpoint scripting | §2.2 gap, §8 Lua | Lua-controlled breakpoint behavior (depends on Phase 8) |
+### 7B — Breakpoint & Debugging Improvements ✅ (Review §2.2: 70% → 85%)
 
-### 7C — Auto Assembler Improvements (Review §2.4: 50% → target 75%)
+| Item | Status | Notes |
+|------|--------|-------|
+| Conditional breakpoints | ✅ Done | BreakpointCondition with RegisterCompare, MemoryCompare, HitCount types |
+| Break-and-trace | ✅ Done | TraceFromBreakpointAsync with static instruction-level trace engine |
+| Changed register highlighting | ✅ Done | DebuggerViewModel diff from previous snapshot (red + bold) |
+| Thread-specific breakpoints | ✅ Done | BreakpointDescriptor.ThreadFilter field |
+| Breakpoint scripting | ⏳ Phase 8 | Depends on Lua engine |
 
-> **Priority note:** `aobscanmodule` is CE's most-used AA directive (§8 #7 High). Implement it first within this phase, or promote to Phase 3B if the Script Editor ships earlier.
+### 7C — Auto Assembler Improvements ✅ (Review §2.4: 50% → 80%)
 
-| Item | Review Source | Details |
-|------|-------------|---------|
-| `aobscanmodule` directive | §2.4 gap, §8 #7 High | AOB scan within a specific module — CE's most-used AA directive |
-| `registersymbol` / `unregistersymbol` | §2.4 gap, §8 #7 High | Share symbols between scripts |
-| `createthread` directive | §2.4 gap | Create remote thread in target |
-| `readmem` / `writemem` directives | §2.4 gap | Memory block copy in scripts |
-| Script variables | §2.4 gap | AA-level variable declarations |
-| `{$strict}` / `{$luacode}` pragmas | §2.4 gap | Compatibility with CE scripts |
-| `loadlibrary` directive | §2.4 gap | Load DLL into target process from script |
-| Include files | §2.4 gap | Shared script libraries via `{$include}` |
+| Item | Status | Notes |
+|------|--------|-------|
+| `aobscanmodule` directive | ✅ Done | Regex-parsed, scans within specific module |
+| `registersymbol` / `unregistersymbol` | ✅ Done | Concurrent symbol table with GetRegisteredSymbols/ResolveSymbol |
+| `createthread` directive | ✅ Done | CreateRemoteThread P/Invoke |
+| `readmem` / `writemem` directives | ✅ Done | Memory block copy in execution phases 11-12 |
+| Script variables | ✅ Done | AA-level variable/define declarations |
+| `{$strict}` / `{$luacode}` pragmas | ✅ Done | Strict mode enforced; luacode gracefully skipped (Lua in Phase 8) |
+| `loadlibrary` directive | ✅ Done | CreateRemoteThread + LoadLibraryW pattern |
+| Include files | ✅ Done | `{$include}` preprocessing |
 
-### 7D — Address Table Improvements (Review §2.5: 65% → target 90%)
+### 7D — Address Table Improvements ✅ (Review §2.5: 65% → 90%)
 
-| Item | Review Source | Details |
-|------|-------------|---------|
-| Show as signed/unsigned toggle | §2.5 gap | Per-entry display mode |
-| Show as hex toggle per entry | §2.5 gap | Per-entry hex/decimal (partially exists via context menu) |
-| Increase/decrease value hotkeys | §2.5 gap | +/- hotkeys for quick value adjustment |
-| Group header activation | §2.5 gap | Enable all children when group is checked |
-| Dropdown value selection | §2.5 gap | Combo-box for enum-style values |
+| Item | Status | Notes |
+|------|--------|-------|
+| Show as signed/unsigned toggle | ✅ Done | Per-entry ShowAsSigned property + context menu toggle |
+| Show as hex toggle per entry | ✅ Done | Per-entry ShowAsHex + "(Hex)" type suffix display |
+| Increase/decrease value hotkeys | ✅ Done | Ctrl+Up/Down with hex-aware parsing |
+| Group header activation | ✅ Done | ActivateGroupRecursiveAsync toggles all children |
+| Dropdown value selection | ✅ Done | DropDownList dictionary + ConfigureDropDown dialog + CT DropDownListLink import |
 
-### 7E — Pointer Scanner Improvements (Review §2.6: 30% → target 70%)
+### 7E — Pointer Scanner Improvements ✅ (Review §2.6: 30% → 70%)
 
-| Item | Review Source | Details |
-|------|-------------|---------|
-| Pointer map file format (.PTR) | §2.6 gap | Save/load pointer maps for offline analysis |
-| Multi-pointer scan comparison | §2.6 gap | Compare maps from different runs |
-| Configurable max depth/offset | §2.6 gap | User-tunable constraints |
-| Module-filtered scanning | §2.6 gap | Only scan pointers in specific modules |
-| Scan cancel/resume | §2.6 gap | Progress UI with cancel + resume capability |
+| Item | Status | Notes |
+|------|--------|-------|
+| Pointer map file format (.PTR) | ✅ Done | JSON serialization with NuintJsonConverter for hex addresses |
+| Multi-pointer scan comparison | ✅ Done | CompareMaps method for cross-run analysis |
+| Configurable max depth/offset | ✅ Done | MaxDepth/MaxOffset properties in PointerScannerViewModel |
+| Module-filtered scanning | ✅ Done | Module filter support in scan options |
+| Scan cancel/resume | ✅ Done | CancellationTokenSource + CanResume state preservation |
 
 ---
 
@@ -437,22 +437,22 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 2 ✅ | After Ph 2.5 ✅ | After Ph 3 ✅ | After Ph 4 ✅ | After Ph 5 | After Ph 7 | Target |
-|----------|-------------|-------------|-----------|-----------|-----------|-----------|--------|
-| Process & Attachment | 20% | 20% | 20% | 45% | 45% | 45% | 80%* |
-| Memory Read/Write | 10% | 10% | 10% | 15% | 80% | 80% | 90% |
-| Scanning | 67% | 67% | 67% | 67% | 67% | 90% | 95% |
-| Disassembly & Analysis | 20% | 20% | 70% | 70% | 70% | 70% | 85% |
-| Breakpoints & Hooks | 50% | 50% | 55% | 55% | 55% | 80% | 90% |
-| Address Table | 67% | 67% | 67% | 67% | 67% | 90% | 95% |
-| Scripting | 40% | 40% | 80% | 80% | 80% | 80% | 95%** |
-| Pointer Resolution | 0% | 0% | 60% | 60% | 60% | 70% | 80% |
-| Structure Discovery | 0% | 0% | 100% | 100% | 100% | 100% | 100% |
-| Snapshots | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
-| Session & History | 60% | 60% | 60% | 75% | 75% | 75% | 80% |
-| Safety & Watchdog | 30% | 30% | 30% | 30% | 30% | 50% | 80% |
-| Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
-| **Overall** | **~42%** | **~42%** | **~62%** | **~65%** | **~72%** | **~82%** | **90%+** |
+| Category | After Ph 2 ✅ | After Ph 2.5 ✅ | After Ph 3 ✅ | After Ph 4 ✅ | After Ph 5 ✅ | After Ph 6 ✅ | After Ph 7 ✅ | Target |
+|----------|-------------|-------------|-----------|-----------|-----------|-----------|-----------|--------|
+| Process & Attachment | 20% | 20% | 20% | 45% | 45% | 45% | 45% | 80%* |
+| Memory Read/Write | 10% | 10% | 10% | 15% | 80% | 80% | 80% | 90% |
+| Scanning | 67% | 67% | 67% | 67% | 67% | 67% | 90% | 95% |
+| Disassembly & Analysis | 20% | 20% | 70% | 70% | 70% | 70% | 70% | 85% |
+| Breakpoints & Hooks | 50% | 50% | 55% | 55% | 55% | 55% | 85% | 90% |
+| Address Table | 67% | 67% | 67% | 67% | 67% | 67% | 90% | 95% |
+| Scripting | 40% | 40% | 80% | 80% | 80% | 80% | 80% | 95%** |
+| Pointer Resolution | 0% | 0% | 60% | 60% | 60% | 60% | 70% | 80% |
+| Structure Discovery | 0% | 0% | 100% | 100% | 100% | 100% | 100% | 100% |
+| Snapshots | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+| Session & History | 60% | 60% | 60% | 75% | 75% | 75% | 75% | 80% |
+| Safety & Watchdog | 30% | 30% | 30% | 30% | 30% | 30% | 50% | 80% |
+| Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
+| **Overall** | **~42%** | **~42%** | **~62%** | **~65%** | **~72%** | **~72%** | **~82%** | **90%+** |
 
 *Process & Attachment parity improves further with future engine enhancements (parent process, command line).
 **Scripting reaches 95% after Phase 8 (Lua Engine).
@@ -483,8 +483,7 @@ Phase 1 ✅ (Foundation)
     │
     Phase 6 ✅ (Command Bar & UX) ← token display, scan status, watchdog, process filter, screenshot/report, context menus, column sorting, color coding
     │
-    ├── Phase 7A (Multi-threaded scanning) ← §8 #5 Critical, independent
-    ├── Phase 7B-E (Engine gaps) ← includes debugger stepping (Phase 3E deferred items)
+    Phase 7 ✅ (Engine Gaps) ← multi-threaded scan, conditional BPs, trace, AA directives, address table, pointer maps
     │
     ├── Phase 8 (Lua) ← §8 #2 Critical, independent of UI phases
     │
@@ -502,8 +501,8 @@ Phase 1 ✅ (Foundation)
 5. ✅ Phase 4 — Done (4 explorer sidebar tabs + process details; 168 tests)
 6. ✅ Phase 5 — Done (Memory Browser+: hex editing, data inspector, structure spider; 291 tests)
 7. ✅ Phase 6 — Done (UX Polish: token/scan/watchdog status bar, process filter, screenshot/report, sorting, color coding; 291 tests)
-8. **Phase 9B — CI/CD (should be set up now)**
-9. Phase 7A — Multi-threaded scanning (performance critical)
+8. ✅ Phase 7 — Done (Engine gaps: multi-threaded scan, conditional BPs, trace, AA directives, address table, pointer maps; 385 tests)
+9. **Phase 9B — CI/CD (should be set up now)**
 10. Phase 8 — Lua (CE's killer feature)
 
 ---
@@ -519,7 +518,7 @@ Phase 1 ✅ (Foundation)
 | **4** | Explorer Sidebar | ✅ Complete | Modules (filterable), Threads (expandable stacks), Memory Map (protection flags), Workspace (sessions + CT import), Process details; 168 tests |
 | **5** | Memory Browser+ | ✅ Complete | Hex editing, data inspector, protection tools, structure spider |
 | **6** | UX Polish | ✅ Complete | Token/scan/watchdog status bar, process filter, screenshot/report export, column sorting, color coding, context menus; 291 tests |
-| **7** | Engine Gaps | Planned | Multi-threaded scan, bit-level scan, conditional BPs, AA directives, debugger stepping |
+| **7** | Engine Gaps | ✅ Complete | Multi-threaded scan, bit-level scan, conditional/thread BPs, break-and-trace, AA directives (aobscanmodule, registersymbol, createthread, readmem/writemem, loadlibrary), address table hex/signed/dropdown/groups, pointer map save/load/compare; 385 tests |
 | **8** | Lua | Planned | Full Lua 5.4 scripting engine with CE API bindings |
 | **9** | Infrastructure | Planned | CI/CD, logging, expanded tests, auto-update, crash recovery |
 | **10** | Advanced | Long-term | Trainers, overlays, kernel debugging, plugins, AI co-pilot mode |

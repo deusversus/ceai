@@ -162,7 +162,6 @@ public partial class MainWindow : Window, IDisposable
         FindResultsContent.DataContext = findResultsVm;
         HotkeysContent.DataContext = hotkeysVm;
         JournalContent.DataContext = journalVm;
-        LuaConsoleContent.DataContext = luaConsoleVm;
 
         // Wire Phase 2.5 panel DataContexts
         ScannerContent.DataContext = scannerVm;
@@ -177,6 +176,7 @@ public partial class MainWindow : Window, IDisposable
         ScriptEditorContent.DataContext = scriptEditorVm;
         SetupScriptEditorHighlighting(scriptEditorVm);
         DebuggerContent.DataContext = debuggerVm;
+        LuaConsoleContent.DataContext = luaConsoleVm;
 
         // Wire Phase 4 sidebar DataContexts
         ModulesContent.DataContext = moduleListVm;

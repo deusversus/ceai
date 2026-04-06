@@ -279,7 +279,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             var rmMatch = ReadMemRegex().Match(trimmed);
             if (rmMatch.Success)
             {
-                readMemDirectives.Add((rmMatch.Groups[1].Value.Trim(), int.Parse(rmMatch.Groups[2].Value.Trim())));
+                readMemDirectives.Add((rmMatch.Groups[1].Value.Trim(), int.Parse(rmMatch.Groups[2].Value.Trim(), CultureInfo.InvariantCulture)));
                 continue;
             }
 
@@ -645,8 +645,8 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                     $"createthread failed at 0x{addr.Value:X}: error {Marshal.GetLastWin32Error()}",
                     allocations, patches, registeredSymbols);
             }
-            WaitForSingleObject(threadHandle, 1000);
-            CloseHandle(threadHandle);
+            _ = WaitForSingleObject(threadHandle, 1000);
+            _ = CloseHandle(threadHandle);
         }
 
         // Phase 11: Execute readmem directives
@@ -708,12 +708,12 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
         foreach (var block in codeBlocks)
         {
-            if (labelAddresses.ContainsKey(block.Label))
+            if (labelAddresses.TryGetValue(block.Label, out var blockAddr))
             {
                 // This block already has an assigned address
-                insideAlloc = IsAllocAddress(labelAddresses[block.Label], defines);
+                insideAlloc = IsAllocAddress(blockAddr, defines);
                 if (insideAlloc)
-                    currentOffset = labelAddresses[block.Label];
+                    currentOffset = blockAddr;
 
                 continue;
             }
@@ -934,7 +934,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             return (nuint)directValue;
 
         // module+offset pattern: "GameAssembly.dll+9A18E8"
-        var plusIdx = expanded.IndexOf('+');
+        var plusIdx = expanded.IndexOf('+', StringComparison.Ordinal);
         if (plusIdx > 0)
         {
             var modulePart = expanded[..plusIdx].Trim();
@@ -961,7 +961,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             return ulong.TryParse(value[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out result);
 
-        if (value.StartsWith("$", StringComparison.Ordinal))
+        if (value.StartsWith('$'))
             return ulong.TryParse(value[1..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out result);
 
         // Contains hex chars a-f → parse as hex
@@ -1132,7 +1132,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 }
                 else
                 {
-                    sb.AppendLine($"// Include not found: {path}");
+                    sb.Append("// Include not found: ").AppendLine(path);
                 }
             }
             else
@@ -1164,8 +1164,8 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             var threadHandle = CreateRemoteThread(processHandle, IntPtr.Zero, 0, loadLibAddr, pathAlloc, 0, out _);
             if (threadHandle == IntPtr.Zero) return false;
 
-            WaitForSingleObject(threadHandle, 5000);
-            CloseHandle(threadHandle);
+            _ = WaitForSingleObject(threadHandle, 5000);
+            _ = CloseHandle(threadHandle);
             return true;
         }
         finally
@@ -1283,7 +1283,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr GetModuleHandleW(string lpModuleName);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true)]
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true, ExactSpelling = true, BestFitMapping = false, ThrowOnUnmappableChar = true)]
     private static extern IntPtr GetProcAddress(IntPtr hModule, string lpProcName);
 
     [DllImport("kernel32.dll", SetLastError = true)]

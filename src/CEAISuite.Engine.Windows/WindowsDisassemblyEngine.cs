@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
@@ -56,7 +57,7 @@ public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null)
                         var instr = decoder.Decode();
 
                         var instrBytes = buffer[totalBytes..(totalBytes + instr.Length)];
-                        var hexBytes = string.Join(' ', instrBytes.Select(b => b.ToString("X2")));
+                        var hexBytes = string.Join(' ', instrBytes.Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
 
                         string mnemonic;
                         string operands;
@@ -71,7 +72,7 @@ public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null)
                         {
                             formatter.Format(instr, output);
                             var formatted = output.ToStringAndReset();
-                            var spaceIdx = formatted.IndexOf(' ');
+                            var spaceIdx = formatted.IndexOf(' ', StringComparison.Ordinal);
                             mnemonic = spaceIdx >= 0 ? formatted[..spaceIdx] : formatted;
                             operands = spaceIdx >= 0 ? formatted[(spaceIdx + 1)..].TrimStart() : "";
                         }

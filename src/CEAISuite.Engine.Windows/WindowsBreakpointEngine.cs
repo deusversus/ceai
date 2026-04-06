@@ -108,9 +108,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 {
                     return await SetBreakpointCoreAsync(processId, address, type, resolvedMode, action, singleHit, cancellationToken);
                 }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("four active hardware breakpoints"))
+                catch (InvalidOperationException ex) when (ex.Message.Contains("four active hardware breakpoints", StringComparison.Ordinal))
                 {
-                    _logger.LogDebug("Hardware slots exhausted. Auto-falling back to PageGuard for BP at 0x{Address:X}", address);
+                    if (_logger.IsEnabled(LogLevel.Debug))
+                        _logger.LogDebug("Hardware slots exhausted. Auto-falling back to PageGuard for BP at 0x{Address:X}", address);
                     return await SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
                 }
             }, cancellationToken);
@@ -416,7 +417,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Breakpoint session creation failed for PID {ProcessId}", processId);
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(ex, "Breakpoint session creation failed for PID {ProcessId}", processId);
                 CloseHandle(processHandle);
                 throw;
             }
@@ -676,7 +678,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
         finally
         {
-            ResumeThread(threadHandle);
+            _ = ResumeThread(threadHandle);
         }
     }
 
@@ -1083,7 +1085,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return DbgContinue;
     }
 
-    private uint HandleExitProcessEvent(ProcessDebugSession session, DEBUG_EVENT debugEvent, ref bool shouldExit)
+    private static uint HandleExitProcessEvent(ProcessDebugSession session, DEBUG_EVENT debugEvent, ref bool shouldExit)
     {
         shouldExit = true;
 
@@ -1307,7 +1309,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return unchecked((nuint)nativeContext.Rip);
     }
 
-    private static IReadOnlyList<int> GetTriggeredHardwareSlots(ProcessDebugSession session, IntPtr threadHandle)
+    private static List<int> GetTriggeredHardwareSlots(ProcessDebugSession session, IntPtr threadHandle)
     {
         ulong dr6;
 
@@ -1391,7 +1393,8 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         // Single-hit enforcement: disable immediately after first hit
         if (breakpoint.SingleHit && breakpoint.HitCount >= 1)
         {
-            _logger.LogDebug("Single-hit BP {BreakpointId} at 0x{Address:X}: auto-disabling after first hit", breakpoint.Id, breakpoint.Address);
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Single-hit BP {BreakpointId} at 0x{Address:X}: auto-disabling after first hit", breakpoint.Id, breakpoint.Address);
             return true;
         }
 
@@ -1418,7 +1421,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return false;
     }
 
-    private IReadOnlyDictionary<string, string> CaptureRegisterSnapshot(
+    private Dictionary<string, string> CaptureRegisterSnapshot(
         ProcessDebugSession session,
         IntPtr threadHandle,
         nuint faultAddress)
@@ -1442,7 +1445,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
     }
 
-    private static IReadOnlyDictionary<string, string> CaptureRegisterSnapshotCore(
+    private static Dictionary<string, string> CaptureRegisterSnapshotCore(
         ProcessDebugSession session,
         IntPtr threadHandle,
         nuint faultAddress)

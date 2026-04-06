@@ -593,7 +593,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
         // Scan upward in 64KB increments (Windows allocation granularity)
         for (var probe = rangeStart; probe < rangeEnd; probe += AllocGranularity)
         {
-            var result = VirtualAllocEx(hProcess, (IntPtr)probe, (UIntPtr)size,
+            var result = VirtualAllocEx(hProcess, checked((IntPtr)probe), checked((UIntPtr)size),
                 MemCommit | MemReserve, PageExecuteReadWrite);
             if (result != IntPtr.Zero)
                 return result;
@@ -657,7 +657,8 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
             CloseHandle(snapshot);
         }
 
-        _logger.LogTrace("Suspended {ThreadCount} thread(s) in process {ProcessId} (danger zone: 0x{DangerStart:X}..0x{DangerEnd:X})", suspended.Count, processId, dangerStart, dangerStart + dangerSize);
+        if (_logger.IsEnabled(LogLevel.Trace))
+            _logger.LogTrace("Suspended {ThreadCount} thread(s) in process {ProcessId} (danger zone: 0x{DangerStart:X}..0x{DangerEnd:X})", suspended.Count, processId, dangerStart, dangerStart + dangerSize);
 
         return suspended;
     }
@@ -667,8 +668,8 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
     {
         foreach (var handle in suspendedThreads)
         {
-            ResumeThread(handle);
-            CloseHandle(handle);
+            _ = ResumeThread(handle);
+            _ = CloseHandle(handle);
         }
     }
 

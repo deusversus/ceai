@@ -29,7 +29,7 @@ public sealed class WindowsCallStackEngine : ICallStackEngine
     public Task<IReadOnlyList<CallStackFrame>> WalkStackAsync(
         int processId, int threadId, IReadOnlyList<ModuleDescriptor> modules, int maxFrames = 64,
         CancellationToken ct = default) =>
-        Task.Run(() => WalkStack(processId, threadId, modules, maxFrames), ct);
+        Task.Run<IReadOnlyList<CallStackFrame>>(() => WalkStack(processId, threadId, modules, maxFrames), ct);
 
     /// <summary>
     /// Walk the call stack of all threads in a process.
@@ -69,7 +69,7 @@ public sealed class WindowsCallStackEngine : ICallStackEngine
             return (IReadOnlyDictionary<int, IReadOnlyList<CallStackFrame>>)result;
         }, ct);
 
-    private IReadOnlyList<CallStackFrame> WalkStack(
+    private static List<CallStackFrame> WalkStack(
         int processId, int threadId, IReadOnlyList<ModuleDescriptor> modules, int maxFrames)
     {
         var frames = new List<CallStackFrame>();
@@ -112,7 +112,7 @@ public sealed class WindowsCallStackEngine : ICallStackEngine
 
                     // Read saved RBP and return address from stack frame
                     var frameBytes = new byte[16];
-                    if (!ReadProcessMemory(hProcess, (IntPtr)(long)rbp, frameBytes, 16, out int bytesRead) || bytesRead < 16)
+                    if (!ReadProcessMemory(hProcess, checked((IntPtr)(long)rbp), frameBytes, 16, out int bytesRead) || bytesRead < 16)
                         break;
 
                     nuint savedRbp = (nuint)BitConverter.ToUInt64(frameBytes, 0);
@@ -134,7 +134,7 @@ public sealed class WindowsCallStackEngine : ICallStackEngine
             }
             finally
             {
-                ResumeThread(hThread);
+                _ = ResumeThread(hThread);
             }
         }
         finally
@@ -146,13 +146,13 @@ public sealed class WindowsCallStackEngine : ICallStackEngine
         return frames;
     }
 
-    private void ScanStackForReturnAddresses(
+    private static void ScanStackForReturnAddresses(
         IntPtr hProcess, nuint stackPointer, IReadOnlyList<ModuleDescriptor> modules,
         List<CallStackFrame> frames, int maxFrames)
     {
         // Read a chunk of stack memory and look for values that look like return addresses
         var stackBytes = new byte[4096];
-        if (!ReadProcessMemory(hProcess, (IntPtr)(long)stackPointer, stackBytes, stackBytes.Length, out int read) || read < 8)
+        if (!ReadProcessMemory(hProcess, checked((IntPtr)(long)stackPointer), stackBytes, stackBytes.Length, out int read) || read < 8)
             return;
 
         var seen = new HashSet<nuint>(frames.Select(f => f.InstructionPointer));

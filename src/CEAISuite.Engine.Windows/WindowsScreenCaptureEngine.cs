@@ -91,7 +91,7 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
 
         EnumWindows((hwnd, _) =>
         {
-            GetWindowThreadProcessId(hwnd, out uint pid);
+            uint threadId = GetWindowThreadProcessId(hwnd, out uint pid);
             if (pid != (uint)processId) return true; // continue
 
             // Skip invisible and minimized windows

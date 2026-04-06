@@ -350,12 +350,12 @@ public sealed class WindowsScanEngine : IScanEngine
     private static string FormatValue(byte[] bytes, MemoryDataType dataType) =>
         dataType switch
         {
-            MemoryDataType.Byte => bytes[0].ToString(),
-            MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(),
-            MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(),
-            MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(),
-            MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9"),
-            MemoryDataType.Double => BitConverter.ToDouble(bytes, 0).ToString("G17"),
+            MemoryDataType.Byte => bytes[0].ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9", CultureInfo.InvariantCulture),
+            MemoryDataType.Double => BitConverter.ToDouble(bytes, 0).ToString("G17", CultureInfo.InvariantCulture),
             _ => Convert.ToHexString(bytes)
         };
 
@@ -389,7 +389,7 @@ public sealed class WindowsScanEngine : IScanEngine
 
     private static bool IsValueBetween(string current, string? bounds, MemoryDataType dataType)
     {
-        if (string.IsNullOrWhiteSpace(bounds) || !bounds.Contains(';'))
+        if (string.IsNullOrWhiteSpace(bounds) || !bounds.Contains(';', StringComparison.Ordinal))
             return false;
 
         var parts = bounds.Split(';', 2);
@@ -445,7 +445,7 @@ public sealed class WindowsScanEngine : IScanEngine
 
             try
             {
-                if (options.SuspendProcess) NtSuspendProcess(handle);
+                if (options.SuspendProcess) _ = NtSuspendProcess(handle);
                 try
                 {
                     var regions = EnumerateRegionsCore(handle, options)
@@ -525,7 +525,7 @@ public sealed class WindowsScanEngine : IScanEngine
                         DateTimeOffset.UtcNow,
                         merged.Count >= MaxScanResults);
                 }
-                finally { if (options.SuspendProcess) NtResumeProcess(handle); }
+                finally { if (options.SuspendProcess) _ = NtResumeProcess(handle); }
             }
             finally { CloseHandle(handle); }
         }, cancellationToken);

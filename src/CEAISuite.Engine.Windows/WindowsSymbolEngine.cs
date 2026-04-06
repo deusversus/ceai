@@ -91,7 +91,7 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
         var handle = OpenProcess(ProcessQueryInformation | ProcessVmRead, false, processId);
         if (handle == IntPtr.Zero) return IntPtr.Zero;
 
-        SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_FAVOR_COMPRESSED);
+        _ = SymSetOptions(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_LOAD_LINES | SYMOPT_FAVOR_COMPRESSED);
 
         if (!SymInitialize(handle, null, invadeProcess: true))
         {
@@ -202,11 +202,11 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
     [DllImport("dbghelp.dll", SetLastError = true)]
     private static extern uint SymSetOptions(uint symOptions);
 
-    [DllImport("dbghelp.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+    [DllImport("dbghelp.dll", SetLastError = true, CharSet = CharSet.Ansi, BestFitMapping = false, ThrowOnUnmappableChar = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SymInitialize(IntPtr hProcess, string? userSearchPath, bool invadeProcess);
 
-    [DllImport("dbghelp.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+    [DllImport("dbghelp.dll", SetLastError = true, CharSet = CharSet.Ansi, BestFitMapping = false, ThrowOnUnmappableChar = true)]
     private static extern ulong SymLoadModuleEx(IntPtr hProcess, IntPtr hFile, string imageName,
         string? moduleName, ulong baseOfDll, uint dllSize, IntPtr data, uint flags);
 

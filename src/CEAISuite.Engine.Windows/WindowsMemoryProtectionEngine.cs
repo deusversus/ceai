@@ -33,7 +33,7 @@ public sealed class WindowsMemoryProtectionEngine : IMemoryProtectionEngine
 
             try
             {
-                if (!VirtualProtectEx(hProcess, (IntPtr)(long)address, (UIntPtr)(ulong)size,
+                if (!VirtualProtectEx(hProcess, checked((IntPtr)(long)address), checked((UIntPtr)(ulong)size),
                     (uint)newProtection, out uint oldProtect))
                     throw new InvalidOperationException($"VirtualProtectEx failed: {Marshal.GetLastWin32Error()}");
 
@@ -53,8 +53,8 @@ public sealed class WindowsMemoryProtectionEngine : IMemoryProtectionEngine
 
             try
             {
-                var preferred = (IntPtr)(long)preferredAddress;
-                var result = VirtualAllocEx(hProcess, preferred, (UIntPtr)(ulong)size,
+                var preferred = checked((IntPtr)(long)preferredAddress);
+                var result = VirtualAllocEx(hProcess, preferred, checked((UIntPtr)(ulong)size),
                     MemCommit | MemReserve, (uint)protection);
 
                 if (result == IntPtr.Zero)
@@ -73,7 +73,7 @@ public sealed class WindowsMemoryProtectionEngine : IMemoryProtectionEngine
 
             try
             {
-                return VirtualFreeEx(hProcess, (IntPtr)(long)address, UIntPtr.Zero, MemRelease);
+                return VirtualFreeEx(hProcess, checked((IntPtr)(long)address), UIntPtr.Zero, MemRelease);
             }
             finally { CloseHandle(hProcess); }
         }, cancellationToken);
@@ -89,7 +89,7 @@ public sealed class WindowsMemoryProtectionEngine : IMemoryProtectionEngine
             try
             {
                 var mbi = new MEMORY_BASIC_INFORMATION();
-                if (VirtualQueryEx(hProcess, (IntPtr)(long)address, ref mbi, (UIntPtr)Marshal.SizeOf(mbi)) == UIntPtr.Zero)
+                if (VirtualQueryEx(hProcess, checked((IntPtr)(long)address), ref mbi, (UIntPtr)Marshal.SizeOf(mbi)) == UIntPtr.Zero)
                     throw new InvalidOperationException($"VirtualQueryEx failed: {Marshal.GetLastWin32Error()}");
 
                 var prot = (MemoryProtection)mbi.Protect;

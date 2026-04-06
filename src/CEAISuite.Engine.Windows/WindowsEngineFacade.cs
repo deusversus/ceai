@@ -22,7 +22,8 @@ public sealed class WindowsEngineFacade : IEngineFacade
 
     private void Trace(string message)
     {
-        _logger.LogDebug("[EngineFacade] {Message}", message);
+        if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug))
+            _logger.LogDebug("[EngineFacade] {Message}", message);
         DiagnosticTrace?.Invoke(message);
     }
 
@@ -363,12 +364,12 @@ public sealed class WindowsEngineFacade : IEngineFacade
 
         var displayValue = dataType switch
         {
-            MemoryDataType.Byte => bytes[0].ToString(),
-            MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(),
-            MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(),
-            MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(),
-            MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9"),
-            MemoryDataType.Double => BitConverter.ToDouble(bytes, 0).ToString("G17"),
+            MemoryDataType.Byte => bytes[0].ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9", CultureInfo.InvariantCulture),
+            MemoryDataType.Double => BitConverter.ToDouble(bytes, 0).ToString("G17", CultureInfo.InvariantCulture),
             MemoryDataType.Pointer => FormatPointer(bytes),
             MemoryDataType.String => ExtractNullTerminatedString(bytes),
             MemoryDataType.ByteArray => Convert.ToHexString(bytes),
@@ -545,7 +546,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Double => BitConverter.GetBytes(double.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Pointer => ConvertPointerValue(processId, value),
             MemoryDataType.String => System.Text.Encoding.UTF8.GetBytes(value + '\0'),
-            MemoryDataType.ByteArray => Convert.FromHexString(value.Replace(" ", "")),
+            MemoryDataType.ByteArray => Convert.FromHexString(value.Replace(" ", "", StringComparison.Ordinal)),
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
 
@@ -561,13 +562,13 @@ public sealed class WindowsEngineFacade : IEngineFacade
             : BitConverter.GetBytes(ulong.Parse(normalized, NumberStyles.HexNumber, CultureInfo.InvariantCulture));
     }
 
-    private static string FormatPointer(IReadOnlyList<byte> bytes)
+    private static string FormatPointer(byte[] bytes)
     {
-        return bytes.Count switch
+        return bytes.Length switch
         {
-            4 => $"0x{BitConverter.ToUInt32(bytes.ToArray(), 0):X8}",
-            8 => $"0x{BitConverter.ToUInt64(bytes.ToArray(), 0):X16}",
-            _ => $"0x{Convert.ToHexString(bytes.ToArray())}"
+            4 => $"0x{BitConverter.ToUInt32(bytes, 0):X8}",
+            8 => $"0x{BitConverter.ToUInt64(bytes, 0):X16}",
+            _ => $"0x{Convert.ToHexString(bytes)}"
         };
     }
 

@@ -14,6 +14,7 @@ using CEAISuite.Desktop.Services;
 using CEAISuite.Desktop.ViewModels;
 using CEAISuite.Engine.Abstractions;
 using ICSharpCode.AvalonEdit.Highlighting;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 
@@ -43,6 +44,11 @@ public partial class MainWindow : Window, IDisposable
     private readonly Dictionary<string, object> _xamlPanelContent = new();
 
     private readonly EventSubscriptions _subs = new();
+    private readonly System.Windows.Threading.DispatcherTimer _autoSaveTimer;
+
+    private static readonly string RecoveryFilePath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CEAISuite", "recovery.json");
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
@@ -285,6 +291,29 @@ public partial class MainWindow : Window, IDisposable
         DataContext = _mainVm.Dashboard;
         Loaded += OnLoaded;
         PreviewKeyUp += OnPreviewKeyUp;
+
+        // ── Crash recovery: auto-save every 5 minutes ──
+        _autoSaveTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+        _autoSaveTimer.Tick += AutoSaveTimer_Tick;
+        _autoSaveTimer.Start();
+    }
+
+    private async void AutoSaveTimer_Tick(object? sender, EventArgs e)
+    {
+        try
+        {
+            var tableService = App.Services.GetService<AddressTableService>();
+            var exportService = App.Services.GetService<AddressTableExportService>();
+            if (tableService is null || exportService is null) return;
+
+            var roots = tableService.Roots;
+            if (roots.Count > 0)
+                await exportService.ExportRecoveryAsync(roots, RecoveryFilePath);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "Auto-save failed");
+        }
     }
 
     private void OnMainVmUiAction(string action, object? param)
@@ -392,6 +421,10 @@ public partial class MainWindow : Window, IDisposable
 
     protected override void OnClosed(EventArgs e)
     {
+        // Stop auto-save and delete recovery file on clean shutdown
+        _autoSaveTimer.Stop();
+        try { File.Delete(RecoveryFilePath); } catch { /* best-effort */ }
+
         SaveLayout();
         _mainVm.OnClosing();
         _hotkeyService.Dispose();

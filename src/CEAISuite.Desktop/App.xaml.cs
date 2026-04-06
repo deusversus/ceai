@@ -60,6 +60,37 @@ public partial class App : System.Windows.Application
         loggerFactory.AddSerilog(Log.Logger);
         ChatClientFactory.SetLogger(loggerFactory);
 
+        // ── Crash recovery: check for recovery file before showing main window ──
+        var recoveryPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "CEAISuite", "recovery.json");
+        if (File.Exists(recoveryPath))
+        {
+            var result = MessageBox.Show(
+                "CE AI Suite didn't shut down cleanly. Restore your last session?",
+                "Session Recovery",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Question);
+
+            if (result == MessageBoxResult.Yes)
+            {
+                try
+                {
+                    var exportService = Services.GetRequiredService<AddressTableExportService>();
+                    var tableService = Services.GetRequiredService<AddressTableService>();
+                    var recovered = exportService.ImportRecoveryAsync(recoveryPath).GetAwaiter().GetResult();
+                    if (recovered is not null)
+                        tableService.ImportNodes(recovered);
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Failed to restore recovery data");
+                }
+            }
+
+            try { File.Delete(recoveryPath); } catch { /* best-effort */ }
+        }
+
         var mainWindow = Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
     }
@@ -266,6 +297,7 @@ public partial class App : System.Windows.Application
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
+        EmergencySaveAddressTable();
         LogCrash("DispatcherUnhandled", e.Exception);
         MessageBox.Show(
             $"An unexpected error occurred:\n\n{e.Exception.Message}\n\nThe app will try to continue. Check logs for details.",
@@ -275,6 +307,7 @@ public partial class App : System.Windows.Application
 
     private void OnDomainUnhandledException(object sender, UnhandledExceptionEventArgs e)
     {
+        EmergencySaveAddressTable();
         if (e.ExceptionObject is Exception ex)
             LogCrash("AppDomainUnhandled", ex);
     }
@@ -283,6 +316,25 @@ public partial class App : System.Windows.Application
     {
         LogCrash("UnobservedTask", e.Exception);
         e.SetObserved(); // Prevent crash
+    }
+
+    private static void EmergencySaveAddressTable()
+    {
+        try
+        {
+            var exportService = Services?.GetService<AddressTableExportService>();
+            var tableService = Services?.GetService<AddressTableService>();
+            if (exportService is null || tableService is null) return;
+
+            var roots = tableService.Roots;
+            if (roots.Count == 0) return;
+
+            var recoveryPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CEAISuite", "recovery.json");
+            exportService.ExportRecoveryAsync(roots, recoveryPath).GetAwaiter().GetResult();
+        }
+        catch { /* Best-effort -- don't throw during crash handler */ }
     }
 
     private static void LogCrash(string source, Exception ex)

@@ -244,14 +244,14 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     }
 }
 
-public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<AddressTableService> logger)
+public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<AddressTableService>? logger = null)
 {
     /// <summary>Optional diagnostic trace callback for debugging address table refresh issues.</summary>
     public Action<string, string, string>? DiagnosticLog { get; set; }
 
     private void Log(string level, string message)
     {
-        logger.LogDebug("[{Level}] {Message}", level, message);
+        logger?.LogDebug("[{Level}] {Message}", level, message);
         DiagnosticLog?.Invoke("AddressTable", level, message);
     }
 

@@ -1070,7 +1070,7 @@ public partial class AddressTableViewModel : ObservableObject
             {
                 _ = _addressTableService.WriteValueAsync(pid.Value, node);
             }
-            catch { /* best effort */ }
+            catch (Exception ex) { _outputLog.Append("AddressTable", "Warning", $"Value write failed for \"{node.Label}\": {ex.Message}"); }
         }
 
         RefreshUI($"Value changed: {node.Label} = {result}");

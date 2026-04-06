@@ -3,18 +3,26 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Engine.Windows;
 
 public sealed class WindowsEngineFacade : IEngineFacade
 {
+    private readonly ILogger<WindowsEngineFacade> _logger;
+
+    public WindowsEngineFacade(ILogger<WindowsEngineFacade> logger)
+    {
+        _logger = logger;
+    }
+
     /// <summary>Optional trace callback for diagnosing attach/detach issues.
     /// Set from the host (e.g. MainViewModel) to route engine diagnostics to the Output panel.</summary>
     public Action<string>? DiagnosticTrace { get; set; }
 
     private void Trace(string message)
     {
-        System.Diagnostics.Debug.WriteLine($"[EngineFacade] {message}");
+        _logger.LogDebug("[EngineFacade] {Message}", message);
         DiagnosticTrace?.Invoke(message);
     }
 
@@ -330,8 +338,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
                     var isPartial = bytesRead < length;
                     if (isPartial)
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[EngineFacade] Partial read at 0x{address:X}: got {bytesRead}/{length} bytes.");
+                        _logger.LogWarning("Partial read at 0x{Address:X}: got {BytesRead}/{Length} bytes", address, bytesRead, length);
                     }
 
                     return new MemoryReadResult(processId, address, buffer[..bytesRead], isPartial);

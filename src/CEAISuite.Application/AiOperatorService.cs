@@ -1618,7 +1618,7 @@ public sealed class AiOperatorService
             _lastContextSuffix = suffix;
             return suffix;
         }
-        catch { return null; }
+        catch (Exception ex) { Log("WARN", $"Context provider failed: {ex.GetType().Name}: {ex.Message}"); return null; }
     }
 
     private const string SystemPrompt = """

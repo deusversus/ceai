@@ -453,7 +453,7 @@ public partial class MainViewModel : ObservableObject
             if (pid.HasValue)
             {
                 try { await _breakpointService.ForceDetachAndCleanupAsync(pid.Value); }
-                catch { /* best-effort */ }
+                catch (Exception ex) { _outputLog.Append("EmergencyStop", "Warning", $"Breakpoint force-detach failed: {ex.Message}"); }
             }
 
             // 4. Detach engine facade + clear dashboard
@@ -690,7 +690,7 @@ public partial class MainViewModel : ObservableObject
             var newClient = CreateChatClient();
             _aiOperatorService.Reconfigure(newClient);
         }
-        catch { }
+        catch (Exception ex) { _logger.LogWarning(ex, "AI reconfigure after skills change failed"); }
     }
 
     public void ShowAbout()

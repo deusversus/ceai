@@ -109,7 +109,7 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
                 await UndoAsync(ct);
                 rolled++;
             }
-            catch { break; } // Stop on first failure — target may be gone
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[PatchUndo] UndoAll stopped at rollback {rolled}: {ex.GetType().Name}: {ex.Message}"); break; }
         }
         return rolled;
     }

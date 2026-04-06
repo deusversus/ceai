@@ -4,11 +4,19 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Engine.Windows;
 
 public sealed class WindowsBreakpointEngine : IBreakpointEngine
 {
+    private readonly ILogger<WindowsBreakpointEngine> _logger;
+
+    public WindowsBreakpointEngine(ILogger<WindowsBreakpointEngine> logger)
+    {
+        _logger = logger;
+    }
+
     private const uint ProcessQueryInformation = 0x0400;
     private const uint ProcessVmRead = 0x0010;
     private const uint ProcessVmWrite = 0x0020;
@@ -102,8 +110,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 }
                 catch (InvalidOperationException ex) when (ex.Message.Contains("four active hardware breakpoints"))
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[BreakpointEngine] Hardware slots exhausted. Auto-falling back to PageGuard for BP at 0x{address:X}.");
+                    _logger.LogDebug("Hardware slots exhausted. Auto-falling back to PageGuard for BP at 0x{Address:X}", address);
                     return await SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
                 }
             }, cancellationToken);
@@ -495,7 +502,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         throw new InvalidOperationException("Windows supports at most four active hardware breakpoints per process.");
     }
 
-    private static void InstallSoftwareBreakpoint(ProcessDebugSession session, BreakpointState breakpoint)
+    private void InstallSoftwareBreakpoint(ProcessDebugSession session, BreakpointState breakpoint)
     {
         if (session.SoftwareBreakpoints.ContainsKey(breakpoint.Address))
         {
@@ -534,9 +541,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         // 2E: Detect existing 0xCC before installing software breakpoint
         if (original[0] == 0xCC)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[BreakpointEngine] WARNING: Address 0x{breakpoint.Address:X} already contains 0xCC (INT3). " +
-                "Another debugger or padding byte may be present. Skipping patch to avoid recording wrong original byte.");
+            _logger.LogWarning("Address 0x{Address:X} already contains 0xCC (INT3). Another debugger or padding byte may be present. Skipping patch to avoid recording wrong original byte", breakpoint.Address);
             throw new InvalidOperationException(
                 $"Address 0x{breakpoint.Address:X} already contains 0xCC (INT3). " +
                 "Cannot install software breakpoint — original byte would be lost.");
@@ -552,7 +557,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         breakpoint.OriginalByte = original[0];
     }
 
-    private static void RestoreOriginalByte(ProcessDebugSession session, BreakpointState breakpoint)
+    private void RestoreOriginalByte(ProcessDebugSession session, BreakpointState breakpoint)
     {
         if (breakpoint.OriginalByte is null)
         {
@@ -564,15 +569,13 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         {
             // 2A: 0xCC persists at this address — mark breakpoint as restoration-failed
             breakpoint.RestorationFailed = true;
-            System.Diagnostics.Debug.WriteLine(
-                $"[BreakpointEngine] CRITICAL: RestoreOriginalByte failed at 0x{breakpoint.Address:X} " +
-                $"(error {Marshal.GetLastWin32Error()}). The 0xCC byte persists — breakpoint {breakpoint.Id} marked as restoration-failed.");
+            _logger.LogError("RestoreOriginalByte failed at 0x{Address:X} (error {Error}). The 0xCC byte persists -- breakpoint {BreakpointId} marked as restoration-failed", breakpoint.Address, Marshal.GetLastWin32Error(), breakpoint.Id);
             return;
         }
         FlushInstructionCache(session.ProcessHandle, (IntPtr)breakpoint.Address, (UIntPtr)1);
     }
 
-    private static void ApplyHardwareBreakpointsLocked(ProcessDebugSession session)
+    private void ApplyHardwareBreakpointsLocked(ProcessDebugSession session)
     {
         var activeHardwareBreakpoints = session.Breakpoints.Values
             .Where(breakpoint => breakpoint.IsEnabled && breakpoint.HardwareSlot.HasValue)
@@ -585,7 +588,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         }
     }
 
-    private static void ApplyHardwareBreakpointsToThread(
+    private void ApplyHardwareBreakpointsToThread(
         IntPtr threadHandle,
         bool isWow64Target,
         IReadOnlyCollection<BreakpointState> activeHardwareBreakpoints)
@@ -634,9 +637,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
                 if (!Wow64SetThreadContext(threadHandle, ref context))
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[BreakpointEngine] Wow64SetThreadContext failed for thread handle 0x{threadHandle:X} " +
-                        $"(error {Marshal.GetLastWin32Error()}). Hardware BP may not be applied to this thread.");
+                    _logger.LogWarning("Wow64SetThreadContext failed for thread handle 0x{ThreadHandle:X} (error {Error}). Hardware BP may not be applied to this thread", threadHandle, Marshal.GetLastWin32Error());
                 }
             }
             else
@@ -668,9 +669,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
                 if (!SetThreadContext(threadHandle, ref context))
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[BreakpointEngine] SetThreadContext failed for thread handle 0x{threadHandle:X} " +
-                        $"(error {Marshal.GetLastWin32Error()}). Hardware BP may not be applied to this thread.");
+                    _logger.LogWarning("SetThreadContext failed for thread handle 0x{ThreadHandle:X} (error {Error}). Hardware BP may not be applied to this thread", threadHandle, Marshal.GetLastWin32Error());
                 }
             }
         }
@@ -864,9 +863,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, faultAddress, registers))
             {
                 breakpoint.IsEnabled = false;
-                System.Diagnostics.Debug.WriteLine(
-                    $"[BreakpointEngine] PageGuard BP {breakpoint.Id} at 0x{breakpoint.Address:X}: " +
-                    $"auto-disabled due to excessive hit rate (guard-page storm prevention).");
+                _logger.LogWarning("PageGuard BP {BreakpointId} at 0x{Address:X}: auto-disabled due to excessive hit rate (guard-page storm prevention)", breakpoint.Id, breakpoint.Address);
             }
         }
 
@@ -904,9 +901,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 bp.IsEnabled = false;
                 bp.ThrottleDisabled = true;
             }
-            System.Diagnostics.Debug.WriteLine(
-                $"[BreakpointEngine] RearmPageGuard failed at page 0x{pageBase:X} " +
-                $"(error {Marshal.GetLastWin32Error()}). {bpList.Count} BP(s) marked as disabled.");
+            _logger.LogWarning("RearmPageGuard failed at page 0x{PageBase:X} (error {Error}). {BpCount} BP(s) marked as disabled", pageBase, Marshal.GetLastWin32Error(), bpList.Count);
         }
     }
 
@@ -970,9 +965,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     }
 
                     consecutiveFailures++;
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[BreakpointEngine] WaitForDebugEventEx failed (error {error}), " +
-                        $"attempt {consecutiveFailures}/{MaxConsecutiveFailures} for PID {session.ProcessId}.");
+                    _logger.LogWarning("WaitForDebugEventEx failed (error {Error}), attempt {Attempt}/{MaxAttempts} for PID {ProcessId}", error, consecutiveFailures, MaxConsecutiveFailures, session.ProcessId);
 
                     if (consecutiveFailures >= MaxConsecutiveFailures)
                     {
@@ -996,8 +989,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 {
                     // Safety: a single bad debug event must never kill the debug loop.
                     // Log and continue processing events — the target process stays alive.
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[BreakpointEngine] HandleDebugEvent error (PID {session.ProcessId}): {ex.Message}");
+                    _logger.LogError(ex, "HandleDebugEvent error (PID {ProcessId})", session.ProcessId);
                     continueStatus = DbgContinue;
                 }
                 finally
@@ -1005,9 +997,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     // 3I: Check ContinueDebugEvent return value — process may have exited
                     if (!ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus))
                     {
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[BreakpointEngine] ContinueDebugEvent failed for PID {debugEvent.dwProcessId} " +
-                            $"(error {Marshal.GetLastWin32Error()}). Ending debug loop.");
+                        _logger.LogWarning("ContinueDebugEvent failed for PID {ProcessId} (error {Error}). Ending debug loop", debugEvent.dwProcessId, Marshal.GetLastWin32Error());
                         shouldExit = true;
                     }
                 }
@@ -1377,7 +1367,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     /// Log a breakpoint hit and check hit-rate. Returns true if the breakpoint should be
     /// auto-disabled due to excessive firing (>200 hits/sec).
     /// </summary>
-    private static bool LogBreakpointHit(
+    private bool LogBreakpointHit(
         BreakpointState breakpoint,
         int threadId,
         nuint address,
@@ -1400,9 +1390,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         // Single-hit enforcement: disable immediately after first hit
         if (breakpoint.SingleHit && breakpoint.HitCount >= 1)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[BreakpointEngine] Single-hit BP {breakpoint.Id} at 0x{breakpoint.Address:X}: " +
-                $"auto-disabling after first hit.");
+            _logger.LogDebug("Single-hit BP {BreakpointId} at 0x{Address:X}: auto-disabling after first hit", breakpoint.Id, breakpoint.Address);
             return true;
         }
 
@@ -1421,9 +1409,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             if (hits > MaxHitsPerSecond)
             {
                 breakpoint.ThrottleDisabled = true;
-                System.Diagnostics.Debug.WriteLine(
-                    $"[BreakpointEngine] Auto-disabling BP {breakpoint.Id} at 0x{breakpoint.Address:X}: " +
-                    $"exceeded {MaxHitsPerSecond} hits/sec ({hits} in window). This prevents game freezes.");
+                _logger.LogWarning("Auto-disabling BP {BreakpointId} at 0x{Address:X}: exceeded {MaxHitsPerSecond} hits/sec ({Hits} in window). This prevents game freezes", breakpoint.Id, breakpoint.Address, MaxHitsPerSecond, hits);
                 return true; // caller should disable this BP
             }
         }
@@ -1431,7 +1417,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return false;
     }
 
-    private static IReadOnlyDictionary<string, string> CaptureRegisterSnapshot(
+    private IReadOnlyDictionary<string, string> CaptureRegisterSnapshot(
         ProcessDebugSession session,
         IntPtr threadHandle,
         nuint faultAddress)
@@ -1449,8 +1435,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             if (staleThreadId != 0)
             {
                 session.ThreadHandles.Remove(staleThreadId);
-                System.Diagnostics.Debug.WriteLine(
-                    $"[BreakpointEngine] Removed stale thread handle for TID {staleThreadId} after context access failure.");
+                _logger.LogWarning("Removed stale thread handle for TID {ThreadId} after context access failure", staleThreadId);
             }
             return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         }

@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Engine.Windows;
 
@@ -25,6 +26,13 @@ namespace CEAISuite.Engine.Windows;
 /// </summary>
 public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
 {
+    private readonly ILogger<WindowsCodeCaveEngine> _logger;
+
+    public WindowsCodeCaveEngine(ILogger<WindowsCodeCaveEngine> logger)
+    {
+        _logger = logger;
+    }
+
     private const uint ProcessAllAccess = 0x001FFFFF;
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
@@ -240,8 +248,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
                 // 1J — Check VirtualProtectEx restore return value
                 if (!VirtualProtectEx(hProcess, (IntPtr)address, (UIntPtr)stealLength, oldProtect, out _))
                 {
-                    System.Diagnostics.Debug.WriteLine(
-                        $"[CodeCave] WARNING: Failed to restore original protection at 0x{address:X} (error: {Marshal.GetLastWin32Error()})");
+                    _logger.LogWarning("Failed to restore original protection at 0x{Address:X} (error: {Error})", address, Marshal.GetLastWin32Error());
                 }
 
                 // Step 8: Register the hook
@@ -300,9 +307,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
             if (!WriteProcessMemory(hProcess, (IntPtr)hook.OriginalAddress,
                     hook.StolenBytes, hook.StolenBytes.Length, out _))
             {
-                System.Diagnostics.Debug.WriteLine(
-                    $"[CodeCave] CRITICAL: Failed to restore original bytes at 0x{hook.OriginalAddress:X}. " +
-                    $"Cave at 0x{hook.CaveAddress:X} will NOT be freed to prevent crash.");
+                _logger.LogError("Failed to restore original bytes at 0x{OriginalAddress:X}. Cave at 0x{CaveAddress:X} will NOT be freed to prevent crash", hook.OriginalAddress, hook.CaveAddress);
                 hook.RemovalFailed = true;
                 // Restore protection but leave cave alive
                 VirtualProtectEx(hProcess, (IntPtr)hook.OriginalAddress, (UIntPtr)hook.StealLength,
@@ -578,7 +583,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
     /// Scans from (target - 2GB) upward in 64KB increments until allocation succeeds.
     /// Falls back to any-address allocation if the entire range is exhausted.
     /// </summary>
-    private static IntPtr AllocateNearTarget(IntPtr hProcess, nuint targetAddress, int size)
+    private IntPtr AllocateNearTarget(IntPtr hProcess, nuint targetAddress, int size)
     {
         var target = (long)targetAddress;
         var rangeStart = Math.Max(0x10000L, target - NearAllocRange);
@@ -595,9 +600,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
 
         // Fallback: allocate at any address (RIP-relative relocation may fail if >2GB away,
         // but BuildTrampoline uses absolute addressing for the far JMP, so basic hooks still work)
-        System.Diagnostics.Debug.WriteLine(
-            $"[CodeCave] WARNING: Could not allocate within ±2GB of 0x{targetAddress:X}. " +
-            $"Falling back to any-address allocation. RIP-relative instructions in stolen bytes may fail.");
+        _logger.LogWarning("Could not allocate within +/-2GB of 0x{TargetAddress:X}. Falling back to any-address allocation. RIP-relative instructions in stolen bytes may fail", targetAddress);
         return VirtualAllocEx(hProcess, IntPtr.Zero, (UIntPtr)size, MemCommit | MemReserve, PageExecuteReadWrite);
     }
 
@@ -614,7 +617,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
     /// Full IP verification would require GetThreadContext with the CONTEXT struct, which
     /// adds significant P/Invoke complexity for a diagnostic-only check.
     /// </summary>
-    private static List<IntPtr> SuspendTargetThreads(int processId, IntPtr hProcess, nuint dangerStart, nuint dangerSize)
+    private List<IntPtr> SuspendTargetThreads(int processId, IntPtr hProcess, nuint dangerStart, nuint dangerSize)
     {
         var suspended = new List<IntPtr>();
         var snapshot = CreateToolhelp32Snapshot(0x00000004 /* TH32CS_SNAPTHREAD */, 0);
@@ -653,9 +656,7 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
             CloseHandle(snapshot);
         }
 
-        System.Diagnostics.Debug.WriteLine(
-            $"[CodeCaveEngine] Suspended {suspended.Count} thread(s) in process {processId} " +
-            $"(danger zone: 0x{dangerStart:X}..0x{dangerStart + dangerSize:X}).");
+        _logger.LogTrace("Suspended {ThreadCount} thread(s) in process {ProcessId} (danger zone: 0x{DangerStart:X}..0x{DangerEnd:X})", suspended.Count, processId, dangerStart, dangerStart + dangerSize);
 
         return suspended;
     }

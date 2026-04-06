@@ -9,6 +9,8 @@ using CEAISuite.Engine.Abstractions;
 using CEAISuite.Engine.Windows;
 using CEAISuite.Persistence.Sqlite;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Serilog;
 
 namespace CEAISuite.Desktop;
 
@@ -33,6 +35,26 @@ public partial class App : System.Windows.Application
         var services = new ServiceCollection();
         ConfigureServices(services);
         Services = services.BuildServiceProvider();
+
+        // Wire the OutputLog sink now that DI is built
+        var outputLog = Services.GetRequiredService<IOutputLog>();
+        var outputSink = new OutputLogSerilogSink(outputLog);
+        var logDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite", "logs");
+        Log.Logger = new LoggerConfiguration()
+            .MinimumLevel.Debug()
+            .Enrich.FromLogContext()
+            .WriteTo.File(
+                Path.Combine(logDir, "ceaisuite-.log"),
+                rollingInterval: RollingInterval.Day,
+                retainedFileCountLimit: 14,
+                outputTemplate: "{Timestamp:HH:mm:ss.fff} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}")
+            .WriteTo.Sink(outputSink, Serilog.Events.LogEventLevel.Information)
+            .CreateLogger();
+
+        // Re-register the Serilog logger into the DI-provided ILoggerFactory
+        var loggerFactory = Services.GetRequiredService<ILoggerFactory>();
+        loggerFactory.AddSerilog(Log.Logger);
 
         var mainWindow = Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
@@ -206,9 +228,19 @@ public partial class App : System.Windows.Application
         services.AddSingleton<MemoryRegionsViewModel>();
         services.AddSingleton<WorkspaceViewModel>();
 
+        // ── Logging ──
+        services.AddLogging();
+
         // ── Main ViewModel + Window ──
         services.AddSingleton<MainViewModel>();
         services.AddSingleton<MainWindow>();
+    }
+
+    protected override void OnExit(ExitEventArgs e)
+    {
+        Log.CloseAndFlush();
+        (Services as IDisposable)?.Dispose();
+        base.OnExit(e);
     }
 
     private void OnDispatcherUnhandledException(object sender, DispatcherUnhandledExceptionEventArgs e)

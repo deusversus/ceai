@@ -146,7 +146,7 @@ public sealed class OperationJournal
 
         bool success = false;
         try { success = await entry.RollbackAction(); }
-        catch { /* rollback failed */ }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Journal] Rollback failed for {operationId}: {ex.GetType().Name}: {ex.Message}"); }
 
         _entries[operationId] = entry with { Status = success ? JournalEntryStatus.RolledBack : JournalEntryStatus.RollbackFailed };
         return new JournalRollbackResult(success, 1, success ? 1 : 0, success ? "Rolled back." : "Rollback failed.");

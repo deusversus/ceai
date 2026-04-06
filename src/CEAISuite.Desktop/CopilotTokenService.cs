@@ -308,7 +308,8 @@ internal sealed class CopilotTokenService : IDisposable
 
         // Primary: Copilot's own model list (only returns models actually usable via Copilot)
         string? sessionToken = null;
-        try { sessionToken = await GetSessionTokenAsync(githubToken); } catch { }
+        try { sessionToken = await GetSessionTokenAsync(githubToken); }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[CopilotToken] Session token fetch failed: {ex.Message}"); }
         if (sessionToken is not null)
         {
             var models = await TryFetchModels(

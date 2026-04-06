@@ -21,7 +21,7 @@
         <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
         <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
-        <Setter Property="Padding" Value="6,4" />
+        <Setter Property="Padding" Value="8,5" />
         <Setter Property="BorderThickness" Value="1" />
     </Style>
 
@@ -31,7 +31,7 @@
         <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
         <Setter Property="CaretBrush" Value="{DynamicResource InputCaret}" />
-        <Setter Property="Padding" Value="6,4" />
+        <Setter Property="Padding" Value="8,5" />
     </Style>
 
     <!-- ── Button ── -->
@@ -39,7 +39,7 @@
         <Setter Property="Background" Value="{DynamicResource ButtonBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource ButtonForeground}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="10,5" />
+        <Setter Property="Padding" Value="12,6" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="FontSize" Value="12" />
         <Setter Property="Template">
@@ -72,7 +72,7 @@
         <Setter Property="Background" Value="{DynamicResource ToolbarButtonBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource ToolbarButtonForeground}" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="8,3" />
+        <Setter Property="Padding" Value="10,4" />
         <Setter Property="FontSize" Value="11" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
@@ -133,13 +133,13 @@
         <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="6,4" />
+        <Setter Property="Padding" Value="8,5" />
         <Setter Property="ItemContainerStyle">
             <Setter.Value>
                 <Style TargetType="ComboBoxItem">
                     <Setter Property="Background" Value="{DynamicResource InputBackground}" />
                     <Setter Property="Foreground" Value="{DynamicResource InputForeground}" />
-                    <Setter Property="Padding" Value="6,4" />
+                    <Setter Property="Padding" Value="8,5" />
                     <Setter Property="Template">
                         <Setter.Value>
                             <ControlTemplate TargetType="ComboBoxItem">
@@ -265,7 +265,7 @@
         <Setter Property="Foreground" Value="{DynamicResource ListForeground}" />
         <Setter Property="Background" Value="Transparent" />
         <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="Padding" Value="4,2" />
+        <Setter Property="Padding" Value="6,4" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
@@ -289,7 +289,7 @@
     <Style TargetType="ListBoxItem">
         <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
         <Setter Property="Background" Value="Transparent" />
-        <Setter Property="Padding" Value="4,2" />
+        <Setter Property="Padding" Value="6,4" />
         <Style.Triggers>
             <Trigger Property="IsMouseOver" Value="True">
                 <Setter Property="Background" Value="{DynamicResource ListItemHoverBackground}" />
@@ -379,7 +379,7 @@
         <Setter Property="Background" Value="{DynamicResource HeaderBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource HeaderForeground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource HeaderBorder}" />
-        <Setter Property="Padding" Value="6,3" />
+        <Setter Property="Padding" Value="8,5" />
         <Setter Property="FontSize" Value="11" />
     </Style>
 
@@ -398,7 +398,7 @@
                 <ControlTemplate TargetType="TabItem">
                     <Border x:Name="Bd" Background="{TemplateBinding Background}"
                             BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,1,1,0"
-                            Padding="12,6" Margin="0,0,2,0" CornerRadius="4,4,0,0">
+                            Padding="14,8" Margin="0,0,2,0" CornerRadius="4,4,0,0">
                         <ContentPresenter ContentSource="Header" VerticalAlignment="Center" />
                     </Border>
                     <ControlTemplate.Triggers>
@@ -425,7 +425,7 @@
         <Setter Property="Background" Value="{DynamicResource ContextMenuBackground}" />
         <Setter Property="Foreground" Value="{DynamicResource ContextMenuForeground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource ContextMenuBorder}" />
-        <Setter Property="Padding" Value="8,4" />
+        <Setter Property="Padding" Value="10,6" />
     </Style>
 
     <!-- ── Expander ── -->
@@ -437,8 +437,8 @@
 
     <!-- ── GroupBox ── -->
     <Style TargetType="GroupBox">
-        <Setter Property="Margin" Value="0,0,0,12" />
-        <Setter Property="Padding" Value="10" />
+        <Setter Property="Margin" Value="0,0,0,14" />
+        <Setter Property="Padding" Value="12" />
         <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
         <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
     </Style>

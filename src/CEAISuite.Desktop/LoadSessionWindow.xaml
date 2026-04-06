@@ -24,7 +24,7 @@
                            Foreground="{DynamicResource TitleBarForeground}" />
             </DockPanel>
         </Border>
-    <DockPanel Grid.Row="1" Margin="12">
+    <DockPanel Grid.Row="1" Margin="16">
         <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
                     HorizontalAlignment="Right" Margin="0,8,0,0">
             <Button Content="Load" Padding="16,6" IsDefault="True"

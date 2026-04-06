@@ -27,7 +27,7 @@
                            Foreground="{DynamicResource TitleBarForeground}" />
             </DockPanel>
         </Border>
-    <Grid Grid.Row="1" Margin="24">
+    <Grid Grid.Row="1" Margin="28">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />

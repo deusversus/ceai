@@ -1089,9 +1089,10 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 result.TryAdd(module.ModuleName, baseAddr);
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Module enumeration may fail for protected processes
+            System.Diagnostics.Trace.TraceWarning($"[WindowsAutoAssemblerEngine] Module enumeration failed: {ex.Message}");
         }
 
         return result;

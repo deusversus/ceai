@@ -405,8 +405,9 @@ internal sealed class CopilotTokenService : IDisposable
 
             return models.Count > 0 ? models : null;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[CopilotTokenService] Model list fetch failed: {ex.Message}");
             return null;
         }
     }

@@ -175,9 +175,10 @@ public sealed partial class AiToolFunctions
                     result[regName] = $"0x{addr:X} (points to 0x{pointed:X})";
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // Address not readable — skip dereference
+                System.Diagnostics.Trace.TraceWarning($"[AiToolFunctions] Dereference failed for {regName}: {ex.Message}");
             }
         }
         return result;

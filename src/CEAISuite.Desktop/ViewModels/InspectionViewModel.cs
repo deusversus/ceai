@@ -33,11 +33,13 @@ public partial class InspectionViewModel : ObservableObject
         _dialogService = dialogService;
         _outputLog = outputLog;
 
-        _processContext.ProcessChanged += () =>
-        {
-            CurrentInspection = _processContext.CurrentInspection;
-        };
+        _processContext.ProcessChanged += OnProcessChanged;
     }
+
+    private void OnProcessChanged() => CurrentInspection = _processContext.CurrentInspection;
+
+    /// <summary>Unsubscribe from events to prevent leaks on shutdown.</summary>
+    public void Cleanup() => _processContext.ProcessChanged -= OnProcessChanged;
 
     [ObservableProperty]
     private string _address = "0x0";

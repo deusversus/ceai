@@ -240,8 +240,9 @@ public sealed class PointerScannerService(IEngineFacade engine)
                 return ("Stable", currentAddr);
             return ("Drifted", currentAddr);
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[PointerScannerService] Pointer path validation failed: {ex.Message}");
             return ("Broken", 0);
         }
     }

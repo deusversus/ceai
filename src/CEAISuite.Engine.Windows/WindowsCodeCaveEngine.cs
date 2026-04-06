@@ -279,9 +279,10 @@ public sealed class WindowsCodeCaveEngine : ICodeCaveEngine, IDisposable
                 ResumeTargetThreads(suspendedThreads);
             }
         }
-        catch
+        catch (Exception ex)
         {
             // 1A — Clean up allocated cave on any failure
+            _logger.LogDebug(ex, "Code cave install failed — cleaning up allocated memory");
             VirtualFreeEx(hProcess, caveBase, UIntPtr.Zero, MemRelease);
             throw;
         }

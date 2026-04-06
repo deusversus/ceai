@@ -380,8 +380,9 @@ public sealed class WindowsScanEngine : IScanEngine
                 _ => string.Compare(current, previous, StringComparison.OrdinalIgnoreCase)
             };
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[WindowsScanEngine] Value comparison failed: {ex.Message}");
             return 0;
         }
     }
@@ -400,8 +401,9 @@ public sealed class WindowsScanEngine : IScanEngine
             return CompareValues(current, parts[0].Trim(), dataType) >= 0
                 && CompareValues(current, parts[1].Trim(), dataType) <= 0;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[WindowsScanEngine] IsValueBetween check failed: {ex.Message}");
             return false;
         }
     }

@@ -213,8 +213,9 @@ public sealed class ScriptGenerationService
             };
             return string.Join(", ", bytes.Select(b => $"0x{b:X2}"));
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[ArtifactServices] Value-to-bytes conversion failed: {ex.Message}");
             return "0x00";
         }
     }

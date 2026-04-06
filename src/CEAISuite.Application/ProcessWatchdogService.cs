@@ -248,9 +248,10 @@ public sealed class ProcessWatchdogService : IDisposable
             var fileName = $"freeze-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}-{monitor.OperationId[..8]}.json";
             File.WriteAllText(Path.Combine(logDir, fileName), json);
         }
-        catch
+        catch (Exception ex)
         {
             // Telemetry should never throw
+            System.Diagnostics.Trace.TraceWarning($"[ProcessWatchdog] Freeze telemetry logging failed: {ex.Message}");
         }
     }
 
@@ -299,10 +300,11 @@ public sealed class ProcessWatchdogService : IDisposable
                         passed++;
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
                     // MainModule may throw for access reasons — count as pass
                     // since OpenProcess succeeded (process exists and is accessible)
+                    System.Diagnostics.Trace.TraceWarning($"[ProcessWatchdog] MainModule access failed during responsiveness check: {ex.Message}");
                     passed++;
                 }
                 finally
@@ -328,17 +330,19 @@ public sealed class ProcessWatchdogService : IDisposable
                     // 6A: Zero CPU progress = signal FAILS (no automatic pass for idle)
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // Can't read times — skip this signal
+                System.Diagnostics.Trace.TraceWarning($"[ProcessWatchdog] Thread time signal check failed: {ex.Message}");
                 total--;
             }
 
             // Responsive if at least 2/3 signals pass (or 2/2 for headless)
             return total > 0 && passed >= Math.Min(2, total);
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[ProcessWatchdog] Responsiveness check failed for PID {processId}: {ex.Message}");
             return false;
         }
     }
@@ -501,9 +505,10 @@ internal sealed class WatchdogMonitor : IDisposable
             {
                 return;
             }
-            catch
+            catch (Exception ex)
             {
                 // Process might have exited — stop monitoring
+                _logger?.LogDebug(ex, "Heartbeat loop error — stopping monitor");
                 return;
             }
         }

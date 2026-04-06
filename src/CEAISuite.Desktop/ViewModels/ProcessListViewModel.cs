@@ -122,4 +122,7 @@ public partial class ProcessListViewModel : ObservableObject
                 .ToList();
         Processes = new ObservableCollection<RunningProcessOverview>(filtered);
     }
+
+    /// <summary>Unsubscribe from events to prevent leaks on shutdown.</summary>
+    public void Cleanup() => _processContext.ProcessChanged -= OnProcessChanged;
 }

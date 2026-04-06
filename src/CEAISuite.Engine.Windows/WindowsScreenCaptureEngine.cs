@@ -72,8 +72,9 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
             return Task.FromResult<ScreenCaptureResult?>(
                 new ScreenCaptureResult(pngBytes, width, height, title));
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Trace.TraceWarning($"[WindowsScreenCaptureEngine] Screen capture failed for PID {processId}: {ex.Message}");
             return Task.FromResult<ScreenCaptureResult?>(null);
         }
     }

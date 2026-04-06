@@ -21,8 +21,9 @@ public sealed class StringToBrushConverter : IValueConverter
             {
                 return Converter.ConvertFromString(colorStr) ?? DefaultBrush;
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Trace.TraceWarning($"[StringToBrushConverter] Color conversion failed: {ex.Message}");
                 return DefaultBrush;
             }
         }

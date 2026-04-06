@@ -390,7 +390,9 @@ public sealed class AiOperatorService
 
         // Connect MCP servers from settings (fire-and-forget, non-blocking)
         if (settings?.McpServers is { Count: > 0 } mcpServers)
-            _ = ConnectMcpServersAsync(mcpServers);
+            _ = ConnectMcpServersAsync(mcpServers).ContinueWith(
+                t => { if (t.IsFaulted) Log("ERROR", $"MCP server connection failed: {t.Exception?.InnerException?.Message}"); },
+                TaskScheduler.Default);
 
         // ── Model Switcher ──
         if (settings?.FallbackModels is { Count: > 0 } fallbackModels)
@@ -440,7 +442,9 @@ public sealed class AiOperatorService
 
         // ── Plugin Host ──
         _pluginHost = new PluginHost(log: Log);
-        _ = LoadPluginsAsync();
+        _ = LoadPluginsAsync().ContinueWith(
+            t => { if (t.IsFaulted) Log("ERROR", $"Plugin loading failed: {t.Exception?.InnerException?.Message}"); },
+            TaskScheduler.Default);
 
         // Start with a fresh chat session
         NewChat();

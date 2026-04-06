@@ -414,8 +414,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 session.DebugThread.Start();
                 return session;
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Breakpoint session creation failed for PID {ProcessId}", processId);
                 CloseHandle(processHandle);
                 throw;
             }

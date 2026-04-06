@@ -154,9 +154,10 @@ public sealed partial class AiToolFunctions
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Protection query failed (e.g., address not mapped) — proceed without warning
+            System.Diagnostics.Trace.TraceWarning($"[AiToolFunctions] Protection query failed: {ex.Message}");
         }
 
         var overview = await disassemblyService.DisassembleAtAsync(processId, resolvedAddress);

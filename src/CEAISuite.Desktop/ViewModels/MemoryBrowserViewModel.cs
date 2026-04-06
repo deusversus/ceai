@@ -944,8 +944,9 @@ public partial class MemoryBrowserViewModel : ObservableObject
             if (region.IsExecutable) flags.Append('X');
             ProtectionText = $"[{flags}] Region: 0x{(ulong)region.BaseAddress:X}-0x{(ulong)region.BaseAddress + (ulong)region.RegionSize:X} ({region.RegionSize:N0} bytes)";
         }
-        catch
+        catch (Exception ex)
         {
+            _outputLog.Append("MemoryBrowser", "WARN", $"Protection query failed: {ex.Message}");
             ProtectionText = "";
         }
     }
@@ -982,5 +983,12 @@ public partial class MemoryBrowserViewModel : ObservableObject
     {
         if (IsAttached)
             _ = ReadMemoryAsync();
+    }
+
+    /// <summary>Unsubscribe from events to prevent leaks on shutdown.</summary>
+    public void Cleanup()
+    {
+        StopAutoRefresh();
+        _processContext.ProcessChanged -= OnProcessChanged;
     }
 }

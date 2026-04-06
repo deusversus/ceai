@@ -81,9 +81,10 @@ public sealed class WindowsEngineFacade : IEngineFacade
                         {
                             results.Add(CreateDescriptor(process));
                         }
-                        catch
+                        catch (Exception ex)
                         {
                             // Process exited between enumeration and descriptor creation — skip it.
+                            _logger.LogDebug(ex, "Skipping process during enumeration");
                         }
                     }
                 }

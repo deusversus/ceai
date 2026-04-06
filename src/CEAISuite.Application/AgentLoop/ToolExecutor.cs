@@ -470,8 +470,9 @@ public sealed class ToolExecutor
                 var localGraceCts = graceCts; // capture for closure
                 graceRegistration = ct.Register(() =>
                 {
-                    _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ =>
+                    _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(t =>
                     {
+                        if (t.IsFaulted) return; // Timer cancelled — ignore
                         try { localGraceCts.Cancel(); } catch (ObjectDisposedException) { }
                     }, TaskScheduler.Default);
                 });

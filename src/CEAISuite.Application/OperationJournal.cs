@@ -24,9 +24,10 @@ public sealed class OperationJournal
                 _journalFilePath = Path.Combine(journalDirectory, "operations.jsonl");
                 LoadPersistedEntries();
             }
-            catch
+            catch (Exception ex)
             {
                 // Persistence is best-effort — don't prevent journal from functioning
+                System.Diagnostics.Trace.TraceWarning($"[OperationJournal] Journal directory init failed: {ex.Message}");
                 _journalFilePath = null;
             }
         }
@@ -84,9 +85,10 @@ public sealed class OperationJournal
             });
             File.AppendAllText(_journalFilePath, line + Environment.NewLine);
         }
-        catch
+        catch (Exception ex)
         {
             // Persistence is best-effort
+            System.Diagnostics.Trace.TraceWarning($"[OperationJournal] Journal append failed: {ex.Message}");
         }
     }
 
@@ -118,15 +120,17 @@ public sealed class OperationJournal
                     if (groupId is not null)
                         _groups.GetOrAdd(groupId, _ => new List<string>()).Add(opId);
                 }
-                catch
+                catch (Exception ex)
                 {
                     // Skip malformed lines
+                    System.Diagnostics.Trace.TraceWarning($"[OperationJournal] Skipping malformed journal line: {ex.Message}");
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
             // File read failed — start fresh
+            System.Diagnostics.Trace.TraceWarning($"[OperationJournal] Journal file read failed: {ex.Message}");
         }
     }
 

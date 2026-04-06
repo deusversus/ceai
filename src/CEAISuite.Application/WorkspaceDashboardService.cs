@@ -140,7 +140,8 @@ public sealed class WorkspaceDashboardService(
         CancellationToken cancellationToken = default)
     {
         var address = ParseAddress(addressText);
-        var raw = await engineFacade.ReadMemoryAsync(processId, address, GetReadLength(processId, dataType), cancellationToken);
+        var readLen = await GetReadLengthAsync(processId, dataType);
+        var raw = await engineFacade.ReadMemoryAsync(processId, address, readLen, cancellationToken);
         var typed = await engineFacade.ReadValueAsync(processId, address, dataType, cancellationToken);
 
         return new ManualMemoryProbeOverview(
@@ -162,21 +163,28 @@ public sealed class WorkspaceDashboardService(
         return $"Wrote {result.WrittenValue} as {result.DataType} to 0x{result.Address:X} ({result.BytesWritten} bytes).";
     }
 
-    private int GetReadLength(int processId, MemoryDataType dataType) =>
-        dataType switch
+    private async Task<int> GetReadLengthAsync(int processId, MemoryDataType dataType)
+    {
+        if (dataType == MemoryDataType.Pointer)
+        {
+            var arch = await GetArchitectureAsync(processId);
+            return string.Equals(arch, "x86", StringComparison.OrdinalIgnoreCase) ? sizeof(int) : sizeof(long);
+        }
+        return dataType switch
         {
             MemoryDataType.Int32 => sizeof(int),
             MemoryDataType.Int64 => sizeof(long),
             MemoryDataType.Float => sizeof(float),
             MemoryDataType.Double => sizeof(double),
-            MemoryDataType.Pointer => string.Equals(GetArchitecture(processId), "x86", StringComparison.OrdinalIgnoreCase)
-                ? sizeof(int)
-                : sizeof(long),
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported data type.")
         };
+    }
 
-    private string GetArchitecture(int processId) =>
-        engineFacade.ListProcessesAsync().GetAwaiter().GetResult().FirstOrDefault(process => process.Id == processId)?.Architecture ?? "x64";
+    private async Task<string> GetArchitectureAsync(int processId)
+    {
+        var processes = await engineFacade.ListProcessesAsync();
+        return processes.FirstOrDefault(process => process.Id == processId)?.Architecture ?? "x64";
+    }
 
     private static nuint ParseAddress(string addressText)
     {

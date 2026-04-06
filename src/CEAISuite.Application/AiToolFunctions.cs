@@ -383,14 +383,14 @@ public sealed partial class AiToolFunctions(
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Summarize current investigation state.")]
-    public Task<string> SummarizeInvestigation(
+    public async Task<string> SummarizeInvestigation(
         [Description("Process name")] string processName,
         [Description("Process ID")] int processId)
     {
-        var dashboard = dashboardService.BuildAsync(
+        var dashboard = await dashboardService.BuildAsync(
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "CEAISuite", "workspace.db")).GetAwaiter().GetResult();
+                "CEAISuite", "workspace.db"));
         var summary = scriptGenerationService.SummarizeInvestigation(
             processName, processId, addressTableService.Entries.ToList(),
             scanService.LastScanResults is not null
@@ -399,7 +399,7 @@ public sealed partial class AiToolFunctions(
                         Convert.ToHexString(r.RawBytes.ToArray()))).ToArray()
                 : null,
             dashboard.Disassembly);
-        return Task.FromResult(summary);
+        return summary;
     }
 
     [ReadOnlyTool]
@@ -707,7 +707,10 @@ public sealed partial class AiToolFunctions(
                         var pid = dashboard.CurrentInspection.ProcessId;
                         if (node.IsScriptEnabled)
                         {
-                            _ = autoAssemblerEngine.DisableAsync(pid, node.AssemblerScript!);
+                            _ = autoAssemblerEngine.DisableAsync(pid, node.AssemblerScript!).ContinueWith(t =>
+                            {
+                                if (t.IsFaulted) logger?.LogWarning(t.Exception, "Hotkey script disable failed for {Label}", node.Label);
+                            }, TaskScheduler.Default);
                             node.IsScriptEnabled = false;
                             node.ScriptStatus = "Disabled (hotkey)";
                         }
@@ -715,6 +718,12 @@ public sealed partial class AiToolFunctions(
                         {
                             _ = autoAssemblerEngine.EnableAsync(pid, node.AssemblerScript!).ContinueWith(t =>
                             {
+                                if (t.IsFaulted)
+                                {
+                                    logger?.LogWarning(t.Exception, "Hotkey script enable failed for {Label}", node.Label);
+                                    node.ScriptStatus = $"FAILED: {t.Exception?.InnerException?.Message ?? "unknown"}";
+                                    return;
+                                }
                                 if (t.Result.Success)
                                 {
                                     node.IsScriptEnabled = true;
@@ -724,7 +733,7 @@ public sealed partial class AiToolFunctions(
                                 {
                                     node.ScriptStatus = $"FAILED: {t.Result.Error}";
                                 }
-                            });
+                            }, TaskScheduler.Default);
                         }
                     }
                 }

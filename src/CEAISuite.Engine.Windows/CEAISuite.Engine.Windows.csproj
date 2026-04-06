@@ -7,7 +7,7 @@
   <ItemGroup>
     <PackageReference Include="Iced" Version="1.21.0" />
     <PackageReference Include="keystoneengine.csharp" Version="0.9.1.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.5" />
     <PackageReference Include="System.Drawing.Common" Version="9.0.5" />
   </ItemGroup>
 

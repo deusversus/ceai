@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
@@ -121,7 +122,7 @@ public partial class ProcessListViewModel : ObservableObject, IDisposable
             ? _allProcesses
             : _allProcesses.Where(p =>
                 p.Name.Contains(FilterText, StringComparison.OrdinalIgnoreCase) ||
-                p.Id.ToString().Contains(FilterText, StringComparison.OrdinalIgnoreCase))
+                p.Id.ToString(CultureInfo.InvariantCulture).Contains(FilterText, StringComparison.OrdinalIgnoreCase))
                 .ToList();
         Processes = new ObservableCollection<RunningProcessOverview>(filtered);
     }

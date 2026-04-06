@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
@@ -190,17 +191,17 @@ public partial class MainViewModel : ObservableObject, IDisposable
         var dashboard = Dashboard;
 
         if (dashboard.CurrentInspection is { } p)
-            sb.AppendLine($"Attached: {p.ProcessName} (PID {p.ProcessId}, {p.Architecture}, {p.Modules.Count} modules)");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Attached: {p.ProcessName} (PID {p.ProcessId}, {p.Architecture}, {p.Modules.Count} modules)");
         else
             sb.AppendLine("No process attached.");
 
         var roots = _addressTableService.Roots;
         int total = 0, frozen = 0, scripts = 0;
         CountNodesRecursive(roots, ref total, ref frozen, ref scripts);
-        sb.AppendLine($"Address table: {total} entries, {frozen} frozen, {scripts} scripts");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Address table: {total} entries, {frozen} frozen, {scripts} scripts");
 
         if (_scanService.LastScanResults is { } scan)
-            sb.AppendLine($"Active scan: {scan.Results.Count:N0} results ({scan.Constraints.DataType})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Active scan: {scan.Results.Count:N0} results ({scan.Constraints.DataType})");
 
         return sb.ToString();
     }
@@ -658,7 +659,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // ── Menu Handlers ──
 
-    public void OpenSkillsFolder()
+    public static void OpenSkillsFolder()
     {
         var userSkillsDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -741,7 +742,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     {
         >= 1_000_000 => $"{tokens / 1_000_000.0:F1}M",
         >= 1_000 => $"{tokens / 1_000.0:F1}K",
-        _ => tokens.ToString()
+        _ => tokens.ToString(CultureInfo.InvariantCulture)
     };
 
     // ── Phase 6: Screenshot Capture & Report Export ──

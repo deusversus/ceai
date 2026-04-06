@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace CEAISuite.Application.AgentLoop;
@@ -39,7 +40,7 @@ public static class PostCompactionRestorer
                 ? string.Concat(result.AsSpan(0, maxForThis), $"... [truncated at {maxForThis:#,0} chars]")
                 : result;
 
-            sb.AppendLine($"## Recent tool result: {toolName}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"## Recent tool result: {toolName}");
             sb.AppendLine(truncated);
             sb.AppendLine();
 

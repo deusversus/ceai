@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
 using CEAISuite.Engine.Abstractions;
@@ -57,7 +58,7 @@ public partial class ThreadListViewModel : ObservableObject
             ExpandedStack.Clear();
             foreach (var (threadId, frames) in allStacks.OrderByDescending(kv => kv.Value.Count))
             {
-                var topFrame = frames.FirstOrDefault();
+                var topFrame = frames.Count > 0 ? frames[0] : null;
                 Threads.Add(new ThreadDisplayItem
                 {
                     ThreadId = threadId,
@@ -121,7 +122,7 @@ public partial class ThreadListViewModel : ObservableObject
     private void CopyThreadId()
     {
         if (SelectedThread is null) return;
-        _clipboard.SetText(SelectedThread.ThreadId.ToString());
+        _clipboard.SetText(SelectedThread.ThreadId.ToString(CultureInfo.InvariantCulture));
     }
 
     [RelayCommand]

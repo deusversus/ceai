@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
@@ -125,8 +126,8 @@ public partial class BreakpointsViewModel : ObservableObject
         try
         {
             var addr = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                ? nuint.Parse(text[2..], System.Globalization.NumberStyles.HexNumber)
-                : nuint.Parse(text, System.Globalization.NumberStyles.HexNumber);
+                ? nuint.Parse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture)
+                : nuint.Parse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
             var result = await _codeCaveEngine.InstallHookAsync(pid, addr);
             _outputLog.Append("System", "Info", $"Hook installed at 0x{addr:X} → cave 0x{result.Hook?.CaveAddress:X}");
             await RefreshHooksAsync();

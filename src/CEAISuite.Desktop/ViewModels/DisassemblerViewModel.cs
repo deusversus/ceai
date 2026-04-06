@@ -209,7 +209,7 @@ public partial class DisassemblerViewModel : ObservableObject
         var sb = new StringBuilder();
         foreach (var line in Lines)
         {
-            sb.AppendLine($"{line.Address}  {line.HexBytes,-24} {line.Mnemonic,-8} {line.Operands}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"{line.Address}  {line.HexBytes,-24} {line.Mnemonic,-8} {line.Operands}");
         }
         _clipboard.SetText(sb.ToString());
         StatusText = $"Copied {Lines.Count} lines to clipboard.";
@@ -362,7 +362,7 @@ public partial class DisassemblerViewModel : ObservableObject
         foreach (var mod in modules)
         {
             if (!TryParseHex(mod.BaseAddress, out var modBase)) continue;
-            if (!ulong.TryParse(mod.Size.Replace(",", ""), out var modSize)) continue;
+            if (!ulong.TryParse(mod.Size.Replace(",", "", StringComparison.Ordinal), out var modSize)) continue;
             if (addr >= modBase && addr < modBase + modSize)
                 return $"{mod.Name}+0x{addr - modBase:X}";
         }

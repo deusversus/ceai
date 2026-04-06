@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
@@ -47,7 +48,7 @@ public partial class WorkspaceViewModel : ObservableObject
                     Id = s.Id,
                     ProcessName = s.ProcessName,
                     ProcessId = s.ProcessId,
-                    CreatedAt = s.CreatedAtUtc.LocalDateTime.ToString("g"),
+                    CreatedAt = s.CreatedAtUtc.LocalDateTime.ToString("g", CultureInfo.InvariantCulture),
                     AddressCount = s.AddressEntryCount,
                     ActionCount = s.ActionLogCount
                 });

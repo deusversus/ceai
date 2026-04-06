@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
@@ -53,8 +54,8 @@ public partial class SnapshotsViewModel : ObservableObject
         try
         {
             var addr = addrText.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
-                ? nuint.Parse(addrText[2..], System.Globalization.NumberStyles.HexNumber)
-                : nuint.Parse(addrText, System.Globalization.NumberStyles.HexNumber);
+                ? nuint.Parse(addrText[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture)
+                : nuint.Parse(addrText, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
             var len = int.TryParse(Length, out var l) ? l : 256;
             var lbl = string.IsNullOrWhiteSpace(Label) ? null : Label.Trim();
             await _snapshotService.CaptureAsync(pid, addr, len, lbl);
@@ -108,7 +109,7 @@ public partial class SnapshotsViewModel : ObservableObject
                 Label = s.Label,
                 Address = $"0x{s.BaseAddress:X}",
                 Size = $"{s.Data.Length}",
-                CapturedAt = s.CapturedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+                CapturedAt = s.CapturedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
             }));
     }
 
@@ -118,8 +119,8 @@ public partial class SnapshotsViewModel : ObservableObject
             diff.Changes.Select(c => new SnapshotDiffDisplayItem
             {
                 Offset = $"+0x{c.Offset:X}",
-                OldValue = BitConverter.ToString(c.OldBytes).Replace("-", " "),
-                NewValue = BitConverter.ToString(c.NewBytes).Replace("-", " "),
+                OldValue = BitConverter.ToString(c.OldBytes).Replace('-', ' '),
+                NewValue = BitConverter.ToString(c.NewBytes).Replace('-', ' '),
                 Interpretation = c.Interpretation ?? ""
             }));
     }

@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.AI;
 
 namespace CEAISuite.Application.AgentLoop;
@@ -198,17 +199,17 @@ public sealed class CompactionPipeline
         var sb = new System.Text.StringBuilder();
         foreach (var msg in messages)
         {
-            sb.Append($"[{msg.Role}] ");
+            sb.Append(CultureInfo.InvariantCulture, $"[{msg.Role}] ");
             foreach (var content in msg.Contents)
             {
                 if (content is TextContent tc)
                     sb.AppendLine(tc.Text);
                 else if (content is FunctionCallContent fc)
-                    sb.AppendLine($"Called {fc.Name}({FormatArgs(fc)})");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"Called {fc.Name}({FormatArgs(fc)})");
                 else if (content is FunctionResultContent fr)
                 {
                     var resultStr = fr.Result?.ToString() ?? "";
-                    sb.AppendLine($"Result: {(resultStr.Length > 200 ? string.Concat(resultStr.AsSpan(0, 200), "...") : resultStr)}");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"Result: {(resultStr.Length > 200 ? string.Concat(resultStr.AsSpan(0, 200), "...") : resultStr)}");
                 }
             }
         }

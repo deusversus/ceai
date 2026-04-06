@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
@@ -10,7 +11,7 @@ using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class AddressTableViewModel : ObservableObject
+public partial class AddressTableViewModel : ObservableObject, IDisposable
 {
     private readonly AddressTableService _addressTableService;
     private readonly AddressTableExportService _addressTableExportService;
@@ -359,7 +360,7 @@ public partial class AddressTableViewModel : ObservableObject
 
         var path = _dialogService.ShowSaveFileDialog(
             "C# files|*.cs",
-            $"Trainer_{processName.Replace(".exe", "")}.cs");
+            $"Trainer_{processName.Replace(".exe", "", StringComparison.OrdinalIgnoreCase)}.cs");
         if (path is null) return;
 
         File.WriteAllText(path, script);
@@ -549,8 +550,8 @@ public partial class AddressTableViewModel : ObservableObject
 
         // Strip dropdown suffix if present ("2904 : Dagger" → "2904")
         var valueStr = node.CurrentValue;
-        if (valueStr.Contains(" : "))
-            valueStr = valueStr[..valueStr.IndexOf(" : ")];
+        if (valueStr.Contains(" : ", StringComparison.Ordinal))
+            valueStr = valueStr[..valueStr.IndexOf(" : ", StringComparison.Ordinal)];
         valueStr = valueStr.Trim();
 
         string newValue;
@@ -558,18 +559,18 @@ public partial class AddressTableViewModel : ObservableObject
         {
             newValue = node.DataType switch
             {
-                MemoryDataType.Byte => Math.Clamp(byte.Parse(valueStr) + delta, byte.MinValue, byte.MaxValue).ToString(),
+                MemoryDataType.Byte => Math.Clamp(byte.Parse(valueStr, CultureInfo.InvariantCulture) + delta, byte.MinValue, byte.MaxValue).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Int16 => node.ShowAsHex
-                    ? ((short)(short.Parse(valueStr, System.Globalization.NumberStyles.HexNumber) + delta)).ToString()
-                    : ((short)(short.Parse(valueStr) + delta)).ToString(),
+                    ? ((short)(short.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
+                    : ((short)(short.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Int32 => node.ShowAsHex
-                    ? ((int)(int.Parse(valueStr, System.Globalization.NumberStyles.HexNumber) + delta)).ToString()
-                    : ((int)(int.Parse(valueStr) + delta)).ToString(),
+                    ? ((int)(int.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
+                    : ((int)(int.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Int64 => node.ShowAsHex
-                    ? ((long)(long.Parse(valueStr, System.Globalization.NumberStyles.HexNumber) + delta)).ToString()
-                    : ((long)(long.Parse(valueStr) + delta)).ToString(),
-                MemoryDataType.Float => (float.Parse(valueStr) + delta).ToString("G9"),
-                MemoryDataType.Double => (double.Parse(valueStr) + delta).ToString("G17"),
+                    ? ((long)(long.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
+                    : ((long)(long.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
+                MemoryDataType.Float => (float.Parse(valueStr, CultureInfo.InvariantCulture) + delta).ToString("G9", CultureInfo.InvariantCulture),
+                MemoryDataType.Double => (double.Parse(valueStr, CultureInfo.InvariantCulture) + delta).ToString("G17", CultureInfo.InvariantCulture),
                 _ => valueStr // Pointer, String, ByteArray — no-op
             };
         }
@@ -621,7 +622,7 @@ public partial class AddressTableViewModel : ObservableObject
         var dict = new Dictionary<int, string>();
         foreach (var line in result.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var eqIdx = line.IndexOf('=');
+            var eqIdx = line.IndexOf('=', StringComparison.Ordinal);
             if (eqIdx > 0 && int.TryParse(line[..eqIdx].Trim(), out var key))
                 dict[key] = line[(eqIdx + 1)..].Trim();
         }
@@ -642,7 +643,11 @@ public partial class AddressTableViewModel : ObservableObject
         if (addr == nuint.Zero)
         {
             try { addr = AddressTableService.ParseAddress(SelectedNode.Address); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to parse address '{Address}' for memory browse", SelectedNode.Address); }
+            catch (Exception ex)
+            {
+                if (_logger?.IsEnabled(LogLevel.Warning) == true)
+                    _logger.LogWarning(ex, "Failed to parse address '{Address}' for memory browse", SelectedNode.Address);
+            }
         }
 
         if (addr == nuint.Zero)
@@ -1046,8 +1051,8 @@ public partial class AddressTableViewModel : ObservableObject
 
         // Strip dropdown name suffix ("2904 : Dagger" → "2904") for editing
         var editValue = node.CurrentValue;
-        if (editValue.Contains(" : "))
-            editValue = editValue[..editValue.IndexOf(" : ")];
+        if (editValue.Contains(" : ", StringComparison.Ordinal))
+            editValue = editValue[..editValue.IndexOf(" : ", StringComparison.Ordinal)];
 
         // Phase 7D: If dropdown is configured, present choices
         if (node.DropDownList is { Count: > 0 })
@@ -1112,5 +1117,11 @@ public partial class AddressTableViewModel : ObservableObject
             if (n.IsGroup) results.Add(n);
             CollectGroups(n.Children, results);
         }
+    }
+
+    public void Dispose()
+    {
+        _refreshTimer?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

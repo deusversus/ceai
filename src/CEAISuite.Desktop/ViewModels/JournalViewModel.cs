@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Windows;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
@@ -42,7 +43,7 @@ public partial class JournalViewModel : ObservableObject
         PatchHistory = new ObservableCollection<PatchHistoryDisplayItem>(
             _patchUndoService.GetHistory(50).Select(p => new PatchHistoryDisplayItem
             {
-                Timestamp = p.Timestamp.LocalDateTime.ToString("HH:mm:ss"),
+                Timestamp = p.Timestamp.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                 Address = $"0x{p.Address:X}",
                 DataType = p.DataType.ToString(),
                 NewValue = p.NewValue
@@ -81,7 +82,7 @@ public partial class JournalViewModel : ObservableObject
             _operationJournal.GetEntries().Select(j => new JournalEntryDisplayItem
             {
                 OperationId = j.OperationId,
-                Timestamp = j.Timestamp.LocalDateTime.ToString("HH:mm:ss"),
+                Timestamp = j.Timestamp.LocalDateTime.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
                 OperationType = j.OperationType,
                 Address = $"0x{j.Address:X}",
                 Mode = j.Mode,

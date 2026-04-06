@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -223,7 +224,7 @@ public sealed class SkillSystem
             {
                 if (_catalog.TryGetValue(name, out var skill))
                 {
-                    sb.AppendLine($"\n## Skill: {skill.Name}");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"\n## Skill: {skill.Name}");
 
                     // Variable substitution: ${SKILL_DIR} → skill's source directory
                     var instructions = skill.Instructions;
@@ -285,7 +286,7 @@ public sealed class SkillSystem
     private string BuildCatalogWithDescriptions(List<SkillDefinition> skills, int maxDescLen)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Available skills ({_activeSkills.Count}/{skills.Count} loaded):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Available skills ({_activeSkills.Count}/{skills.Count} loaded):");
 
         string? lastCategory = null;
         foreach (var skill in skills)
@@ -293,7 +294,7 @@ public sealed class SkillSystem
             var cat = skill.Category ?? "General";
             if (cat != lastCategory)
             {
-                sb.AppendLine($"\n  [{cat}]");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"\n  [{cat}]");
                 lastCategory = cat;
             }
 
@@ -305,7 +306,7 @@ public sealed class SkillSystem
                 desc = desc[..(maxDescLen - 1)] + "…";
 
             var version = skill.Version is not null ? $" v{skill.Version}" : "";
-            sb.AppendLine($"    {status} {skill.Name}{version} — {desc}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"    {status} {skill.Name}{version} — {desc}");
         }
 
         sb.AppendLine("\nUse load_skill(name) to activate a skill before using its techniques.");
@@ -315,7 +316,7 @@ public sealed class SkillSystem
     private string BuildCatalogNamesOnly(List<SkillDefinition> skills)
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"Available skills ({_activeSkills.Count}/{skills.Count} loaded):");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Available skills ({_activeSkills.Count}/{skills.Count} loaded):");
 
         string? lastCategory = null;
         foreach (var skill in skills)
@@ -323,7 +324,7 @@ public sealed class SkillSystem
             var cat = skill.Category ?? "General";
             if (cat != lastCategory)
             {
-                sb.AppendLine($"\n  [{cat}]");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"\n  [{cat}]");
                 lastCategory = cat;
             }
 
@@ -332,11 +333,11 @@ public sealed class SkillSystem
             if (skill.IsBundled)
             {
                 // Bundled skills always get full descriptions
-                sb.AppendLine($"    {status} {skill.Name} — {skill.Description}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"    {status} {skill.Name} — {skill.Description}");
             }
             else
             {
-                sb.AppendLine($"    {status} {skill.Name}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"    {status} {skill.Name}");
             }
         }
 
@@ -397,7 +398,7 @@ public sealed class SkillSystem
                 if (totalSize + info.Length > maxTotalSize) break;
 
                 var content = File.ReadAllText(file);
-                sb.AppendLine($"\n### Reference: {Path.GetFileName(file)}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"\n### Reference: {Path.GetFileName(file)}");
                 sb.AppendLine(content);
                 totalSize += content.Length;
             }

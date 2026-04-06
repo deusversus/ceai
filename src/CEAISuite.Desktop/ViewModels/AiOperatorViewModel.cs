@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Media;
@@ -17,7 +18,7 @@ namespace CEAISuite.Desktop.ViewModels;
 /// attachments, streaming state, model selection, and all non-UI-specific
 /// AI interaction logic extracted from MainWindow code-behind.
 /// </summary>
-public partial class AiOperatorViewModel : ObservableObject
+public partial class AiOperatorViewModel : ObservableObject, IDisposable
 {
     private readonly AiOperatorService _aiOperatorService;
     private readonly AppSettingsService _appSettingsService;
@@ -29,6 +30,9 @@ public partial class AiOperatorViewModel : ObservableObject
     private readonly IThemeService _themeService;
     private readonly IClipboardService _clipboard;
     private readonly ILogger<AiOperatorViewModel> _logger;
+
+    private static readonly string[] AnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"];
+    private static readonly string[] OpenAiModels = ["gpt-5.4", "gpt-4.1", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini"];
 
     private CancellationTokenSource? _streamingCts;
     private bool _suppressChatSwitch;
@@ -225,7 +229,7 @@ public partial class AiOperatorViewModel : ObservableObject
                                     currentTextBlock = new TextContentBlock
                                     {
                                         RoleLabel = "AI Operator",
-                                        Timestamp = DateTime.Now.ToString("h:mm tt"),
+                                        Timestamp = DateTime.Now.ToString("h:mm tt", CultureInfo.InvariantCulture),
                                         Background = FindThemeBrush("ChatAiBubble")
                                     };
                                     StreamingBlocks.Add(currentTextBlock);
@@ -244,7 +248,7 @@ public partial class AiOperatorViewModel : ObservableObject
                                 {
                                     ToolName = tool.ToolName,
                                     Arguments = tool.Arguments,
-                                    Timestamp = DateTime.Now.ToString("h:mm:ss"),
+                                    Timestamp = DateTime.Now.ToString("h:mm:ss", CultureInfo.InvariantCulture),
                                     Status = "running"
                                 };
                                 StreamingBlocks.Add(block);
@@ -279,7 +283,7 @@ public partial class AiOperatorViewModel : ObservableObject
                                 {
                                     ToolName = approval.ToolName,
                                     Arguments = approval.Arguments,
-                                    Timestamp = DateTime.Now.ToString("h:mm:ss"),
+                                    Timestamp = DateTime.Now.ToString("h:mm:ss", CultureInfo.InvariantCulture),
                                 };
                                 block.Resolve = approved =>
                                 {
@@ -302,7 +306,7 @@ public partial class AiOperatorViewModel : ObservableObject
                                 {
                                     RoleLabel = "Error",
                                     Content = err.Message,
-                                    Timestamp = DateTime.Now.ToString("h:mm tt"),
+                                    Timestamp = DateTime.Now.ToString("h:mm tt", CultureInfo.InvariantCulture),
                                     Background = FindThemeBrush("ChatAiBubble")
                                 });
                                 StreamingBlocksUpdated?.Invoke();
@@ -351,7 +355,7 @@ public partial class AiOperatorViewModel : ObservableObject
             _streamingCts?.Dispose();
             _streamingCts = null;
 
-            if (StatusText.StartsWith("Thinking") || StatusText.StartsWith("Tool:"))
+            if (StatusText.StartsWith("Thinking", StringComparison.Ordinal) || StatusText.StartsWith("Tool:", StringComparison.Ordinal))
                 StatusText = _aiOperatorService.IsConfigured ? "Ready" : "Not configured — open Settings to add API key";
             RefreshChatDisplay();
             RefreshChatSwitcher();
@@ -589,7 +593,7 @@ public partial class AiOperatorViewModel : ObservableObject
         {
             RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
             Content = msg.Content,
-            Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt"),
+            Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture),
             Background = msg.Role == "user" ? userBrush : aiBrush,
             ImageData = msg.ImageDataList?.FirstOrDefault()
         }).ToList();
@@ -713,11 +717,11 @@ public partial class AiOperatorViewModel : ObservableObject
                 break;
 
             case "anthropic":
-                models.AddRange(new[] { "claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5" });
+                models.AddRange(AnthropicModels);
                 break;
 
             case "openai":
-                models.AddRange(new[] { "gpt-5.4", "gpt-4.1", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini" });
+                models.AddRange(OpenAiModels);
                 break;
 
             case "openai-compatible":
@@ -804,6 +808,12 @@ public partial class AiOperatorViewModel : ObservableObject
         }
     }
 
+    public void Dispose()
+    {
+        _streamingCts?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
     internal Brush FindThemeBrush(string key) => _themeService.FindBrush(key);
 
     private static string FormatTimeAgo(DateTimeOffset dt)
@@ -813,6 +823,6 @@ public partial class AiOperatorViewModel : ObservableObject
         if (diff.TotalMinutes < 60) return $"{(int)diff.TotalMinutes}m ago";
         if (diff.TotalHours < 24) return $"{(int)diff.TotalHours}h ago";
         if (diff.TotalDays < 7) return $"{(int)diff.TotalDays}d ago";
-        return dt.ToLocalTime().ToString("MMM d");
+        return dt.ToLocalTime().ToString("MMM d", CultureInfo.InvariantCulture);
     }
 }

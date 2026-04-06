@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Text;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
@@ -117,7 +118,7 @@ public partial class StructureDissectorViewModel : ObservableObject
                 _ => "uint8_t[4]"
             };
             var name = string.IsNullOrWhiteSpace(f.Name) ? $"field_{f.Offset:X3}" : f.Name;
-            sb.AppendLine($"    {cType} {name}; // offset {f.OffsetHex}, confidence {f.ConfidencePercent}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"    {cType} {name}; // offset {f.OffsetHex}, confidence {f.ConfidencePercent}");
         }
         sb.AppendLine("};");
         _clipboard.SetText(sb.ToString());
@@ -184,7 +185,7 @@ public partial class StructureDissectorViewModel : ObservableObject
                 _ => "4 Bytes"
             };
             var name = string.IsNullOrWhiteSpace(f.Name) ? $"field_{f.Offset:X3}" : f.Name;
-            sb.AppendLine($"  <Element Offset=\"{f.Offset}\" Vartype=\"{ceType}\" Bytesize=\"{GetByteSize(f.ProbableType)}\" Description=\"{name}\" DisplayMethod=\"0\"/>");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"  <Element Offset=\"{f.Offset}\" Vartype=\"{ceType}\" Bytesize=\"{GetByteSize(f.ProbableType)}\" Description=\"{name}\" DisplayMethod=\"0\"/>");
         }
         sb.AppendLine("</Structure>");
         _clipboard.SetText(sb.ToString());

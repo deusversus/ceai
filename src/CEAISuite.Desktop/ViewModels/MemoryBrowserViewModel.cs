@@ -154,7 +154,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
     {
         var selected = GetSelectedBytes();
         if (selected.Length == 0) return;
-        var hex = string.Join(" ", selected.Select(b => b.ToString("X2")));
+        var hex = string.Join(" ", selected.Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
         _clipboard.SetText(hex);
         StatusText = $"Copied {selected.Length} bytes as hex.";
     }
@@ -309,7 +309,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
             var result = await _disassemblyEngine.DisassembleAsync(pid, (nuint)addr, 8);
             var sb = new StringBuilder();
             foreach (var instr in result.Instructions)
-                sb.AppendLine($"  0x{(ulong)instr.Address:X}: {instr.Mnemonic} {instr.Operands}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  0x{(ulong)instr.Address:X}: {instr.Mnemonic} {instr.Operands}");
             DisassemblyAnnotation = sb.ToString().TrimEnd();
         }
         catch (Exception ex)
@@ -540,7 +540,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
         if (SelectionLength <= 0) { StatusText = "Select bytes to NOP first."; return; }
         var addr = BaseAddress + (ulong)SelectionStart;
         var oldBytes = GetSelectedBytes();
-        var nops = _codeInjection.NopSelection(oldBytes.Length);
+        var nops = CodeInjectionTemplateService.NopSelection(oldBytes.Length);
 
         PauseAutoRefreshForEdit();
         var success = await WriteBytesToProcessAsync(addr, nops);
@@ -564,7 +564,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
         try
         {
             var cave = await _protectionEngine.AllocateAsync(pid, 256, MemoryProtection.ExecuteReadWrite, (nuint)source);
-            var hookBytes = _codeInjection.InsertJmpHook(source, (ulong)cave.BaseAddress, is64);
+            var hookBytes = CodeInjectionTemplateService.InsertJmpHook(source, (ulong)cave.BaseAddress, is64);
             var oldBytes = MemoryBuffer.AsSpan(CursorOffset, Math.Min(hookBytes.Length, MemoryBuffer.Length - CursorOffset)).ToArray();
 
             PauseAutoRefreshForEdit();
@@ -596,7 +596,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
     private static byte[] ParseHexString(string text)
     {
         // Accept "AA BB CC" or "AABBCC" or "AA-BB-CC"
-        var cleaned = text.Replace(" ", "").Replace("-", "").Replace("0x", "").Replace(",", "").Trim();
+        var cleaned = text.Replace(" ", "", StringComparison.Ordinal).Replace("-", "", StringComparison.Ordinal).Replace("0x", "", StringComparison.Ordinal).Replace(",", "", StringComparison.Ordinal).Trim();
         if (cleaned.Length % 2 != 0) return [];
         var bytes = new byte[cleaned.Length / 2];
         for (var i = 0; i < bytes.Length; i++)
@@ -613,7 +613,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
         var trimmed = pattern.Trim();
 
         // If it looks like hex bytes (contains spaces or all hex chars)
-        if (trimmed.Contains(' ') || trimmed.Contains("??"))
+        if (trimmed.Contains(' ', StringComparison.Ordinal) || trimmed.Contains("??", StringComparison.Ordinal))
         {
             var parts = trimmed.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             var result = new byte?[parts.Length];
@@ -630,7 +630,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
         }
 
         // Try as pure hex string (no spaces)
-        if (trimmed.All(c => "0123456789abcdefABCDEF".Contains(c)) && trimmed.Length >= 2 && trimmed.Length % 2 == 0)
+        if (trimmed.All(c => "0123456789abcdefABCDEF".Contains(c, StringComparison.Ordinal)) && trimmed.Length >= 2 && trimmed.Length % 2 == 0)
         {
             var result = new byte?[trimmed.Length / 2];
             for (var i = 0; i < result.Length; i++)

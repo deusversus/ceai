@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -186,7 +187,7 @@ public sealed class MemorySystem
 
         foreach (var group in grouped)
         {
-            sb.AppendLine($"\n## {group.Key}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"\n## {group.Key}");
             foreach (var entry in group)
             {
                 var line = entry.ProcessName is not null

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
@@ -82,7 +83,7 @@ public partial class DebuggerViewModel : ObservableObject
                     HitCount = bp.HitCount,
                     Status = bp.IsEnabled ? "Armed" : "Disabled",
                     Condition = bp.Condition ?? "",
-                    ThreadFilter = bp.ThreadFilter?.ToString() ?? ""
+                    ThreadFilter = bp.ThreadFilter?.ToString(CultureInfo.InvariantCulture) ?? ""
                 });
             }
             StatusText = $"{ActiveBreakpoints.Count} breakpoint(s)";
@@ -247,5 +248,5 @@ public partial class DebuggerViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanStep))] private void StepOver() { }
     [RelayCommand(CanExecute = nameof(CanStep))] private void StepOut() { }
     [RelayCommand(CanExecute = nameof(CanStep))] private void Continue() { }
-    private bool CanStep() => false;
+    private static bool CanStep() => false;
 }

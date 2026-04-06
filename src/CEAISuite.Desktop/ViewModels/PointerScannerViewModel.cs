@@ -8,7 +8,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class PointerScannerViewModel : ObservableObject
+public partial class PointerScannerViewModel : ObservableObject, IDisposable
 {
     private readonly PointerScannerService _scannerService;
     private readonly AddressTableService _addressTableService;
@@ -61,9 +61,9 @@ public partial class PointerScannerViewModel : ObservableObject
 
         var maxOff = 0x2000L;
         if (MaxOffset.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            long.TryParse(MaxOffset[2..], System.Globalization.NumberStyles.HexNumber, null, out maxOff);
+            _ = long.TryParse(MaxOffset[2..], System.Globalization.NumberStyles.HexNumber, null, out maxOff);
         else
-            long.TryParse(MaxOffset, out maxOff);
+            _ = long.TryParse(MaxOffset, out maxOff);
 
         _scanCts?.Cancel();
         _scanCts?.Dispose();
@@ -238,7 +238,7 @@ public partial class PointerScannerViewModel : ObservableObject
         }
     }
 
-    private static IReadOnlyList<string>? ParseModuleFilter(string? filter)
+    private static List<string>? ParseModuleFilter(string? filter)
     {
         if (string.IsNullOrWhiteSpace(filter)) return null;
         return filter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -353,5 +353,11 @@ public partial class PointerScannerViewModel : ObservableObject
         if (text.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
             text = text[2..];
         return nuint.TryParse(text, System.Globalization.NumberStyles.HexNumber, null, out address);
+    }
+
+    public void Dispose()
+    {
+        _scanCts?.Dispose();
+        GC.SuppressFinalize(this);
     }
 }

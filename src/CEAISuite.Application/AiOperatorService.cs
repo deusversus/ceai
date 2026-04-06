@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.Versioning;
@@ -1350,31 +1351,31 @@ public sealed class AiOperatorService
 
         // Format the plan for display
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"## {plan.Title}");
-        sb.AppendLine($"*{plan.Summary}*");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"## {plan.Title}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"*{plan.Summary}*");
         sb.AppendLine();
 
         for (int i = 0; i < plan.Steps.Count; i++)
         {
             var step = plan.Steps[i];
             var destructiveTag = step.IsDestructive ? " ⚠️ DESTRUCTIVE" : "";
-            sb.AppendLine($"**Step {i + 1}**: {step.Description}{destructiveTag}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"**Step {i + 1}**: {step.Description}{destructiveTag}");
             if (step.Details is not null)
-                sb.AppendLine($"  Details: {step.Details}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  Details: {step.Details}");
             if (step.ExpectedTools is { Count: > 0 })
-                sb.AppendLine($"  Tools: {string.Join(", ", step.ExpectedTools)}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  Tools: {string.Join(", ", step.ExpectedTools)}");
             if (step.EstimatedDuration is not null)
-                sb.AppendLine($"  Duration: {step.EstimatedDuration}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  Duration: {step.EstimatedDuration}");
             sb.AppendLine();
         }
 
         if (plan.EstimatedToolCalls.HasValue)
-            sb.AppendLine($"Estimated tool calls: ~{plan.EstimatedToolCalls}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"Estimated tool calls: ~{plan.EstimatedToolCalls}");
         if (plan.Warnings is { Count: > 0 })
         {
             sb.AppendLine("\n⚠️ **Warnings:**");
             foreach (var w in plan.Warnings)
-                sb.AppendLine($"  • {w}");
+                sb.AppendLine(CultureInfo.InvariantCulture, $"  • {w}");
         }
 
         sb.AppendLine("\n*To execute this plan, use execute_plan or describe the task directly.*");
@@ -1393,9 +1394,9 @@ public sealed class AiOperatorService
         var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider);
 
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"## Executing Plan: {plan.Title}");
-        sb.AppendLine($"*{plan.Summary}*");
-        sb.AppendLine($"Steps: {plan.Steps.Count}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"## Executing Plan: {plan.Title}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"*{plan.Summary}*");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"Steps: {plan.Steps.Count}");
         sb.AppendLine();
 
         // Phase 2: Execute the plan step by step
@@ -1406,11 +1407,11 @@ public sealed class AiOperatorService
             switch (evt)
             {
                 case AgentLoop.PlanProgressEvent.StepStarted ss:
-                    sb.AppendLine($"--- Step {ss.StepIndex + 1}/{plan.Steps.Count}: {ss.Step.Description} ---");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"--- Step {ss.StepIndex + 1}/{plan.Steps.Count}: {ss.Step.Description} ---");
                     break;
                 case AgentLoop.PlanProgressEvent.StepCompleted sc:
                     var status = sc.Result.Success ? "OK" : "FAILED";
-                    sb.AppendLine($"[Step {sc.StepIndex + 1} {status}: {sc.Result.ToolCallCount} tool calls]");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"[Step {sc.StepIndex + 1} {status}: {sc.Result.ToolCallCount} tool calls]");
                     if (!string.IsNullOrWhiteSpace(sc.Result.Text))
                     {
                         // Include a summary of the step result (truncated)
@@ -1425,7 +1426,7 @@ public sealed class AiOperatorService
                     sb.AppendLine("**Plan execution complete.**");
                     break;
                 case AgentLoop.PlanProgressEvent.PlanFailed pf:
-                    sb.AppendLine($"**Plan execution failed:** {pf.Error}");
+                    sb.AppendLine(CultureInfo.InvariantCulture, $"**Plan execution failed:** {pf.Error}");
                     break;
                 case AgentLoop.PlanProgressEvent.PlanCancelled:
                     sb.AppendLine("**Plan execution cancelled.**");
@@ -1583,9 +1584,9 @@ public sealed class AiOperatorService
     public string ExportChatToMarkdown()
     {
         var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"# {CurrentChatTitle}");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"# {CurrentChatTitle}");
         sb.AppendLine();
-        sb.AppendLine($"*Exported {DateTimeOffset.Now:yyyy-MM-dd HH:mm}*");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"*Exported {DateTimeOffset.Now:yyyy-MM-dd HH:mm}*");
         sb.AppendLine();
         sb.AppendLine("---");
         sb.AppendLine();
@@ -1593,8 +1594,8 @@ public sealed class AiOperatorService
         foreach (var msg in _displayHistory)
         {
             var role = msg.Role == "user" ? "**You**" : "**AI Operator**";
-            var time = msg.Timestamp.ToLocalTime().ToString("h:mm tt");
-            sb.AppendLine($"### {role} — {time}");
+            var time = msg.Timestamp.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture);
+            sb.AppendLine(CultureInfo.InvariantCulture, $"### {role} — {time}");
             sb.AppendLine();
             sb.AppendLine(msg.Content);
             sb.AppendLine();

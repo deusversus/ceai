@@ -3,6 +3,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 using CEAISuite.Engine.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -243,14 +244,14 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     }
 }
 
-public sealed class AddressTableService(IEngineFacade engineFacade)
+public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<AddressTableService> logger)
 {
     /// <summary>Optional diagnostic trace callback for debugging address table refresh issues.</summary>
     public Action<string, string, string>? DiagnosticLog { get; set; }
 
     private void Log(string level, string message)
     {
-        System.Diagnostics.Debug.WriteLine($"[AddressTable] [{level}] {message}");
+        logger.LogDebug("[{Level}] {Message}", level, message);
         DiagnosticLog?.Invoke("AddressTable", level, message);
     }
 

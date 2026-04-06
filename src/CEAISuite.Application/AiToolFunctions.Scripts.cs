@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using CEAISuite.Application.AgentLoop;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -245,7 +246,7 @@ public sealed partial class AiToolFunctions
                         warnings++;
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ValidateScriptDeep] Address resolve failed: {ex.Message}"); }
+                catch (Exception ex) { logger?.LogDebug(ex, "ValidateScriptDeep address resolve failed"); }
             }
         }
 

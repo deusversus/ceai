@@ -7,6 +7,7 @@ using CEAISuite.Application.AgentLoop;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -38,7 +39,8 @@ public sealed partial class AiToolFunctions(
     AiChatStore? chatStore = null,
     Func<IReadOnlyList<AiChatMessage>>? currentChatProvider = null,
     TokenLimits? tokenLimits = null,
-    ToolResultStore? toolResultStore = null)
+    ToolResultStore? toolResultStore = null,
+    ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
 
@@ -59,10 +61,10 @@ public sealed partial class AiToolFunctions(
         return new { processAlive = alive, processId, sessionGeneration = _sessionGeneration, pidChanged };
     }
 
-    private static bool IsProcessAlive(int processId)
+    private bool IsProcessAlive(int processId)
     {
         try { return !System.Diagnostics.Process.GetProcessById(processId).HasExited; }
-        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[IsProcessAlive] PID {processId}: {ex.Message}"); return false; }
+        catch (Exception ex) { logger?.LogDebug(ex, "IsProcessAlive check failed for PID {ProcessId}", processId); return false; }
     }
 
     [ReadOnlyTool]

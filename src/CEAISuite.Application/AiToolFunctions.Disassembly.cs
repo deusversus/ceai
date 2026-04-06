@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -215,7 +216,7 @@ public sealed partial class AiToolFunctions
                 var attachment = await engineFacade.AttachAsync(processId);
                 modules = attachment.Modules;
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ListMemoryRegions] Module lookup failed: {ex.Message}"); }
+            catch (Exception ex) { logger?.LogDebug(ex, "ListMemoryRegions module lookup failed"); }
 
             var filtered = filter.ToLowerInvariant() switch
             {

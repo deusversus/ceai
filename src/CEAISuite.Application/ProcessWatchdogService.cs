@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -11,12 +12,19 @@ namespace CEAISuite.Application;
 /// </summary>
 public sealed class ProcessWatchdogService : IDisposable
 {
+    private readonly ILogger<ProcessWatchdogService>? _logger;
+
+    public ProcessWatchdogService(ILogger<ProcessWatchdogService>? logger = null)
+    {
+        _logger = logger;
+    }
+
     /// <summary>Optional diagnostic log callback: (source, level, message).</summary>
     public Action<string, string, string>? DiagnosticLog { get; set; }
 
     private void Log(string level, string message)
     {
-        Debug.WriteLine($"[Watchdog] [{level}] {message}");
+        _logger?.LogDebug("[{Level}] {Message}", level, message);
         DiagnosticLog?.Invoke("Watchdog", level, message);
     }
 
@@ -50,7 +58,7 @@ public sealed class ProcessWatchdogService : IDisposable
         var monitor = new WatchdogMonitor(
             processId, operationId, address, operationType, mode,
             rollbackAction, HeartbeatIntervalMs, UnresponsiveThresholdMs,
-            OnRollbackTriggered);
+            OnRollbackTriggered, _logger);
 
         _monitors[operationId] = monitor;
         monitor.Start();
@@ -415,6 +423,7 @@ internal sealed class WatchdogMonitor : IDisposable
     private readonly Action<WatchdogMonitor, bool> _onRollback;
     private readonly int _heartbeatMs;
     private readonly int _thresholdMs;
+    private readonly ILogger? _logger;
 
     public int ProcessId { get; }
     public string OperationId { get; }
@@ -427,7 +436,8 @@ internal sealed class WatchdogMonitor : IDisposable
         string operationType, string mode,
         Func<Task<bool>> rollbackAction,
         int heartbeatMs, int thresholdMs,
-        Action<WatchdogMonitor, bool> onRollback)
+        Action<WatchdogMonitor, bool> onRollback,
+        ILogger? logger = null)
     {
         ProcessId = processId;
         OperationId = operationId;
@@ -438,6 +448,7 @@ internal sealed class WatchdogMonitor : IDisposable
         _heartbeatMs = heartbeatMs;
         _thresholdMs = thresholdMs;
         _onRollback = onRollback;
+        _logger = logger;
     }
 
     public void Start()
@@ -473,7 +484,7 @@ internal sealed class WatchdogMonitor : IDisposable
                         catch (Exception rollbackEx)
                         {
                             // 6B: Log rollback exception instead of swallowing
-                            Debug.WriteLine($"[Watchdog] Monitor rollback failed for {OperationType} at 0x{Address:X}: {rollbackEx.Message}");
+                            _logger?.LogWarning(rollbackEx, "Monitor rollback failed for {OperationType} at 0x{Address:X}", OperationType, Address);
                         }
                         _onRollback(this, success);
                         return; // Stop monitoring

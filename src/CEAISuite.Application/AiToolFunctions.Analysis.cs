@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using CEAISuite.Engine.Abstractions;
 using Iced.Intel;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -325,7 +326,7 @@ public sealed partial class AiToolFunctions
                                 }
                             }
                         }
-                        catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[GetCallerGraph] Pointer read failed: {ex.Message}"); }
+                        catch (Exception ex) { logger?.LogDebug(ex, "GetCallerGraph pointer read failed"); }
                     }
 
                     if (matches)

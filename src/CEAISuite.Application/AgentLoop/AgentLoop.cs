@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Threading.Channels;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application.AgentLoop;
 
@@ -26,11 +27,12 @@ public sealed class AgentLoop
     private readonly RetryPolicy _retryPolicy;
     private readonly CompactionPipeline _compactionPipeline;
     private readonly Action<string, string>? _log;
+    private readonly ILogger<AgentLoop>? _logger;
 
     /// <summary>The options this loop was created with (exposed for SubagentManager/PlanExecutor).</summary>
     public AgentLoopOptions Options => _options;
 
-    public AgentLoop(IChatClient chatClient, AgentLoopOptions options, ToolAttributeCache? attributeCache = null)
+    public AgentLoop(IChatClient chatClient, AgentLoopOptions options, ToolAttributeCache? attributeCache = null, ILogger<AgentLoop>? logger = null)
     {
         _chatClient = chatClient;
         _options = options;
@@ -38,6 +40,7 @@ public sealed class AgentLoop
         _retryPolicy = new RetryPolicy(log: options.Log);
         _compactionPipeline = new CompactionPipeline(chatClient, options.Limits, options.Log);
         _log = options.Log;
+        _logger = logger;
     }
 
     /// <summary>
@@ -136,7 +139,7 @@ public sealed class AgentLoop
         {
             string? contextSuffix = null;
             try { contextSuffix = contextProvider?.Invoke(); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[AgentLoop] Context provider failed: {ex.Message}"); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Context provider failed"); }
             var fullContext = contextSuffix is not null ? $"[CURRENT STATE]\n{contextSuffix}" : null;
             history.AddUserMessage(userMessage, fullContext);
         }

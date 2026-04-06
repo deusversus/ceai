@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application.AgentLoop;
 
@@ -24,11 +25,16 @@ public sealed class SkillSystem
     private readonly HashSet<string> _pendingApproval = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private readonly Action<string, string>? _log;
+    private readonly ILogger<SkillSystem>? _logger;
 
     /// <summary>Maximum characters for the catalog summary. Non-bundled descriptions are truncated to fit.</summary>
     public int MaxCatalogChars { get; set; } = 2000;
 
-    public SkillSystem(Action<string, string>? log = null) => _log = log;
+    public SkillSystem(Action<string, string>? log = null, ILogger<SkillSystem>? logger = null)
+    {
+        _log = log;
+        _logger = logger;
+    }
 
     /// <summary>All known skill definitions (snapshot).</summary>
     public IReadOnlyDictionary<string, SkillDefinition> Catalog
@@ -411,12 +417,12 @@ public sealed class SkillSystem
 
     private const int MaxSkillInstructionLength = 10_000;
 
-    private static string SanitizeSkillInstructions(string instructions, string skillName)
+    private string SanitizeSkillInstructions(string instructions, string skillName)
     {
         if (instructions.Length > MaxSkillInstructionLength)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[SkillSystem] Skill '{skillName}' instructions truncated from {instructions.Length} to {MaxSkillInstructionLength} chars");
+            _logger?.LogWarning("Skill {SkillName} instructions truncated from {OriginalLength} to {MaxLength} chars",
+                skillName, instructions.Length, MaxSkillInstructionLength);
             instructions = instructions[..MaxSkillInstructionLength];
         }
 
@@ -436,8 +442,8 @@ public sealed class SkillSystem
 
         if (stripped > 0)
         {
-            System.Diagnostics.Debug.WriteLine(
-                $"[SkillSystem] Skill '{skillName}': stripped {stripped} suspicious directive line(s)");
+            _logger?.LogWarning("Skill {SkillName}: stripped {StrippedCount} suspicious directive line(s)",
+                skillName, stripped);
         }
 
         return filtered.ToString();

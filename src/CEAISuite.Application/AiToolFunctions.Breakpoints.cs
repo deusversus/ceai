@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -370,7 +371,7 @@ public sealed partial class AiToolFunctions
                     }
                 }
             }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ProbeTargetRisk] Module lookup failed: {ex.Message}"); }
+            catch (Exception ex) { logger?.LogDebug(ex, "ProbeTargetRisk module lookup failed"); }
 
             if (regionKind == "heap/dynamic")
             {

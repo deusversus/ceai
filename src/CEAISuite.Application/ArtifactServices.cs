@@ -1,6 +1,9 @@
+using System.Collections.ObjectModel;
 using System.Globalization;
+using System.IO;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -261,5 +264,120 @@ public sealed class AddressTableExportService
         }
 
         return entries;
+    }
+
+    // ── Recovery (crash auto-save / restore) ─────────────────────────────
+
+    private static readonly JsonSerializerOptions s_recoveryOptions = new()
+    {
+        WriteIndented = false, // compact for speed
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    /// <summary>
+    /// Serialize the full address-table tree to a lightweight JSON file for crash recovery.
+    /// </summary>
+    public async Task ExportRecoveryAsync(IReadOnlyList<AddressTableNode> roots, string filePath)
+    {
+        var dtos = roots.Select(RecoveryNodeDto.FromNode).ToList();
+        var dir = Path.GetDirectoryName(filePath);
+        if (dir is not null) Directory.CreateDirectory(dir);
+        await using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true);
+        await JsonSerializer.SerializeAsync(fs, dtos, s_recoveryOptions);
+    }
+
+    /// <summary>
+    /// Deserialize a recovery JSON file back into address-table nodes.
+    /// Returns null if the file does not exist or is corrupt.
+    /// </summary>
+    public async Task<IReadOnlyList<AddressTableNode>?> ImportRecoveryAsync(string filePath)
+    {
+        if (!File.Exists(filePath)) return null;
+        try
+        {
+            await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+            var dtos = await JsonSerializer.DeserializeAsync<List<RecoveryNodeDto>>(fs, s_recoveryOptions);
+            if (dtos is null) return null;
+            return dtos.Select(d => d.ToNode()).ToList();
+        }
+        catch (JsonException) { return null; }
+        catch (IOException) { return null; }
+    }
+
+    /// <summary>DTO for JSON round-tripping AddressTableNode trees during crash recovery.</summary>
+    internal sealed class RecoveryNodeDto
+    {
+        public string Id { get; set; } = "";
+        public string Label { get; set; } = "";
+        public bool IsGroup { get; set; }
+        public string Address { get; set; } = "";
+        public MemoryDataType DataType { get; set; }
+        public string CurrentValue { get; set; } = "";
+        public string? AssemblerScript { get; set; }
+        public bool ShowAsHex { get; set; }
+        public bool ShowAsSigned { get; set; }
+        public bool IsLocked { get; set; }
+        public string? LockedValue { get; set; }
+        public string? UserColor { get; set; }
+        public bool IsPointer { get; set; }
+        public List<long>? PointerOffsets { get; set; }
+        public bool IsOffset { get; set; }
+        public string? Notes { get; set; }
+        public List<RecoveryNodeDto>? Children { get; set; }
+
+        public static RecoveryNodeDto FromNode(AddressTableNode n) => new()
+        {
+            Id = n.Id,
+            Label = n.Label,
+            IsGroup = n.IsGroup,
+            Address = n.Address,
+            DataType = n.DataType,
+            CurrentValue = n.CurrentValue,
+            AssemblerScript = n.AssemblerScript,
+            ShowAsHex = n.ShowAsHex,
+            ShowAsSigned = n.ShowAsSigned,
+            IsLocked = n.IsLocked,
+            LockedValue = n.LockedValue,
+            UserColor = n.UserColor,
+            IsPointer = n.IsPointer,
+            PointerOffsets = n.PointerOffsets.Count > 0 ? n.PointerOffsets : null,
+            IsOffset = n.IsOffset,
+            Notes = n.Notes,
+            Children = n.Children.Count > 0
+                ? n.Children.Select(FromNode).ToList()
+                : null
+        };
+
+        public AddressTableNode ToNode()
+        {
+            var node = new AddressTableNode(Id, Label, IsGroup)
+            {
+                Address = Address,
+                DataType = DataType,
+                CurrentValue = CurrentValue,
+                AssemblerScript = AssemblerScript,
+                ShowAsHex = ShowAsHex,
+                ShowAsSigned = ShowAsSigned,
+                IsLocked = IsLocked,
+                LockedValue = LockedValue,
+                UserColor = UserColor,
+                IsPointer = IsPointer,
+                IsOffset = IsOffset,
+                Notes = Notes
+            };
+            if (PointerOffsets is not null)
+                node.PointerOffsets = PointerOffsets;
+            if (Children is not null)
+            {
+                foreach (var child in Children)
+                {
+                    var childNode = child.ToNode();
+                    childNode.Parent = node;
+                    node.Children.Add(childNode);
+                }
+            }
+            return node;
+        }
     }
 }

@@ -423,7 +423,7 @@ public partial class MemoryBrowserViewModel : ObservableObject
                         label += $" [{fieldType}]";
                     }
                 }
-                catch { /* dissection not critical */ }
+                catch (Exception ex) { _outputLog.Append("MemoryBrowser", "Debug", $"Dissection failed: {ex.Message}"); }
 
                 var node = new StructureSpiderNode(bufferBase + (ulong)offset, offset, ptr, label, depth)
                 {
@@ -441,10 +441,10 @@ public partial class MemoryBrowserViewModel : ObservableObject
                         if (childBuffer.Length > 0)
                             await SpiderScanAsync(pid, childBuffer, ptr, node.Children, visited, depth + 1);
                     }
-                    catch { /* child read failed, skip recursion */ }
+                    catch (Exception ex) { _outputLog.Append("MemoryBrowser", "Debug", $"Child read failed during spider scan: {ex.Message}"); }
                 }
             }
-            catch { /* not readable, skip */ }
+            catch (Exception ex) { _outputLog.Append("MemoryBrowser", "Debug", $"Spider scan pointer not readable: {ex.Message}"); }
         }
     }
 

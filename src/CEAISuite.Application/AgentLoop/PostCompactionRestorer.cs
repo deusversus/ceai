@@ -113,7 +113,7 @@ public static class PostCompactionRestorer
 
         // Get dynamic context from provider
         string? processContext = null;
-        try { processContext = contextProvider?.Invoke(); } catch { /* ignore */ }
+        try { processContext = contextProvider?.Invoke(); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[PostCompactionRestorer] Context provider failed: {ex.Message}"); }
 
         return new ContextSnapshot
         {

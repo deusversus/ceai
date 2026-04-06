@@ -702,7 +702,7 @@ public partial class SettingsWindow : Window
         var layoutPath = System.IO.Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "CEAISuite", "layout.xml");
-        try { System.IO.File.Delete(layoutPath); } catch { }
+        try { System.IO.File.Delete(layoutPath); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[SettingsWindow] Failed to delete layout file: {ex.Message}"); }
         MessageBox.Show("Layout reset. Restart the application to apply the default layout.",
             "Reset Layout", MessageBoxButton.OK, MessageBoxImage.Information);
     }

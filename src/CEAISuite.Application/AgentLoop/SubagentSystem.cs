@@ -540,7 +540,7 @@ public static class AgentDefinitionLoader
                     toolPatterns = System.Text.Json.JsonSerializer
                         .Deserialize<List<string>>(toolsStr);
                 }
-                catch { /* fall through to comma-split */ }
+                catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[SubagentSystem] JSON parse failed for tools list, falling back to comma-split: {ex.Message}"); }
             }
             toolPatterns ??= toolsStr.Trim('[', ']')
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)

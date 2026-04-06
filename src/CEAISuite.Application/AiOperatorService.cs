@@ -446,7 +446,7 @@ public sealed class AiOperatorService
         NewChat();
 
         // Ensure log directory exists
-        try { Directory.CreateDirectory(LogDir); } catch { /* best effort */ }
+        try { Directory.CreateDirectory(LogDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiOperatorService] Failed to create log directory: {ex.Message}"); }
     }
 
     // ── Shared hook registry (single instance across sessions) ──
@@ -577,7 +577,7 @@ public sealed class AiOperatorService
     private void Log(string level, string message)
     {
         var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level}] {message}";
-        try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch { /* best effort */ }
+        try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiOperatorService] Failed to write log: {ex.Message}"); }
     }
 
     private void UpdateStatus(string status)

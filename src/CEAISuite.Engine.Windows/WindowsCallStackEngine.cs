@@ -59,7 +59,7 @@ public sealed class WindowsCallStackEngine : ICallStackEngine
                                 if (frames.Count > 0)
                                     result[(int)entry.th32ThreadID] = frames;
                             }
-                            catch { /* thread may have exited */ }
+                            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[WindowsCallStackEngine] Thread {entry.th32ThreadID} walk failed (may have exited): {ex.Message}"); }
                         }
                     } while (Thread32Next(snapshot, ref entry));
                 }

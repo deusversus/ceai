@@ -155,7 +155,7 @@ public sealed class HexEditorControl : FrameworkElement
     {
         // Cache DPI once per frame (avoids P/Invoke per DrawText call)
         try { _cachedPixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip; }
-        catch { _cachedPixelsPerDip = 1.0; }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[HexEditorControl] Failed to get DPI: {ex.Message}"); _cachedPixelsPerDip = 1.0; }
 
         // Background
         var bg = FindBrush("PanelBackground") ?? Brushes.Black;
@@ -319,7 +319,7 @@ public sealed class HexEditorControl : FrameworkElement
     private Brush? FindBrush(string key)
     {
         try { return FindResource(key) as Brush; }
-        catch { return null; }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[HexEditorControl] Resource '{key}' not found: {ex.Message}"); return null; }
     }
 
     // ── Mouse Input ──

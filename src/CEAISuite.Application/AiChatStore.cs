@@ -31,7 +31,7 @@ public sealed class AiChatStore
 
     public AiChatStore()
     {
-        try { Directory.CreateDirectory(ChatsDir); } catch { /* best effort */ }
+        try { Directory.CreateDirectory(ChatsDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to create chats directory: {ex.Message}"); }
     }
 
     public void Save(AiChatSession session)
@@ -68,7 +68,7 @@ public sealed class AiChatStore
                 if (session is not null && !string.IsNullOrEmpty(session.Id))
                     sessions.Add(session);
             }
-            catch { /* skip corrupt files */ }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to load chat file {file}: {ex.Message}"); }
         }
 
         return sessions.OrderByDescending(s => s.UpdatedAt).ToList();

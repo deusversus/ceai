@@ -77,7 +77,7 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
         {
             foreach (var (_, handle) in _initializedProcesses)
             {
-                try { SymCleanup(handle); CloseHandle(handle); } catch { /* cleanup best-effort */ }
+                try { SymCleanup(handle); CloseHandle(handle); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[WindowsSymbolEngine] Cleanup failed for process handle: {ex.Message}"); }
             }
             _initializedProcesses.Clear();
         }

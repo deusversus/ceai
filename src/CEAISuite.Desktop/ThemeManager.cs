@@ -71,7 +71,7 @@ public static class ThemeManager
             if (value is int i)
                 return i == 1 ? AppTheme.Light : AppTheme.Dark;
         }
-        catch { /* fallback */ }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[ThemeManager] Failed to detect system theme: {ex.Message}"); }
         return AppTheme.Dark;
     }
 }

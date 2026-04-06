@@ -371,7 +371,7 @@ public partial class AiOperatorViewModel : ObservableObject
     {
         if (item is null) return;
         try { _clipboard.SetText(item.Content); }
-        catch { /* clipboard locked */ }
+        catch (Exception ex) { _outputLog.Append("AiOperator", "Debug", $"Clipboard copy failed: {ex.Message}"); }
     }
 
     [RelayCommand]
@@ -708,7 +708,7 @@ public partial class AiOperatorViewModel : ObservableObject
                         var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(settings.GitHubToken);
                         models.AddRange(copilotModels.Select(m => m.Id));
                     }
-                    catch { }
+                    catch (Exception ex) { _outputLog.Append("AiOperator", "Debug", $"Failed to fetch Copilot models: {ex.Message}"); }
                 }
                 break;
 

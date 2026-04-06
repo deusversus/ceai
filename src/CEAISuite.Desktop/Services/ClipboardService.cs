@@ -9,6 +9,6 @@ public sealed class ClipboardService : IClipboardService
     public string? GetText()
     {
         try { return Clipboard.GetText(); }
-        catch { return null; }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[ClipboardService] Clipboard read failed: {ex.Message}"); return null; }
     }
 }

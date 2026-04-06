@@ -174,7 +174,7 @@ public sealed class StdioMcpTransport : IMcpTransport
                 if (!_process.WaitForExit(3000))
                     _process.Kill();
             }
-            catch { /* best effort */ }
+            catch (Exception ex) { _log?.Invoke("MCP", $"[stdio] Cleanup error: {ex.Message}"); }
         }
         _process?.Dispose();
         _lock.Dispose();
@@ -430,7 +430,7 @@ public sealed class SseMcpTransport : IMcpTransport
 
         if (_sseListenerTask is not null)
         {
-            try { await _sseListenerTask; } catch { /* expected */ }
+            try { await _sseListenerTask; } catch (Exception ex) { _log?.Invoke("MCP", $"[sse] Listener task ended: {ex.Message}"); }
         }
 
         _sseCts?.Dispose();

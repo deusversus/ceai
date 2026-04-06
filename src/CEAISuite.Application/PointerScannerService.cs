@@ -257,6 +257,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
         var found = new List<(nuint Address, long Offset, ModuleDescriptor Module)>();
         var ptrSize = 8; // assume x64
 
+        int regionReadFailures = 0, moduleAccessFailures = 0;
         for (int mi = startModuleIndex; mi < modules.Count; mi++)
         {
             var mod = modules[mi];
@@ -295,12 +296,14 @@ public sealed class PointerScannerService(IEngineFacade engine)
                             }
                         }
                     }
-                    catch { /* unreadable region */ }
+                    catch (Exception ex) { regionReadFailures++; if (regionReadFailures == 1) System.Diagnostics.Trace.TraceWarning($"[PointerScannerService] Unreadable region: {ex.Message}"); }
                 }
             }
-            catch { /* module access error */ }
+            catch (Exception ex) { moduleAccessFailures++; if (moduleAccessFailures == 1) System.Diagnostics.Trace.TraceWarning($"[PointerScannerService] Module access error: {ex.Message}"); }
         }
 
+        if (regionReadFailures > 1) System.Diagnostics.Trace.TraceWarning($"[PointerScannerService] Total unreadable regions: {regionReadFailures}");
+        if (moduleAccessFailures > 1) System.Diagnostics.Trace.TraceWarning($"[PointerScannerService] Total module access errors: {moduleAccessFailures}");
         return found;
     }
 }

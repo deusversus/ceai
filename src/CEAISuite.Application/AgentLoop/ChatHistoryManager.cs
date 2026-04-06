@@ -238,7 +238,7 @@ public sealed class ChatHistoryManager
                                     args = System.Text.Json.JsonSerializer
                                         .Deserialize<Dictionary<string, object?>>(tc.ArgumentsJson);
                                 }
-                                catch { /* malformed JSON — skip args */ }
+                                catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[ChatHistoryManager] Malformed JSON in tool call args: {ex.Message}"); }
                             }
                             assistantMsg.Contents.Add(new FunctionCallContent(tc.CallId, tc.Name, args));
                         }

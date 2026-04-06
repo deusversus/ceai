@@ -459,7 +459,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                         var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
                         node.ResolvedAddress = resolvedAddr != nuint.Zero ? resolvedAddr : null;
                     }
-                    catch { node.ResolvedAddress = null; }
+                    catch (Exception ex) { logger?.LogDebug(ex, "Failed to resolve address for node {Label}", node.Label); node.ResolvedAddress = null; }
                 }
                 // If group has a pointer chain but failed to resolve, skip children
                 // (they depend on this group's address and would read garbage)

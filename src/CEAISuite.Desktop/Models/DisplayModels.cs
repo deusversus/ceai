@@ -34,7 +34,7 @@ public sealed class AiChatDisplayItem
                 bmp.Freeze();
                 _imageSource = bmp;
             }
-            catch { /* corrupt image — leave null */ }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatDisplayItem] Corrupt image data: {ex.Message}"); }
             return _imageSource;
         }
     }
@@ -154,7 +154,7 @@ public sealed class AttachmentChip
                 bmp.Freeze();
                 _thumbnail = bmp;
             }
-            catch { /* corrupt image */ }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AttachmentChip] Corrupt image data: {ex.Message}"); }
             return _thumbnail;
         }
     }

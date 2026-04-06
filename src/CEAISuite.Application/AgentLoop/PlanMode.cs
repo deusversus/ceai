@@ -54,7 +54,7 @@ public sealed class PlanExecutor
         if (contextProvider is not null)
         {
             try { contextSuffix = $"\n\n[CURRENT STATE]\n{contextProvider()}"; }
-            catch { /* ignore */ }
+            catch (Exception ex) { _log?.Invoke("PLAN", $"Failed to get context: {ex.Message}"); }
         }
 
         var planMessages = new List<ChatMessage>
@@ -391,7 +391,7 @@ public sealed class PlanModeState
                 PropertyNameCaseInsensitive = true,
             });
         }
-        catch { return null; }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[PlanModeState] Failed to load saved state: {ex.Message}"); return null; }
     }
 
     /// <summary>Clear saved plan state from disk.</summary>

@@ -91,7 +91,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 {
                     foreach (var process in processes)
                     {
-                        try { process.Dispose(); } catch { }
+                        try { process.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to dispose process object during enumeration"); }
                     }
                 }
 

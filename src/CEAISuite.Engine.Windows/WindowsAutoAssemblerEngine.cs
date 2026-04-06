@@ -1343,7 +1343,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 .FirstOrDefault(m => string.Equals(m.ModuleName, moduleName, StringComparison.OrdinalIgnoreCase));
             moduleSize = mod?.ModuleMemorySize ?? 0;
         }
-        catch { moduleSize = 0; }
+        catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[WindowsAutoAssemblerEngine] Failed to get module size for AOB scan: {ex.Message}"); moduleSize = 0; }
 
         if (moduleSize == 0) return null;
 

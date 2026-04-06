@@ -442,7 +442,7 @@ public class SessionServiceTests
         Assert.Equal("game.exe", loaded.Value.ProcessName);
 
         // Cleanup is best-effort; SQLite may hold the file briefly
-        try { File.Delete(dbPath); } catch { /* ignore */ }
+        try { File.Delete(dbPath); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[ApplicationTests] Failed to cleanup test DB: {ex.Message}"); }
     }
 }
 

@@ -121,7 +121,7 @@ public sealed class WindowsScreenCaptureEngine : IScreenCaptureEngine
             {
                 best = Process.GetProcessById(processId).MainWindowHandle;
             }
-            catch { /* process gone */ }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[WindowsScreenCaptureEngine] Failed to get MainWindowHandle (process may have exited): {ex.Message}"); }
         }
 
         return best;

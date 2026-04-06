@@ -198,7 +198,7 @@ public sealed class SkillSystem
                             break;
                         }
                     }
-                    catch { /* Invalid regex — skip */ }
+                    catch (Exception ex) { _logger?.LogDebug(ex, "Invalid regex pattern in skill trigger"); }
                 }
             }
             return matches;
@@ -401,7 +401,7 @@ public sealed class SkillSystem
                 sb.AppendLine(content);
                 totalSize += content.Length;
             }
-            catch { /* skip unreadable files */ }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[SkillSystem] Failed to read skill reference file {file}: {ex.Message}"); }
         }
 
         return sb.Length > 0 ? sb.ToString() : null;

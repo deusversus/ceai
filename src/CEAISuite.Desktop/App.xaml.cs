@@ -284,6 +284,6 @@ public partial class App : System.Windows.Application
             entry += "\n";
             File.AppendAllText(logPath, entry);
         }
-        catch { /* last resort — nothing to do */ }
+        catch (Exception writeEx) { System.Diagnostics.Trace.TraceWarning($"[App] Failed to write crash log: {writeEx.Message}"); }
     }
 }

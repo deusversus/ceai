@@ -1392,14 +1392,14 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "RestoreLayout failed");
-            try { File.Delete(LayoutFilePath); } catch { }
+            try { File.Delete(LayoutFilePath); } catch (Exception deleteEx) { _logger.LogDebug(deleteEx, "Failed to delete layout file after restore failure"); }
         }
     }
 
     private void ResetLayout(object sender, RoutedEventArgs e)
     {
-        try { File.Delete(LayoutFilePath); } catch { }
-        try { File.Delete(LayoutVersionPath); } catch { }
+        try { File.Delete(LayoutFilePath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete layout file during reset"); }
+        try { File.Delete(LayoutVersionPath); } catch (Exception ex) { _logger.LogDebug(ex, "Failed to delete layout version file during reset"); }
         MessageBox.Show("Layout reset. Restart the application to apply the default layout.",
             "Reset Layout", MessageBoxButton.OK, MessageBoxImage.Information);
     }

@@ -662,7 +662,7 @@ public partial class AddressTableViewModel : ObservableObject
         var addr = SelectedNode.ResolvedAddress ?? nuint.Zero;
         if (addr == nuint.Zero)
         {
-            try { addr = AddressTableService.ParseAddress(SelectedNode.Address); } catch { }
+            try { addr = AddressTableService.ParseAddress(SelectedNode.Address); } catch (Exception ex) { _logger?.LogDebug(ex, "Disassemble: Failed to parse address"); }
         }
 
         NavigateToDisassembly?.Invoke($"0x{addr:X}");
@@ -678,7 +678,7 @@ public partial class AddressTableViewModel : ObservableObject
         var addr = SelectedNode.ResolvedAddress ?? nuint.Zero;
         if (addr == nuint.Zero)
         {
-            try { addr = AddressTableService.ParseAddress(SelectedNode.Address); } catch { }
+            try { addr = AddressTableService.ParseAddress(SelectedNode.Address); } catch (Exception ex) { _logger?.LogDebug(ex, "FindWhatWrites: Failed to parse address"); }
         }
         if (addr == nuint.Zero) return;
 

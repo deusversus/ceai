@@ -49,7 +49,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult memResult;
                 try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                catch { continue; }
+                catch (Exception ex) { logger?.LogDebug(ex, "FindWritersToOffset: Memory read failed at chunk offset"); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 if (bytes.Length == 0) continue;
@@ -123,7 +123,7 @@ public sealed partial class AiToolFunctions
                 var chunk = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 allBytes.AddRange(chunk);
             }
-            catch { break; }
+            catch (Exception ex) { logger?.LogDebug(ex, "FindFunctionBoundaries: Memory read failed"); break; }
         }
 
         var bytes = allBytes.ToArray();
@@ -282,7 +282,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult memResult;
                 try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                catch { continue; }
+                catch (Exception ex) { logger?.LogDebug(ex, "FindCallsTo: Failed to read memory at {Address}", readAddr); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 if (bytes.Length == 0) continue;
@@ -382,7 +382,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult memResult;
                 try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                catch { continue; }
+                catch (Exception ex) { logger?.LogDebug(ex, "SearchInstructionPattern: Failed to read memory at {Address}", readAddr); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 if (bytes.Length == 0) continue;
@@ -450,7 +450,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult memResult;
                 try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                catch { continue; }
+                catch (Exception ex) { logger?.LogDebug(ex, "FindByMemoryOperand: Memory read failed at chunk offset"); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 if (bytes.Length == 0) continue;
@@ -593,7 +593,7 @@ public sealed partial class AiToolFunctions
 
                     MemoryReadResult memResult;
                     try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                    catch { continue; }
+                    catch (Exception ex) { logger?.LogDebug(ex, "FindStructureAccess: Strategy A memory read failed"); continue; }
 
                     var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                     if (bytes.Length == 0) continue;
@@ -661,7 +661,7 @@ public sealed partial class AiToolFunctions
 
                         MemoryReadResult memResult;
                         try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
-                        catch { continue; }
+                        catch (Exception ex) { logger?.LogDebug(ex, "FindStructureAccess: Strategy B memory read failed"); continue; }
 
                         var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                         if (bytes.Length == 0) continue;
@@ -728,7 +728,7 @@ public sealed partial class AiToolFunctions
 
                 MemoryReadResult scanMem;
                 try { scanMem = await engineFacade.ReadMemoryAsync(processId, scanStart, scanLen); }
-                catch { continue; }
+                catch (Exception ex) { logger?.LogDebug(ex, "FindStructureAccess: Strategy C memory read failed"); continue; }
 
                 var scanBytes = scanMem.Bytes is byte[] sa ? sa : scanMem.Bytes.ToArray();
                 var scanReader = new ByteArrayCodeReader(scanBytes);

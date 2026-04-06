@@ -74,6 +74,7 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
         var matchCount = 0;
         var chunkSize = 0x100000; // 1MB chunks
 
+        int readFailures = 0;
         for (long offset = 0; offset < module.SizeBytes; offset += chunkSize)
         {
             ct.ThrowIfCancellationRequested();
@@ -100,9 +101,10 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
                     if (match) matchCount++;
                 }
             }
-            catch { /* unreadable region */ }
+            catch (Exception ex) { readFailures++; if (readFailures == 1) System.Diagnostics.Trace.TraceWarning($"[SignatureGeneratorService] Unreadable region: {ex.Message}"); }
         }
 
+        if (readFailures > 1) System.Diagnostics.Trace.TraceWarning($"[SignatureGeneratorService] Total unreadable regions during uniqueness check: {readFailures}");
         return matchCount;
     }
 

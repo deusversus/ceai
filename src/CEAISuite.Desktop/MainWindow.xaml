@@ -25,9 +25,24 @@
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+
+        <!-- Row 1: Update Banner (collapsed by default) -->
+        <Border Grid.Row="1" Background="#2E7D32" Padding="8,4"
+                Visibility="{Binding IsUpdateAvailable, Converter={StaticResource BoolToVisibility}}">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="Skip" Padding="8,2" Margin="4,0,0,0"
+                        Command="{Binding SkipUpdateCommand}" Foreground="White" Background="Transparent"
+                        BorderThickness="1" BorderBrush="#AAFFFFFF" Cursor="Hand" />
+                <Button DockPanel.Dock="Right" Content="Update Now" Padding="8,2"
+                        Command="{Binding ApplyUpdateCommand}" Foreground="White" Background="#1B5E20"
+                        BorderThickness="0" Cursor="Hand" />
+                <TextBlock Text="{Binding UpdateMessage}" Foreground="White" VerticalAlignment="Center" />
+            </DockPanel>
+        </Border>
 
         <!-- Row 0: Command Bar -->
         <Border Grid.Row="0" Background="{DynamicResource MenuBarBackground}"
@@ -86,6 +101,8 @@
                                 <MenuItem Header="_Manage Servers…" Click="OpenMcpManager" />
                             </MenuItem>
                             <MenuItem Header="_Help">
+                                <MenuItem Header="Check for _Updates" Click="CheckForUpdates" />
+                                <Separator />
                                 <MenuItem Header="_About CE AI Suite" Click="ShowAbout" />
                             </MenuItem>
                             <Separator />
@@ -201,8 +218,8 @@
             </DockPanel>
         </Border>
 
-        <!-- Row 1: Dockable Panel Layout -->
-        <avalonDock:DockingManager x:Name="DockManager" Grid.Row="1">
+        <!-- Row 2: Dockable Panel Layout -->
+        <avalonDock:DockingManager x:Name="DockManager" Grid.Row="2">
             <avalonDock:LayoutRoot>
                 <avalonDock:LayoutPanel Orientation="Horizontal">
 
@@ -2040,7 +2057,7 @@
         </avalonDock:DockingManager>
 
         <!-- Row 3: Status bar -->
-        <Border Grid.Row="2" Background="{DynamicResource MenuBarBackground}"
+        <Border Grid.Row="3" Background="{DynamicResource MenuBarBackground}"
                 BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="8,3">
             <Grid>
                 <Grid.ColumnDefinitions>

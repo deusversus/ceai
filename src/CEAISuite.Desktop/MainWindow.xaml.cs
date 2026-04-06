@@ -358,6 +358,9 @@ public partial class MainWindow : Window, IDisposable
 
         await _mainVm.InitializeAsync();
 
+        // Check for updates in the background (fire-and-forget)
+        _ = Task.Run(() => _mainVm.CheckForUpdatesOnStartupAsync());
+
         // Wire up paste handler (thin wrapper -- ViewModel handles attachment logic)
         DataObject.AddPastingHandler(AiChatInputTextBox, OnChatInputPaste);
 
@@ -847,6 +850,7 @@ public partial class MainWindow : Window, IDisposable
     private async void MenuRedo(object sender, RoutedEventArgs e) => await _mainVm.PerformRedoAsync();
 
     private void ShowAbout(object sender, RoutedEventArgs e) => _mainVm.ShowAbout();
+    private async void CheckForUpdates(object sender, RoutedEventArgs e) => await _mainVm.CheckForUpdatesCommand.ExecuteAsync(null);
 
     private async void CaptureScreenshot(object sender, RoutedEventArgs e) => await _mainVm.CaptureScreenshotAsync();
     private async void ExportReport(object sender, RoutedEventArgs e) => await _mainVm.ExportReportAsync();

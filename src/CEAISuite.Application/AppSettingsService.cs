@@ -118,6 +118,14 @@ public sealed class AppSettings
     /// Default: false (conservative; enable for lower latency on tool-heavy conversations).
     /// </summary>
     public bool EnableEarlyToolExecution { get; set; }
+
+    // ── Auto-Update ──
+
+    /// <summary>Check GitHub for updates when the application starts.</summary>
+    public bool CheckForUpdatesOnStartup { get; set; } = true;
+
+    /// <summary>Version string the user chose to skip (e.g., "0.3.0"). Null = no skip.</summary>
+    public string? SkippedVersion { get; set; }
 }
 
 /// <summary>Settings entry for a configured MCP server.</summary>

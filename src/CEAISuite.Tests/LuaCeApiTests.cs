@@ -14,7 +14,7 @@ public sealed class LuaCeApiTests : IDisposable
     {
         // Set up facade with test process attached
         _facade.AttachAsync(1234).GetAwaiter().GetResult();
-        _engine = new MoonSharpLuaEngine(_facade, _assembler, TimeSpan.FromSeconds(5));
+        _engine = new MoonSharpLuaEngine(_facade, _assembler, executionTimeout: TimeSpan.FromSeconds(5));
     }
 
     public void Dispose() => _engine.Dispose();
@@ -91,7 +91,7 @@ public sealed class LuaCeApiTests : IDisposable
     public async Task ReadInteger_NoProcess_ThrowsLuaError()
     {
         // Create engine WITHOUT attaching a process
-        using var noProcessEngine = new MoonSharpLuaEngine(new StubEngineFacade(), null, TimeSpan.FromSeconds(5));
+        using var noProcessEngine = new MoonSharpLuaEngine(new StubEngineFacade(), null, executionTimeout: TimeSpan.FromSeconds(5));
 
         var result = await noProcessEngine.ExecuteAsync("return readInteger('0x1000')");
 

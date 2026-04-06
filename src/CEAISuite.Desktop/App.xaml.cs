@@ -78,10 +78,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IDisassemblyEngine>(sp =>
             new WindowsDisassemblyEngine(sp.GetRequiredService<ISymbolEngine>()));
         services.AddSingleton<IBreakpointEngine, WindowsBreakpointEngine>();
+        services.AddSingleton<ILuaFormHost, LuaFormHostService>();
         services.AddSingleton<ILuaScriptEngine>(sp =>
             new MoonSharpLuaEngine(
                 sp.GetRequiredService<IEngineFacade>(),
-                sp.GetService<IAutoAssemblerEngine>()));
+                sp.GetService<IAutoAssemblerEngine>(),
+                formHost: sp.GetService<ILuaFormHost>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
@@ -158,7 +160,8 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<AiChatStore>(),
                 currentChatProvider: () => lazyOperator.Value.DisplayHistory ?? Array.Empty<AiChatMessage>(),
                 tokenLimits: sp.GetRequiredService<TokenLimits>(),
-                toolResultStore: sp.GetRequiredService<ToolResultStore>());
+                toolResultStore: sp.GetRequiredService<ToolResultStore>(),
+                luaEngine: sp.GetService<ILuaScriptEngine>());
         });
 
         // ── AI operator service (starts with null IChatClient — MainWindow hot-swaps it) ──
@@ -188,6 +191,11 @@ public partial class App : System.Windows.Application
         services.AddSingleton<FindResultsViewModel>();
         services.AddSingleton<SnapshotsViewModel>();
         services.AddSingleton<JournalViewModel>();
+        services.AddSingleton<LuaConsoleViewModel>(sp =>
+            new LuaConsoleViewModel(
+                sp.GetService<ILuaScriptEngine>(),
+                sp.GetRequiredService<IProcessContext>(),
+                sp.GetRequiredService<IOutputLog>()));
         services.AddSingleton<BreakpointsViewModel>();
         services.AddSingleton<ScriptsViewModel>();
 
@@ -208,7 +216,8 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<IDialogService>(),
                 sp.GetRequiredService<IOutputLog>(),
                 sp.GetRequiredService<IDispatcherService>(),
-                sp.GetRequiredService<INavigationService>()));
+                sp.GetRequiredService<INavigationService>(),
+                sp.GetService<ILuaScriptEngine>()));
 
         // ── Phase 3 services (not yet in DI) ──
         services.AddSingleton<StructureDissectorService>();

@@ -23,6 +23,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\AutoAssembler.xshd" />
+    <EmbeddedResource Include="Resources\Lua.xshd" />
   </ItemGroup>
 
   <!-- Copy agent skills to build output for FileAgentSkillsProvider -->

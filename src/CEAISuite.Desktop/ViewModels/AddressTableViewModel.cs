@@ -24,6 +24,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
     private readonly IOutputLog _outputLog;
     private readonly IDispatcherService _dispatcher;
     private readonly INavigationService _navigationService;
+    private readonly ILuaScriptEngine? _luaScriptEngine;
     private readonly ILogger<AddressTableViewModel>? _logger;
 
     private System.Threading.Timer? _refreshTimer;
@@ -64,6 +65,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         IOutputLog outputLog,
         IDispatcherService dispatcher,
         INavigationService navigationService,
+        ILuaScriptEngine? luaScriptEngine = null,
         ILogger<AddressTableViewModel>? logger = null)
     {
         _addressTableService = addressTableService;
@@ -77,6 +79,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         _outputLog = outputLog;
         _dispatcher = dispatcher;
         _navigationService = navigationService;
+        _luaScriptEngine = luaScriptEngine;
         _logger = logger;
 
         Roots = _addressTableService.Roots;
@@ -423,6 +426,20 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
             var ctFile = CheatTableParser.ParseFile(path);
             var nodes = CheatTableParser.ToAddressTableNodes(ctFile);
             _addressTableService.ImportNodes(nodes);
+
+            // Execute CT Lua script if present and engine available
+            if (ctFile.LuaScript is not null && _luaScriptEngine is not null)
+            {
+                var pid = _processContext.AttachedProcessId;
+                var luaResult = pid.HasValue
+                    ? _luaScriptEngine.ExecuteAsync(ctFile.LuaScript, pid.Value).GetAwaiter().GetResult()
+                    : _luaScriptEngine.ExecuteAsync(ctFile.LuaScript).GetAwaiter().GetResult();
+
+                if (!luaResult.Success)
+                    _outputLog.Append("CT Import", "Warn", $"CT Lua script error: {luaResult.Error}");
+                else
+                    _outputLog.Append("CT Import", "Info", "CT Lua script executed successfully.");
+            }
 
             var scriptCount = CountScripts(ctFile.Entries);
             RefreshUI(

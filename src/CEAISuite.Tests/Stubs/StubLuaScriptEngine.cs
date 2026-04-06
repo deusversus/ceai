@@ -51,5 +51,23 @@ public sealed class StubLuaScriptEngine : ILuaScriptEngine
         LastEvaluatedExpression = null;
     }
 
+    public LuaExecutionResult NextBreakpointCallbackResult { get; set; } = new(true, "true", null, []);
+    public string? LastBreakpointCallbackName { get; private set; }
+    private readonly HashSet<string> _registeredCallbacks = new(StringComparer.OrdinalIgnoreCase);
+
+    public void RegisterBreakpointCallback(string functionName)
+    {
+        _registeredCallbacks.Add(functionName);
+    }
+
+    public Task<LuaExecutionResult> InvokeBreakpointCallbackAsync(
+        string functionName, BreakpointHitEvent hitEvent, CancellationToken ct = default)
+    {
+        LastBreakpointCallbackName = functionName;
+        return Task.FromResult(NextBreakpointCallbackResult);
+    }
+
+    public bool IsCallbackRegistered(string name) => _registeredCallbacks.Contains(name);
+
     public void SimulateOutput(string line) => OutputWritten?.Invoke(line);
 }

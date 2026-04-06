@@ -68,6 +68,7 @@
                                 <MenuItem Header="_Find Results" Click="ShowPanel" Tag="findResults" />
                                 <MenuItem Header="_Hotkeys" Click="ShowPanel" Tag="hotkeys" />
                                 <MenuItem Header="_Journal" Click="ShowPanel" Tag="journal" />
+                                <MenuItem Header="_Lua Console" Click="ShowPanel" Tag="luaConsole" />
                             </MenuItem>
                             <MenuItem Header="S_kills">
                                 <MenuItem Header="_Manage Skills…" Click="OpenSkillsManager" />
@@ -1533,6 +1534,52 @@
                                         </Grid>
                                     </TabItem>
                                 </TabControl>
+                            </avalonDock:LayoutAnchorable>
+
+                            <!-- ═══ Lua Console ═══ -->
+                            <avalonDock:LayoutAnchorable Title="Lua Console" ContentId="luaConsole">
+                                <Grid x:Name="LuaConsoleContent" Background="{DynamicResource SidebarBackground}">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Toolbar -->
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="8,6,8,4">
+                                        <Button Content="Execute" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0"
+                                                Command="{Binding ExecuteCommand}" ToolTip="Execute script (Enter)" />
+                                        <Button Content="Eval" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0"
+                                                Command="{Binding EvaluateLineCommand}" ToolTip="Evaluate expression (Ctrl+Enter)" />
+                                        <Button Content="Clear" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0"
+                                                Command="{Binding ClearCommand}" />
+                                        <Button Content="Reset" Style="{StaticResource ToolbarButton}" Margin="0,0,4,0"
+                                                Command="{Binding ResetEngineCommand}" ToolTip="Reset Lua state" />
+                                    </StackPanel>
+
+                                    <!-- History -->
+                                    <ListView Grid.Row="1" ItemsSource="{Binding History}" Margin="4,0,4,4"
+                                              Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                              BorderBrush="{DynamicResource BorderBrush}" FontFamily="Consolas" FontSize="12">
+                                        <ListView.ItemTemplate>
+                                            <DataTemplate>
+                                                <TextBlock>
+                                                    <Run Text="{Binding Timestamp, Mode=OneTime}" Foreground="{DynamicResource TertiaryForeground}" />
+                                                    <Run Text=" " />
+                                                    <Run Text="{Binding Text, Mode=OneTime}" />
+                                                </TextBlock>
+                                            </DataTemplate>
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+
+                                    <!-- Input -->
+                                    <TextBox Grid.Row="2" Text="{Binding InputText, UpdateSourceTrigger=PropertyChanged}"
+                                             Margin="4,0,4,4" Padding="4" FontFamily="Consolas" FontSize="12"
+                                             AcceptsReturn="True" MinHeight="40" MaxHeight="100"
+                                             Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
+                                             BorderBrush="{DynamicResource BorderBrush}"
+                                             ToolTip="Enter Lua code. Press Enter to execute." />
+                                </Grid>
                             </avalonDock:LayoutAnchorable>
                         </avalonDock:LayoutAnchorablePane>
                     </avalonDock:LayoutPanel>

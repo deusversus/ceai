@@ -14,6 +14,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly TimeSpan _executionTimeout;
     private readonly IEngineFacade? _engineFacade;
     private readonly IAutoAssemblerEngine? _autoAssembler;
+    private readonly ILuaFormHost? _formHost;
     private Script _script;
     private int? _currentProcessId;
 
@@ -28,10 +29,12 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     public MoonSharpLuaEngine(
         IEngineFacade? engineFacade = null,
         IAutoAssemblerEngine? autoAssembler = null,
+        ILuaFormHost? formHost = null,
         TimeSpan? executionTimeout = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
+        _formHost = formHost;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         _script = CreateSandboxedScript();
     }
@@ -103,12 +106,38 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         }
     }
 
+    private readonly HashSet<string> _breakpointCallbacks = new(StringComparer.OrdinalIgnoreCase);
+
+    public void RegisterBreakpointCallback(string functionName)
+    {
+        _breakpointCallbacks.Add(functionName);
+    }
+
+    public async Task<LuaExecutionResult> InvokeBreakpointCallbackAsync(
+        string functionName,
+        BreakpointHitEvent hitEvent,
+        CancellationToken ct = default)
+    {
+        // Build a Lua table from the hit event registers
+        var regTable = new System.Text.StringBuilder();
+        regTable.Append('{');
+        foreach (var (name, value) in hitEvent.RegisterSnapshot)
+            regTable.Append(System.Globalization.CultureInfo.InvariantCulture, $"{name}=\"{value}\",");
+        regTable.Append(System.Globalization.CultureInfo.InvariantCulture, $"Address=\"0x{(ulong)hitEvent.Address:X}\",");
+        regTable.Append(System.Globalization.CultureInfo.InvariantCulture, $"ThreadId={hitEvent.ThreadId}");
+        regTable.Append('}');
+
+        var code = $"return {functionName}({regTable})";
+        return await RunAsync(code, processId: null, evaluate: false, ct).ConfigureAwait(false);
+    }
+
     public void Reset()
     {
         _gate.Wait();
         try
         {
             _currentProcessId = null;
+            _breakpointCallbacks.Clear();
             _script = CreateSandboxedScript();
         }
         finally
@@ -135,6 +164,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
         if (_engineFacade is not null)
             CeApiBindings.Register(script, this, _engineFacade, _autoAssembler);
+
+        if (_formHost is not null)
+            CeFormBindings.Register(script, _formHost);
 
         return script;
     }

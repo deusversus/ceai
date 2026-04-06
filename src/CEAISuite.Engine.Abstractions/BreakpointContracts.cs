@@ -105,6 +105,9 @@ public sealed record BreakpointHitEvent(
     IReadOnlyDictionary<string, string> RegisterSnapshot);
 
 
+/// <summary>Associates a Lua callback function with a breakpoint.</summary>
+public sealed record BreakpointLuaCallback(string FunctionName);
+
 // ─── Conditional Breakpoints ─────────────────────────────────────────
 
 public enum BreakpointConditionType

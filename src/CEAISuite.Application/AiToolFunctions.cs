@@ -41,6 +41,7 @@ public sealed partial class AiToolFunctions(
     Func<IReadOnlyList<AiChatMessage>>? currentChatProvider = null,
     TokenLimits? tokenLimits = null,
     ToolResultStore? toolResultStore = null,
+    ILuaScriptEngine? luaEngine = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;

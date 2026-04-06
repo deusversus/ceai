@@ -39,4 +39,13 @@ public interface ILuaScriptEngine
 
     /// <summary>Fired when a Lua script calls print() or writes output.</summary>
     event Action<string>? OutputWritten;
+
+    /// <summary>Register a Lua function name as a breakpoint callback.</summary>
+    void RegisterBreakpointCallback(string functionName);
+
+    /// <summary>Invoke a registered breakpoint callback with hit event data.</summary>
+    Task<LuaExecutionResult> InvokeBreakpointCallbackAsync(
+        string functionName,
+        BreakpointHitEvent hitEvent,
+        CancellationToken ct = default);
 }

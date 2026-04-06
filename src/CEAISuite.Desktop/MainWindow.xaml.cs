@@ -68,6 +68,7 @@ public partial class MainWindow : Window, IDisposable
         FindResultsViewModel findResultsVm,
         SnapshotsViewModel snapshotsVm,
         JournalViewModel journalVm,
+        LuaConsoleViewModel luaConsoleVm,
         BreakpointsViewModel breakpointsVm,
         ScriptsViewModel scriptsVm,
         ScannerViewModel scannerVm,
@@ -161,6 +162,7 @@ public partial class MainWindow : Window, IDisposable
         FindResultsContent.DataContext = findResultsVm;
         HotkeysContent.DataContext = hotkeysVm;
         JournalContent.DataContext = journalVm;
+        LuaConsoleContent.DataContext = luaConsoleVm;
 
         // Wire Phase 2.5 panel DataContexts
         ScannerContent.DataContext = scannerVm;

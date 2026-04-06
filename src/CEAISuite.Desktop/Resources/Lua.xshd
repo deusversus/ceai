@@ -1,0 +1,138 @@
+<?xml version="1.0"?>
+<SyntaxDefinition name="Lua" extensions=".lua"
+    xmlns="http://icsharpcode.net/sharpdevelop/syntaxdefinition/2008">
+  <Color name="Comment" foreground="#57A64A" />
+  <Color name="String" foreground="#D69D85" />
+  <Color name="Number" foreground="#B5CEA8" />
+  <Color name="Keyword" foreground="#569CD6" />
+  <Color name="BuiltIn" foreground="#DCDCAA" />
+  <Color name="CeGlobal" foreground="#4EC9B0" />
+  <Color name="Operator" foreground="#B4B4B4" />
+
+  <RuleSet>
+    <!-- Block comments -->
+    <Span color="Comment" multiline="true">
+      <Begin>--\[\[</Begin>
+      <End>\]\]</End>
+    </Span>
+
+    <!-- Single-line comments -->
+    <Span color="Comment">
+      <Begin>--</Begin>
+    </Span>
+
+    <!-- Long strings -->
+    <Span color="String" multiline="true">
+      <Begin>\[\[</Begin>
+      <End>\]\]</End>
+    </Span>
+
+    <!-- Double-quoted strings -->
+    <Span color="String">
+      <Begin>"</Begin>
+      <End>"</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <!-- Single-quoted strings -->
+    <Span color="String">
+      <Begin>'</Begin>
+      <End>'</End>
+      <RuleSet>
+        <Span begin="\\" end="." />
+      </RuleSet>
+    </Span>
+
+    <!-- Keywords -->
+    <Keywords color="Keyword">
+      <Word>and</Word>
+      <Word>break</Word>
+      <Word>do</Word>
+      <Word>else</Word>
+      <Word>elseif</Word>
+      <Word>end</Word>
+      <Word>false</Word>
+      <Word>for</Word>
+      <Word>function</Word>
+      <Word>goto</Word>
+      <Word>if</Word>
+      <Word>in</Word>
+      <Word>local</Word>
+      <Word>nil</Word>
+      <Word>not</Word>
+      <Word>or</Word>
+      <Word>repeat</Word>
+      <Word>return</Word>
+      <Word>then</Word>
+      <Word>true</Word>
+      <Word>until</Word>
+      <Word>while</Word>
+    </Keywords>
+
+    <!-- Built-in functions -->
+    <Keywords color="BuiltIn">
+      <Word>print</Word>
+      <Word>type</Word>
+      <Word>tostring</Word>
+      <Word>tonumber</Word>
+      <Word>error</Word>
+      <Word>assert</Word>
+      <Word>pcall</Word>
+      <Word>xpcall</Word>
+      <Word>pairs</Word>
+      <Word>ipairs</Word>
+      <Word>next</Word>
+      <Word>select</Word>
+      <Word>unpack</Word>
+      <Word>rawget</Word>
+      <Word>rawset</Word>
+      <Word>setmetatable</Word>
+      <Word>getmetatable</Word>
+      <Word>require</Word>
+    </Keywords>
+
+    <!-- CE-specific globals -->
+    <Keywords color="CeGlobal">
+      <Word>readInteger</Word>
+      <Word>readSmallInteger</Word>
+      <Word>readQword</Word>
+      <Word>readFloat</Word>
+      <Word>readDouble</Word>
+      <Word>readBytes</Word>
+      <Word>readString</Word>
+      <Word>writeInteger</Word>
+      <Word>writeSmallInteger</Word>
+      <Word>writeQword</Word>
+      <Word>writeFloat</Word>
+      <Word>writeDouble</Word>
+      <Word>writeBytes</Word>
+      <Word>writeString</Word>
+      <Word>openProcess</Word>
+      <Word>getOpenedProcessID</Word>
+      <Word>getProcessId</Word>
+      <Word>getProcessList</Word>
+      <Word>getAddress</Word>
+      <Word>getModuleBaseAddress</Word>
+      <Word>registerSymbol</Word>
+      <Word>unregisterSymbol</Word>
+      <Word>autoAssemble</Word>
+      <Word>autoAssembleCheck</Word>
+      <Word>sleep</Word>
+      <Word>getTickCount</Word>
+      <Word>showMessage</Word>
+      <Word>createForm</Word>
+      <Word>createButton</Word>
+      <Word>createLabel</Word>
+      <Word>createEdit</Word>
+      <Word>createCheckBox</Word>
+      <Word>createTimer</Word>
+    </Keywords>
+
+    <!-- Numbers -->
+    <Rule color="Number">
+      \b0[xX][0-9a-fA-F]+\b|\b\d+\.?\d*([eE][+-]?\d+)?\b
+    </Rule>
+  </RuleSet>
+</SyntaxDefinition>

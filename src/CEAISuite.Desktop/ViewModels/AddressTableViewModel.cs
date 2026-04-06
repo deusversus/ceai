@@ -1035,16 +1035,22 @@ public partial class AddressTableViewModel : ObservableObject
     {
         string? result;
 
+        // Strip dropdown name suffix ("2904 : Dagger" → "2904") for editing
+        var editValue = node.CurrentValue;
+        if (editValue.Contains(" : "))
+            editValue = editValue[..editValue.IndexOf(" : ")];
+
         // Phase 7D: If dropdown is configured, present choices
         if (node.DropDownList is { Count: > 0 })
         {
-            var choices = string.Join(", ", node.DropDownList.Select(kv => $"{kv.Key}={kv.Value}"));
+            var choices = string.Join(", ", node.DropDownList.Select(kv =>
+                node.ShowAsHex ? $"{kv.Key:X}={kv.Value}" : $"{kv.Key}={kv.Value}"));
             result = _dialogService.ShowInput("Change Value",
-                $"Enter value ({choices}):", node.CurrentValue);
+                $"Enter value ({choices}):", editValue);
         }
         else
         {
-            result = _dialogService.ShowInput("Change Value", "New value:", node.CurrentValue);
+            result = _dialogService.ShowInput("Change Value", "New value:", editValue);
         }
         if (result is null) return;
 

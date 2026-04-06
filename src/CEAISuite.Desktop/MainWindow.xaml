@@ -464,17 +464,17 @@
                                         <TextBlock Grid.Column="2" Text="Description" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Label"
                                                    ToolTip="Click to sort by description" />
-                                        <GridSplitter Grid.Column="3" Width="3" Background="Transparent" Cursor="SizeWE"
+                                        <GridSplitter Grid.Column="3" Width="3" Background="{DynamicResource BorderBrush}" Cursor="SizeWE"
                                                       HorizontalAlignment="Center" VerticalAlignment="Stretch" />
                                         <TextBlock Grid.Column="4" Text="Address" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Address"
                                                    ToolTip="Click to sort by address" />
-                                        <GridSplitter Grid.Column="5" Width="3" Background="Transparent" Cursor="SizeWE"
+                                        <GridSplitter Grid.Column="5" Width="3" Background="{DynamicResource BorderBrush}" Cursor="SizeWE"
                                                       HorizontalAlignment="Center" VerticalAlignment="Stretch" />
                                         <TextBlock Grid.Column="6" Text="Type" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Type"
                                                    ToolTip="Click to sort by data type" />
-                                        <GridSplitter Grid.Column="7" Width="3" Background="Transparent" Cursor="SizeWE"
+                                        <GridSplitter Grid.Column="7" Width="3" Background="{DynamicResource BorderBrush}" Cursor="SizeWE"
                                                       HorizontalAlignment="Center" VerticalAlignment="Stretch" />
                                         <TextBlock Grid.Column="8" Text="Value" FontWeight="Bold" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Cursor="Hand" MouseLeftButtonUp="SortAddressTable" Tag="Value"

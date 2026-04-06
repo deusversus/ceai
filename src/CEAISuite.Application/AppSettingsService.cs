@@ -118,6 +118,9 @@ public sealed class AppSettings
     /// Default: false (conservative; enable for lower latency on tool-heavy conversations).
     /// </summary>
     public bool EnableEarlyToolExecution { get; set; }
+
+    /// <summary>Set to true after the first-run welcome dialog has been completed.</summary>
+    public bool FirstRunCompleted { get; set; }
 }
 
 /// <summary>Settings entry for a configured MCP server.</summary>
@@ -163,6 +166,9 @@ public sealed class AppSettingsService
     }
 
     public AppSettings Settings => _settings;
+
+    /// <summary>True when the welcome dialog has never been completed.</summary>
+    public bool IsFirstRun => !_settings.FirstRunCompleted;
 
     /// <summary>Event raised when settings change (after Save).</summary>
     public event Action? SettingsChanged;

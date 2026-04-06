@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Xml.Linq;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.Logging;
 
@@ -177,6 +178,66 @@ public sealed class AddressTableNode : INotifyPropertyChanged
             Notify();
         }
     }
+
+    // CT format gap closure: preserved unknown XML elements for round-trip fidelity
+    /// <summary>Unknown XML elements preserved from the original CT file for lossless round-tripping.</summary>
+    public List<XElement>? PreservedElements { get; set; }
+
+    // CT format gap closure: Options flags
+    /// <summary>CE Options flags (moHideChildren, moActivateChildrenAsWell, etc.).</summary>
+    public CheatEntryOptions Options { get; set; }
+
+    // CT format gap closure: Hotkeys
+    /// <summary>Hotkey bindings from the CT file.</summary>
+    public List<CheatEntryHotkey> Hotkeys { get; set; } = new();
+
+    // CT format gap closure: Rich offsets with Interval/UpdateOnFullRefresh attributes
+    /// <summary>Original CE offset elements with attributes, for export fidelity.</summary>
+    public List<CeOffset>? OriginalOffsets { get; set; }
+
+    // CT format gap closure: LastState attributes
+    /// <summary>Last known real address from the CT file's LastState element.</summary>
+    public string? LastRealAddress { get; set; }
+
+    // CT format gap closure: String config
+    /// <summary>CE String length.</summary>
+    public int? StringLength { get; set; }
+    /// <summary>CE Unicode flag for string entries.</summary>
+    public bool? IsUnicode { get; set; }
+    /// <summary>CE ZeroTerminate flag for string entries.</summary>
+    public bool? ZeroTerminate { get; set; }
+
+    // CT format gap closure: ByteLength
+    /// <summary>CE ByteLength for array-of-byte entries.</summary>
+    public int? ByteLength { get; set; }
+
+    // CT format gap closure: Bit fields
+    /// <summary>CE BitStart for binary/bit display.</summary>
+    public int? BitStart { get; set; }
+    /// <summary>CE BitLength for binary/bit display.</summary>
+    public int? BitLength { get; set; }
+    /// <summary>CE ShowAsBinary flag.</summary>
+    public bool ShowAsBinary { get; set; }
+
+    // CT format gap closure: CustomType
+    /// <summary>CE CustomType name (user-defined types).</summary>
+    public string? CustomTypeName { get; set; }
+
+    // CT format gap closure: DropDownList attributes
+    /// <summary>CE DropDownList DescriptionOnly attribute.</summary>
+    public bool DropDownDescriptionOnly { get; set; }
+    /// <summary>CE DropDownList ReadOnly attribute.</summary>
+    public bool DropDownReadOnly { get; set; }
+    /// <summary>CE DropDownList DisplayValueAsItem attribute.</summary>
+    public bool DropDownDisplayValueAsItem { get; set; }
+
+    // CT format gap closure: Script Async
+    /// <summary>CE AssemblerScript Async attribute.</summary>
+    public bool ScriptAsync { get; set; }
+
+    // CT format gap closure: Comment
+    /// <summary>CE Comment element text.</summary>
+    public string? Comment { get; set; }
 
     // Tree structure
     public ObservableCollection<AddressTableNode> Children { get; } = new();

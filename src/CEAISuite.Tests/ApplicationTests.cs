@@ -1,4 +1,5 @@
 using System.IO;
+using System.Xml.Linq;
 using CEAISuite.Application;
 using CEAISuite.Engine.Abstractions;
 
@@ -1117,5 +1118,516 @@ public class ToolResultStoreTests
         Assert.Equal(1, store.Count);
         Assert.Null(store.Retrieve(h1, 0, 100));
         Assert.NotNull(store.Retrieve(h2, 0, 100));
+    }
+}
+
+public class CtFormatGapClosureTests
+{
+    [Fact]
+    public void RoundTrip_UnknownTableLevelElements_Preserved()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Test""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+    </CheatEntry>
+  </CheatEntries>
+  <UserdefinedSymbols>
+    <SymbolEntry>
+      <Name>mySymbol</Name>
+      <Address>12345678</Address>
+    </SymbolEntry>
+  </UserdefinedSymbols>
+  <Structures>
+    <Structure Name=""PlayerStruct"" AutoFill=""0"" AutoCreate=""1"" />
+  </Structures>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.NotNull(ct.PreservedElements);
+        Assert.Equal(2, ct.PreservedElements.Count);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes, ct.PreservedElements);
+
+        Assert.Contains("UserdefinedSymbols", exported);
+        Assert.Contains("mySymbol", exported);
+        Assert.Contains("Structures", exported);
+        Assert.Contains("PlayerStruct", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_UnknownEntryLevelElements_Preserved()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Test""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <SomeCustomElement>custom data</SomeCustomElement>
+      <AnotherUnknown attr=""val"">nested<child/></AnotherUnknown>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        var entry = ct.Entries[0];
+        Assert.NotNull(entry.PreservedElements);
+        Assert.Equal(2, entry.PreservedElements.Count);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+
+        Assert.Contains("SomeCustomElement", exported);
+        Assert.Contains("custom data", exported);
+        Assert.Contains("AnotherUnknown", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Color_BgrRgbConversion()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Red Entry""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <Color>0000FF</Color>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.Equal("0000FF", ct.Entries[0].Color);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        // BGR 0000FF -> RGB #FF0000
+        Assert.Equal("#FF0000", nodes[0].UserColor);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        // Should convert back to BGR
+        Assert.Contains("<Color>0000FF</Color>", exported);
+    }
+
+    [Fact]
+    public void ConvertBgrToRgb_CorrectConversion()
+    {
+        Assert.Equal("#FF0000", CheatTableParser.ConvertBgrToRgb("0000FF")); // BGR blue -> RGB red
+        Assert.Equal("#0000FF", CheatTableParser.ConvertBgrToRgb("FF0000")); // BGR red -> RGB blue
+        Assert.Equal("#00FF00", CheatTableParser.ConvertBgrToRgb("00FF00")); // green stays
+        Assert.Null(CheatTableParser.ConvertBgrToRgb(null));
+    }
+
+    [Fact]
+    public void ConvertRgbToBgr_CorrectConversion()
+    {
+        Assert.Equal("0000FF", CheatTableParser.ConvertRgbToBgr("#FF0000")); // RGB red -> BGR
+        Assert.Equal("FF0000", CheatTableParser.ConvertRgbToBgr("#0000FF")); // RGB blue -> BGR
+        Assert.Null(CheatTableParser.ConvertRgbToBgr(null));
+    }
+
+    [Fact]
+    public void RoundTrip_Options_Flags()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Group""</Description>
+      <GroupHeader>1</GroupHeader>
+      <Options moHideChildren=""1"" moActivateChildrenAsWell=""1"" moDeactivateChildrenAsWell=""1""/>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        var entry = ct.Entries[0];
+        Assert.True(entry.Options.HasFlag(CheatEntryOptions.HideChildren));
+        Assert.True(entry.Options.HasFlag(CheatEntryOptions.ActivateChildrenAsWell));
+        Assert.True(entry.Options.HasFlag(CheatEntryOptions.DeactivateChildrenAsWell));
+        Assert.False(entry.Options.HasFlag(CheatEntryOptions.RecursiveSetValue));
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.True(nodes[0].Options.HasFlag(CheatEntryOptions.HideChildren));
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("moHideChildren", exported);
+        Assert.Contains("moActivateChildrenAsWell", exported);
+        Assert.Contains("moDeactivateChildrenAsWell", exported);
+        Assert.DoesNotContain("moRecursiveSetValue", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Hotkeys_NestedStructure()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Test""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <Hotkeys>
+        <Hotkey>
+          <Action>Toggle Activation</Action>
+          <ID>1</ID>
+          <Keys>
+            <Key>17</Key>
+            <Key>72</Key>
+          </Keys>
+        </Hotkey>
+        <Hotkey>
+          <Action>Set Value</Action>
+          <Value>999</Value>
+          <ID>2</ID>
+          <Keys>
+            <Key>113</Key>
+          </Keys>
+        </Hotkey>
+      </Hotkeys>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        var entry = ct.Entries[0];
+        Assert.NotNull(entry.Hotkeys);
+        Assert.Equal(2, entry.Hotkeys.Count);
+        Assert.Equal("Toggle Activation", entry.Hotkeys[0].Action);
+        Assert.Equal(2, entry.Hotkeys[0].Keys.Count);
+        Assert.Equal(17, entry.Hotkeys[0].Keys[0]);
+        Assert.Equal(72, entry.Hotkeys[0].Keys[1]);
+        Assert.Equal("Set Value", entry.Hotkeys[1].Action);
+        Assert.Equal("999", entry.Hotkeys[1].Value);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.Equal(2, nodes[0].Hotkeys.Count);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("<Hotkeys>", exported);
+        Assert.Contains("<Action>Toggle Activation</Action>", exported);
+        Assert.Contains("<Key>17</Key>", exported);
+        Assert.Contains("<Key>72</Key>", exported);
+        Assert.Contains("<Value>999</Value>", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_LastState_FullAttributes()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Health""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <LastState Value=""100"" RealAddress=""00400000"" Activated=""1""/>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        var entry = ct.Entries[0];
+        Assert.Equal("100", entry.LastValue);
+        Assert.Equal("00400000", entry.LastRealAddress);
+        Assert.True(entry.LastActivated);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.Equal("00400000", nodes[0].LastRealAddress);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("RealAddress", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_OffsetAttributes()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""PtrVal""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>game.dll+100</Address>
+      <Offsets>
+        <Offset Interval=""60000"" UpdateOnFullRefresh=""1"">B8</Offset>
+        <Offset>10</Offset>
+      </Offsets>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        var entry = ct.Entries[0];
+        Assert.NotNull(entry.RichOffsets);
+        Assert.Equal(2, entry.RichOffsets.Count);
+        Assert.Equal(60000, entry.RichOffsets[0].Interval);
+        Assert.True(entry.RichOffsets[0].UpdateOnFullRefresh);
+        Assert.Null(entry.RichOffsets[1].Interval);
+        Assert.False(entry.RichOffsets[1].UpdateOnFullRefresh);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.NotNull(nodes[0].OriginalOffsets);
+        Assert.Equal(2, nodes[0].OriginalOffsets!.Count);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("Interval=\"60000\"", exported);
+        Assert.Contains("UpdateOnFullRefresh=\"1\"", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_StringConfig()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Name""</Description>
+      <VariableType>String</VariableType>
+      <Address>00400000</Address>
+      <Length>32</Length>
+      <Unicode>1</Unicode>
+      <ZeroTerminate>1</ZeroTerminate>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.Equal(32, ct.Entries[0].StringLength);
+        Assert.True(ct.Entries[0].IsUnicode);
+        Assert.True(ct.Entries[0].ZeroTerminate);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.Equal(32, nodes[0].StringLength);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("<Length>32</Length>", exported);
+        Assert.Contains("<Unicode>1</Unicode>", exported);
+        Assert.Contains("<ZeroTerminate>1</ZeroTerminate>", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_BitFields()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Flag""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <BitStart>3</BitStart>
+      <BitLength>5</BitLength>
+      <ShowAsBinary>1</ShowAsBinary>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.Equal(3, ct.Entries[0].BitStart);
+        Assert.Equal(5, ct.Entries[0].BitLength);
+        Assert.True(ct.Entries[0].ShowAsBinary);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("<BitStart>3</BitStart>", exported);
+        Assert.Contains("<BitLength>5</BitLength>", exported);
+        Assert.Contains("<ShowAsBinary>1</ShowAsBinary>", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_CustomType()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Special""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <CustomType>MySpecialType</CustomType>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.Equal("MySpecialType", ct.Entries[0].CustomTypeName);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("<CustomType>MySpecialType</CustomType>", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_DropDownAttributes()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Item""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <DropDownList DescriptionOnly=""1"" ReadOnly=""1"" DisplayValueAsItem=""1"">0:None
+1:Sword
+2:Shield
+</DropDownList>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.True(ct.Entries[0].DropDownDescriptionOnly);
+        Assert.True(ct.Entries[0].DropDownReadOnly);
+        Assert.True(ct.Entries[0].DropDownDisplayValueAsItem);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.True(nodes[0].DropDownDescriptionOnly);
+        Assert.True(nodes[0].DropDownReadOnly);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("DescriptionOnly=\"1\"", exported);
+        Assert.Contains("ReadOnly=\"1\"", exported);
+        Assert.Contains("DisplayValueAsItem=\"1\"", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_ScriptAsync()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""AsyncScript""</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript Async=""1""><![CDATA[[ENABLE]
+nop
+[DISABLE]]]></AssemblerScript>
+      <Address>0</Address>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.True(ct.Entries[0].ScriptAsync);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.True(nodes[0].ScriptAsync);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("Async=\"1\"", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_Comment()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Health""</Description>
+      <VariableType>4 Bytes</VariableType>
+      <Address>00400000</Address>
+      <Comment>This is the player health address</Comment>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.Equal("This is the player health address", ct.Entries[0].Comment);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        // Comment should map to Notes
+        Assert.Equal("This is the player health address", nodes[0].Notes);
+        Assert.Equal("This is the player health address", nodes[0].Comment);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("<Comment>This is the player health address</Comment>", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_Phase2_ByteLength()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""Bytes""</Description>
+      <VariableType>Array of Byte</VariableType>
+      <Address>00400000</Address>
+      <ByteLength>16</ByteLength>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.Equal(16, ct.Entries[0].ByteLength);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        Assert.Equal(16, nodes[0].ByteLength);
+
+        var exporter = new CheatTableExporter();
+        var exported = exporter.ExportToXml(nodes);
+        Assert.Contains("<ByteLength>16</ByteLength>", exported);
+    }
+
+    [Fact]
+    public void RoundTrip_LastActivated_SetsIsScriptEnabled()
+    {
+        var xml = @"<?xml version=""1.0"" encoding=""utf-8""?>
+<CheatTable CheatEngineTableVersion=""46"">
+  <CheatEntries>
+    <CheatEntry>
+      <ID>0</ID>
+      <Description>""God Mode""</Description>
+      <VariableType>Auto Assembler Script</VariableType>
+      <AssemblerScript><![CDATA[[ENABLE]
+nop
+[DISABLE]]]></AssemblerScript>
+      <Address>0</Address>
+      <LastState Activated=""1""/>
+    </CheatEntry>
+  </CheatEntries>
+</CheatTable>";
+
+        var ct = CheatTableParser.Parse(xml);
+        Assert.True(ct.Entries[0].LastActivated);
+
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
+        // Script entry with LastActivated should have IsScriptEnabled = true
+        Assert.True(nodes[0].IsScriptEnabled);
     }
 }

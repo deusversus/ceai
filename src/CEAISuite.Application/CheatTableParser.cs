@@ -5,6 +5,31 @@ using CEAISuite.Engine.Abstractions;
 namespace CEAISuite.Application;
 
 /// <summary>
+/// Options flags from CE's <Options> element on cheat entries.
+/// Controls group behavior like hiding children, cascading activation, etc.
+/// </summary>
+[Flags]
+public enum CheatEntryOptions
+{
+    None = 0,
+    HideChildren = 1 << 0,
+    ActivateChildrenAsWell = 1 << 1,
+    DeactivateChildrenAsWell = 1 << 2,
+    RecursiveSetValue = 1 << 3,
+    AllowManualCollapseAndExpand = 1 << 4
+}
+
+/// <summary>
+/// Represents a hotkey binding on a cheat entry.
+/// </summary>
+public sealed record CheatEntryHotkey(string Action, IReadOnlyList<int> Keys, string? Value, int Id);
+
+/// <summary>
+/// Represents an offset with optional CE attributes (Interval, UpdateOnFullRefresh).
+/// </summary>
+public sealed record CeOffset(string Value, int? Interval = null, bool UpdateOnFullRefresh = false);
+
+/// <summary>
 /// Represents a single entry parsed from a Cheat Engine .CT (Cheat Table) file.
 /// </summary>
 public sealed record CheatTableEntry(
@@ -22,7 +47,27 @@ public sealed record CheatTableEntry(
     bool ShowAsHex = false,
     IReadOnlyDictionary<int, string>? DropDownList = null,
     string? DropDownListLink = null,
-    string? RawDropDownText = null);
+    string? RawDropDownText = null,
+    IReadOnlyList<XElement>? PreservedElements = null,
+    string? Color = null,
+    CheatEntryOptions Options = CheatEntryOptions.None,
+    IReadOnlyList<CheatEntryHotkey>? Hotkeys = null,
+    string? LastRealAddress = null,
+    bool LastActivated = false,
+    IReadOnlyList<CeOffset>? RichOffsets = null,
+    int? StringLength = null,
+    bool? IsUnicode = null,
+    bool? ZeroTerminate = null,
+    int? ByteLength = null,
+    int? BitStart = null,
+    int? BitLength = null,
+    bool ShowAsBinary = false,
+    string? CustomTypeName = null,
+    bool DropDownDescriptionOnly = false,
+    bool DropDownReadOnly = false,
+    bool DropDownDisplayValueAsItem = false,
+    bool ScriptAsync = false,
+    string? Comment = null);
 
 /// <summary>
 /// Represents a parsed Cheat Engine .CT file.
@@ -32,7 +77,8 @@ public sealed record CheatTableFile(
     int TableVersion,
     IReadOnlyList<CheatTableEntry> Entries,
     int TotalEntryCount,
-    string? LuaScript);
+    string? LuaScript,
+    IReadOnlyList<XElement>? PreservedElements = null);
 
 /// <summary>
 /// Parses Cheat Engine .CT (Cheat Table) XML files into our domain model.
@@ -40,6 +86,24 @@ public sealed record CheatTableFile(
 /// </summary>
 public sealed class CheatTableParser
 {
+    /// <summary>Known top-level element names under the CheatTable root.</summary>
+    private static readonly HashSet<string> KnownRootElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CheatEntries", "LuaScript"
+    };
+
+    /// <summary>Known element names within a CheatEntry.</summary>
+    private static readonly HashSet<string> KnownEntryElements = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "ID", "Description", "GroupHeader", "VariableType", "Address",
+        "Offsets", "LastState", "AssemblerScript", "ShowAsSigned", "ShowAsHex",
+        "DropDownList", "DropDownListLink", "CheatEntries",
+        "Color", "Options", "Hotkeys",
+        "Length", "Unicode", "ZeroTerminate", "ByteLength",
+        "BitStart", "BitLength", "ShowAsBinary",
+        "CustomType", "Comment"
+    };
+
     /// <summary>
     /// Parse a .CT file from a file path.
     /// </summary>
@@ -68,9 +132,16 @@ public sealed class CheatTableParser
 
         var luaScript = root.Element("LuaScript")?.Value;
 
+        // Step 0: Collect unknown root-level elements as preserved XElement clones
+        var preservedRootElements = root.Elements()
+            .Where(e => !KnownRootElements.Contains(e.Name.LocalName))
+            .Select(e => new XElement(e))
+            .ToList();
+
         var totalCount = CountEntries(entries);
 
-        return new CheatTableFile(fileName, tableVersion, entries, totalCount, luaScript);
+        return new CheatTableFile(fileName, tableVersion, entries, totalCount, luaScript,
+            preservedRootElements.Count > 0 ? preservedRootElements : null);
     }
 
     /// <summary>
@@ -88,17 +159,13 @@ public sealed class CheatTableParser
     /// </summary>
     public static IReadOnlyList<AddressTableNode> ToAddressTableNodes(CheatTableFile ctFile)
     {
-        // Build a global lookup of Description → raw DropDownList text for resolving <DropDownListLink>.
-        // CE allows entries to reference another entry's dropdown by its description (e.g., "[List]Item ID").
-        // We store raw text and re-parse with the consumer's ShowAsHex so ambiguous values like "2904"
-        // are correctly interpreted as hex when the consuming entry has ShowAsHex=1.
+        // Build a global lookup of Description -> raw DropDownList text for resolving <DropDownListLink>.
         var dropDownRawLookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         BuildDropDownRawLookup(ctFile.Entries, dropDownRawLookup);
         return ConvertToNodes(ctFile.Entries, null, dropDownRawLookup);
     }
 
-    /// <summary>Recursively collect raw DropDownList text from all entries, keyed by cleaned description.
-    /// Raw text is stored so linked consumers can re-parse with their own ShowAsHex context.</summary>
+    /// <summary>Recursively collect raw DropDownList text from all entries, keyed by cleaned description.</summary>
     private static void BuildDropDownRawLookup(IReadOnlyList<CheatTableEntry> entries, Dictionary<string, string> lookup)
     {
         foreach (var entry in entries)
@@ -109,7 +176,7 @@ public sealed class CheatTableParser
         }
     }
 
-    /// <summary>Parse CE dropdown text ("value:name\n...") into int→string map, interpreting values as hex when showAsHex is true.</summary>
+    /// <summary>Parse CE dropdown text ("value:name\n...") into int->string map, interpreting values as hex when showAsHex is true.</summary>
     internal static Dictionary<int, string>? ParseDropDownText(string? text, bool showAsHex)
     {
         if (string.IsNullOrEmpty(text)) return null;
@@ -133,6 +200,27 @@ public sealed class CheatTableParser
         return dict.Count > 0 ? dict : null;
     }
 
+    /// <summary>Convert BGR hex (e.g. "FF0000") to RGB hex string (e.g. "#0000FF").</summary>
+    internal static string? ConvertBgrToRgb(string? bgrHex)
+    {
+        if (string.IsNullOrWhiteSpace(bgrHex)) return null;
+        var s = bgrHex.Trim();
+        // Pad to 6 chars
+        s = s.PadLeft(6, '0');
+        if (s.Length < 6) return null;
+        // BGR -> RGB: swap first and last byte pairs
+        return $"#{s[4..6]}{s[2..4]}{s[0..2]}";
+    }
+
+    /// <summary>Convert RGB hex string (e.g. "#RRGGBB") to BGR hex (e.g. "BBGGRR").</summary>
+    internal static string? ConvertRgbToBgr(string? rgbHex)
+    {
+        if (string.IsNullOrWhiteSpace(rgbHex)) return null;
+        var s = rgbHex.Trim().TrimStart('#');
+        if (s.Length < 6) return null;
+        return $"{s[4..6]}{s[2..4]}{s[0..2]}";
+    }
+
     private static List<AddressTableNode> ConvertToNodes(
         IReadOnlyList<CheatTableEntry> entries,
         AddressTableNode? parent,
@@ -152,8 +240,16 @@ public sealed class CheatTableParser
                     Parent = parent,
                     ShowAsSigned = entry.ShowAsSigned,
                     ShowAsHex = entry.ShowAsHex,
-                    DropDownList = entry.DropDownList is not null ? new Dictionary<int, string>(entry.DropDownList) : null
+                    DropDownList = entry.DropDownList is not null ? new Dictionary<int, string>(entry.DropDownList) : null,
+                    UserColor = entry.Color is not null ? ConvertBgrToRgb(entry.Color) : null,
+                    Options = entry.Options,
+                    Hotkeys = entry.Hotkeys?.ToList() ?? new List<CheatEntryHotkey>(),
+                    PreservedElements = entry.PreservedElements?.ToList(),
+                    OriginalOffsets = entry.RichOffsets?.ToList(),
+                    Comment = entry.Comment
                 };
+                if (!string.IsNullOrEmpty(entry.Comment))
+                    group.Notes = entry.Comment;
                 foreach (var child in ConvertToNodes(entry.Children, group, dropDownRawLookup))
                     group.Children.Add(child);
                 nodes.Add(group);
@@ -167,10 +263,19 @@ public sealed class CheatTableParser
                 {
                     Address = "(script)",
                     AssemblerScript = entry.AssemblerScript,
-                    Notes = entry.AssemblerScript.Contains("LuaCall") ? "LuaCall script (display only)" : "Auto Assembler script",
-                    Parent = parent
+                    Notes = entry.Comment ?? (entry.AssemblerScript.Contains("LuaCall") ? "LuaCall script (display only)" : "Auto Assembler script"),
+                    Parent = parent,
+                    UserColor = entry.Color is not null ? ConvertBgrToRgb(entry.Color) : null,
+                    Options = entry.Options,
+                    Hotkeys = entry.Hotkeys?.ToList() ?? new List<CheatEntryHotkey>(),
+                    PreservedElements = entry.PreservedElements?.ToList(),
+                    ScriptAsync = entry.ScriptAsync,
+                    LastRealAddress = entry.LastRealAddress,
+                    Comment = entry.Comment
                 };
-                // Also import any children the script entry may have
+                // LastActivated -> IsScriptEnabled
+                if (entry.LastActivated)
+                    scriptNode.IsScriptEnabled = true;
                 foreach (var child in ConvertToNodes(entry.Children, scriptNode, dropDownRawLookup))
                     scriptNode.Children.Add(child);
                 nodes.Add(scriptNode);
@@ -178,7 +283,6 @@ public sealed class CheatTableParser
             }
 
             // CE inheritance: children inherit ShowAsHex / DropDownList from their parent group
-            // when the child entry itself doesn't explicitly set them.
             var effectiveShowAsHex = entry.ShowAsHex || (parent?.ShowAsHex ?? false);
 
             // Resolve DropDownList: own > DropDownListLink (re-parsed with consumer's ShowAsHex) > parent inheritance
@@ -199,12 +303,31 @@ public sealed class CheatTableParser
                 IsPointer = entry.IsPointer,
                 PointerOffsets = entry.PointerOffsets.Select(o => ParseCeOffset(o)).ToList(),
                 IsOffset = entry.Address.TrimStart().StartsWith('+') || entry.Address.TrimStart().StartsWith('-'),
-                Notes = entry.IsPointer ? $"Pointer: [{string.Join(" → ", entry.PointerOffsets)}]" : null,
+                Notes = entry.Comment ?? (entry.IsPointer ? $"Pointer: [{string.Join(" -> ", entry.PointerOffsets)}]" : null),
                 AssemblerScript = entry.AssemblerScript,
                 Parent = parent,
                 ShowAsSigned = entry.ShowAsSigned,
                 ShowAsHex = effectiveShowAsHex,
-                DropDownList = effectiveDropDown
+                DropDownList = effectiveDropDown,
+                UserColor = entry.Color is not null ? ConvertBgrToRgb(entry.Color) : null,
+                Options = entry.Options,
+                Hotkeys = entry.Hotkeys?.ToList() ?? new List<CheatEntryHotkey>(),
+                PreservedElements = entry.PreservedElements?.ToList(),
+                OriginalOffsets = entry.RichOffsets?.ToList(),
+                LastRealAddress = entry.LastRealAddress,
+                StringLength = entry.StringLength,
+                IsUnicode = entry.IsUnicode,
+                ZeroTerminate = entry.ZeroTerminate,
+                ByteLength = entry.ByteLength,
+                BitStart = entry.BitStart,
+                BitLength = entry.BitLength,
+                ShowAsBinary = entry.ShowAsBinary,
+                CustomTypeName = entry.CustomTypeName,
+                DropDownDescriptionOnly = entry.DropDownDescriptionOnly,
+                DropDownReadOnly = entry.DropDownReadOnly,
+                DropDownDisplayValueAsItem = entry.DropDownDisplayValueAsItem,
+                ScriptAsync = entry.ScriptAsync,
+                Comment = entry.Comment
             };
 
             // Import any children
@@ -303,24 +426,38 @@ public sealed class CheatTableParser
 
         // Parse pointer offsets (CE stores them in reverse order)
         var offsets = new List<string>();
+        var richOffsets = new List<CeOffset>();
         var offsetsEl = el.Element("Offsets");
         if (offsetsEl is not null)
         {
             foreach (var offset in offsetsEl.Elements("Offset"))
             {
                 offsets.Add(offset.Value);
+                int? interval = null;
+                bool updateOnFullRefresh = false;
+                if (int.TryParse(offset.Attribute("Interval")?.Value, out var iv))
+                    interval = iv;
+                if (offset.Attribute("UpdateOnFullRefresh")?.Value == "1")
+                    updateOnFullRefresh = true;
+                richOffsets.Add(new CeOffset(offset.Value, interval, updateOnFullRefresh));
             }
         }
 
-        // Parse last known value
+        // Parse last known value + RealAddress + Activated
         string? lastValue = null;
+        string? lastRealAddress = null;
+        bool lastActivated = false;
         var lastStateEl = el.Element("LastState");
         if (lastStateEl is not null)
         {
             lastValue = lastStateEl.Attribute("Value")?.Value;
+            lastRealAddress = lastStateEl.Attribute("RealAddress")?.Value;
+            lastActivated = lastStateEl.Attribute("Activated")?.Value == "1";
         }
 
-        var assemblerScript = el.Element("AssemblerScript")?.Value;
+        var assemblerScriptEl = el.Element("AssemblerScript");
+        var assemblerScript = assemblerScriptEl?.Value;
+        bool scriptAsync = assemblerScriptEl?.Attribute("Async")?.Value == "1";
 
         // CE ShowAsSigned: 0 = unsigned display (default in CE is unsigned)
         var showAsSigned = el.Element("ShowAsSigned")?.Value != "0";
@@ -329,13 +466,88 @@ public sealed class CheatTableParser
         var showAsHex = el.Element("ShowAsHex")?.Value == "1";
 
         // CE DropDownList: newline-separated "value:description" pairs for value-to-name mapping
-        var dropDownText = el.Element("DropDownList")?.Value;
+        var dropDownEl = el.Element("DropDownList");
+        var dropDownText = dropDownEl?.Value;
         var dropDownList = ParseDropDownText(dropDownText, showAsHex);
+        bool dropDownDescriptionOnly = dropDownEl?.Attribute("DescriptionOnly")?.Value == "1";
+        bool dropDownReadOnly = dropDownEl?.Attribute("ReadOnly")?.Value == "1";
+        bool dropDownDisplayValueAsItem = dropDownEl?.Attribute("DisplayValueAsItem")?.Value == "1";
 
         // CE DropDownListLink: reference to another entry's DropDownList by description
         var dropDownListLink = el.Element("DropDownListLink")?.Value;
         if (dropDownListLink is not null)
             dropDownListLink = CleanDescription(dropDownListLink);
+
+        // Color (BGR hex)
+        var color = el.Element("Color")?.Value;
+
+        // Options flags
+        var options = CheatEntryOptions.None;
+        var optionsEl = el.Element("Options");
+        if (optionsEl is not null)
+        {
+            if (optionsEl.Attribute("moHideChildren")?.Value == "1")
+                options |= CheatEntryOptions.HideChildren;
+            if (optionsEl.Attribute("moActivateChildrenAsWell")?.Value == "1")
+                options |= CheatEntryOptions.ActivateChildrenAsWell;
+            if (optionsEl.Attribute("moDeactivateChildrenAsWell")?.Value == "1")
+                options |= CheatEntryOptions.DeactivateChildrenAsWell;
+            if (optionsEl.Attribute("moRecursiveSetValue")?.Value == "1")
+                options |= CheatEntryOptions.RecursiveSetValue;
+            if (optionsEl.Attribute("moAllowManualCollapseAndExpand")?.Value == "1")
+                options |= CheatEntryOptions.AllowManualCollapseAndExpand;
+        }
+
+        // Hotkeys
+        var hotkeys = new List<CheatEntryHotkey>();
+        var hotkeysEl = el.Element("Hotkeys");
+        if (hotkeysEl is not null)
+        {
+            foreach (var hkEl in hotkeysEl.Elements("Hotkey"))
+            {
+                var action = hkEl.Element("Action")?.Value ?? "";
+                var hkId = int.TryParse(hkEl.Element("ID")?.Value, out var hid) ? hid : 0;
+                var value = hkEl.Element("Value")?.Value;
+                var keys = new List<int>();
+                var keysEl = hkEl.Element("Keys");
+                if (keysEl is not null)
+                {
+                    foreach (var keyEl in keysEl.Elements("Key"))
+                    {
+                        if (int.TryParse(keyEl.Value, out var k))
+                            keys.Add(k);
+                    }
+                }
+                hotkeys.Add(new CheatEntryHotkey(action, keys, value, hkId));
+            }
+        }
+
+        // Phase 2: String config
+        int? stringLength = null;
+        if (int.TryParse(el.Element("Length")?.Value, out var sl))
+            stringLength = sl;
+        bool? isUnicode = el.Element("Unicode")?.Value is string uv ? uv == "1" : null;
+        bool? zeroTerminate = el.Element("ZeroTerminate")?.Value is string zt ? zt == "1" : null;
+
+        // ByteLength
+        int? byteLength = null;
+        if (int.TryParse(el.Element("ByteLength")?.Value, out var bl))
+            byteLength = bl;
+
+        // Bit fields
+        int? bitStart = null;
+        if (int.TryParse(el.Element("BitStart")?.Value, out var bs))
+            bitStart = bs;
+        int? bitLength = null;
+        if (int.TryParse(el.Element("BitLength")?.Value, out var blen))
+            bitLength = blen;
+        bool showAsBinary = el.Element("ShowAsBinary")?.Value == "1";
+
+        // CustomType
+        var customTypeName = el.Element("CustomType")?.Value;
+
+        // Comment
+        var comment = el.Element("Comment")?.Value;
 
         // Parse nested child entries
         var children = new List<CheatTableEntry>();
@@ -347,10 +559,36 @@ public sealed class CheatTableParser
 
         var dataType = MapVariableType(variableType);
 
+        // Step 0: Collect unknown entry-level elements
+        var preservedElements = el.Elements()
+            .Where(e => !KnownEntryElements.Contains(e.Name.LocalName))
+            .Select(e => new XElement(e))
+            .ToList();
+
         return new CheatTableEntry(
             id, description, address, dataType, lastValue,
             isPointer, offsets, isGroupHeader, assemblerScript, children,
-            showAsSigned, showAsHex, dropDownList, dropDownListLink, dropDownText);
+            showAsSigned, showAsHex, dropDownList, dropDownListLink, dropDownText,
+            PreservedElements: preservedElements.Count > 0 ? preservedElements : null,
+            Color: color,
+            Options: options,
+            Hotkeys: hotkeys.Count > 0 ? hotkeys : null,
+            LastRealAddress: lastRealAddress,
+            LastActivated: lastActivated,
+            RichOffsets: richOffsets.Count > 0 ? richOffsets : null,
+            StringLength: stringLength,
+            IsUnicode: isUnicode,
+            ZeroTerminate: zeroTerminate,
+            ByteLength: byteLength,
+            BitStart: bitStart,
+            BitLength: bitLength,
+            ShowAsBinary: showAsBinary,
+            CustomTypeName: customTypeName,
+            DropDownDescriptionOnly: dropDownDescriptionOnly,
+            DropDownReadOnly: dropDownReadOnly,
+            DropDownDisplayValueAsItem: dropDownDisplayValueAsItem,
+            ScriptAsync: scriptAsync,
+            Comment: comment);
     }
 
     private static MemoryDataType MapVariableType(string ceType) =>
@@ -371,7 +609,7 @@ public sealed class CheatTableParser
 
     private static string CleanDescription(string raw)
     {
-        // CE wraps descriptions in quotes: "Health" → Health
+        // CE wraps descriptions in quotes: "Health" -> Health
         if (raw.Length >= 2 && raw[0] == '"' && raw[^1] == '"')
             return raw[1..^1];
         return raw;

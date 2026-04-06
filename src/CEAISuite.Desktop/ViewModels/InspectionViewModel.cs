@@ -6,7 +6,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class InspectionViewModel : ObservableObject
+public partial class InspectionViewModel : ObservableObject, IDisposable
 {
     private readonly WorkspaceDashboardService _dashboardService;
     private readonly IProcessContext _processContext;
@@ -15,6 +15,7 @@ public partial class InspectionViewModel : ObservableObject
     private readonly AddressTableService _addressTableService;
     private readonly IDialogService _dialogService;
     private readonly IOutputLog _outputLog;
+    private readonly EventSubscriptions _subs = new();
 
     public InspectionViewModel(
         WorkspaceDashboardService dashboardService,
@@ -33,13 +34,11 @@ public partial class InspectionViewModel : ObservableObject
         _dialogService = dialogService;
         _outputLog = outputLog;
 
-        _processContext.ProcessChanged += OnProcessChanged;
+        _subs.Subscribe(h => _processContext.ProcessChanged += h, h => _processContext.ProcessChanged -= h,
+            () => CurrentInspection = _processContext.CurrentInspection);
     }
 
-    private void OnProcessChanged() => CurrentInspection = _processContext.CurrentInspection;
-
-    /// <summary>Unsubscribe from events to prevent leaks on shutdown.</summary>
-    public void Cleanup() => _processContext.ProcessChanged -= OnProcessChanged;
+    public void Dispose() => _subs.Dispose();
 
     [ObservableProperty]
     private string _address = "0x0";

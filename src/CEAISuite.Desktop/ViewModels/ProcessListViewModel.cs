@@ -6,11 +6,12 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class ProcessListViewModel : ObservableObject
+public partial class ProcessListViewModel : ObservableObject, IDisposable
 {
     private readonly WorkspaceDashboardService _dashboardService;
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
+    private readonly EventSubscriptions _subs = new();
 
     private List<RunningProcessOverview> _allProcesses = [];
 
@@ -23,8 +24,10 @@ public partial class ProcessListViewModel : ObservableObject
         _processContext = processContext;
         _outputLog = outputLog;
 
-        _processContext.ProcessChanged += OnProcessChanged;
+        _subs.Subscribe(h => _processContext.ProcessChanged += h, h => _processContext.ProcessChanged -= h, OnProcessChanged);
     }
+
+    public void Dispose() => _subs.Dispose();
 
     [ObservableProperty]
     private ObservableCollection<RunningProcessOverview> _processes = new();
@@ -123,6 +126,4 @@ public partial class ProcessListViewModel : ObservableObject
         Processes = new ObservableCollection<RunningProcessOverview>(filtered);
     }
 
-    /// <summary>Unsubscribe from events to prevent leaks on shutdown.</summary>
-    public void Cleanup() => _processContext.ProcessChanged -= OnProcessChanged;
 }

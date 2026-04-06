@@ -41,13 +41,7 @@ public partial class MainWindow : Window
     private readonly Dictionary<string, object> _closedPanelContent = new();
     private readonly Dictionary<string, object> _xamlPanelContent = new();
 
-    // ── Stored event handlers (for unsubscription in OnClosed) ──
-    private Action<string>? _statusChangedHandler;
-    private Action? _chatListChangedHandler;
-    private Action? _settingsChangedHandler;
-    private Action<AppTheme>? _themeChangedHandler;
-    private Action<string, string>? _contextRequestedHandler;
-    private IAiContextService? _aiContextService;
+    private readonly EventSubscriptions _subs = new();
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
@@ -129,8 +123,8 @@ public partial class MainWindow : Window
         ThemeManager.ApplyTheme(savedTheme);
         ApplyDockTheme(ThemeManager.ResolvedTheme);
         UpdateSystemSelectionColors();
-        _themeChangedHandler = t => { ApplyDockTheme(t); UpdateSystemSelectionColors(); };
-        ThemeManager.ThemeChanged += _themeChangedHandler;
+        _subs.Subscribe<AppTheme>(h => ThemeManager.ThemeChanged += h, h => ThemeManager.ThemeChanged -= h,
+            t => { ApplyDockTheme(t); UpdateSystemSelectionColors(); });
 
         // Restore saved panel layout (must happen after InitializeComponent + theme)
         RestoreLayout();
@@ -150,15 +144,12 @@ public partial class MainWindow : Window
         ApplyDensityPreset(_appSettingsService.Settings.DensityPreset ?? "Balanced");
 
         // Live status updates from AI agent
-        _statusChangedHandler = status =>
-        {
-            Dispatcher.BeginInvoke(() =>
+        _subs.Subscribe<string>(h => _aiOperatorService.StatusChanged += h, h => _aiOperatorService.StatusChanged -= h,
+            status => Dispatcher.BeginInvoke(() =>
             {
                 _aiOperatorVm.StatusText = status;
                 _mainVm.AppendOutputLog("Agent", "Info", status);
-            });
-        };
-        _aiOperatorService.StatusChanged += _statusChangedHandler;
+            }));
         OutputLogList.ItemsSource = _outputLogEntries;
 
         // Wire bottom-panel DataContexts via x:Name content roots
@@ -244,20 +235,14 @@ public partial class MainWindow : Window
         };
 
         // Refresh chat switcher when chats change
-        _chatListChangedHandler = () =>
-        {
-            Dispatcher.BeginInvoke(() => _aiOperatorVm.RefreshChatSwitcher());
-        };
-        _aiOperatorService.ChatListChanged += _chatListChangedHandler;
+        _subs.Subscribe(h => _aiOperatorService.ChatListChanged += h, h => _aiOperatorService.ChatListChanged -= h,
+            () => Dispatcher.BeginInvoke(() => _aiOperatorVm.RefreshChatSwitcher()));
 
-        _settingsChangedHandler = () =>
-        {
-            Dispatcher.Invoke(() => _mainVm.HandleSettingsChanged());
-        };
-        _appSettingsService.SettingsChanged += _settingsChangedHandler;
+        _subs.Subscribe(h => _appSettingsService.SettingsChanged += h, h => _appSettingsService.SettingsChanged -= h,
+            () => Dispatcher.Invoke(() => _mainVm.HandleSettingsChanged()));
 
         // Wire MainViewModel UI action requests
-        _mainVm.UiActionRequested += OnMainVmUiAction;
+        _subs.Add(() => _mainVm.UiActionRequested += OnMainVmUiAction, () => _mainVm.UiActionRequested -= OnMainVmUiAction);
 
         // Sync Dashboard → DataContext
         _mainVm.PropertyChanged += (_, args) =>
@@ -281,14 +266,13 @@ public partial class MainWindow : Window
         };
 
         // Wire universal "Ask AI" context service
-        _aiContextService = aiContextService;
-        _contextRequestedHandler = (label, context) =>
-        {
-            _aiOperatorVm.AddAttachment(label, context);
-            ActivateAnchorable("aiOperator");
-            AiChatInputTextBox.Focus();
-        };
-        aiContextService.ContextRequested += _contextRequestedHandler;
+        _subs.Subscribe<string, string>(h => aiContextService.ContextRequested += h, h => aiContextService.ContextRequested -= h,
+            (label, context) =>
+            {
+                _aiOperatorVm.AddAttachment(label, context);
+                ActivateAnchorable("aiOperator");
+                AiChatInputTextBox.Focus();
+            });
 
         DataContext = _mainVm.Dashboard;
         Loaded += OnLoaded;
@@ -398,23 +382,13 @@ public partial class MainWindow : Window
         _mainVm.OnClosing();
         _hotkeyService.Dispose();
 
-        // Unsubscribe from all service/static events to allow clean GC
-        if (_themeChangedHandler is not null)
-            ThemeManager.ThemeChanged -= _themeChangedHandler;
-        if (_statusChangedHandler is not null)
-            _aiOperatorService.StatusChanged -= _statusChangedHandler;
-        if (_chatListChangedHandler is not null)
-            _aiOperatorService.ChatListChanged -= _chatListChangedHandler;
-        if (_settingsChangedHandler is not null)
-            _appSettingsService.SettingsChanged -= _settingsChangedHandler;
-        if (_contextRequestedHandler is not null && _aiContextService is not null)
-            _aiContextService.ContextRequested -= _contextRequestedHandler;
-        _mainVm.UiActionRequested -= OnMainVmUiAction;
+        // Unsubscribe all tracked event subscriptions (window + service events)
+        _subs.Dispose();
 
-        // Clean up ViewModel event subscriptions
-        _inspectionVm.Cleanup();
-        _processListVm.Cleanup();
-        _memoryBrowserVm.Cleanup();
+        // Dispose child ViewModels (unsubscribes their own event subscriptions)
+        _inspectionVm.Dispose();
+        _processListVm.Dispose();
+        _memoryBrowserVm.Dispose();
 
         base.OnClosed(e);
     }

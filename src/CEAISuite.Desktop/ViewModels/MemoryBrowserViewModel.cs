@@ -12,7 +12,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class MemoryBrowserViewModel : ObservableObject
+public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
 {
     private readonly IEngineFacade _engine;
     private readonly IProcessContext _processContext;
@@ -26,6 +26,7 @@ public partial class MemoryBrowserViewModel : ObservableObject
     private readonly StructureDissectorService _dissectorService;
     private readonly CodeInjectionTemplateService _codeInjection;
     private readonly HexEditUndoService _undoService = new();
+    private readonly EventSubscriptions _subs = new();
 
     private DispatcherTimer? _autoTimer;
     private DispatcherTimer? _editResumeTimer;
@@ -59,8 +60,7 @@ public partial class MemoryBrowserViewModel : ObservableObject
         _dissectorService = dissectorService;
         _codeInjection = codeInjection;
 
-        _processContext.ProcessChanged += OnProcessChanged;
-        Bookmarks.CollectionChanged += (_, _) => OnPropertyChanged(nameof(BookmarkAddresses));
+        _subs.Subscribe(h => _processContext.ProcessChanged += h, h => _processContext.ProcessChanged -= h, OnProcessChanged);
     }
 
     // ── Observable Properties ──
@@ -985,10 +985,9 @@ public partial class MemoryBrowserViewModel : ObservableObject
             _ = ReadMemoryAsync();
     }
 
-    /// <summary>Unsubscribe from events to prevent leaks on shutdown.</summary>
-    public void Cleanup()
+    public void Dispose()
     {
         StopAutoRefresh();
-        _processContext.ProcessChanged -= OnProcessChanged;
+        _subs.Dispose();
     }
 }

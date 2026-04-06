@@ -17,8 +17,9 @@ namespace CEAISuite.Desktop.ViewModels;
 /// process attach/detach, undo/redo, AI configuration, and menu-bar commands.
 /// UI-specific code (AvalonDock layout, theme, density, drag-drop, WndProc) stays in MainWindow.
 /// </summary>
-public partial class MainViewModel : ObservableObject
+public partial class MainViewModel : ObservableObject, IDisposable
 {
+    private readonly EventSubscriptions _subs = new();
     private readonly string _databasePath;
     private readonly WorkspaceDashboardService _dashboardService;
     private readonly AddressTableService _addressTableService;
@@ -112,20 +113,21 @@ public partial class MainViewModel : ObservableObject
         _dispatcher = dispatcher;
 
         // Sync toolbar combo selection when process attach/detach state changes
-        _processContext.ProcessChanged += OnProcessContextChanged;
+        _subs.Subscribe(h => _processContext.ProcessChanged += h, h => _processContext.ProcessChanged -= h, OnProcessContextChanged);
 
         // Phase 6: Status bar — token usage updates when AI status changes
-        _aiOperatorService.StatusChanged += OnAiStatusChanged;
+        _subs.Subscribe<string>(h => _aiOperatorService.StatusChanged += h, h => _aiOperatorService.StatusChanged -= h, OnAiStatusChanged);
 
         // Phase 6: Status bar — scan status
-        _scannerVm.PropertyChanged += (_, args) =>
+        System.ComponentModel.PropertyChangedEventHandler scanHandler = (_, args) =>
         {
             if (args.PropertyName == nameof(ScannerViewModel.ScanStatus))
                 StatusBarScanText = _scannerVm.ScanStatus ?? "";
         };
+        _subs.Add(() => _scannerVm.PropertyChanged += scanHandler, () => _scannerVm.PropertyChanged -= scanHandler);
 
         // Phase 6: Status bar — watchdog rollback alerts
-        _watchdog.OnAutoRollback += OnWatchdogRollback;
+        _subs.Add(() => _watchdog.OnAutoRollback += OnWatchdogRollback, () => _watchdog.OnAutoRollback -= OnWatchdogRollback);
 
         // Wire AI operator with dynamic context injection
         _aiOperatorService.SetContextProvider(BuildAiContext);
@@ -800,10 +802,10 @@ public partial class MainViewModel : ObservableObject
 
     public void OnClosing()
     {
-        _processContext.ProcessChanged -= OnProcessContextChanged;
-        _aiOperatorService.StatusChanged -= OnAiStatusChanged;
-        _watchdog.OnAutoRollback -= OnWatchdogRollback;
         _addressTableVm.StopAutoRefresh();
         _aiOperatorService.SaveCurrentChat();
+        Dispose();
     }
+
+    public void Dispose() => _subs.Dispose();
 }

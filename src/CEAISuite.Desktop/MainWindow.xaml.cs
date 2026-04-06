@@ -46,7 +46,7 @@ public partial class MainWindow : Window, IDisposable
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 18; // v18 = widen left sidebar from 250 → 420
+    private const int LayoutVersion = 19; // v19 = add Lua Console center document tab
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -140,6 +140,11 @@ public partial class MainWindow : Window, IDisposable
         {
             if (args.Anchorable is { ContentId: not null, Content: not null })
                 _closedPanelContent[args.Anchorable.ContentId] = args.Anchorable.Content;
+        };
+        DockManager.DocumentClosing += (_, args) =>
+        {
+            if (args.Document is { ContentId: not null, Content: not null })
+                _closedPanelContent[args.Document.ContentId] = args.Document.Content;
         };
 
         // Apply saved density preset (after layout restore so it can override visibility)
@@ -1302,21 +1307,41 @@ public partial class MainWindow : Window, IDisposable
 
         if (content is not null)
         {
-            var restored = new LayoutAnchorable
+            // Center document tabs must be restored as LayoutDocument, not LayoutAnchorable
+            if (IsDocumentPanel(contentId))
             {
-                ContentId = contentId,
-                Title = GetPanelTitle(contentId),
-                Content = content
-            };
-            var targetPane = FindTargetPaneForContentId(contentId);
-            if (targetPane is not null)
-                targetPane.Children.Add(restored);
+                var restoredDoc = new LayoutDocument
+                {
+                    ContentId = contentId,
+                    Title = GetPanelTitle(contentId),
+                    Content = content
+                };
+                var docPane = DockManager.Layout
+                    .Descendents()
+                    .OfType<LayoutDocumentPane>()
+                    .FirstOrDefault();
+                if (docPane is not null)
+                    docPane.Children.Add(restoredDoc);
+                restoredDoc.IsActive = true;
+            }
             else
             {
-                var newPane = new LayoutAnchorablePane(restored);
-                DockManager.Layout.RootPanel?.Children.Add(newPane);
+                var restored = new LayoutAnchorable
+                {
+                    ContentId = contentId,
+                    Title = GetPanelTitle(contentId),
+                    Content = content
+                };
+                var targetPane = FindTargetPaneForContentId(contentId);
+                if (targetPane is not null)
+                    targetPane.Children.Add(restored);
+                else
+                {
+                    var newPane = new LayoutAnchorablePane(restored);
+                    DockManager.Layout.RootPanel?.Children.Add(newPane);
+                }
+                restored.IsActive = true;
             }
-            restored.IsActive = true;
         }
     }
 
@@ -1334,6 +1359,7 @@ public partial class MainWindow : Window, IDisposable
         "pointerScanner" => "Pointer Scanner",
         "scriptEditor" => "Script Editor",
         "debugger" => "Debugger",
+        "luaConsole" => "Lua Console",
         "breakpoints" => "Breakpoints",
         "scripts" => "Scripts",
         "snapshots" => "Snapshots",
@@ -1454,6 +1480,12 @@ public partial class MainWindow : Window, IDisposable
         MessageBox.Show("Layout reset. Restart the application to apply the default layout.",
             "Reset Layout", MessageBoxButton.OK, MessageBoxImage.Information);
     }
+
+    /// <summary>Center document tabs — restored as LayoutDocument, not LayoutAnchorable.</summary>
+    private static bool IsDocumentPanel(string contentId) => contentId is
+        "addressTable" or "inspection" or "memoryBrowser" or "disassembler"
+        or "structureDissector" or "pointerScanner" or "scriptEditor"
+        or "debugger" or "luaConsole";
 
     private LayoutAnchorablePane? FindTargetPaneForContentId(string contentId)
     {

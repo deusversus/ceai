@@ -404,7 +404,11 @@ public partial class MainWindow : Window, IDisposable
 
     private async void InspectSelectedProcess(object sender, RoutedEventArgs e)
     {
-        if (DataContext is not WorkspaceDashboard) return;
+        if (DataContext is not WorkspaceDashboard)
+        {
+            _outputLog.Append("Attach", "Error", $"InspectSelectedProcess: DataContext is {DataContext?.GetType().Name ?? "null"}, expected WorkspaceDashboard. Attach aborted.");
+            return;
+        }
         await _mainVm.InspectSelectedProcessAsync();
     }
 
@@ -880,6 +884,7 @@ public partial class MainWindow : Window, IDisposable
     {
         if (ProcessComboBox.SelectedItem is ProcessComboItem item)
         {
+            _outputLog.Append("Attach", "Info", $"CmdAttachProcess: combo selected PID {item.Pid} ({item.Name})");
             // Find the matching process in the Processes tab list and select it
             var match = _processListVm.Processes.FirstOrDefault(p => p.Id == item.Pid);
             if (match is not null)
@@ -888,6 +893,11 @@ public partial class MainWindow : Window, IDisposable
                 InspectSelectedProcess(sender, e);
                 return;
             }
+            _outputLog.Append("Attach", "Warning", $"CmdAttachProcess: PID {item.Pid} not found in process list ({_processListVm.Processes.Count} processes). Stale combo selection?");
+        }
+        else
+        {
+            _outputLog.Append("Attach", "Warning", $"CmdAttachProcess: no combo selection (SelectedItem={ProcessComboBox.SelectedItem?.GetType().Name ?? "null"})");
         }
         StatusBarCenter.Text = "Select a process from the dropdown first";
     }

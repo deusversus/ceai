@@ -46,6 +46,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly ProcessWatchdogService _watchdog;
     private readonly IScreenCaptureEngine _screenCaptureEngine;
     private readonly ScriptGenerationService _scriptGenerationService;
+    private readonly UpdateService _updateService;
     private readonly IDispatcherService _dispatcher;
     private readonly ILogger<MainViewModel> _logger;
 
@@ -71,6 +72,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ProcessWatchdogService watchdog,
         IScreenCaptureEngine screenCaptureEngine,
         ScriptGenerationService scriptGenerationService,
+        UpdateService updateService,
         IDispatcherService dispatcher,
         ILogger<MainViewModel> logger)
     {
@@ -112,6 +114,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             dispatcher.InvokeAsync(() => outputLog.Append(source, level, msg));
         _screenCaptureEngine = screenCaptureEngine;
         _scriptGenerationService = scriptGenerationService;
+        _updateService = updateService;
         _dispatcher = dispatcher;
 
         // Sync toolbar combo selection when process attach/detach state changes
@@ -792,6 +795,109 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
         UiActionRequested?.Invoke("SaveReport", markdown);
         return Task.CompletedTask;
+    }
+
+    // ── Auto-Update ──
+
+    [ObservableProperty]
+    private bool _isUpdateAvailable;
+
+    [ObservableProperty]
+    private string _updateMessage = string.Empty;
+
+    [ObservableProperty]
+    private UpdateService.UpdateInfo? _pendingUpdate;
+
+    [RelayCommand]
+    private async Task ApplyUpdateAsync()
+    {
+        if (PendingUpdate is null) return;
+        try
+        {
+            var update = PendingUpdate;
+            UpdateMessage = "Downloading update...";
+            var zipPath = await _updateService.DownloadUpdateAsync(
+                update,
+                new Progress<double>(p =>
+                    _dispatcher.Invoke(() => UpdateMessage = $"Downloading... {p:P0}")));
+
+            if (!UpdateService.VerifyChecksum(zipPath, update.Checksum))
+            {
+                UpdateMessage = "Checksum verification failed. Update aborted.";
+                return;
+            }
+
+            UpdateMessage = "Applying update...";
+            UpdateService.ApplyUpdate(zipPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Update failed");
+            UpdateMessage = $"Update failed: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private void SkipUpdate()
+    {
+        if (PendingUpdate is not null)
+        {
+            _appSettingsService.Settings.SkippedVersion = PendingUpdate.Version;
+            _appSettingsService.Save();
+        }
+        IsUpdateAvailable = false;
+        PendingUpdate = null;
+        UpdateMessage = string.Empty;
+    }
+
+    [RelayCommand]
+    private async Task CheckForUpdatesAsync()
+    {
+        try
+        {
+            var update = await _updateService.CheckForUpdateAsync();
+            if (update is null)
+            {
+                StatusBarCenterText = "You are running the latest version.";
+                return;
+            }
+
+            PendingUpdate = update;
+            UpdateMessage = $"Version {update.Version} is available ({update.SizeBytes / 1024.0 / 1024.0:F1} MB)";
+            IsUpdateAvailable = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Update check failed");
+            StatusBarCenterText = $"Update check failed: {ex.Message}";
+        }
+    }
+
+    public async Task CheckForUpdatesOnStartupAsync()
+    {
+        if (!_appSettingsService.Settings.CheckForUpdatesOnStartup)
+            return;
+
+        try
+        {
+            var update = await _updateService.CheckForUpdateAsync();
+            if (update is null) return;
+
+            // Skip if user already skipped this version
+            if (string.Equals(_appSettingsService.Settings.SkippedVersion, update.Version, StringComparison.OrdinalIgnoreCase))
+                return;
+
+            _dispatcher.Invoke(() =>
+            {
+                PendingUpdate = update;
+                UpdateMessage = $"Version {update.Version} is available ({update.SizeBytes / 1024.0 / 1024.0:F1} MB)";
+                IsUpdateAvailable = true;
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Startup update check failed");
+        }
     }
 
     // ── Lifecycle ──

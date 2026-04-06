@@ -162,6 +162,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ProcessWatchdogService>();
         services.AddSingleton<OperationJournal>();
         services.AddSingleton<AiChatStore>();
+        services.AddSingleton<UpdateService>();
 
         // ── Settings (needs .Load() called) ──
         services.AddSingleton<AppSettingsService>(sp =>

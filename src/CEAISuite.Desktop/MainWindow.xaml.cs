@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -18,7 +19,7 @@ using ICSharpCode.AvalonEdit.Highlighting.Xshd;
 
 namespace CEAISuite.Desktop;
 
-public partial class MainWindow : Window
+public partial class MainWindow : Window, IDisposable
 {
     private readonly GlobalHotkeyService _hotkeyService;
     private readonly AppSettingsService _appSettingsService;
@@ -374,6 +375,12 @@ public partial class MainWindow : Window
         if (msg == WM_HOTKEY)
             handled = _hotkeyService.HandleHotkeyMessage(wParam.ToInt32());
         return IntPtr.Zero;
+    }
+
+    public void Dispose()
+    {
+        _subs.Dispose();
+        GC.SuppressFinalize(this);
     }
 
     protected override void OnClosed(EventArgs e)
@@ -805,7 +812,7 @@ public partial class MainWindow : Window
         window.ShowDialog();
     }
 
-    private void OpenSkillsFolder(object sender, RoutedEventArgs e) => _mainVm.OpenSkillsFolder();
+    private void OpenSkillsFolder(object sender, RoutedEventArgs e) => MainViewModel.OpenSkillsFolder();
 
     private void ReloadSkills(object sender, RoutedEventArgs e)
     {
@@ -1101,10 +1108,10 @@ public partial class MainWindow : Window
         if (e.DataObject.GetDataPresent(DataFormats.UnicodeText))
         {
             var text = e.DataObject.GetData(DataFormats.UnicodeText) as string;
-            if (text is not null && (text.Contains('\n') || text.Length > 300))
+            if (text is not null && (text.Contains('\n', StringComparison.Ordinal) || text.Length > 300))
             {
                 e.CancelCommand();
-                _aiOperatorVm.AddAttachment(text.Contains('\n') ? "Pasted" : "Pasted text", text);
+                _aiOperatorVm.AddAttachment(text.Contains('\n', StringComparison.Ordinal) ? "Pasted" : "Pasted text", text);
             }
         }
     }
@@ -1315,7 +1322,7 @@ public partial class MainWindow : Window
             Directory.CreateDirectory(dir);
             var serializer = new XmlLayoutSerializer(DockManager);
             serializer.Serialize(LayoutFilePath);
-            File.WriteAllText(LayoutVersionPath, LayoutVersion.ToString());
+            File.WriteAllText(LayoutVersionPath, LayoutVersion.ToString(CultureInfo.InvariantCulture));
         }
         catch (Exception ex)
         {
@@ -1345,8 +1352,8 @@ public partial class MainWindow : Window
             if (!File.Exists(LayoutFilePath)) return;
 
             var savedVersion = 0;
-            try { if (File.Exists(LayoutVersionPath)) savedVersion = int.Parse(File.ReadAllText(LayoutVersionPath).Trim()); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Could not parse saved layout version from {Path}", LayoutVersionPath); }
+            try { if (File.Exists(LayoutVersionPath)) savedVersion = int.Parse(File.ReadAllText(LayoutVersionPath).Trim(), CultureInfo.InvariantCulture); }
+            catch (Exception ex) { if (_logger.IsEnabled(LogLevel.Debug)) _logger.LogDebug(ex, "Could not parse saved layout version from {Path}", LayoutVersionPath); }
             if (savedVersion < LayoutVersion)
             {
                 File.Delete(LayoutFilePath);

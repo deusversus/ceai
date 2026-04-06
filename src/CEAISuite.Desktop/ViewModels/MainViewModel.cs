@@ -775,7 +775,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var inspection = Dashboard.CurrentInspection;
-        var markdown = _scriptGenerationService.SummarizeInvestigation(
+        var markdown = ScriptGenerationService.SummarizeInvestigation(
             inspection.ProcessName,
             inspection.ProcessId,
             _addressTableService.Entries.ToList(),

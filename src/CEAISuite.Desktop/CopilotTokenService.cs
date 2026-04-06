@@ -389,7 +389,7 @@ internal sealed class CopilotTokenService : IDisposable
                 if (string.IsNullOrEmpty(id)) continue;
 
                 // Catalog IDs are "publisher/model" — strip prefix for API use
-                var shortId = stripPublisher && id.Contains('/') ? id[(id.LastIndexOf('/') + 1)..] : id;
+                var shortId = stripPublisher && id.Contains('/', StringComparison.Ordinal) ? id[(id.LastIndexOf('/') + 1)..] : id;
 
                 var name = item.TryGetProperty("friendly_name", out var fn) ? fn.GetString() ?? shortId
                          : item.TryGetProperty("name", out var nameEl) ? nameEl.GetString() ?? shortId

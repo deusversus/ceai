@@ -611,7 +611,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     public void RefreshChatSwitcher()
     {
         _suppressChatSwitch = true;
-        var chats = _aiOperatorService.ListChats();
+        var chats = AiOperatorService.ListChats();
         var currentId = _aiOperatorService.CurrentChatId;
 
         _allChatItems = chats.Select(c => new ChatHistoryDisplayItem

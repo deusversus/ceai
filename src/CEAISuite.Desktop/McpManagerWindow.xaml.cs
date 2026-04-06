@@ -191,7 +191,7 @@ public partial class McpManagerWindow : Window
         var dict = new Dictionary<string, string>();
         foreach (var line in text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            var eq = line.IndexOf('=');
+            var eq = line.IndexOf('=', StringComparison.Ordinal);
             if (eq > 0)
                 dict[line[..eq].Trim()] = line[(eq + 1)..].Trim();
         }

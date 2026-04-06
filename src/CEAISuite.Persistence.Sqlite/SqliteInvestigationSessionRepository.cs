@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using CEAISuite.Domain;
 using Microsoft.Data.Sqlite;
@@ -80,7 +81,7 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
         command.CommandText = sql;
         command.Parameters.AddWithValue("$id", session.Id);
         command.Parameters.AddWithValue("$process_name", session.ProcessName);
-        command.Parameters.AddWithValue("$process_id", (object?)session.ProcessId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$process_id", session.ProcessId.HasValue ? session.ProcessId.Value : DBNull.Value);
         command.Parameters.AddWithValue("$created_at_utc", session.CreatedAtUtc.ToString("O"));
         command.Parameters.AddWithValue("$address_entry_count", session.AddressEntries.Count);
         command.Parameters.AddWithValue("$scan_session_count", session.ScanSessions.Count);
@@ -136,8 +137,8 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
                 new SavedInvestigationSession(
                     reader.GetString(0),
                     reader.GetString(1),
-                    reader.IsDBNull(2) ? null : reader.GetInt32(2),
-                    DateTimeOffset.Parse(reader.GetString(3)),
+                    await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetInt32(2),
+                    DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture),
                     reader.GetInt32(4),
                     reader.GetInt32(5),
                     reader.GetInt32(6)));

@@ -253,8 +253,8 @@ public class CheatTablePointerTests
 </CheatTable>";
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         Assert.Single(nodes);
         var node = nodes[0];
@@ -296,8 +296,8 @@ public class CheatTablePointerTests
 </CheatTable>";
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         Assert.Single(nodes);
         var group = nodes[0];
@@ -329,8 +329,8 @@ public class AddressTableExportServiceTests
             new AddressTableEntry("id2", "Speed", "0x400010", MemoryDataType.Float, "3.5", null, null, true, "3.5")
         };
 
-        var json = sut.ExportToJson(entries);
-        var imported = sut.ImportFromJson(json);
+        var json = AddressTableExportService.ExportToJson(entries);
+        var imported = AddressTableExportService.ImportFromJson(json);
 
         Assert.Equal(2, imported.Count);
         Assert.Equal("Health", imported[0].Label);
@@ -352,7 +352,7 @@ public class ScriptGenerationServiceTests
             new AddressTableEntry("id1", "Health", "0x400000", MemoryDataType.Int32, "999", null, null, true, "999")
         };
 
-        var script = sut.GenerateTrainerScript(entries, "TestGame.exe");
+        var script = ScriptGenerationService.GenerateTrainerScript(entries, "TestGame.exe");
 
         Assert.Contains("TestGame", script);
         Assert.Contains("WriteValue", script);
@@ -368,7 +368,7 @@ public class ScriptGenerationServiceTests
             new AddressTableEntry("id1", "Health", "0x400000", MemoryDataType.Int32, "999", null, null, true, "999")
         };
 
-        var script = sut.GenerateAutoAssemblerScript(entries, "TestGame.exe");
+        var script = ScriptGenerationService.GenerateAutoAssemblerScript(entries, "TestGame.exe");
 
         Assert.Contains("[ENABLE]", script);
         Assert.Contains("[DISABLE]", script);
@@ -387,7 +387,7 @@ public class ScriptGenerationServiceTests
             new AddressTableEntry("id2", "Speed", "0x400010", MemoryDataType.Float, "3.5", null, null, true, "3.5")
         };
 
-        var script = sut.GenerateLuaScript(entries, "TestGame.exe");
+        var script = ScriptGenerationService.GenerateLuaScript(entries, "TestGame.exe");
 
         Assert.Contains("writeInteger", script);
         Assert.Contains("writeFloat", script);
@@ -404,7 +404,7 @@ public class ScriptGenerationServiceTests
             new AddressTableEntry("id1", "Health", "0x400000", MemoryDataType.Int32, "999", null, null, true, "999")
         };
 
-        var summary = sut.SummarizeInvestigation("TestGame.exe", 1234, entries, null, null);
+        var summary = ScriptGenerationService.SummarizeInvestigation("TestGame.exe", 1234, entries, null, null);
 
         Assert.Contains("# Investigation Summary", summary);
         Assert.Contains("TestGame.exe", summary);
@@ -503,7 +503,7 @@ public class CheatTableParserTests
     public void Parse_ReturnsCorrectTableVersion()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml, "test.ct");
+        var ct = CheatTableParser.Parse(SampleCtXml, "test.ct");
 
         Assert.Equal(44, ct.TableVersion);
         Assert.Equal("test.ct", ct.FileName);
@@ -513,7 +513,7 @@ public class CheatTableParserTests
     public void Parse_ParsesTopLevelAndNestedEntries()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         // 3 top-level entries (group + money + script)
         Assert.Equal(3, ct.Entries.Count);
@@ -525,7 +525,7 @@ public class CheatTableParserTests
     public void Parse_RecognizesGroupHeaders()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         var group = ct.Entries[0];
         Assert.True(group.IsGroupHeader);
@@ -537,7 +537,7 @@ public class CheatTableParserTests
     public void Parse_ParsesPointerOffsets()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         var money = ct.Entries[1];
         Assert.True(money.IsPointer);
@@ -550,7 +550,7 @@ public class CheatTableParserTests
     public void Parse_ParsesAssemblerScript()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         var script = ct.Entries[2];
         Assert.NotNull(script.AssemblerScript);
@@ -561,7 +561,7 @@ public class CheatTableParserTests
     public void Parse_CapturesLuaScript()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         Assert.NotNull(ct.LuaScript);
         Assert.Contains("hello", ct.LuaScript);
@@ -571,8 +571,8 @@ public class CheatTableParserTests
     public void ToAddressTableEntries_FlattensGroupsAndIncludesScripts()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
-        var entries = parser.ToAddressTableEntries(ct);
+        var ct = CheatTableParser.Parse(SampleCtXml);
+        var entries = CheatTableParser.ToAddressTableEntries(ct);
 
         // Health, Speed (from group), Money, God Mode script = 4 entries
         Assert.Equal(4, entries.Count);
@@ -596,7 +596,7 @@ public class CheatTableParserTests
     public void Parse_MapsVariableTypesCorrectly()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         var group = ct.Entries[0];
         Assert.Equal(MemoryDataType.Int32, group.Children[0].DataType); // 4 Bytes
@@ -607,7 +607,7 @@ public class CheatTableParserTests
     public void Parse_CleansQuotedDescriptions()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
+        var ct = CheatTableParser.Parse(SampleCtXml);
 
         // Descriptions should not have surrounding quotes
         Assert.Equal("Player Stats", ct.Entries[0].Description);
@@ -618,8 +618,8 @@ public class CheatTableParserTests
     public void ToAddressTableNodes_PreservesScriptEntries()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(SampleCtXml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         // 3 top-level nodes: group (Player Stats), Money, God Mode script
         Assert.Equal(3, nodes.Count);
@@ -636,8 +636,8 @@ public class CheatTableParserTests
     public void ToAddressTableNodes_PreservesGroupHierarchy()
     {
         var parser = new CheatTableParser();
-        var ct = parser.Parse(SampleCtXml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(SampleCtXml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         var group = nodes[0];
         Assert.True(group.IsGroup);
@@ -692,8 +692,8 @@ public class CheatTableExporterTests
         var xml = exporter.ExportToXml(new[] { group });
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         // Assert
         Assert.Single(nodes);
@@ -722,8 +722,8 @@ public class CheatTableExporterTests
         var xml = exporter.ExportToXml(new[] { node });
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         Assert.Single(nodes);
         var imported = nodes[0];
@@ -747,8 +747,8 @@ public class CheatTableExporterTests
         var xml = exporter.ExportToXml(new[] { node });
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         Assert.Single(nodes);
         var imported = nodes[0];
@@ -772,8 +772,8 @@ public class CheatTableExporterTests
         var xml = exporter.ExportToXml(new[] { node });
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         Assert.Single(nodes);
         Assert.False(nodes[0].ShowAsSigned);
@@ -803,8 +803,8 @@ public class CheatTableExporterTests
         var xml = exporter.ExportToXml(roots);
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var nodes = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var nodes = CheatTableParser.ToAddressTableNodes(ct);
 
         Assert.Equal(types.Length, nodes.Count);
         for (int i = 0; i < types.Length; i++)
@@ -851,8 +851,8 @@ public class CheatTableExporterTests
         var xml = exporter.ExportToXml(roots);
 
         var parser = new CheatTableParser();
-        var ct = parser.Parse(xml);
-        var reimported = parser.ToAddressTableNodes(ct);
+        var ct = CheatTableParser.Parse(xml);
+        var reimported = CheatTableParser.ToAddressTableNodes(ct);
 
         // Verify structure
         Assert.Equal(3, reimported.Count);

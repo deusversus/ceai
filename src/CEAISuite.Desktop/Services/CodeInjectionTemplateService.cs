@@ -6,7 +6,7 @@ namespace CEAISuite.Desktop.Services;
 public sealed class CodeInjectionTemplateService
 {
     /// <summary>Generate a NOP sled of the specified length (x86 opcode 0x90).</summary>
-    public byte[] NopSelection(int length)
+    public static byte[] NopSelection(int length)
     {
         var bytes = new byte[length];
         Array.Fill(bytes, (byte)0x90);
@@ -18,7 +18,7 @@ public sealed class CodeInjectionTemplateService
     /// x86 (5 bytes): E9 [rel32]
     /// x64 (14 bytes): FF 25 00 00 00 00 [abs64]
     /// </summary>
-    public byte[] InsertJmpHook(ulong source, ulong target, bool is64Bit)
+    public static byte[] InsertJmpHook(ulong source, ulong target, bool is64Bit)
     {
         if (!is64Bit)
         {

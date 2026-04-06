@@ -1,3 +1,4 @@
+using System.Globalization;
 using Serilog.Core;
 using Serilog.Events;
 
@@ -26,6 +27,6 @@ public sealed class OutputLogSerilogSink(IOutputLog outputLog) : ILogEventSink
             ? ctx.ToString().Trim('"').Split('.')[^1]
             : "App";
 
-        outputLog.Append(source, level, logEvent.RenderMessage());
+        outputLog.Append(source, level, logEvent.RenderMessage(CultureInfo.InvariantCulture));
     }
 }

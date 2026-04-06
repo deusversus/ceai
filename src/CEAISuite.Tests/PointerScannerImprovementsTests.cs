@@ -7,29 +7,28 @@ namespace CEAISuite.Tests;
 
 public class PointerScannerImprovementsTests
 {
+    private static readonly JsonSerializerOptions s_nuintOptions = new() { Converters = { new NuintJsonConverter() } };
+
     // ── NuintJsonConverter ──
 
     [Fact]
     public void NuintConverter_SerializesAsHex()
     {
-        var options = new JsonSerializerOptions { Converters = { new NuintJsonConverter() } };
-        var json = JsonSerializer.Serialize((nuint)0x12345, options);
+        var json = JsonSerializer.Serialize((nuint)0x12345, s_nuintOptions);
         Assert.Equal("\"0x12345\"", json);
     }
 
     [Fact]
     public void NuintConverter_DeserializesHex()
     {
-        var options = new JsonSerializerOptions { Converters = { new NuintJsonConverter() } };
-        var result = JsonSerializer.Deserialize<nuint>("\"0x12345\"", options);
+        var result = JsonSerializer.Deserialize<nuint>("\"0x12345\"", s_nuintOptions);
         Assert.Equal((nuint)0x12345, result);
     }
 
     [Fact]
     public void NuintConverter_DeserializesWithout0xPrefix()
     {
-        var options = new JsonSerializerOptions { Converters = { new NuintJsonConverter() } };
-        var result = JsonSerializer.Deserialize<nuint>("\"ABCD\"", options);
+        var result = JsonSerializer.Deserialize<nuint>("\"ABCD\"", s_nuintOptions);
         Assert.Equal((nuint)0xABCD, result);
     }
 

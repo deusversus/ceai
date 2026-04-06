@@ -1,0 +1,19 @@
+[*.cs]
+# Globalization and culture
+dotnet_diagnostic.CA1304.severity = warning     # Specify CultureInfo
+dotnet_diagnostic.CA1305.severity = warning     # Specify IFormatProvider
+dotnet_diagnostic.CA1307.severity = warning     # Specify StringComparison for clarity
+dotnet_diagnostic.CA1310.severity = warning     # Specify StringComparison for correctness
+
+# Performance and design
+dotnet_diagnostic.CA1001.severity = warning     # Types owning disposable fields should be disposable
+dotnet_diagnostic.CA1822.severity = warning     # Mark members as static
+dotnet_diagnostic.CA1852.severity = warning     # Seal internal types
+dotnet_diagnostic.CA1805.severity = warning     # Do not initialize unnecessarily
+dotnet_diagnostic.CA1826.severity = warning     # Use property instead of Linq method
+dotnet_diagnostic.CA1847.severity = warning     # Use char overload
+dotnet_diagnostic.CA1861.severity = warning     # Avoid constant arrays as arguments
+dotnet_diagnostic.CA1865.severity = warning     # Use char overload
+dotnet_diagnostic.CA1866.severity = warning     # Use char overload
+dotnet_diagnostic.CA1869.severity = warning     # Cache and reuse JsonSerializerOptions
+dotnet_diagnostic.CA1873.severity = warning     # Avoid expensive logging argument evaluation

@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CEAISuite.Desktop.Models;
 
 namespace CEAISuite.Desktop.Services;
@@ -11,7 +12,7 @@ public sealed class OutputLogService : IOutputLog
     {
         Entries.Add(new OutputLogEntry
         {
-            Timestamp = DateTime.Now.ToString("HH:mm:ss"),
+            Timestamp = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
             Source = source,
             Level = level,
             Message = message

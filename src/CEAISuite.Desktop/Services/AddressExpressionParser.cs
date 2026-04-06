@@ -25,7 +25,7 @@ public static class AddressExpressionParser
         var text = expression.Trim();
 
         // Check for module+offset pattern: "name+0xOFFSET" or "name+OFFSET"
-        var plusIndex = text.IndexOf('+');
+        var plusIndex = text.IndexOf('+', StringComparison.Ordinal);
         if (plusIndex > 0 && plusIndex < text.Length - 1)
         {
             var moduleName = text[..plusIndex].Trim();

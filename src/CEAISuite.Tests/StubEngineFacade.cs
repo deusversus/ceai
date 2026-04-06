@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Tests;
@@ -73,10 +74,10 @@ public sealed class StubEngineFacade : IEngineFacade
 
         string display = dataType switch
         {
-            MemoryDataType.Byte => raw[0].ToString(),
-            MemoryDataType.Int16 => BitConverter.ToInt16(raw).ToString(),
-            MemoryDataType.Int32 => BitConverter.ToInt32(raw).ToString(),
-            MemoryDataType.Float => BitConverter.ToSingle(raw).ToString(),
+            MemoryDataType.Byte => raw[0].ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int16 => BitConverter.ToInt16(raw).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int32 => BitConverter.ToInt32(raw).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Float => BitConverter.ToSingle(raw).ToString(CultureInfo.InvariantCulture),
             _ => "0"
         };
         return Task.FromResult(new TypedMemoryValue(processId, address, dataType, display, raw));
@@ -86,9 +87,9 @@ public sealed class StubEngineFacade : IEngineFacade
     {
         byte[] bytes = dataType switch
         {
-            MemoryDataType.Int32 => BitConverter.GetBytes(int.Parse(value)),
-            MemoryDataType.Float => BitConverter.GetBytes(float.Parse(value)),
-            _ => BitConverter.GetBytes(int.Parse(value))
+            MemoryDataType.Int32 => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture)),
+            MemoryDataType.Float => BitConverter.GetBytes(float.Parse(value, CultureInfo.InvariantCulture)),
+            _ => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture))
         };
         _memory[address] = bytes;
         return Task.FromResult(new MemoryWriteResult(processId, address, dataType, value, bytes.Length));

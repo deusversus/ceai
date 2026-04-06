@@ -39,7 +39,7 @@ public static class ThemeManager
         for (int i = mergedDictionaries.Count - 1; i >= 0; i--)
         {
             var src = mergedDictionaries[i].Source;
-            if (src is not null && (src.OriginalString.Contains("DarkTheme") || src.OriginalString.Contains("LightTheme")))
+            if (src is not null && (src.OriginalString.Contains("DarkTheme", StringComparison.Ordinal) || src.OriginalString.Contains("LightTheme", StringComparison.Ordinal)))
                 mergedDictionaries.RemoveAt(i);
         }
 

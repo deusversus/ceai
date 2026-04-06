@@ -634,7 +634,8 @@ public class AgentLoopTests
 // ── Test doubles ─────────────────────────────────────────────────────
 
 /// <summary>Test class with tool attributes for cache scanning.</summary>
-internal class TestToolClass
+#pragma warning disable CA1822 // Methods must be instance for AI tool reflection
+internal sealed class TestToolClass
 {
     [ReadOnlyTool, ConcurrencySafe]
     public string ReadOnlyMethod() => "ok";
@@ -642,8 +643,10 @@ internal class TestToolClass
     [Destructive]
     public string DestructiveMethod() => "ok";
 }
+#pragma warning restore CA1822
 
 /// <summary>Mock IChatClient that returns a fixed text response.</summary>
+#pragma warning disable CA1822 // Interface implementation cannot be static
 internal sealed class MockChatClient : IChatClient
 {
     private readonly string _responseText;
@@ -679,11 +682,14 @@ internal sealed class MockChatClient : IChatClient
     public object? GetService(Type serviceType, object? serviceKey = null) => null;
     public void Dispose() { }
 }
+#pragma warning restore CA1822
 
 /// <summary>Mock IChatClient that hangs forever (for cancellation tests).</summary>
 internal sealed class SlowMockChatClient : IChatClient
 {
+#pragma warning disable CA1822
     public ChatClientMetadata Metadata => new("slow-mock");
+#pragma warning restore CA1822
 
     public Task<ChatResponse> GetResponseAsync(
         IEnumerable<ChatMessage> messages, ChatOptions? options = null,

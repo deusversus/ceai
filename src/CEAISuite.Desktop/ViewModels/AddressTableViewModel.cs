@@ -315,7 +315,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         var path = _dialogService.ShowSaveFileDialog("JSON files|*.json", "address_table.json");
         if (path is null) return;
 
-        var json = _addressTableExportService.ExportToJson(entries.ToArray());
+        var json = AddressTableExportService.ExportToJson(entries.ToArray());
         File.WriteAllText(path, json);
         _outputLog.Append("AddressTable", "Info", $"Exported {entries.Count} entries to {path}");
     }
@@ -329,7 +329,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         try
         {
             var json = File.ReadAllText(path);
-            var imported = _addressTableExportService.ImportFromJson(json);
+            var imported = AddressTableExportService.ImportFromJson(json);
             foreach (var entry in imported)
                 _addressTableService.AddEntry(entry.Address, entry.DataType, entry.CurrentValue, entry.Label);
 
@@ -356,7 +356,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         }
 
         var processName = _processContext.AttachedProcessName ?? "Unknown";
-        var script = _scriptGenerationService.GenerateTrainerScript(locked, processName);
+        var script = ScriptGenerationService.GenerateTrainerScript(locked, processName);
 
         var path = _dialogService.ShowSaveFileDialog(
             "C# files|*.cs",
@@ -420,9 +420,8 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
                 }
             }
 
-            var parser = new CheatTableParser();
-            var ctFile = parser.ParseFile(path);
-            var nodes = parser.ToAddressTableNodes(ctFile);
+            var ctFile = CheatTableParser.ParseFile(path);
+            var nodes = CheatTableParser.ToAddressTableNodes(ctFile);
             _addressTableService.ImportNodes(nodes);
 
             var scriptCount = CountScripts(ctFile.Entries);

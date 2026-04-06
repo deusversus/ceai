@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -6,14 +7,14 @@ using CEAISuite.Application;
 
 namespace CEAISuite.Desktop;
 
-public partial class SettingsWindow : Window
+public partial class SettingsWindow : Window, IDisposable
 {
     private readonly AppSettingsService _settingsService;
     private bool _keyVisible;
     private bool _suppressModelListChange;
     private CancellationTokenSource? _deviceFlowCts;
 
-    private record ModelInfo(string Id, string Name, string Description);
+    private sealed record ModelInfo(string Id, string Name, string Description);
 
     private static readonly ModelInfo[] OpenAIModels =
     [
@@ -92,14 +93,14 @@ public partial class SettingsWindow : Window
         }
 
         // General
-        RefreshIntervalBox.Text = s.RefreshIntervalMs.ToString();
+        RefreshIntervalBox.Text = s.RefreshIntervalMs.ToString(CultureInfo.InvariantCulture);
         RefreshSlider.Value = s.RefreshIntervalMs;
         ShowUnresolvedCheck.IsChecked = s.ShowUnresolvedAsQuestionMarks;
         StreamingCheck.IsChecked = s.UseStreaming;
         AutoOpenMemoryBrowserCheck.IsChecked = s.AutoOpenMemoryBrowser;
 
         // Rate limiting
-        RateLimitBox.Text = s.RateLimitSeconds.ToString();
+        RateLimitBox.Text = s.RateLimitSeconds.ToString(CultureInfo.InvariantCulture);
         RateLimitSlider.Value = s.RateLimitSeconds;
         RateLimitWaitCheck.IsChecked = s.RateLimitWait;
 
@@ -143,15 +144,15 @@ public partial class SettingsWindow : Window
         PermModePlanOnly.IsChecked = permMode == "planonly";
         PermModeUnrestricted.IsChecked = permMode == "unrestricted";
 
-        MaxSessionCostBox.Text = s.MaxSessionCostDollars > 0 ? s.MaxSessionCostDollars.ToString("F2") : "";
-        InputPriceBox.Text = s.InputPricePerMillion.ToString("F2");
-        OutputPriceBox.Text = s.OutputPricePerMillion.ToString("F2");
-        CachedInputPriceBox.Text = s.CachedInputPricePerMillion.ToString("F2");
+        MaxSessionCostBox.Text = s.MaxSessionCostDollars > 0 ? s.MaxSessionCostDollars.ToString("F2", CultureInfo.InvariantCulture) : "";
+        InputPriceBox.Text = s.InputPricePerMillion.ToString("F2", CultureInfo.InvariantCulture);
+        OutputPriceBox.Text = s.OutputPricePerMillion.ToString("F2", CultureInfo.InvariantCulture);
+        CachedInputPriceBox.Text = s.CachedInputPricePerMillion.ToString("F2", CultureInfo.InvariantCulture);
 
         FallbackModelsBox.Text = s.FallbackModels.Count > 0 ? string.Join(", ", s.FallbackModels) : "";
 
         EnableAgentMemoryCheck.IsChecked = s.EnableAgentMemory;
-        MaxMemoryEntriesBox.Text = s.MaxMemoryEntries.ToString();
+        MaxMemoryEntriesBox.Text = s.MaxMemoryEntries.ToString(CultureInfo.InvariantCulture);
 
         RequirePlanCheck.IsChecked = s.RequirePlanForDestructive;
         EarlyToolExecutionCheck.IsChecked = s.EnableEarlyToolExecution;
@@ -226,9 +227,9 @@ public partial class SettingsWindow : Window
                 return; // User has customized — don't overwrite
         }
 
-        InputPriceBox.Text = input.ToString("F2");
-        OutputPriceBox.Text = output.ToString("F2");
-        CachedInputPriceBox.Text = cached.ToString("F2");
+        InputPriceBox.Text = input.ToString("F2", CultureInfo.InvariantCulture);
+        OutputPriceBox.Text = output.ToString("F2", CultureInfo.InvariantCulture);
+        CachedInputPriceBox.Text = cached.ToString("F2", CultureInfo.InvariantCulture);
     }
 
     private void PopulateModelList(string provider)
@@ -464,13 +465,13 @@ public partial class SettingsWindow : Window
     private void RefreshSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (RefreshIntervalBox is not null)
-            RefreshIntervalBox.Text = ((int)e.NewValue).ToString();
+            RefreshIntervalBox.Text = ((int)e.NewValue).ToString(CultureInfo.InvariantCulture);
     }
 
     private void RateLimitSlider_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
     {
         if (RateLimitBox is not null)
-            RateLimitBox.Text = ((int)e.NewValue).ToString();
+            RateLimitBox.Text = ((int)e.NewValue).ToString(CultureInfo.InvariantCulture);
     }
 
     private void SaveSettings(object sender, RoutedEventArgs e)
@@ -677,7 +678,7 @@ public partial class SettingsWindow : Window
 
     private static void LoadLimitBox(TextBox box, int? value)
     {
-        box.Text = value.HasValue ? value.Value.ToString() : "";
+        box.Text = value.HasValue ? value.Value.ToString(CultureInfo.InvariantCulture) : "";
     }
 
     private static int? ParseLimitBox(TextBox box)
@@ -685,6 +686,18 @@ public partial class SettingsWindow : Window
         var text = box.Text.Trim();
         if (string.IsNullOrEmpty(text)) return null;
         return int.TryParse(text, out var val) && val > 0 ? val : null;
+    }
+
+    public void Dispose()
+    {
+        _deviceFlowCts?.Dispose();
+        GC.SuppressFinalize(this);
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        Dispose();
+        base.OnClosed(e);
     }
 
     private void CancelSettings(object sender, RoutedEventArgs e)

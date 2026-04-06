@@ -46,3 +46,10 @@ dotnet_diagnostic.CA1848.severity = suggestion  # Use LoggerMessage delegates fo
 dotnet_diagnostic.CA2007.severity = none        # Do not directly await Task (WPF handles SyncContext)
 dotnet_diagnostic.CA1816.severity = suggestion  # Dispose pattern
 dotnet_diagnostic.IDE0005.severity = warning    # Remove unnecessary usings
+
+# Suppressed — false positives or inapplicable for this project
+dotnet_diagnostic.CA1707.severity = none        # Underscores in identifiers — CommunityToolkit.Mvvm [ObservableProperty] convention
+dotnet_diagnostic.CA1725.severity = none        # Parameter names should match base — not actionable when implementing interfaces
+dotnet_diagnostic.CA1720.severity = none        # Identifier contains type name — too pedantic for domain models
+dotnet_diagnostic.CA1716.severity = none        # Identifiers should not match keywords — too pedantic
+dotnet_diagnostic.CA1000.severity = none        # Static members on generic types — valid pattern (factory methods)

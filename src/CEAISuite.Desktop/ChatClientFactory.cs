@@ -391,7 +391,8 @@ internal static class ChatClientFactory
                 }
                 catch (Exception ex)
                 {
-                    _logger?.LogWarning(ex, "Failed to log Copilot API error response (status {Status})", status);
+                    if (_logger is not null && _logger.IsEnabled(LogLevel.Warning))
+                        _logger.LogWarning(ex, "Failed to log Copilot API error response (status {Status})", status);
                 }
             }
         }

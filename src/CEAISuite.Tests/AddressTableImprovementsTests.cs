@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Application;
 using CEAISuite.Desktop.ViewModels;
 using CEAISuite.Engine.Abstractions;
@@ -290,14 +291,14 @@ public class AddressTableImprovementsTests
     public async Task IncreaseValue_Int32Max_Wraps()
     {
         var (vm, svc) = Create();
-        var node = MakeLeaf(value: int.MaxValue.ToString());
+        var node = MakeLeaf(value: int.MaxValue.ToString(CultureInfo.InvariantCulture));
         svc.Roots.Add(node);
         vm.SelectedNode = node;
 
         await vm.IncreaseValueCommand.ExecuteAsync(null);
 
         // Should wrap to Int32.MinValue or handle gracefully
-        Assert.NotEqual(int.MaxValue.ToString(), node.CurrentValue);
+        Assert.NotEqual(int.MaxValue.ToString(CultureInfo.InvariantCulture), node.CurrentValue);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -11,12 +12,12 @@ public partial class SkillsManagerWindow : Window
 
     private readonly List<SkillEntry> _skills = new();
 
-    private record SkillEntry(
+    private sealed record SkillEntry(
         string Name, string Description, string Version,
         string Author, string[] Tags, string Path, bool IsBuiltIn);
 
     // View-model for the ListBox DataTemplate
-    private record SkillListItem(string Icon, string Name, string Description, int Index);
+    private sealed record SkillListItem(string Icon, string Name, string Description, int Index);
 
     private static readonly string UserSkillsDir = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -152,7 +153,7 @@ public partial class SkillsManagerWindow : Window
 
         var titleCase = string.Join(' ',
             skillName.Split('-').Select(w =>
-                w.Length > 0 ? char.ToUpper(w[0]) + w[1..] : w));
+                w.Length > 0 ? char.ToUpper(w[0], CultureInfo.InvariantCulture) + w[1..] : w));
 
         var tagsYaml = skillTags.Length > 0
             ? string.Join("\n", skillTags.Select(t => $"  - {t}"))

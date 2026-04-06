@@ -7,6 +7,9 @@
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <NoWarn>$(NoWarn);EnableGenerateDocumentationFile</NoWarn>
+    <Version>0.2.0</Version>
+    <FileVersion>0.2.0.0</FileVersion>
+    <InformationalVersion>0.2.0</InformationalVersion>
   </PropertyGroup>
 
   <!-- Shared Roslyn analyzers for all projects -->

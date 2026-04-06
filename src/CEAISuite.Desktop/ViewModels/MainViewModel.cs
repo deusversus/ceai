@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Reflection;
 using CEAISuite.Application;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
@@ -698,9 +699,12 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     public void ShowAbout()
     {
+        var version = typeof(MainViewModel).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion ?? "unknown";
         _dialogService.ShowInfo(
             "About CE AI Suite",
-            "CE AI Suite\nA Cheat Engine-class desktop application with integrated AI operator.\n\nVersion 0.1.0-alpha");
+            $"CE AI Suite\nA Cheat Engine-class desktop application with integrated AI operator.\n\nVersion {version}");
     }
 
     // ── Output / Find Results Forwarding ──

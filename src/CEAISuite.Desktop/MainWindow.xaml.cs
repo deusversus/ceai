@@ -1336,7 +1336,8 @@ public partial class MainWindow : Window
             if (!File.Exists(LayoutFilePath)) return;
 
             var savedVersion = 0;
-            try { if (File.Exists(LayoutVersionPath)) savedVersion = int.Parse(File.ReadAllText(LayoutVersionPath).Trim()); } catch { }
+            try { if (File.Exists(LayoutVersionPath)) savedVersion = int.Parse(File.ReadAllText(LayoutVersionPath).Trim()); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Could not parse saved layout version from {Path}", LayoutVersionPath); }
             if (savedVersion < LayoutVersion)
             {
                 File.Delete(LayoutFilePath);

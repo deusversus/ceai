@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -152,7 +153,13 @@ public sealed class AppSettingsService
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite");
     private static readonly string SettingsPath = Path.Combine(SettingsDir, "settings.json");
 
+    private readonly ILogger<AppSettingsService>? _logger;
     private AppSettings _settings = new();
+
+    public AppSettingsService(ILogger<AppSettingsService>? logger = null)
+    {
+        _logger = logger;
+    }
 
     public AppSettings Settings => _settings;
 
@@ -169,7 +176,11 @@ public sealed class AppSettingsService
                 _settings = JsonSerializer.Deserialize<AppSettings>(json) ?? new();
             }
         }
-        catch { _settings = new(); }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Failed to deserialize settings from {Path}, using defaults", SettingsPath);
+            _settings = new();
+        }
 
         // Decrypt stored API key
         if (!string.IsNullOrWhiteSpace(_settings.EncryptedApiKey))
@@ -178,7 +189,11 @@ public sealed class AppSettingsService
             {
                 _settings.OpenAiApiKey = DecryptString(_settings.EncryptedApiKey);
             }
-            catch { _settings.OpenAiApiKey = null; }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to decrypt stored API key — clearing to null");
+                _settings.OpenAiApiKey = null;
+            }
         }
 
         // Decrypt stored GitHub token (for Copilot provider)
@@ -188,7 +203,11 @@ public sealed class AppSettingsService
             {
                 _settings.GitHubToken = DecryptString(_settings.EncryptedGitHubToken);
             }
-            catch { _settings.GitHubToken = null; }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to decrypt stored GitHub token — clearing to null");
+                _settings.GitHubToken = null;
+            }
         }
 
         // Decrypt MCP server environment variables
@@ -202,7 +221,11 @@ public sealed class AppSettingsService
                         kv => kv.Key,
                         kv => DecryptString(kv.Value));
                 }
-                catch { mcp.Environment = null; }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to decrypt MCP server '{Name}' environment variables", mcp.Name);
+                    mcp.Environment = null;
+                }
             }
         }
 

@@ -6,6 +6,7 @@ using CEAISuite.Desktop.Services;
 using CEAISuite.Engine.Abstractions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Desktop.ViewModels;
 
@@ -22,6 +23,7 @@ public partial class AddressTableViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private readonly IDispatcherService _dispatcher;
     private readonly INavigationService _navigationService;
+    private readonly ILogger<AddressTableViewModel>? _logger;
 
     private System.Threading.Timer? _refreshTimer;
     private int _refreshIntervalMs = 500;
@@ -60,7 +62,8 @@ public partial class AddressTableViewModel : ObservableObject
         IDialogService dialogService,
         IOutputLog outputLog,
         IDispatcherService dispatcher,
-        INavigationService navigationService)
+        INavigationService navigationService,
+        ILogger<AddressTableViewModel>? logger = null)
     {
         _addressTableService = addressTableService;
         _addressTableExportService = addressTableExportService;
@@ -73,6 +76,7 @@ public partial class AddressTableViewModel : ObservableObject
         _outputLog = outputLog;
         _dispatcher = dispatcher;
         _navigationService = navigationService;
+        _logger = logger;
 
         Roots = _addressTableService.Roots;
     }
@@ -637,7 +641,8 @@ public partial class AddressTableViewModel : ObservableObject
         var addr = SelectedNode.ResolvedAddress ?? nuint.Zero;
         if (addr == nuint.Zero)
         {
-            try { addr = AddressTableService.ParseAddress(SelectedNode.Address); } catch { }
+            try { addr = AddressTableService.ParseAddress(SelectedNode.Address); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to parse address '{Address}' for memory browse", SelectedNode.Address); }
         }
 
         if (addr == nuint.Zero)

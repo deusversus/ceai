@@ -1,6 +1,7 @@
 using Anthropic;
 using CEAISuite.Application;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using OpenAI;
 
 namespace CEAISuite.Desktop;
@@ -12,12 +13,19 @@ namespace CEAISuite.Desktop;
 /// </summary>
 internal static class ChatClientFactory
 {
+    private static ILogger? _logger;
     private static CopilotTokenService? _copilotTokenService;
 
     internal static CopilotTokenService CopilotService
     {
         get => _copilotTokenService ??= new CopilotTokenService();
     }
+
+    /// <summary>
+    /// Sets the logger used for diagnostic warnings. Call once during DI setup.
+    /// </summary>
+    internal static void SetLogger(ILoggerFactory loggerFactory) =>
+        _logger = loggerFactory.CreateLogger(typeof(ChatClientFactory));
 
     public static IChatClient? Create(AppSettings settings)
     {
@@ -94,6 +102,8 @@ internal static class ChatClientFactory
             _githubToken = githubToken;
         }
 
+        // Sync override required by PipelinePolicy contract — SDK only calls ProcessAsync
+        // in practice, but the base class demands this. The async path (ProcessAsync) is preferred.
         public override void Process(
             System.ClientModel.Primitives.PipelineMessage message,
             IReadOnlyList<System.ClientModel.Primitives.PipelinePolicy> pipeline,
@@ -239,7 +249,10 @@ internal static class ChatClientFactory
                                                     writer.WriteString("content", unwrapped);
                                                     continue;
                                                 }
-                                                catch { }
+                                                catch (Exception ex)
+                                                {
+                                                    _logger?.LogWarning(ex, "Failed to unwrap double-encoded tool content during Copilot request rewrite");
+                                                }
                                             }
                                             field.WriteTo(writer);
                                         }
@@ -333,7 +346,7 @@ internal static class ChatClientFactory
                 message.Request.Content.WriteTo(ms, default);
                 return System.Text.Encoding.UTF8.GetString(ms.ToArray());
             }
-            catch { return null; }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to capture Copilot request body for diagnostics"); return null; }
         }
 
         private static void LogRequest(string? body)
@@ -376,7 +389,10 @@ internal static class ChatClientFactory
                         LogDiag($"ERR_BODY: {errBody}");
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to log Copilot API error response (status {Status})", status);
+                }
             }
         }
 
@@ -392,7 +408,10 @@ internal static class ChatClientFactory
                 System.IO.File.AppendAllText(logPath,
                     $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{Environment.NewLine}");
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to write Copilot HTTP diagnostic log entry");
+            }
         }
 
         private static void ApplyHeaders(System.ClientModel.Primitives.PipelineMessage message, string sessionToken)

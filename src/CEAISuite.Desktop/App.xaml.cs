@@ -55,6 +55,7 @@ public partial class App : System.Windows.Application
         // Re-register the Serilog logger into the DI-provided ILoggerFactory
         var loggerFactory = Services.GetRequiredService<ILoggerFactory>();
         loggerFactory.AddSerilog(Log.Logger);
+        ChatClientFactory.SetLogger(loggerFactory);
 
         var mainWindow = Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
@@ -106,7 +107,7 @@ public partial class App : System.Windows.Application
         // ── Settings (needs .Load() called) ──
         services.AddSingleton<AppSettingsService>(sp =>
         {
-            var svc = new AppSettingsService();
+            var svc = new AppSettingsService(sp.GetService<ILogger<AppSettingsService>>());
             svc.Load();
             return svc;
         });

@@ -81,6 +81,9 @@ public partial class MainViewModel : ObservableObject
         _appSettingsService = appSettingsService;
         _patchUndoService = patchUndoService;
         _engineFacade = engineFacade;
+        // Wire engine diagnostic trace to Output panel
+        if (engineFacade is CEAISuite.Engine.Windows.WindowsEngineFacade winFacade)
+            winFacade.DiagnosticTrace = msg => outputLog.Append("Engine", "Debug", msg);
         _processContext = processContext;
         _outputLog = outputLog;
         _dialogService = dialogService;
@@ -233,16 +236,23 @@ public partial class MainViewModel : ObservableObject
 
     public async Task InspectSelectedProcessAsync()
     {
-        if (Interlocked.CompareExchange(ref _isAttaching, 1, 0) != 0) return;
+        if (Interlocked.CompareExchange(ref _isAttaching, 1, 0) != 0)
+        {
+            _outputLog.Append("Attach", "Warning", "InspectSelectedProcessAsync: re-entrancy guard blocked call (already attaching/detaching).");
+            return;
+        }
 
         var dashboard = Dashboard;
         var selectedProcess = _processListVm.SelectedProcess;
         if (selectedProcess is null)
         {
+            _outputLog.Append("Attach", "Warning", "InspectSelectedProcessAsync: no process selected.");
             Dashboard = dashboard with { StatusMessage = "Select a process to inspect." };
             Interlocked.Exchange(ref _isAttaching, 0);
             return;
         }
+
+        _outputLog.Append("Attach", "Info", $"InspectSelectedProcessAsync: starting attach to {selectedProcess.Name} (PID {selectedProcess.Id})...");
 
         try
         {
@@ -250,12 +260,18 @@ public partial class MainViewModel : ObservableObject
             if (dashboard.CurrentInspection is not null
                 && dashboard.CurrentInspection.ProcessId != selectedProcess.Id)
             {
+                _outputLog.Append("Attach", "Info",
+                    $"Detaching from previous process PID {dashboard.CurrentInspection.ProcessId} before attaching to PID {selectedProcess.Id}.");
                 _dashboardService.DetachProcess();
                 _processContext.Detach();
                 UiActionRequested?.Invoke("DetachCleanup", null);
+                _outputLog.Append("Attach", "Info", "Previous process detached successfully.");
             }
 
+            _outputLog.Append("Attach", "Info", $"Calling InspectProcessAsync(PID {selectedProcess.Id})...");
             var inspection = await _dashboardService.InspectProcessAsync(selectedProcess.Id);
+            _outputLog.Append("Attach", "Info",
+                $"InspectProcessAsync succeeded: {inspection.ProcessName} — {inspection.Modules.Count} modules, status=\"{inspection.StatusMessage}\"");
             Dashboard = dashboard with
             {
                 CurrentInspection = inspection,
@@ -265,25 +281,31 @@ public partial class MainViewModel : ObservableObject
             // Update InspectionViewModel and process context
             _inspectionVm.SetInspection(inspection);
             _processContext.Attach(inspection);
+            _outputLog.Append("Attach", "Info", "ProcessContext.Attach() done, ProcessChanged event fired.");
 
             // Set process context for pointer chain resolution
             // NOTE: InspectProcessAsync already called AttachAsync internally,
             // so we only call again here for the module list needed by AddressTableService.
             try
             {
+                _outputLog.Append("Attach", "Info", $"Calling AttachAsync(PID {selectedProcess.Id}) for module context...");
                 var attachment = await _engineFacade.AttachAsync(selectedProcess.Id);
+                _outputLog.Append("Attach", "Info",
+                    $"AttachAsync returned {attachment.Modules.Count} modules for {attachment.ProcessName}.");
                 _addressTableService.SetProcessContext(
                     attachment.Modules,
                     selectedProcess.Architecture == "x86");
+                _outputLog.Append("Attach", "Info", "AddressTableService.SetProcessContext() done.");
             }
             catch (Exception ex)
             {
                 _outputLog.Append("Attach", "Warning",
-                    $"Module enumeration failed for {selectedProcess.Name}: {ex.Message}. Address table resolution may be limited.");
+                    $"Module enumeration failed for {selectedProcess.Name}: {ex.GetType().Name}: {ex.Message}. Address table resolution may be limited.");
             }
 
             // Start auto-refresh timer for address table values
             StartAutoRefresh();
+            _outputLog.Append("Attach", "Info", "Auto-refresh started. Attach complete.");
 
             // Auto-open Memory Browser tab if enabled
             if (_appSettingsService.Settings.AutoOpenMemoryBrowser)
@@ -293,11 +315,17 @@ public partial class MainViewModel : ObservableObject
         }
         catch (Exception exception)
         {
+            _outputLog.Append("Attach", "Error",
+                $"InspectSelectedProcessAsync FAILED: {exception.GetType().Name}: {exception.Message}");
+            if (exception.InnerException is not null)
+                _outputLog.Append("Attach", "Error", $"  Inner: {exception.InnerException.GetType().Name}: {exception.InnerException.Message}");
+            _outputLog.Append("Attach", "Error", $"  Stack: {exception.StackTrace}");
             Dashboard = dashboard with { StatusMessage = exception.Message };
         }
         finally
         {
             Interlocked.Exchange(ref _isAttaching, 0);
+            _outputLog.Append("Attach", "Info", "InspectSelectedProcessAsync: re-entrancy guard released.");
         }
     }
 
@@ -326,11 +354,16 @@ public partial class MainViewModel : ObservableObject
 
     public async Task DetachProcessAsync()
     {
-        if (Interlocked.CompareExchange(ref _isAttaching, 1, 0) != 0) return;
+        if (Interlocked.CompareExchange(ref _isAttaching, 1, 0) != 0)
+        {
+            _outputLog.Append("Detach", "Warning", "DetachProcessAsync: re-entrancy guard blocked call (already attaching/detaching).");
+            return;
+        }
 
         var dashboard = Dashboard;
         if (dashboard.CurrentInspection is null)
         {
+            _outputLog.Append("Detach", "Warning", "DetachProcessAsync: no process attached (CurrentInspection is null).");
             StatusBarCenterText = "No process attached";
             Interlocked.Exchange(ref _isAttaching, 0);
             return;
@@ -338,24 +371,31 @@ public partial class MainViewModel : ObservableObject
 
         var pid = dashboard.CurrentInspection.ProcessId;
         var processName = dashboard.CurrentInspection.ProcessName;
+        _outputLog.Append("Detach", "Info", $"DetachProcessAsync: detaching from {processName} (PID {pid})...");
 
         try
         {
             // 1. Stop auto-refresh so we don't read from a detached process
             _addressTableVm.StopAutoRefresh();
+            _outputLog.Append("Detach", "Info", "Auto-refresh stopped.");
 
             // 2. Remove all breakpoints for this process
             try
             {
                 var bps = await _breakpointService.ListBreakpointsAsync(pid);
+                _outputLog.Append("Detach", "Info", $"Removing {bps.Count} breakpoints...");
                 foreach (var bp in bps)
                     await _breakpointService.RemoveBreakpointAsync(pid, bp.Id);
             }
-            catch { /* best-effort -- process may already be gone */ }
+            catch (Exception bpEx)
+            {
+                _outputLog.Append("Detach", "Warning", $"Breakpoint cleanup failed (best-effort): {bpEx.GetType().Name}: {bpEx.Message}");
+            }
 
             // 3. Detach engine facade + clear dashboard state
             _dashboardService.DetachProcess();
             _processContext.Detach();
+            _outputLog.Append("Detach", "Info", "Engine facade detached, ProcessContext cleared.");
 
             // 4. Update dashboard to reflect detach
             Dashboard = dashboard with
@@ -370,14 +410,17 @@ public partial class MainViewModel : ObservableObject
             // 6. Update status bar
             StatusBarProcessText = "No process attached";
             StatusBarCenterText = $"Detached from {processName}";
+            _outputLog.Append("Detach", "Info", $"Detach from {processName} (PID {pid}) complete.");
         }
         catch (Exception ex)
         {
+            _outputLog.Append("Detach", "Error", $"DetachProcessAsync FAILED: {ex.GetType().Name}: {ex.Message}");
             StatusBarCenterText = $"Detach error: {ex.Message}";
         }
         finally
         {
             Interlocked.Exchange(ref _isAttaching, 0);
+            _outputLog.Append("Detach", "Info", "DetachProcessAsync: re-entrancy guard released.");
         }
     }
 

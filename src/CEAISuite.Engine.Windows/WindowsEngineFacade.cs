@@ -8,6 +8,16 @@ namespace CEAISuite.Engine.Windows;
 
 public sealed class WindowsEngineFacade : IEngineFacade
 {
+    /// <summary>Optional trace callback for diagnosing attach/detach issues.
+    /// Set from the host (e.g. MainViewModel) to route engine diagnostics to the Output panel.</summary>
+    public Action<string>? DiagnosticTrace { get; set; }
+
+    private void Trace(string message)
+    {
+        System.Diagnostics.Debug.WriteLine($"[EngineFacade] {message}");
+        DiagnosticTrace?.Invoke(message);
+    }
+
     private const uint ProcessQueryLimitedInformation = 0x1000;
     private const uint ProcessVmRead = 0x0010;
     private const uint ProcessVmWrite = 0x0020;
@@ -87,6 +97,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
             () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                Trace($"AttachAsync called for PID {processId}. Current state: _attachedProcessId={_attachedProcessId}, handleValid={_cachedProcessHandle != IntPtr.Zero}, hasCachedAttachment={_cachedAttachment is not null}");
 
                 // Return cached attachment if we already successfully attached to this PID.
                 // This avoids redundant module enumeration when AttachAsync is called
@@ -94,7 +105,12 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 lock (_attachLock)
                 {
                     if (_cachedAttachment is not null && _cachedAttachment.ProcessId == processId)
+                    {
+                        Trace($"AttachAsync: returning cached attachment for PID {processId} ({_cachedAttachment.Modules.Count} modules).");
                         return _cachedAttachment;
+                    }
+                    if (_cachedAttachment is not null)
+                        Trace($"AttachAsync: cached attachment is for different PID {_cachedAttachment.ProcessId}, re-attaching to {processId}.");
                 }
 
                 // Retry module enumeration with backoff — the target process may still
@@ -106,10 +122,12 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 for (var attempt = 1; attempt <= maxAttempts; attempt++)
                 {
                     cancellationToken.ThrowIfCancellationRequested();
+                    Trace($"AttachAsync: attempt {attempt}/{maxAttempts} for PID {processId}...");
 
                     try
                     {
                         using var process = Process.GetProcessById(processId);
+                        Trace($"AttachAsync: Process.GetProcessById succeeded — {process.ProcessName}, HasExited={process.HasExited}");
 
                         // Verify the process handle is usable before enumerating modules.
                         // OpenProcess with QUERY_LIMITED can succeed even when VM_READ
@@ -118,20 +136,26 @@ public sealed class WindowsEngineFacade : IEngineFacade
                         if (testHandle == IntPtr.Zero)
                         {
                             var errorCode = Marshal.GetLastWin32Error();
+                            Trace($"AttachAsync: OpenProcess failed with error {errorCode} (access=0x{CachedHandleAccess:X})");
                             throw new Win32Exception(errorCode,
                                 $"Cannot open process with required access (error {errorCode}). " +
                                 "The process may still be initializing or is protected.");
                         }
+                        Trace($"AttachAsync: OpenProcess succeeded, handle=0x{testHandle:X}");
 
                         // Handle is good — cache it now so we don't re-open later
                         lock (_attachLock)
                         {
                             _attachedProcessId = process.Id;
                             if (_cachedProcessHandle != IntPtr.Zero)
+                            {
+                                Trace($"AttachAsync: closing old cached handle 0x{_cachedProcessHandle:X}");
                                 CloseHandle(_cachedProcessHandle);
+                            }
                             _cachedProcessHandle = testHandle;
                         }
 
+                        Trace("AttachAsync: enumerating modules...");
                         var modules = process.Modules
                             .Cast<ProcessModule>()
                             .Select(
@@ -141,36 +165,44 @@ public sealed class WindowsEngineFacade : IEngineFacade
                                     module.ModuleMemorySize))
                             .OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase)
                             .ToArray();
+                        Trace($"AttachAsync: enumerated {modules.Length} modules successfully.");
 
                         var attachment = new EngineAttachment(process.Id, process.ProcessName, modules);
                         lock (_attachLock)
                         {
                             _cachedAttachment = attachment;
                         }
+                        Trace($"AttachAsync: SUCCESS — attached to {process.ProcessName} (PID {process.Id}), {modules.Length} modules cached.");
                         return attachment;
                     }
                     catch (Win32Exception exception) when (attempt < maxAttempts)
                     {
                         lastException = exception;
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[EngineFacade] AttachAsync attempt {attempt}/{maxAttempts} for PID {processId} failed: {exception.Message}");
+                        Trace($"AttachAsync: attempt {attempt}/{maxAttempts} Win32Exception: {exception.Message} (NativeErrorCode={exception.NativeErrorCode}). Retrying...");
                         // Backoff: 250ms, 500ms, 1000ms
                         Thread.Sleep(250 * (1 << (attempt - 1)));
                     }
                     catch (Win32Exception exception)
                     {
                         lastException = exception;
+                        Trace($"AttachAsync: FINAL attempt {attempt}/{maxAttempts} Win32Exception: {exception.Message} (NativeErrorCode={exception.NativeErrorCode}). No more retries.");
                     }
-                    catch (InvalidOperationException) when (attempt < maxAttempts)
+                    catch (InvalidOperationException ex) when (attempt < maxAttempts)
                     {
                         // Process.GetProcessById can throw if process exited between retries
-                        System.Diagnostics.Debug.WriteLine(
-                            $"[EngineFacade] AttachAsync attempt {attempt}/{maxAttempts}: process {processId} not found, retrying...");
+                        lastException = ex;
+                        Trace($"AttachAsync: attempt {attempt}/{maxAttempts} InvalidOperationException: {ex.Message}. Retrying...");
                         Thread.Sleep(250 * (1 << (attempt - 1)));
+                    }
+                    catch (InvalidOperationException ex)
+                    {
+                        lastException = ex;
+                        Trace($"AttachAsync: FINAL attempt {attempt}/{maxAttempts} InvalidOperationException: {ex.Message}. No more retries.");
                     }
                 }
 
                 // All retries exhausted — clean up partial attach state
+                Trace($"AttachAsync: ALL {maxAttempts} ATTEMPTS EXHAUSTED for PID {processId}. Cleaning up partial state...");
                 lock (_attachLock)
                 {
                     if (_attachedProcessId == processId)
@@ -182,6 +214,11 @@ public sealed class WindowsEngineFacade : IEngineFacade
                             _cachedProcessHandle = IntPtr.Zero;
                         }
                         _cachedAttachment = null;
+                        Trace("AttachAsync: partial state cleaned up (_attachedProcessId=null, handle closed, cache cleared).");
+                    }
+                    else
+                    {
+                        Trace($"AttachAsync: skipped cleanup — _attachedProcessId is {_attachedProcessId}, not {processId}.");
                     }
                 }
 
@@ -196,6 +233,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
     {
         lock (_attachLock)
         {
+            Trace($"Detach: clearing state. _attachedProcessId={_attachedProcessId}, handleValid={_cachedProcessHandle != IntPtr.Zero}, hasCachedAttachment={_cachedAttachment is not null}");
             _attachedProcessId = null;
             // 4A: Close cached process handle on detach
             if (_cachedProcessHandle != IntPtr.Zero)
@@ -206,6 +244,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
             // 4D: Invalidate cached architecture
             _cachedArchitecture = null;
             _cachedAttachment = null;
+            Trace("Detach: all state cleared.");
         }
     }
 

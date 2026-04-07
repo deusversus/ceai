@@ -86,7 +86,7 @@ public partial class SettingsWindow : Window, IDisposable
         if (!string.IsNullOrWhiteSpace(currentKey))
         {
             ApiKeyBox.Password = currentKey;
-            ApiKeyTextBox.Text = currentKey;
+            // Don't load ApiKeyTextBox.Text — only populate when user clicks Show
             ApiKeyStatus.Text = "✓ API key configured";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
         }
@@ -100,7 +100,7 @@ public partial class SettingsWindow : Window, IDisposable
         if (!string.IsNullOrWhiteSpace(s.GitHubToken))
         {
             GitHubTokenBox.Password = s.GitHubToken;
-            GitHubTokenTextBox.Text = s.GitHubToken;
+            // Don't load GitHubTokenTextBox.Text — only populate when user clicks Show
             GitHubTokenStatus.Text = "✓ Signed in to GitHub Copilot";
             GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
             GitHubSignInBtn.Content = "✓  Signed in — sign in again?";

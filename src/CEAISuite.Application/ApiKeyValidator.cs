@@ -68,6 +68,12 @@ public static class ApiKeyValidator
         if (string.IsNullOrWhiteSpace(endpoint))
             return (false, "Custom endpoint URL is required.");
 
+        // Warn if not HTTPS — keys would be transmitted insecurely
+        if (!endpoint.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            && !endpoint.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase)
+            && !endpoint.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            return (false, "Custom endpoint should use HTTPS (except localhost).");
+
         var baseUrl = endpoint.TrimEnd('/');
         using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/models");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);

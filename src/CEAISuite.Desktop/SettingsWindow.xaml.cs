@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using CEAISuite.Application;
 
 namespace CEAISuite.Desktop;
@@ -13,6 +14,8 @@ public partial class SettingsWindow : Window, IDisposable
     private bool _keyVisible;
     private bool _suppressModelListChange;
     private CancellationTokenSource? _deviceFlowCts;
+    private DispatcherTimer? _apiKeyRevealTimer;
+    private DispatcherTimer? _ghTokenRevealTimer;
 
     private sealed record ModelInfo(string Id, string Name, string Description);
 
@@ -91,11 +94,13 @@ public partial class SettingsWindow : Window, IDisposable
             GitHubTokenStatus.Text = "✓ Signed in to GitHub Copilot";
             GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
             GitHubSignInBtn.Content = "✓  Signed in — sign in again?";
+            CopilotSignOutBtn.Visibility = Visibility.Visible;
         }
         else
         {
             GitHubTokenStatus.Text = "Sign in to enable Copilot";
             GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
+            CopilotSignOutBtn.Visibility = Visibility.Collapsed;
         }
 
         // General
@@ -476,7 +481,7 @@ public partial class SettingsWindow : Window, IDisposable
         ThemeManager.ApplyTheme(theme);
     }
 
-    private void ToggleApiKeyVisibility(object sender, RoutedEventArgs e)
+    private void ToggleApiKeyVisibility(object? sender, RoutedEventArgs? e)
     {
         _keyVisible = !_keyVisible;
         if (_keyVisible)
@@ -485,10 +490,22 @@ public partial class SettingsWindow : Window, IDisposable
             ApiKeyTextBox.Visibility = Visibility.Visible;
             ApiKeyBox.Visibility = Visibility.Collapsed;
             ShowKeyBtn.Content = "Hide";
+
+            // Auto-hide after 30 seconds
+            _apiKeyRevealTimer?.Stop();
+            _apiKeyRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            _apiKeyRevealTimer.Tick += (_, _) =>
+            {
+                _apiKeyRevealTimer.Stop();
+                ToggleApiKeyVisibility(null, null);
+            };
+            _apiKeyRevealTimer.Start();
         }
         else
         {
+            _apiKeyRevealTimer?.Stop();
             ApiKeyBox.Password = ApiKeyTextBox.Text;
+            ApiKeyTextBox.Text = ""; // Clear plaintext
             ApiKeyBox.Visibility = Visibility.Visible;
             ApiKeyTextBox.Visibility = Visibility.Collapsed;
             ShowKeyBtn.Content = "Show";
@@ -496,7 +513,7 @@ public partial class SettingsWindow : Window, IDisposable
     }
 
     private bool _ghTokenVisible;
-    private void ToggleGitHubTokenVisibility(object sender, RoutedEventArgs e)
+    private void ToggleGitHubTokenVisibility(object? sender, RoutedEventArgs? e)
     {
         _ghTokenVisible = !_ghTokenVisible;
         if (_ghTokenVisible)
@@ -505,10 +522,22 @@ public partial class SettingsWindow : Window, IDisposable
             GitHubTokenTextBox.Visibility = Visibility.Visible;
             GitHubTokenBox.Visibility = Visibility.Collapsed;
             ShowGitHubTokenBtn.Content = "Hide";
+
+            // Auto-hide after 30 seconds
+            _ghTokenRevealTimer?.Stop();
+            _ghTokenRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            _ghTokenRevealTimer.Tick += (_, _) =>
+            {
+                _ghTokenRevealTimer.Stop();
+                ToggleGitHubTokenVisibility(null, null);
+            };
+            _ghTokenRevealTimer.Start();
         }
         else
         {
+            _ghTokenRevealTimer?.Stop();
             GitHubTokenBox.Password = GitHubTokenTextBox.Text;
+            GitHubTokenTextBox.Text = ""; // Clear plaintext
             GitHubTokenBox.Visibility = Visibility.Visible;
             GitHubTokenTextBox.Visibility = Visibility.Collapsed;
             ShowGitHubTokenBtn.Content = "Show";
@@ -845,6 +874,8 @@ public partial class SettingsWindow : Window, IDisposable
             GitHubTokenStatus.Text = "✓ Signed in to GitHub Copilot";
             GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
             GitHubSignInBtn.Content = "✓  Signed in — sign in again?";
+            CopilotSignOutBtn.Visibility = Visibility.Visible;
+            DeviceCodeText.Text = ""; // Clear device code after successful authorization
             DeviceFlowPanel.Visibility = Visibility.Collapsed;
 
             // Invalidate cached models so they re-fetch with new token
@@ -884,6 +915,36 @@ public partial class SettingsWindow : Window, IDisposable
             Clipboard.SetText(code);
             DeviceFlowStatusText.Text = "Code copied! Waiting for authorization…";
         }
+    }
+
+    private void CopilotSignOut_Click(object sender, RoutedEventArgs e)
+    {
+        // Clear tokens
+        _settingsService.Settings.GitHubToken = null;
+        _settingsService.Settings.EncryptedGitHubToken = null;
+
+        // Invalidate cached session tokens
+        ChatClientFactory.CopilotService.Invalidate();
+        ChatClientFactory.CopilotService.InvalidateModels();
+
+        // Clear UI
+        GitHubTokenBox.Password = "";
+        GitHubTokenTextBox.Text = "";
+        DeviceCodeText.Text = "";
+        GitHubTokenStatus.Text = "Not signed in";
+        GitHubTokenStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
+        CopilotSignOutBtn.Visibility = Visibility.Collapsed;
+        GitHubSignInBtn.Content = "🔗  Sign in with GitHub";
+
+        // Hide usage panel
+        CopilotUsagePanel.Visibility = Visibility.Collapsed;
+
+        // Clear model list since token is gone
+        if (GetSelectedProvider() == "copilot")
+            PopulateModelList("copilot");
+
+        // Save immediately
+        _settingsService.Save();
     }
 
     private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();

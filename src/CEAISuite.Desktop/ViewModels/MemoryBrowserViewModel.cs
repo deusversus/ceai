@@ -134,6 +134,9 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string _disassemblyAnnotation = "";
 
+    [ObservableProperty]
+    private bool _isCapturingSnapshot;
+
     // ── 5I: Bookmarks ──
 
     public ObservableCollection<MemoryBookmark> Bookmarks { get; } = [];
@@ -471,6 +474,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
     private async Task CaptureSnapshotAsync()
     {
         if (_processContext.AttachedProcessId is not { } pid) return;
+        IsCapturingSnapshot = true;
         try
         {
             var snap = await _snapshotService.CaptureAsync(pid, (nuint)BaseAddress, MemoryBuffer.Length,
@@ -481,6 +485,7 @@ public partial class MemoryBrowserViewModel : ObservableObject, IDisposable
         {
             StatusText = $"Snapshot failed: {ex.Message}";
         }
+        finally { IsCapturingSnapshot = false; }
     }
 
     // ── Gap 15: Allocation Commands ──

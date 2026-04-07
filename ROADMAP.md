@@ -490,8 +490,7 @@ Phase 1 ✅ (Foundation)
     │
     Phase 8 ✅ (Lua) ← MoonSharp + CE API + REPL + forms + BP scripting; 489 tests
     │
-    ├── Phase 9 (CI/CD, Logging, Testing, UX gaps) ← CI/CD should be early
-    │       └── includes: auto-update, crash recovery, progress indicators, first-run onboarding
+    Phase 9 ✅ (Infrastructure) ← CI/CD, Serilog, telemetry, benchmarks, progress bars, wizard; 579 tests
     │
     └── Phase 10 (Advanced) ← long-term; includes AI co-pilot mode
 ```
@@ -505,7 +504,7 @@ Phase 1 ✅ (Foundation)
 6. ✅ Phase 5 — Done (Memory Browser+: hex editing, data inspector, structure spider; 291 tests)
 7. ✅ Phase 6 — Done (UX Polish: token/scan/watchdog status bar, process filter, screenshot/report, sorting, color coding; 291 tests)
 8. ✅ Phase 7 — Done (Engine gaps: multi-threaded scan, conditional BPs, trace, AA directives, address table, pointer maps; 385 tests)
-9. **Phase 9B — CI/CD (should be set up now)**
+9. ✅ Phase 9 — Done (CI/CD + Codecov, Serilog logging, crash telemetry opt-in, progress indicators, first-run wizard, UI lifecycle tests, benchmark hardening; 579 tests)
 10. ✅ Phase 8 — Done (MoonSharp Lua 5.2 engine, CE API, REPL, forms, BP scripting; 489 tests)
 
 ---
@@ -523,5 +522,5 @@ Phase 1 ✅ (Foundation)
 | **6** | UX Polish | ✅ Complete | Token/scan/watchdog status bar, process filter, screenshot/report export, column sorting, color coding, context menus; 291 tests |
 | **7** | Engine Gaps | ✅ Complete | Multi-threaded scan, bit-level scan, conditional/thread BPs, break-and-trace, AA directives (aobscanmodule, registersymbol, createthread, readmem/writemem, loadlibrary), address table hex/signed/dropdown/groups, pointer map save/load/compare; 385 tests |
 | **8** | Lua | ✅ Complete | MoonSharp Lua 5.2 engine: CE API bindings (20+ functions), {$luacode}/LuaCall AA integration, REPL console, CT Lua execution, form designer, breakpoint scripting, 3 AI tools; 489 tests |
-| **9** | Infrastructure | Planned | CI/CD, logging, expanded tests, auto-update, crash recovery |
+| **9** | Infrastructure | ✅ Complete | CI/CD (GitHub Actions + Codecov), Serilog structured logging (file + Output panel), crash telemetry opt-in, breakpoint/snapshot progress indicators, first-run wizard (3-page onboarding), UI lifecycle smoke tests, benchmark hardening; 579 tests |
 | **10** | Advanced | Long-term | Trainers, overlays, kernel debugging, plugins, AI co-pilot mode |

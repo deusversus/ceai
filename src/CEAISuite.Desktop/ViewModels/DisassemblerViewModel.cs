@@ -69,6 +69,7 @@ public partial class DisassemblerViewModel : ObservableObject
     [ObservableProperty] private bool _canGoForward;
     [ObservableProperty] private string? _currentFunctionLabel;
     [ObservableProperty] private bool _isDisassembling;
+    [ObservableProperty] private bool _isBreakpointBusy;
 
     [RelayCommand]
     private async Task GoToAddressAsync()
@@ -141,6 +142,7 @@ public partial class DisassemblerViewModel : ObservableObject
             if (!proceed) { StatusText = "Breakpoint cancelled."; return; }
         }
 
+        IsBreakpointBusy = true;
         try
         {
             var bp = await _breakpointService.SetBreakpointAsync(pid.Value, SelectedLine.Address);
@@ -148,6 +150,7 @@ public partial class DisassemblerViewModel : ObservableObject
             _outputLog.Append("Disasm", "Info", $"Breakpoint set at {SelectedLine.Address}");
         }
         catch (Exception ex) { StatusText = $"Failed: {ex.Message}"; }
+        finally { IsBreakpointBusy = false; }
     }
 
     [RelayCommand]
@@ -156,6 +159,7 @@ public partial class DisassemblerViewModel : ObservableObject
         if (SelectedLine is null) return;
         var pid = _processContext.AttachedProcessId;
         if (pid is null) { StatusText = "No process attached."; return; }
+        IsBreakpointBusy = true;
         try
         {
             // Set a write-breakpoint at the selected address to capture writers
@@ -175,6 +179,7 @@ public partial class DisassemblerViewModel : ObservableObject
             PopulateFindResults?.Invoke(items, $"Find What Writes to {SelectedLine.Address}");
         }
         catch (Exception ex) { StatusText = $"Failed: {ex.Message}"; }
+        finally { IsBreakpointBusy = false; }
     }
 
     [RelayCommand]

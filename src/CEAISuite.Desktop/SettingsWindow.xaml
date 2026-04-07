@@ -352,6 +352,9 @@
                         <CheckBox x:Name="CheckForUpdatesCheck" Content="Check for updates on startup"
                                   IsChecked="True" FontSize="13" Margin="0,10,0,0" />
 
+                        <CheckBox x:Name="CrashTelemetryCheck" Content="Help improve CE AI Suite by sharing anonymous crash reports"
+                                  IsChecked="False" FontSize="13" Margin="0,10,0,0" />
+
                         <Separator Margin="0,20,0,20" />
 
                         <TextBlock Text="Rate Limiting" FontWeight="SemiBold" FontSize="14" />

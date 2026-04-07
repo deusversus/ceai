@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Welcome to CE AI Suite"
         Icon="icon.ico"
-        Height="400" Width="500"
+        Height="480" Width="520"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize"
         Background="{DynamicResource WindowBackground}">
@@ -35,18 +35,20 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <!-- Heading -->
+        <!-- Heading (updates per page) -->
         <StackPanel Grid.Row="0" Margin="0,0,0,20">
-            <TextBlock Text="Let's get you set up"
+            <TextBlock x:Name="PageTitle" Text="Let's get you set up"
                        FontSize="22" FontWeight="SemiBold"
                        Foreground="{DynamicResource PrimaryForeground}" />
-            <TextBlock Text="You can change these later in Settings."
+            <TextBlock x:Name="PageSubtitle" Text="You can change these later in Settings."
                        FontSize="12" Margin="0,4,0,0"
                        Foreground="{DynamicResource SecondaryForeground}" />
         </StackPanel>
 
-        <!-- Content sections -->
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+        <!-- ═══════════════════════════════════════════ -->
+        <!-- Page 0: Settings (API Key, Theme, Density) -->
+        <!-- ═══════════════════════════════════════════ -->
+        <ScrollViewer x:Name="Page0" Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
                 <!-- Section 1: API Key -->
                 <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14"
@@ -96,10 +98,102 @@
             </StackPanel>
         </ScrollViewer>
 
-        <!-- Get Started button -->
-        <Button Grid.Row="2" Content="Get Started" FontSize="14" FontWeight="SemiBold"
-                Padding="24,10" HorizontalAlignment="Right" Margin="0,16,0,0"
-                Click="GetStarted_Click" IsDefault="True" />
+        <!-- ═══════════════════════════════════ -->
+        <!-- Page 1: Getting Started Overview   -->
+        <!-- ═══════════════════════════════════ -->
+        <StackPanel x:Name="Page1" Grid.Row="1" Visibility="Collapsed">
+            <TextBlock TextWrapping="Wrap" FontSize="13" Margin="0,0,0,16"
+                       Foreground="{DynamicResource PrimaryForeground}">
+                CE AI Suite is an AI-powered memory analysis tool. Here's a quick overview of the core workflow:
+            </TextBlock>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">1. Attach to a Process</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    Use the process list at the top to select and attach to a running process. The sidebar shows modules, threads, and memory maps.
+                </TextBlock>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">2. Scan Memory</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    Enter a value in the scanner and click Scan. Refine with changed/unchanged scans until you narrow down the address.
+                </TextBlock>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">3. Set Breakpoints &amp; Inspect</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    Right-click addresses to find what reads/writes them. Use the disassembler and debugger to understand code behavior.
+                </TextBlock>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">4. Save &amp; Script</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    Add addresses to the Address Table, write Auto Assembler or Lua scripts, and export as Cheat Tables (.CT) for sharing.
+                </TextBlock>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- ═══════════════════════════════════ -->
+        <!-- Page 2: AI Operator Introduction   -->
+        <!-- ═══════════════════════════════════ -->
+        <StackPanel x:Name="Page2" Grid.Row="1" Visibility="Collapsed">
+            <TextBlock TextWrapping="Wrap" FontSize="13" Margin="0,0,0,16"
+                       Foreground="{DynamicResource PrimaryForeground}">
+                The AI Operator chat panel is your intelligent assistant for memory analysis. It can help with tasks that would normally require deep expertise.
+            </TextBlock>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">Natural Language Commands</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    Ask the AI to scan for values, set breakpoints, analyze code, or write scripts. Example: "Find the health value and freeze it at 999."
+                </TextBlock>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">Tool Integration</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    The AI has access to 20+ tools including memory scanning, breakpoints, disassembly, Auto Assembler, Lua scripting, and pointer analysis.
+                </TextBlock>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">Safety &amp; Permissions</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    Destructive operations (writing memory, injecting code) always require your approval. The AI follows a plan-then-execute workflow for complex tasks.
+                </TextBlock>
+            </StackPanel>
+
+            <StackPanel Margin="0,0,0,12">
+                <TextBlock FontWeight="SemiBold" FontSize="13" Foreground="{DynamicResource AccentForeground}">Persistent Memory</TextBlock>
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="16,4,0,0" Foreground="{DynamicResource SecondaryForeground}">
+                    The AI remembers discoveries across sessions — pointer paths, code patterns, and strategies are retained for future use.
+                </TextBlock>
+            </StackPanel>
+        </StackPanel>
+
+        <!-- Navigation buttons -->
+        <DockPanel Grid.Row="2" Margin="0,16,0,0">
+            <!-- Page indicators -->
+            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                <Ellipse x:Name="Dot0" Width="8" Height="8" Fill="{DynamicResource AccentForeground}" Margin="0,0,6,0" />
+                <Ellipse x:Name="Dot1" Width="8" Height="8" Fill="{DynamicResource SecondaryForeground}" Margin="0,0,6,0" Opacity="0.4" />
+                <Ellipse x:Name="Dot2" Width="8" Height="8" Fill="{DynamicResource SecondaryForeground}" Opacity="0.4" />
+            </StackPanel>
+
+            <!-- Buttons (right-aligned) -->
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="SkipButton" Content="Skip" Padding="16,10" Margin="0,0,8,0"
+                        Click="Skip_Click" FontSize="13"
+                        Background="Transparent" Foreground="{DynamicResource SecondaryForeground}" BorderThickness="0" />
+                <Button x:Name="BackButton" Content="Back" Padding="16,10" Margin="0,0,8,0"
+                        Click="Back_Click" FontSize="13" Visibility="Collapsed" />
+                <Button x:Name="NextButton" Content="Next" FontSize="14" FontWeight="SemiBold"
+                        Padding="24,10" Click="Next_Click" IsDefault="True" />
+            </StackPanel>
+        </DockPanel>
     </Grid>
     </Grid>
 </Window>

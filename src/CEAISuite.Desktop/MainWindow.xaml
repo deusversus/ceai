@@ -506,6 +506,20 @@
                                         <TextBlock VerticalAlignment="Center" Margin="8,0,0,0" Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                    Text="{Binding AddressTableStatus, TargetNullValue=No addresses saved}" />
                                     </StackPanel>
+                                    <!-- Phase 9E: Breakpoint operation progress indicator -->
+                                    <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="3" Margin="4,0,4,2"
+                                                 Background="{DynamicResource InputBackground}" Foreground="#FF4CAF50">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsBreakpointBusy}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
                                     <!-- Column headers (clickable for sorting, drag-resizable via GridSplitters) -->
                                     <Grid DockPanel.Dock="Top" Margin="22,0,0,2">
                                         <Grid.ColumnDefinitions>
@@ -781,6 +795,20 @@
                                         <Button Command="{Binding CopySelectedRangeCommand}" Content="Copy All" Padding="8,2" Style="{StaticResource ToolbarButton}" />
                                         <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
                                     </StackPanel>
+                                    <!-- Phase 9E: Breakpoint operation progress indicator -->
+                                    <ProgressBar DockPanel.Dock="Top" IsIndeterminate="True" Height="3" Margin="4,0,4,2"
+                                                 Background="{DynamicResource InputBackground}" Foreground="#FF4CAF50">
+                                        <ProgressBar.Style>
+                                            <Style TargetType="ProgressBar">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsBreakpointBusy}" Value="True">
+                                                        <Setter Property="Visibility" Value="Visible" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </ProgressBar.Style>
+                                    </ProgressBar>
                                     <ListView ItemsSource="{Binding Lines}" SelectedItem="{Binding SelectedLine}" FontFamily="Consolas" FontSize="12"
                                               Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
                                               BorderThickness="0">

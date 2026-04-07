@@ -74,6 +74,22 @@
             <TextBlock Foreground="{DynamicResource SecondaryForeground}" Text="{Binding SearchStatus}" VerticalAlignment="Center" Margin="8,0,0,0" />
         </WrapPanel>
 
+        <!-- Phase 9E: Snapshot capture progress indicator -->
+        <ProgressBar Grid.Row="1" IsIndeterminate="True" Height="3" Margin="0,0,0,2"
+                     VerticalAlignment="Bottom"
+                     Background="{DynamicResource InputBackground}" Foreground="#FF4CAF50">
+            <ProgressBar.Style>
+                <Style TargetType="ProgressBar">
+                    <Setter Property="Visibility" Value="Collapsed" />
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsCapturingSnapshot}" Value="True">
+                            <Setter Property="Visibility" Value="Visible" />
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </ProgressBar.Style>
+        </ProgressBar>
+
         <!-- Main content: hex editor + side panels -->
         <Grid Grid.Row="2">
             <Grid.ColumnDefinitions>

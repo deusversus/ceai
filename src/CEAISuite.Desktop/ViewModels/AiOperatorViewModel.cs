@@ -740,14 +740,18 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
             {
                 var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(settings.GitHubToken);
                 foreach (var m in copilotModels)
-                    models.Add(new ModelOption("copilot", m.Id, $"{m.Id} (Copilot)"));
+                    models.Add(new ModelOption("copilot", m.Id, $"{m.Name} [{m.GetRate()}]"));
             }
             catch (Exception ex)
             {
                 _outputLog.Append("AiOperator", "Debug", $"Failed to fetch Copilot models: {ex.Message}");
-                // Fallback defaults
-                models.Add(new ModelOption("copilot", "gpt-4o", "gpt-4o (Copilot)"));
-                models.Add(new ModelOption("copilot", "claude-sonnet-4-6", "Claude Sonnet (Copilot)"));
+                // Fallback defaults — rates resolved from known table
+                var fallbacks = new[] { ("gpt-4o", "GPT-4o"), ("claude-sonnet-4-6", "Claude Sonnet 4.6") };
+                foreach (var (id, name) in fallbacks)
+                {
+                    var info = new CopilotModelInfo(id, name, "", "");
+                    models.Add(new ModelOption("copilot", id, $"{name} [{info.GetRate()}]"));
+                }
             }
         }
 

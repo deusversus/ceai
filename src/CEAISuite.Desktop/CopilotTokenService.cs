@@ -400,7 +400,13 @@ internal sealed class CopilotTokenService : IDisposable
                            : item.TryGetProperty("owned_by", out var ownerEl) ? ownerEl.GetString() ?? ""
                            : "";
 
-                models.Add(new CopilotModelInfo(shortId, name, vendor, ""));
+                // Try to extract premium request multiplier from API response
+                var rate = "";
+                if (item.TryGetProperty("policy", out var policy)
+                    && policy.TryGetProperty("premium_request_multiplier", out var mult))
+                    rate = mult.ValueKind == JsonValueKind.Number ? $"{mult.GetDouble()}x" : mult.GetString() ?? "";
+
+                models.Add(new CopilotModelInfo(shortId, name, vendor, "", rate));
             }
 
             return models.Count > 0 ? models : null;
@@ -432,7 +438,27 @@ internal sealed class CopilotTokenService : IDisposable
 }
 
 /// <summary>Model info returned by the Copilot /models endpoint.</summary>
-internal sealed record CopilotModelInfo(string Id, string Name, string Vendor, string Capabilities);
+internal sealed record CopilotModelInfo(string Id, string Name, string Vendor, string Capabilities, string PremiumRate = "")
+{
+    /// <summary>Known premium request multipliers from GitHub Copilot billing docs (2026-04).</summary>
+    private static readonly Dictionary<string, string> KnownRates = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["gpt-4.1"] = "Included", ["gpt-4o"] = "Included", ["gpt-4o-mini"] = "Included",
+        ["gpt-5-mini"] = "Included", ["raptor-mini"] = "Included",
+        ["gpt-5.1-codex-mini"] = "0.33x", ["gpt-5.4-mini"] = "0.33x",
+        ["claude-haiku-4-5"] = "0.33x", ["gemini-3-flash"] = "0.33x",
+        ["gemini-3-flash-preview"] = "0.33x", ["grok-code-fast-1"] = "0.25x",
+        ["claude-sonnet-4"] = "1x", ["claude-sonnet-4-5"] = "1x", ["claude-sonnet-4-6"] = "1x",
+        ["gpt-5.1"] = "1x", ["gpt-5.2"] = "1x", ["gpt-5.4"] = "1x",
+        ["o3"] = "1x", ["o4-mini"] = "1x",
+        ["gemini-2.5-pro"] = "1x", ["gemini-3-pro"] = "1x", ["gemini-3.1-pro"] = "1x",
+        ["claude-opus-4-5"] = "3x", ["claude-opus-4-6"] = "3x",
+    };
+
+    /// <summary>Get the premium request rate — from API if available, else known table, else "1x".</summary>
+    public string GetRate() => !string.IsNullOrEmpty(PremiumRate) ? PremiumRate
+        : KnownRates.TryGetValue(Id, out var rate) ? rate : "1x";
+}
 
 /// <summary>Quota snapshot for a single Copilot resource category.</summary>
 internal sealed record CopilotQuota(int Entitlement, int Remaining, double PercentRemaining, bool Unlimited);

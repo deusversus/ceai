@@ -394,7 +394,7 @@ public partial class SettingsWindow : Window, IDisposable
             var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(githubToken);
 
             var modelInfos = copilotModels
-                .Select(m => new ModelInfo(m.Id, m.Name, m.Vendor))
+                .Select(m => new ModelInfo(m.Id, m.Name, m.GetRate()))
                 .ToArray();
 
             Dispatcher.Invoke(() =>

@@ -386,3 +386,6 @@ public sealed class SessionDisplayItem
     public int AddressCount { get; init; }
     public int ActionCount { get; init; }
 }
+
+/// <summary>Display model for the grouped multi-provider model selector dropdown.</summary>
+public sealed record ModelOption(string Provider, string ModelId, string DisplayName, bool IsHeader = false);

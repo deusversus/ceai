@@ -1958,11 +1958,12 @@
                                                                 <ItemsControl x:Name="ModelSelectorList">
                                                                     <ItemsControl.ItemTemplate>
                                                                         <DataTemplate>
-                                                                            <Button Content="{Binding}" FontSize="12"
-                                                                                    Padding="12,6" HorizontalContentAlignment="Left"
-                                                                                    Background="Transparent" BorderThickness="0" Cursor="Hand"
+                                                                            <Button Padding="12,4" HorizontalContentAlignment="Left"
+                                                                                    Background="Transparent" BorderThickness="0"
                                                                                     Click="ModelSelectorItem_Click" Tag="{Binding}"
-                                                                                    Loaded="ModelSelectorItem_Loaded" />
+                                                                                    Loaded="ModelSelectorItem_Loaded">
+                                                                                <TextBlock Text="{Binding DisplayName}" FontSize="12" />
+                                                                            </Button>
                                                                         </DataTemplate>
                                                                     </ItemsControl.ItemTemplate>
                                                                 </ItemsControl>

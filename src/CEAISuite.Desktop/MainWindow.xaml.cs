@@ -1318,17 +1318,32 @@ public partial class MainWindow : Window, IDisposable
 
     private void ModelSelectorItem_Loaded(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button btn || btn.Tag is not string model) return;
-        var isCurrent = model == _appSettingsService.Settings.Model;
-        btn.Foreground = (Brush)FindResource(isCurrent ? "AccentForeground" : "PrimaryForeground");
-        btn.FontWeight = isCurrent ? FontWeights.SemiBold : FontWeights.Normal;
+        if (sender is not Button btn || btn.Tag is not ModelOption option) return;
+
+        if (option.IsHeader)
+        {
+            // Headers: bold, muted foreground, non-clickable
+            btn.IsHitTestVisible = false;
+            btn.Cursor = Cursors.Arrow;
+            btn.FontWeight = FontWeights.SemiBold;
+            btn.Foreground = (Brush)FindResource("TertiaryForeground");
+        }
+        else
+        {
+            // Models: highlight the currently active model
+            var isCurrent = option.ModelId == _appSettingsService.Settings.Model
+                         && option.Provider.Equals(_appSettingsService.Settings.Provider ?? "openai", StringComparison.OrdinalIgnoreCase);
+            btn.Cursor = Cursors.Hand;
+            btn.Foreground = (Brush)FindResource(isCurrent ? "AccentForeground" : "PrimaryForeground");
+            btn.FontWeight = isCurrent ? FontWeights.SemiBold : FontWeights.Normal;
+        }
     }
 
     private void ModelSelectorItem_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button btn || btn.Tag is not string model) return;
+        if (sender is not Button btn || btn.Tag is not ModelOption option || option.IsHeader) return;
         ModelSelectorPopup.IsOpen = false;
-        _aiOperatorVm.SelectModelCommand.Execute(model);
+        _aiOperatorVm.SelectModelCommand.Execute(option);
     }
 
     // ── Permission Mode Selector ──

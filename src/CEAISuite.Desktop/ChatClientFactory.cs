@@ -28,6 +28,27 @@ internal static class ChatClientFactory
     internal static void SetLogger(ILoggerFactory loggerFactory) =>
         _logger = loggerFactory.CreateLogger(typeof(ChatClientFactory));
 
+    /// <summary>
+    /// Creates an IChatClient for an explicit provider and model combination.
+    /// Used by the multi-provider model selector to switch provider+model in one step.
+    /// </summary>
+    public static IChatClient? Create(AppSettings settings, string provider, string model)
+    {
+        return provider.ToLowerInvariant() switch
+        {
+            "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, model)),
+            "anthropic" => CreateIfKey(settings.OpenAiApiKey, k => CreateAnthropic(k, model)),
+            "openai-compatible" => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAICompatible(k, model, settings.CustomEndpoint)),
+            "gemini" => null, // Gemini support not yet available — will be filled in when Phase 2 merges
+            _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, model)),
+        };
+    }
+
+    private static IChatClient? CreateIfKey(string? key, Func<string, IChatClient> factory)
+    {
+        return string.IsNullOrWhiteSpace(key) ? null : factory(key);
+    }
+
     public static IChatClient? Create(AppSettings settings)
     {
         return settings.Provider.ToLowerInvariant() switch

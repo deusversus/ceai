@@ -31,6 +31,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     private readonly IClipboardService _clipboard;
     private readonly ILogger<AiOperatorViewModel> _logger;
 
+    private static readonly string[] GeminiModels = ["gemini-2.5-flash", "gemini-2.5-pro"];
     private static readonly string[] AnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"];
     private static readonly string[] OpenAiModels = ["gpt-5.4", "gpt-4.1", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini"];
 
@@ -104,7 +105,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     private bool _isChatHistoryVisible;
 
     [ObservableProperty]
-    private ObservableCollection<string> _availableModels = new();
+    private ObservableCollection<ModelOption> _availableModels = new();
 
     [ObservableProperty]
     private string _chatSearchText = "";
@@ -526,17 +527,25 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private async Task SelectModelAsync(string? model)
+    private async Task SelectModelAsync(ModelOption? option)
     {
-        if (string.IsNullOrEmpty(model)) return;
+        if (option is null || option.IsHeader) return;
 
-        _appSettingsService.Settings.Model = model;
+        _appSettingsService.Settings.Model = option.ModelId;
+        SelectedModel = option.ModelId;
+
+        // Switch provider if the selected model belongs to a different provider
+        var currentProvider = (_appSettingsService.Settings.Provider ?? "openai").ToLowerInvariant();
+        if (!option.Provider.Equals(currentProvider, StringComparison.OrdinalIgnoreCase))
+        {
+            _appSettingsService.Settings.Provider = option.Provider;
+        }
+
         _appSettingsService.Save();
-        SelectedModel = model;
 
         try
         {
-            var newClient = ChatClientFactory.Create(_appSettingsService.Settings);
+            var newClient = ChatClientFactory.Create(_appSettingsService.Settings, option.Provider, option.ModelId);
             _aiOperatorService.Reconfigure(newClient);
         }
         catch (Exception ex)
@@ -690,48 +699,65 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     private async Task RefreshAvailableModelsAsync()
     {
         var models = await GetAvailableModelsAsync();
-        AvailableModels = new ObservableCollection<string>(models);
+        AvailableModels = new ObservableCollection<ModelOption>(models);
     }
 
-    /// <summary>Fetch available models for the model selector popup, filtered by the active provider.</summary>
-    public async Task<List<string>> GetAvailableModelsAsync()
+    /// <summary>Fetch available models for the model selector popup, grouped by provider.</summary>
+    public async Task<List<ModelOption>> GetAvailableModelsAsync()
     {
         var settings = _appSettingsService.Settings;
-        var currentModel = settings.Model;
-        var provider = (settings.Provider ?? "openai").ToLowerInvariant();
+        var models = new List<ModelOption>();
 
-        List<string> models = new();
-
-        switch (provider)
+        // OpenAI — uses the shared OpenAiApiKey
+        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey))
         {
-            case "copilot":
-                if (!string.IsNullOrWhiteSpace(settings.GitHubToken))
-                {
-                    try
-                    {
-                        var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(settings.GitHubToken);
-                        models.AddRange(copilotModels.Select(m => m.Id));
-                    }
-                    catch (Exception ex) { _outputLog.Append("AiOperator", "Debug", $"Failed to fetch Copilot models: {ex.Message}"); }
-                }
-                break;
-
-            case "anthropic":
-                models.AddRange(AnthropicModels);
-                break;
-
-            case "openai":
-                models.AddRange(OpenAiModels);
-                break;
-
-            case "openai-compatible":
-                // Custom endpoints — no predefined list; just show the current model.
-                break;
+            models.Add(new ModelOption("openai", "", "\u2500\u2500 OpenAI \u2500\u2500", IsHeader: true));
+            foreach (var m in OpenAiModels)
+                models.Add(new ModelOption("openai", m, m));
         }
 
-        // Always include the current model so the user sees what's active
-        if (!models.Contains(currentModel))
-            models.Insert(0, currentModel);
+        // Anthropic — uses the shared OpenAiApiKey (Anthropic key stored in same field)
+        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey))
+        {
+            models.Add(new ModelOption("anthropic", "", "\u2500\u2500 Anthropic \u2500\u2500", IsHeader: true));
+            foreach (var m in AnthropicModels)
+                models.Add(new ModelOption("anthropic", m, m));
+        }
+
+        // Gemini — uses the shared OpenAiApiKey (Gemini key stored in same field)
+        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey))
+        {
+            models.Add(new ModelOption("gemini", "", "\u2500\u2500 Google Gemini \u2500\u2500", IsHeader: true));
+            foreach (var m in GeminiModels)
+                models.Add(new ModelOption("gemini", m, m));
+        }
+
+        // GitHub Copilot
+        if (!string.IsNullOrWhiteSpace(settings.GitHubToken))
+        {
+            models.Add(new ModelOption("copilot", "", "\u2500\u2500 GitHub Copilot \u2500\u2500", IsHeader: true));
+            try
+            {
+                var copilotModels = await ChatClientFactory.CopilotService.FetchModelsAsync(settings.GitHubToken);
+                foreach (var m in copilotModels)
+                    models.Add(new ModelOption("copilot", m.Id, $"{m.Id} (Copilot)"));
+            }
+            catch (Exception ex)
+            {
+                _outputLog.Append("AiOperator", "Debug", $"Failed to fetch Copilot models: {ex.Message}");
+                // Fallback defaults
+                models.Add(new ModelOption("copilot", "gpt-4o", "gpt-4o (Copilot)"));
+                models.Add(new ModelOption("copilot", "claude-sonnet-4-6", "Claude Sonnet (Copilot)"));
+            }
+        }
+
+        // OpenAI-Compatible
+        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey) && !string.IsNullOrWhiteSpace(settings.CustomEndpoint))
+        {
+            models.Add(new ModelOption("openai-compatible", "", "\u2500\u2500 Compatible \u2500\u2500", IsHeader: true));
+            if (!string.IsNullOrWhiteSpace(settings.Model))
+                models.Add(new ModelOption("openai-compatible", settings.Model, settings.Model));
+        }
 
         return models;
     }

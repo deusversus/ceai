@@ -79,6 +79,7 @@ public partial class SettingsWindow : Window, IDisposable
         var currentKey = s.Provider?.ToLowerInvariant() switch
         {
             "anthropic" => s.AnthropicApiKey,
+            "gemini" => s.GeminiApiKey,
             "openai-compatible" => s.CompatibleApiKey,
             _ => s.OpenAiApiKey,
         };
@@ -248,6 +249,7 @@ public partial class SettingsWindow : Window, IDisposable
         var newKey = provider switch
         {
             "anthropic" => s.AnthropicApiKey,
+            "gemini" => s.GeminiApiKey,
             "openai-compatible" => s.CompatibleApiKey,
             "openai" => s.OpenAiApiKey,
             _ => null,
@@ -609,8 +611,9 @@ public partial class SettingsWindow : Window, IDisposable
         {
             case "openai": s.OpenAiApiKey = apiKeyValue; break;
             case "anthropic": s.AnthropicApiKey = apiKeyValue; break;
+            case "gemini": s.GeminiApiKey = apiKeyValue; break;
             case "openai-compatible": s.CompatibleApiKey = apiKeyValue; break;
-            // Gemini and Copilot handled separately
+            // Copilot uses GitHubToken (handled below)
         }
 
         s.GitHubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;

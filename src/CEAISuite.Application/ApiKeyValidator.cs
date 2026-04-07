@@ -22,6 +22,7 @@ public static class ApiKeyValidator
             {
                 "openai" => await ValidateOpenAI(apiKey, ct),
                 "anthropic" => await ValidateAnthropic(apiKey, ct),
+                "gemini" => await ValidateGemini(apiKey, ct),
                 "openai-compatible" => await ValidateCompatible(apiKey, endpoint, ct),
                 "copilot" => await ValidateCopilot(apiKey, ct),
                 _ => (false, $"Unknown provider: {provider}"),
@@ -50,6 +51,14 @@ public static class ApiKeyValidator
         using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/v1/models");
         req.Headers.Add("x-api-key", apiKey);
         req.Headers.Add("anthropic-version", "2023-06-01");
+        using var res = await Http.SendAsync(req, ct);
+        return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid API key.");
+    }
+
+    private static async Task<(bool, string?)> ValidateGemini(string apiKey, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get,
+            $"https://generativelanguage.googleapis.com/v1/models?key={apiKey}");
         using var res = await Http.SendAsync(req, ct);
         return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid API key.");
     }

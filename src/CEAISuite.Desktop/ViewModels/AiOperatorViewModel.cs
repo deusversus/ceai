@@ -708,7 +708,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
         var settings = _appSettingsService.Settings;
         var models = new List<ModelOption>();
 
-        // OpenAI — uses the shared OpenAiApiKey
+        // OpenAI
         if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey))
         {
             models.Add(new ModelOption("openai", "", "\u2500\u2500 OpenAI \u2500\u2500", IsHeader: true));
@@ -716,16 +716,16 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                 models.Add(new ModelOption("openai", m, m));
         }
 
-        // Anthropic — uses the shared OpenAiApiKey (Anthropic key stored in same field)
-        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey))
+        // Anthropic
+        if (!string.IsNullOrWhiteSpace(settings.AnthropicApiKey))
         {
             models.Add(new ModelOption("anthropic", "", "\u2500\u2500 Anthropic \u2500\u2500", IsHeader: true));
             foreach (var m in AnthropicModels)
                 models.Add(new ModelOption("anthropic", m, m));
         }
 
-        // Gemini — uses the shared OpenAiApiKey (Gemini key stored in same field)
-        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey))
+        // Gemini
+        if (!string.IsNullOrWhiteSpace(settings.GeminiApiKey))
         {
             models.Add(new ModelOption("gemini", "", "\u2500\u2500 Google Gemini \u2500\u2500", IsHeader: true));
             foreach (var m in GeminiModels)
@@ -752,7 +752,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
         }
 
         // OpenAI-Compatible
-        if (!string.IsNullOrWhiteSpace(settings.OpenAiApiKey) && !string.IsNullOrWhiteSpace(settings.CustomEndpoint))
+        if (!string.IsNullOrWhiteSpace(settings.CompatibleApiKey ?? settings.OpenAiApiKey) && !string.IsNullOrWhiteSpace(settings.CustomEndpoint))
         {
             models.Add(new ModelOption("openai-compatible", "", "\u2500\u2500 Compatible \u2500\u2500", IsHeader: true));
             if (!string.IsNullOrWhiteSpace(settings.Model))

@@ -63,11 +63,17 @@ public partial class SettingsWindow : Window, IDisposable
         if (!string.IsNullOrWhiteSpace(s.CustomEndpoint))
             EndpointBox.Text = s.CustomEndpoint;
 
-        // API Key (for non-Copilot providers)
-        if (!string.IsNullOrWhiteSpace(s.OpenAiApiKey))
+        // API Key (for non-Copilot providers) — load per-provider key
+        var currentKey = s.Provider?.ToLowerInvariant() switch
         {
-            ApiKeyBox.Password = s.OpenAiApiKey;
-            ApiKeyTextBox.Text = s.OpenAiApiKey;
+            "anthropic" => s.AnthropicApiKey,
+            "openai-compatible" => s.CompatibleApiKey,
+            _ => s.OpenAiApiKey,
+        };
+        if (!string.IsNullOrWhiteSpace(currentKey))
+        {
+            ApiKeyBox.Password = currentKey;
+            ApiKeyTextBox.Text = currentKey;
             ApiKeyStatus.Text = "✓ API key configured";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
         }
@@ -219,6 +225,22 @@ public partial class SettingsWindow : Window, IDisposable
                 "openai-compatible" => "API key for the compatible endpoint",
                 _ => "Get yours at platform.openai.com",
             };
+        }
+
+        // Swap API key display to the per-provider key
+        var s = _settingsService.Settings;
+        var newKey = provider switch
+        {
+            "anthropic" => s.AnthropicApiKey,
+            "openai-compatible" => s.CompatibleApiKey,
+            "openai" => s.OpenAiApiKey,
+            _ => null,
+        };
+        if (ApiKeyBox is not null)
+        {
+            ApiKeyBox.Password = newKey ?? "";
+            if (_keyVisible && ApiKeyTextBox is not null)
+                ApiKeyTextBox.Text = newKey ?? "";
         }
 
         PopulateModelList(provider);
@@ -511,7 +533,17 @@ public partial class SettingsWindow : Window, IDisposable
 
         s.Provider = GetSelectedProvider();
         s.CustomEndpoint = s.Provider == "openai-compatible" ? EndpointBox.Text : null;
-        s.OpenAiApiKey = _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password;
+
+        // Save API key to the correct per-provider property
+        var apiKeyValue = _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password;
+        switch (GetSelectedProvider())
+        {
+            case "openai": s.OpenAiApiKey = apiKeyValue; break;
+            case "anthropic": s.AnthropicApiKey = apiKeyValue; break;
+            case "openai-compatible": s.CompatibleApiKey = apiKeyValue; break;
+            // Gemini and Copilot handled separately
+        }
+
         s.GitHubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;
         s.Model = GetSelectedModel();
 

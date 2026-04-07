@@ -29,24 +29,18 @@ internal static class ChatClientFactory
 
     public static IChatClient? Create(AppSettings settings)
     {
-        if (settings.Provider.Equals("copilot", StringComparison.OrdinalIgnoreCase))
-        {
-            var githubToken = settings.GitHubToken;
-            if (string.IsNullOrWhiteSpace(githubToken)) return null;
-            return CreateCopilot(githubToken, settings.Model);
-        }
-
-        var apiKey = settings.OpenAiApiKey;
-        if (string.IsNullOrWhiteSpace(apiKey)) return null;
-
         return settings.Provider.ToLowerInvariant() switch
         {
-            "openai" => CreateOpenAI(apiKey, settings.Model),
-            "anthropic" => CreateAnthropic(apiKey, settings.Model),
-            "openai-compatible" => CreateOpenAICompatible(apiKey, settings.Model, settings.CustomEndpoint),
-            _ => CreateOpenAI(apiKey, settings.Model),
+            "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, settings.Model)),
+            "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, settings.Model)),
+            "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, settings.Model, settings.CustomEndpoint)),
+            "gemini" => null, // Phase 2
+            _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, settings.Model)),
         };
     }
+
+    private static IChatClient? CreateIfKey(string? key, Func<string, IChatClient> factory)
+        => string.IsNullOrWhiteSpace(key) ? null : factory(key);
 
     private static IChatClient CreateOpenAI(string apiKey, string model)
     {

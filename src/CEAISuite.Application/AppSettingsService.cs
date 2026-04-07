@@ -19,6 +19,36 @@ public sealed class AppSettings
     /// <summary>DPAPI-encrypted, Base64-encoded API key (written to disk).</summary>
     public string? EncryptedApiKey { get; set; }
 
+    // ── Per-provider API keys (each pair: runtime plaintext + disk-encrypted) ──
+
+    /// <summary>Runtime-only plaintext Anthropic key (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? AnthropicApiKey { get; set; }
+    public string? EncryptedAnthropicApiKey { get; set; }
+
+    /// <summary>Runtime-only plaintext Gemini key (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GeminiApiKey { get; set; }
+    public string? EncryptedGeminiApiKey { get; set; }
+
+    /// <summary>Runtime-only plaintext Gemini OAuth token (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GeminiOAuthToken { get; set; }
+    public string? EncryptedGeminiOAuthToken { get; set; }
+
+    /// <summary>Runtime-only plaintext Gemini refresh token (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GeminiRefreshToken { get; set; }
+    public string? EncryptedGeminiRefreshToken { get; set; }
+
+    /// <summary>Runtime-only plaintext OpenAI-compatible key (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? CompatibleApiKey { get; set; }
+    public string? EncryptedCompatibleApiKey { get; set; }
+
+    /// <summary>Settings schema version for migrations.</summary>
+    public int SettingsVersion { get; set; }
+
     /// <summary>AI provider: "openai", "anthropic", "openai-compatible", "copilot".</summary>
     public string Provider { get; set; } = "openai";
 
@@ -147,6 +177,17 @@ public sealed class AppSettings
     /// <summary>Set to true after the first-run welcome dialog has been completed.</summary>
     public bool FirstRunCompleted { get; set; }
 
+    /// <summary>Returns the API key for the given provider name.</summary>
+    public string? GetApiKeyForProvider(string? provider) => provider?.ToLowerInvariant() switch
+    {
+        "openai" => OpenAiApiKey,
+        "anthropic" => AnthropicApiKey,
+        "gemini" => GeminiApiKey,
+        "openai-compatible" => CompatibleApiKey,
+        "copilot" => GitHubToken,
+        _ => OpenAiApiKey,
+    };
+
     // ── Auto-Update ──
 
     /// <summary>Check GitHub for updates when the application starts.</summary>
@@ -250,6 +291,37 @@ public sealed class AppSettingsService
             }
         }
 
+        // Decrypt per-provider API keys
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedAnthropicApiKey))
+        {
+            try { _settings.AnthropicApiKey = DecryptString(_settings.EncryptedAnthropicApiKey); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Anthropic API key"); }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiApiKey))
+        {
+            try { _settings.GeminiApiKey = DecryptString(_settings.EncryptedGeminiApiKey); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini API key"); }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiOAuthToken))
+        {
+            try { _settings.GeminiOAuthToken = DecryptString(_settings.EncryptedGeminiOAuthToken); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini OAuth token"); }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiRefreshToken))
+        {
+            try { _settings.GeminiRefreshToken = DecryptString(_settings.EncryptedGeminiRefreshToken); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini refresh token"); }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedCompatibleApiKey))
+        {
+            try { _settings.CompatibleApiKey = DecryptString(_settings.EncryptedCompatibleApiKey); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Compatible API key"); }
+        }
+
         // Decrypt MCP server environment variables
         foreach (var mcp in _settings.McpServers)
         {
@@ -269,11 +341,35 @@ public sealed class AppSettingsService
             }
         }
 
+        // Migrate from shared OpenAiApiKey to per-provider keys (one-time)
+        if (_settings.SettingsVersion < 1 && !string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
+        {
+            switch (_settings.Provider?.ToLowerInvariant())
+            {
+                case "anthropic":
+                    _settings.AnthropicApiKey ??= _settings.OpenAiApiKey;
+                    break;
+                case "openai-compatible":
+                    _settings.CompatibleApiKey ??= _settings.OpenAiApiKey;
+                    break;
+                // "openai" stays in OpenAiApiKey — no migration needed
+            }
+            _settings.SettingsVersion = 1;
+            Save(); // Persist migration
+        }
+
         // Environment variable overrides stored key if present
-        var envKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
-                  ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-        if (!string.IsNullOrWhiteSpace(envKey) && string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
-            _settings.OpenAiApiKey = envKey;
+        var envAnthropicKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+        if (!string.IsNullOrWhiteSpace(envAnthropicKey) && string.IsNullOrWhiteSpace(_settings.AnthropicApiKey))
+            _settings.AnthropicApiKey = envAnthropicKey;
+
+        var envOpenAiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+        if (!string.IsNullOrWhiteSpace(envOpenAiKey) && string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
+            _settings.OpenAiApiKey = envOpenAiKey;
+
+        var envGeminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+        if (!string.IsNullOrWhiteSpace(envGeminiKey) && string.IsNullOrWhiteSpace(_settings.GeminiApiKey))
+            _settings.GeminiApiKey = envGeminiKey;
 
         var envGitHub = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
         if (!string.IsNullOrWhiteSpace(envGitHub) && string.IsNullOrWhiteSpace(_settings.GitHubToken))
@@ -305,6 +401,18 @@ public sealed class AppSettingsService
             _settings.EncryptedGitHubToken = EncryptString(_settings.GitHubToken);
         else
             _settings.EncryptedGitHubToken = null;
+
+        // Encrypt per-provider API keys before writing
+        _settings.EncryptedAnthropicApiKey = !string.IsNullOrWhiteSpace(_settings.AnthropicApiKey)
+            ? EncryptString(_settings.AnthropicApiKey) : null;
+        _settings.EncryptedGeminiApiKey = !string.IsNullOrWhiteSpace(_settings.GeminiApiKey)
+            ? EncryptString(_settings.GeminiApiKey) : null;
+        _settings.EncryptedGeminiOAuthToken = !string.IsNullOrWhiteSpace(_settings.GeminiOAuthToken)
+            ? EncryptString(_settings.GeminiOAuthToken) : null;
+        _settings.EncryptedGeminiRefreshToken = !string.IsNullOrWhiteSpace(_settings.GeminiRefreshToken)
+            ? EncryptString(_settings.GeminiRefreshToken) : null;
+        _settings.EncryptedCompatibleApiKey = !string.IsNullOrWhiteSpace(_settings.CompatibleApiKey)
+            ? EncryptString(_settings.CompatibleApiKey) : null;
 
         // Encrypt MCP server environment variables before writing
         foreach (var mcp in _settings.McpServers)

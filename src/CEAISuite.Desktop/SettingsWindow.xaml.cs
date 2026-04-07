@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using CEAISuite.Application;
 
@@ -512,6 +513,33 @@ public partial class SettingsWindow : Window, IDisposable
         }
     }
 
+    private async void ValidateApiKey_Click(object sender, RoutedEventArgs e)
+    {
+        var provider = GetSelectedProvider();
+        var key = _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password;
+        var endpoint = provider == "openai-compatible" ? EndpointBox.Text : null;
+
+        ApiKeyValidationStatus.Text = "Validating...";
+        ApiKeyValidationStatus.Foreground = new SolidColorBrush(Colors.Gray);
+        ValidateKeyBtn.IsEnabled = false;
+
+        try
+        {
+            var (isValid, error) = await ApiKeyValidator.ValidateAsync(provider, key, endpoint);
+            ApiKeyValidationStatus.Text = isValid ? "\u2713 Valid" : $"\u2717 {error}";
+            ApiKeyValidationStatus.Foreground = new SolidColorBrush(isValid ? Colors.Green : Colors.Red);
+        }
+        catch (Exception ex)
+        {
+            ApiKeyValidationStatus.Text = $"\u2717 {ex.Message}";
+            ApiKeyValidationStatus.Foreground = new SolidColorBrush(Colors.Red);
+        }
+        finally
+        {
+            ValidateKeyBtn.IsEnabled = true;
+        }
+    }
+
     private bool _ghTokenVisible;
     private void ToggleGitHubTokenVisibility(object? sender, RoutedEventArgs? e)
     {
@@ -668,6 +696,25 @@ public partial class SettingsWindow : Window, IDisposable
             s.MemoryBrowserBytesPerRow = bytesPerRow;
 
         _settingsService.Save();
+
+        // Background-validate the saved key (non-blocking warning)
+        var savedProvider = GetSelectedProvider();
+        var savedKey = s.GetApiKeyForProvider(savedProvider);
+        var savedEndpoint = savedProvider == "openai-compatible" ? s.CustomEndpoint : null;
+        if (!string.IsNullOrWhiteSpace(savedKey) && savedProvider != "copilot")
+        {
+            _ = Task.Run(async () =>
+            {
+                var (isValid, error) = await ApiKeyValidator.ValidateAsync(savedProvider, savedKey, savedEndpoint);
+                if (!isValid)
+                {
+                    Dispatcher.Invoke(() =>
+                        MessageBox.Show(
+                            $"Warning: API key validation failed for {savedProvider}.\n{error}\n\nThe key was saved, but may not work.",
+                            "Key Validation Warning", MessageBoxButton.OK, MessageBoxImage.Warning));
+                }
+            });
+        }
 
         MessageBox.Show("Settings saved. Provider and model changes take effect on next message.",
             "Settings Saved", MessageBoxButton.OK, MessageBoxImage.Information);

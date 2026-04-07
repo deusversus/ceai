@@ -167,6 +167,13 @@
                             <TextBox x:Name="ApiKeyTextBox" FontFamily="Consolas" FontSize="13"
                                      Padding="8,6" Margin="0,4,0,0" Visibility="Collapsed" />
 
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                <Button x:Name="ValidateKeyBtn" Content="Validate" Padding="8,2"
+                                        Click="ValidateApiKey_Click" ToolTip="Test if the API key is valid" />
+                                <TextBlock x:Name="ApiKeyValidationStatus" Text="" FontSize="12"
+                                           VerticalAlignment="Center" Margin="8,0,0,0" />
+                            </StackPanel>
+
                             <TextBlock x:Name="ApiKeyStatus" Margin="0,6,0,0"
                                        Foreground="{DynamicResource SecondaryForeground}" FontSize="12" />
                             </StackPanel>

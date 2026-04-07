@@ -37,6 +37,13 @@ public partial class SettingsWindow : Window, IDisposable
         new("claude-haiku-4-5",  "Claude Haiku 4.5",  "Fast & cheap"),
     ];
 
+    private static readonly ModelInfo[] GeminiModels =
+    [
+        new("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast & efficient"),
+        new("gemini-2.5-pro",   "Gemini 2.5 Pro",   "Most capable"),
+        new("gemini-3-flash-preview", "Gemini 3.0 Flash", "Next-gen preview"),
+    ];
+
     private static readonly ModelInfo[] CopilotModels = []; // populated dynamically from API
 
     private bool _copilotModelsLoading;
@@ -58,6 +65,7 @@ public partial class SettingsWindow : Window, IDisposable
         {
             "anthropic" => ProviderAnthropic,
             "copilot" => ProviderCopilot,
+            "gemini" => ProviderGemini,
             "openai-compatible" => ProviderCompatible,
             _ => ProviderOpenAI,
         };
@@ -205,6 +213,7 @@ public partial class SettingsWindow : Window, IDisposable
     {
         if (ProviderAnthropic.IsChecked == true) return "anthropic";
         if (ProviderCopilot.IsChecked == true) return "copilot";
+        if (ProviderGemini.IsChecked == true) return "gemini";
         if (ProviderCompatible.IsChecked == true) return "openai-compatible";
         return "openai";
     }
@@ -228,6 +237,7 @@ public partial class SettingsWindow : Window, IDisposable
             ApiKeySubtitle.Text = provider switch
             {
                 "anthropic" => "Get yours at console.anthropic.com",
+                "gemini" => "Get yours at ai.google.dev",
                 "openai-compatible" => "API key for the compatible endpoint",
                 _ => "Get yours at platform.openai.com",
             };
@@ -274,6 +284,7 @@ public partial class SettingsWindow : Window, IDisposable
             "anthropic" => (3.00m, 15.00m, 0.30m),    // Claude Sonnet 4 pricing
             "openai" => (2.50m, 10.00m, 1.25m),       // GPT-4o pricing
             "copilot" => (0m, 0m, 0m),                 // Copilot: included in subscription
+            "gemini" => (0.15m, 0.60m, 0.04m),         // Gemini 2.5 Flash pricing
             _ => (3.00m, 15.00m, 0.30m),               // Default fallback
         };
 
@@ -281,7 +292,7 @@ public partial class SettingsWindow : Window, IDisposable
         // (empty, or match a known provider default within tolerance)
         if (decimal.TryParse(InputPriceBox.Text, out var currentInput))
         {
-            var knownDefaults = new[] { 0m, 2.50m, 3.00m, 15.00m };
+            var knownDefaults = new[] { 0m, 0.15m, 2.50m, 3.00m, 15.00m };
             if (!knownDefaults.Any(d => Math.Abs(d - currentInput) < 0.01m))
                 return; // User has customized — don't overwrite
         }
@@ -322,6 +333,7 @@ public partial class SettingsWindow : Window, IDisposable
         var models = provider switch
         {
             "anthropic" => AnthropicModels,
+            "gemini" => GeminiModels,
             "openai-compatible" => Array.Empty<ModelInfo>(),
             _ => OpenAIModels,
         };

@@ -1,5 +1,6 @@
 using Anthropic;
 using CEAISuite.Application;
+using GenerativeAI.Microsoft;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using OpenAI;
@@ -34,7 +35,7 @@ internal static class ChatClientFactory
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, settings.Model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, settings.Model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, settings.Model, settings.CustomEndpoint)),
-            "gemini" => null, // Phase 2
+            "gemini" => CreateIfKey(settings.GeminiApiKey, k => CreateGemini(k, settings.Model)),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, settings.Model)),
         };
     }
@@ -53,6 +54,11 @@ internal static class ChatClientFactory
     {
         return new AnthropicClient { ApiKey = apiKey }
             .AsIChatClient(model);
+    }
+
+    private static GenerativeAIChatClient CreateGemini(string apiKey, string model)
+    {
+        return new GenerativeAIChatClient(apiKey, model);
     }
 
     private static IChatClient CreateOpenAICompatible(string apiKey, string model, string? endpoint)

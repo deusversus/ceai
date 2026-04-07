@@ -49,7 +49,7 @@ public sealed class AppSettings
     /// <summary>Settings schema version for migrations.</summary>
     public int SettingsVersion { get; set; }
 
-    /// <summary>AI provider: "openai", "anthropic", "openai-compatible", "copilot".</summary>
+    /// <summary>AI provider: "openai", "anthropic", "gemini", "openai-compatible", "copilot".</summary>
     public string Provider { get; set; } = "openai";
 
     /// <summary>For OpenAI-compatible endpoints (e.g., local LLMs, Azure, etc.).</summary>

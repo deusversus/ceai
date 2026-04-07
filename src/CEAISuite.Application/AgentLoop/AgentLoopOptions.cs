@@ -19,6 +19,8 @@ public enum ProviderKind
     Copilot,
     /// <summary>OpenAI-compatible endpoint (Ollama, LM Studio, Azure, etc.).</summary>
     OpenAICompatible,
+    /// <summary>Google Gemini (Gemini 2.5, 3.0).</summary>
+    Gemini,
 }
 
 /// <summary>

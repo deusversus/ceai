@@ -536,6 +536,7 @@ public sealed class AiOperatorService : IDisposable
         {
             "anthropic" => ProviderKind.Anthropic,
             "copilot" => ProviderKind.Copilot,
+            "gemini" => ProviderKind.Gemini,
             "openai-compatible" => ProviderKind.OpenAICompatible,
             "openai" => ProviderKind.OpenAI,
             _ => ProviderKind.Unknown,

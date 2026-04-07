@@ -26,6 +26,13 @@ public sealed record AddressTableEntry(
 /// </summary>
 public sealed class AddressTableNode : INotifyPropertyChanged
 {
+    private const string ChangedFlashColor = "#FF4444";
+    private const string ScriptEnabledColor = "#22AA22";
+    private const string ScriptDisabledColor = "#AA2222";
+    private const string FrozenColor = "#CC4444";
+    private const string UnresolvedColor = "#999999";
+    private const string DefaultValueColor = "#CCCCCC";
+
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Notify([CallerMemberName] string? prop = null)
     {
@@ -34,14 +41,11 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     private void NotifyDisplayProperties()
     {
         Notify(nameof(DisplayValue));
-        Notify(nameof(DisplayValueColor));
         Notify(nameof(DisplayValueWeight));
-        Notify(nameof(DisplayLock));
         Notify(nameof(DisplayAddress));
         Notify(nameof(DisplayType));
         Notify(nameof(DisplayIcon));
         Notify(nameof(StatusTooltip));
-        Notify(nameof(ValueColor));
         Notify(nameof(ValueForeground));
     }
 
@@ -249,18 +253,10 @@ public sealed class AddressTableNode : INotifyPropertyChanged
         : string.IsNullOrEmpty(CurrentValue) ? "??" : (IsLocked ? $"{CurrentValue} 🔒" : CurrentValue);
     public string DisplayType => IsGroup ? "Group" : IsScriptEntry ? "AA Script"
         : ShowAsHex ? $"{DataType} (Hex)" : DataType.ToString();
-    public string DisplayLock => IsGroup ? "" : IsScriptEntry ? "" : (IsLocked ? "🔒 Frozen" : "");
     public string DisplayIcon => IsScriptEntry ? "📜" : IsGroup ? "📁" : (IsPointer ? "🔗" : "");
     public string DisplayAddress => IsGroup ? "" : IsScriptEntry ? "(script)"
         : ResolvedAddress.HasValue ? $"0x{ResolvedAddress.Value:X}"
         : Address;
-
-    /// <summary>Color for the Value column: red=frozen, green=script enabled, gray=script disabled, black=normal</summary>
-    public string DisplayValueColor => IsScriptEntry
-        ? (IsScriptEnabled ? "#22AA22" : "#AA2222")
-        : IsLocked ? "#CC4444"
-        : CurrentValue == "???" ? "#999999"
-        : "#000000";
 
     /// <summary>Bold weight for active scripts and frozen values.</summary>
     public string DisplayValueWeight => (IsScriptEntry || IsLocked) ? "Bold" : "Normal";
@@ -274,14 +270,12 @@ public sealed class AddressTableNode : INotifyPropertyChanged
           (IsPointer ? $"\nPointer: {PointerOffsets.Count} level(s)" : "") +
           (!string.IsNullOrEmpty(Notes) ? $"\n\n{Notes}" : "");
 
-    public string ValueColor => IsLocked ? "#CC4444" : "#000000";
-
     /// <summary>Foreground for value column: red flash when changed, then normal color.</summary>
-    public string ValueForeground => ValueJustChanged ? "#FF4444"
-        : IsScriptEntry ? (IsScriptEnabled ? "#22AA22" : "#AA2222")
-        : IsLocked ? "#CC4444"
-        : CurrentValue == "???" ? "#999999"
-        : "#CCCCCC";
+    public string ValueForeground => ValueJustChanged ? ChangedFlashColor
+        : IsScriptEntry ? (IsScriptEnabled ? ScriptEnabledColor : ScriptDisabledColor)
+        : IsLocked ? FrozenColor
+        : CurrentValue == "???" ? UnresolvedColor
+        : DefaultValueColor;
 
     public AddressTableNode(string id, string label, bool isGroup)
     {
@@ -755,7 +749,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         if (string.IsNullOrWhiteSpace(s)) return 0;
         s = s.Trim();
         if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
-        return long.Parse(s, System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        return long.TryParse(s, System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var result) ? result : 0;
     }
 
     /// <summary>Import a flat list of entries as root nodes (for backward compat).</summary>
@@ -816,10 +810,19 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
 
     public static nuint ParseAddress(string addressText)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(addressText);
+
         var normalized = addressText.Trim();
         if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            return (nuint)ulong.Parse(normalized[2..], System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-        return (nuint)ulong.Parse(normalized, CultureInfo.InvariantCulture);
+        {
+            return ulong.TryParse(normalized[2..], System.Globalization.NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexAddress)
+                ? (nuint)hexAddress
+                : throw new FormatException("Address must be a valid hexadecimal value.");
+        }
+
+        return ulong.TryParse(normalized, System.Globalization.NumberStyles.Integer, CultureInfo.InvariantCulture, out var decimalAddress)
+            ? (nuint)decimalAddress
+            : throw new FormatException("Address must be a valid decimal or hexadecimal value.");
     }
 
     /// <summary>Write a node's current value to process memory.</summary>

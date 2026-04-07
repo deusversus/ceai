@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
-using Microsoft.Extensions.AI;
 
 namespace CEAISuite.Application;
 
@@ -184,7 +183,8 @@ public sealed partial class AiToolFunctions
                 if (allStacks.Count == 0) return "No thread stacks could be captured.";
 
                 // Pick the thread with the most frames (likely main)
-                var best = allStacks.OrderByDescending(kv => kv.Value.Count).First();
+                var best = allStacks.OrderByDescending(kv => kv.Value.Count).FirstOrDefault();
+                if (best.Key == 0 && best.Value is null) return "No thread stacks could be captured.";
                 threadId = best.Key;
                 var frames = best.Value;
                 return FormatCallStack(threadId, frames);

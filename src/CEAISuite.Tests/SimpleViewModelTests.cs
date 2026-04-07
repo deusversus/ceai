@@ -53,7 +53,7 @@ public class SimpleViewModelTests
     }
 
     [Fact]
-    public void ScriptsViewModel_ToggleSelected_NoProcess_LogsWarning()
+    public async Task ScriptsViewModel_ToggleSelected_NoProcess_LogsWarning()
     {
         var engineFacade = new StubEngineFacade();
         var addressTableService = new AddressTableService(engineFacade);
@@ -65,13 +65,13 @@ public class SimpleViewModelTests
         vm.SelectedScript = null;
 
         // No selection + no process → early return, no crash
-        _ = vm.ToggleSelectedCommand.ExecuteAsync(null);
+        var ex = await Record.ExceptionAsync(() => vm.ToggleSelectedCommand.ExecuteAsync(null));
 
-        Assert.NotNull(vm);
+        Assert.Null(ex);
     }
 
     [Fact]
-    public void SnapshotsViewModel_CaptureSnapshot_NoProcess_LogsWarning()
+    public async Task SnapshotsViewModel_CaptureSnapshot_NoProcess_LogsWarning()
     {
         var engineFacade = new StubEngineFacade();
         var snapshotService = new MemorySnapshotService(engineFacade);
@@ -80,10 +80,10 @@ public class SimpleViewModelTests
 
         var vm = new SnapshotsViewModel(snapshotService, processContext, outputLog);
 
-        _ = vm.CaptureCommand.ExecuteAsync(null);
+        // No process → early return, no crash
+        var ex = await Record.ExceptionAsync(() => vm.CaptureCommand.ExecuteAsync(null));
 
-        // No process → early return or status message, no crash
-        Assert.NotNull(vm);
+        Assert.Null(ex);
     }
 
     [Fact]
@@ -97,14 +97,14 @@ public class SimpleViewModelTests
 
         var vm = new JournalViewModel(patchUndoService, operationJournal, outputLog, dialogService);
 
-        vm.RefreshPatchHistoryCommand.Execute(null);
+        var ex = Record.Exception(() => vm.RefreshPatchHistoryCommand.Execute(null));
 
-        // Should not throw, history may be empty
-        Assert.NotNull(vm);
+        // Should not throw; history may be empty
+        Assert.Null(ex);
     }
 
     [Fact]
-    public void InspectionViewModel_DisassembleAtAddress_NoProcess_SetsStatus()
+    public async Task InspectionViewModel_DisassembleAtAddress_NoProcess_SetsStatus()
     {
         var engineFacade = new StubEngineFacade();
         var dashboardService = new WorkspaceDashboardService(engineFacade, new StubSessionRepository());
@@ -120,10 +120,10 @@ public class SimpleViewModelTests
             breakpointService, addressTableService, dialogService, outputLog);
         vm.DisassemblyAddress = "0x7FF00100";
 
-        _ = vm.DisassembleAtAddressCommand.ExecuteAsync(null);
+        await vm.DisassembleAtAddressCommand.ExecuteAsync(null);
 
-        // Should log warning or set status about no process
-        // Basic smoke test — no crash
-        Assert.NotNull(vm);
+        // No process → logs a warning about needing to inspect first
+        Assert.Contains(outputLog.LoggedMessages,
+            m => m.Level == "Warn" && m.Message.Contains("process"));
     }
 }

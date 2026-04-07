@@ -373,7 +373,7 @@ internal static class ChatClientFactory
             }
             catch (Exception ex)
             {
-                LogDiag($"REWRITE_ERR: {ex.Message}");
+                LogDiag($"REWRITE_ERR: {ex}");
             }
         }
 
@@ -427,7 +427,8 @@ internal static class ChatClientFactory
                     if (message.Response?.Content is not null)
                     {
                         var errBody = message.Response.Content.ToString();
-                        LogDiag($"ERR_BODY: {errBody}");
+                        var truncated = errBody.Length > 200 ? errBody[..200] + "..." : errBody;
+                        LogDiag($"ERR_BODY: {truncated}");
                     }
                 }
                 catch (Exception ex)

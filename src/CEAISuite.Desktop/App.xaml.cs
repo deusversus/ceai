@@ -279,7 +279,7 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<INavigationService>(),
                 sp.GetService<ILuaScriptEngine>()));
 
-        // ── Phase 3 services (not yet in DI) ──
+        // ── Phase 3 services ──
         services.AddSingleton<StructureDissectorService>();
         services.AddSingleton<PointerScannerService>();
 
@@ -381,7 +381,49 @@ public partial class App : System.Windows.Application
             }
             entry += "\n";
             File.AppendAllText(logPath, entry);
+
+            // Phase 9C: Write submission-ready telemetry JSON if user has opted in
+            WriteCrashTelemetry(logDir, source, ex);
         }
         catch (Exception writeEx) { System.Diagnostics.Trace.TraceWarning($"[App] Failed to write crash log: {writeEx.Message}"); }
+    }
+
+    /// <summary>
+    /// Writes a structured JSON crash report alongside the plain-text log.
+    /// Only writes if the user has opted in via <see cref="AppSettings.EnableCrashTelemetry"/>.
+    /// The JSON file is ready for future submission to a telemetry endpoint.
+    /// </summary>
+    private static readonly System.Text.Json.JsonSerializerOptions s_telemetryJsonOptions = new() { WriteIndented = true };
+
+    private static void WriteCrashTelemetry(string logDir, string source, Exception ex)
+    {
+        try
+        {
+            var settingsService = Services?.GetService<AppSettingsService>();
+            if (settingsService is null || !settingsService.Settings.EnableCrashTelemetry) return;
+
+            var telemetry = new
+            {
+                timestamp = DateTime.UtcNow.ToString("o"),
+                source,
+                exceptionType = ex.GetType().FullName,
+                message = ex.Message,
+                stackTrace = ex.StackTrace,
+                innerException = ex.InnerException is { } inner ? new
+                {
+                    type = inner.GetType().FullName,
+                    message = inner.Message,
+                    stackTrace = inner.StackTrace
+                } : null,
+                appVersion = typeof(App).Assembly.GetName().Version?.ToString() ?? "unknown",
+                os = Environment.OSVersion.ToString(),
+                runtime = Environment.Version.ToString()
+            };
+
+            var json = System.Text.Json.JsonSerializer.Serialize(telemetry, s_telemetryJsonOptions);
+            var telemetryPath = Path.Combine(logDir, $"crash-telemetry-{DateTime.Now:yyyyMMdd-HHmmss}.json");
+            File.WriteAllText(telemetryPath, json);
+        }
+        catch { /* Best-effort — don't throw inside crash handler */ }
     }
 }

@@ -31,7 +31,7 @@ public sealed class AiChatStore
 
     public AiChatStore()
     {
-        try { Directory.CreateDirectory(ChatsDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to create chats directory: {ex.Message}"); }
+        try { Directory.CreateDirectory(ChatsDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to create chats directory: {ex}"); }
     }
 
     public static void Save(AiChatSession session)
@@ -46,8 +46,15 @@ public sealed class AiChatStore
     {
         var path = Path.Combine(ChatsDir, $"{chatId}.json");
         if (!File.Exists(path)) return null;
-        var json = File.ReadAllText(path);
-        return JsonSerializer.Deserialize<AiChatSession>(json, JsonOpts);
+        try
+        {
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<AiChatSession>(json, JsonOpts);
+        }
+        catch
+        {
+            return null; // Corrupt or unreadable file
+        }
     }
 
     public static List<AiChatSession> ListAll()
@@ -68,7 +75,7 @@ public sealed class AiChatStore
                 if (session is not null && !string.IsNullOrEmpty(session.Id))
                     sessions.Add(session);
             }
-            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to load chat file {file}: {ex.Message}"); }
+            catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiChatStore] Failed to load chat file {file}: {ex}"); }
         }
 
         return sessions.OrderByDescending(s => s.UpdatedAt).ToList();

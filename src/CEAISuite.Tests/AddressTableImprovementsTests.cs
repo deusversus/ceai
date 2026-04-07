@@ -288,7 +288,7 @@ public class AddressTableImprovementsTests
     // ── Edge-case tests ──
 
     [Fact]
-    public async Task IncreaseValue_Int32Max_Wraps()
+    public async Task IncreaseValue_Int32Max_Clamps()
     {
         var (vm, svc) = Create();
         var node = MakeLeaf(value: int.MaxValue.ToString(CultureInfo.InvariantCulture));
@@ -297,8 +297,8 @@ public class AddressTableImprovementsTests
 
         await vm.IncreaseValueCommand.ExecuteAsync(null);
 
-        // Should wrap to Int32.MinValue or handle gracefully
-        Assert.NotEqual(int.MaxValue.ToString(CultureInfo.InvariantCulture), node.CurrentValue);
+        // Should clamp to Int32.MaxValue (not wrap)
+        Assert.Equal(int.MaxValue.ToString(CultureInfo.InvariantCulture), node.CurrentValue);
     }
 
     [Fact]

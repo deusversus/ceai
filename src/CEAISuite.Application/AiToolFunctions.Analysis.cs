@@ -14,6 +14,8 @@ public sealed partial class AiToolFunctions
 {
     // ── Static Analysis Tools ──
 
+    private const int DefaultChunkSize = 0x10000;
+
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Search a module's code for instructions that write to a specific offset (e.g., [reg+0x38]). Returns all MOV/ADD/SUB/XOR/INC/DEC/IMUL instructions targeting [any_register + offset]. Essential for finding what code writes to a known data field. Set includeReads=true to also find reads and LEA address computations.")]
@@ -41,7 +43,7 @@ public sealed partial class AiToolFunctions
         {
             if (results.Count >= maxResults) break;
 
-            const int chunkSize = 0x10000;
+            var chunkSize = DefaultChunkSize;
             for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
             {
                 var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
@@ -274,7 +276,7 @@ public sealed partial class AiToolFunctions
         {
             if (results.Count >= maxResults) break;
 
-            const int chunkSize = 0x10000;
+            var chunkSize = DefaultChunkSize;
             for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
             {
                 var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
@@ -374,7 +376,7 @@ public sealed partial class AiToolFunctions
         {
             if (results.Count >= maxResults) break;
 
-            const int chunkSize = 0x10000;
+            var chunkSize = DefaultChunkSize;
             for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
             {
                 var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
@@ -442,7 +444,7 @@ public sealed partial class AiToolFunctions
         {
             if (results.Count >= maxResults) break;
 
-            const int chunkSize = 0x10000;
+            var chunkSize = DefaultChunkSize;
             for (long off = 0; off < mod.SizeBytes && results.Count < maxResults; off += chunkSize)
             {
                 var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
@@ -585,7 +587,7 @@ public sealed partial class AiToolFunctions
             {
                 if (stratACount >= maxResults) break;
 
-                const int chunkSize = 0x10000;
+                var chunkSize = DefaultChunkSize;
                 for (long off = 0; off < mod.SizeBytes && stratACount < maxResults; off += chunkSize)
                 {
                     var readAddr = (nuint)((ulong)mod.BaseAddress + (ulong)off);
@@ -650,7 +652,7 @@ public sealed partial class AiToolFunctions
                 {
                     if (stratBCount >= 10) break;
 
-                    const int chunkSize = 0x10000;
+                    var chunkSize = DefaultChunkSize;
                     var formatter = new MasmFormatter();
                     var output = new StringOutput();
 

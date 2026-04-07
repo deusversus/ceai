@@ -645,7 +645,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             // Restore chat history if a chat was linked
             if (!string.IsNullOrEmpty(loaded.Value.ChatId))
             {
-                _aiOperatorService.SwitchChat(loaded.Value.ChatId);
+                await _aiOperatorService.SwitchChatAsync(loaded.Value.ChatId);
             }
 
             Dashboard = dashboard with

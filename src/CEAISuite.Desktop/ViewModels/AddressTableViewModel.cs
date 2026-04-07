@@ -53,6 +53,9 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
     [ObservableProperty]
     private string? _addressTableStatus;
 
+    [ObservableProperty]
+    private bool _isBreakpointBusy;
+
     public AddressTableViewModel(
         AddressTableService addressTableService,
         AddressTableExportService addressTableExportService,
@@ -577,14 +580,14 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
             {
                 MemoryDataType.Byte => Math.Clamp(byte.Parse(valueStr, CultureInfo.InvariantCulture) + delta, byte.MinValue, byte.MaxValue).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Int16 => node.ShowAsHex
-                    ? ((short)(short.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
-                    : ((short)(short.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
+                    ? ((short)Math.Clamp((int)short.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta, short.MinValue, short.MaxValue)).ToString(CultureInfo.InvariantCulture)
+                    : ((short)Math.Clamp((int)short.Parse(valueStr, CultureInfo.InvariantCulture) + delta, short.MinValue, short.MaxValue)).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Int32 => node.ShowAsHex
-                    ? ((int)(int.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
-                    : ((int)(int.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
+                    ? ((int)Math.Clamp((long)int.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta, int.MinValue, int.MaxValue)).ToString(CultureInfo.InvariantCulture)
+                    : ((int)Math.Clamp((long)int.Parse(valueStr, CultureInfo.InvariantCulture) + delta, int.MinValue, int.MaxValue)).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Int64 => node.ShowAsHex
-                    ? ((long)(long.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
-                    : ((long)(long.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
+                    ? (checked(long.Parse(valueStr, NumberStyles.HexNumber, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture)
+                    : (checked(long.Parse(valueStr, CultureInfo.InvariantCulture) + delta)).ToString(CultureInfo.InvariantCulture),
                 MemoryDataType.Float => (float.Parse(valueStr, CultureInfo.InvariantCulture) + delta).ToString("G9", CultureInfo.InvariantCulture),
                 MemoryDataType.Double => (double.Parse(valueStr, CultureInfo.InvariantCulture) + delta).ToString("G17", CultureInfo.InvariantCulture),
                 _ => valueStr // Pointer, String, ByteArray — no-op
@@ -703,6 +706,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         }
         if (addr == nuint.Zero) return;
 
+        IsBreakpointBusy = true;
         try
         {
             var bp = await _breakpointService.SetBreakpointAsync(
@@ -719,6 +723,7 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         {
             _outputLog.Append("AddressTable", "Error", $"Failed to set write breakpoint: {ex.Message}");
         }
+        finally { IsBreakpointBusy = false; }
     }
 
     [RelayCommand]

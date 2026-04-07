@@ -46,16 +46,23 @@ public sealed partial class LoadSessionWindow : Window
 
     private async void Delete_Click(object sender, RoutedEventArgs e)
     {
-        if (SessionListBox.SelectedIndex < 0) return;
-        var target = _sessions[SessionListBox.SelectedIndex];
-        var confirm = MessageBox.Show(
-            $"Delete session \"{target.Id}\"?\nThis cannot be undone.",
-            "Delete Session", MessageBoxButton.YesNo, MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.Yes) return;
+        try
+        {
+            if (SessionListBox.SelectedIndex < 0) return;
+            var target = _sessions[SessionListBox.SelectedIndex];
+            var confirm = MessageBox.Show(
+                $"Delete session \"{target.Id}\"?\nThis cannot be undone.",
+                "Delete Session", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
 
-        await _deleteSession(target.Id);
-        _sessions = (await _refreshSessions()).ToList();
-        PopulateList();
+            await _deleteSession(target.Id);
+            _sessions = (await _refreshSessions()).ToList();
+            PopulateList();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Delete error: {ex}");
+        }
     }
 
     private void Cancel_Click(object sender, RoutedEventArgs e)

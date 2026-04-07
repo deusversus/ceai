@@ -429,12 +429,12 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     }
 
     [RelayCommand]
-    private void SwitchChat(ChatHistoryDisplayItem? selected)
+    private async Task SwitchChat(ChatHistoryDisplayItem? selected)
     {
         if (_suppressChatSwitch) return;
         if (selected is not null && selected.Id != _aiOperatorService.CurrentChatId)
         {
-            _aiOperatorService.SwitchChat(selected.Id);
+            await _aiOperatorService.SwitchChatAsync(selected.Id);
             PermissionModeDisplay = _aiOperatorService.CurrentPermissionMode;
             RefreshChatDisplay();
             RefreshChatSwitcher();
@@ -660,7 +660,10 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     public void OpenChat(ChatHistoryDisplayItem? selected)
     {
         if (selected is null) return;
-        _aiOperatorService.SwitchChat(selected.Id);
+        _ = _aiOperatorService.SwitchChatAsync(selected.Id).ContinueWith(t =>
+        {
+            if (t.Exception != null) System.Diagnostics.Trace.TraceWarning($"SwitchChat failed: {t.Exception}");
+        }, TaskContinuationOptions.OnlyOnFaulted);
         PermissionModeDisplay = _aiOperatorService.CurrentPermissionMode;
         RefreshChatDisplay();
         RefreshChatSwitcher();

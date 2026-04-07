@@ -36,8 +36,8 @@ public sealed class StructureDissectorService(IEngineFacade engine)
             var candidates = AnalyzeOffset(bytes, offset, baseAddress, typeHint);
             if (candidates.Count > 0)
             {
-                var best = candidates.OrderByDescending(c => c.Confidence).First();
-                fields.Add(best);
+                var best = candidates.OrderByDescending(c => c.Confidence).FirstOrDefault();
+                if (best is not null) fields.Add(best);
             }
         }
 

@@ -142,6 +142,7 @@ public partial class SettingsWindow : Window, IDisposable
         StreamingCheck.IsChecked = s.UseStreaming;
         AutoOpenMemoryBrowserCheck.IsChecked = s.AutoOpenMemoryBrowser;
         CheckForUpdatesCheck.IsChecked = s.CheckForUpdatesOnStartup;
+        CrashTelemetryCheck.IsChecked = s.EnableCrashTelemetry;
 
         // Rate limiting
         RateLimitBox.Text = s.RateLimitSeconds.ToString(CultureInfo.InvariantCulture);
@@ -553,32 +554,8 @@ public partial class SettingsWindow : Window, IDisposable
     private void ToggleApiKeyVisibility(object? sender, RoutedEventArgs? e)
     {
         _keyVisible = !_keyVisible;
-        if (_keyVisible)
-        {
-            ApiKeyTextBox.Text = ApiKeyBox.Password;
-            ApiKeyTextBox.Visibility = Visibility.Visible;
-            ApiKeyBox.Visibility = Visibility.Collapsed;
-            ShowKeyBtn.Content = "Hide";
-
-            // Auto-hide after 30 seconds
-            _apiKeyRevealTimer?.Stop();
-            _apiKeyRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _apiKeyRevealTimer.Tick += (_, _) =>
-            {
-                _apiKeyRevealTimer.Stop();
-                ToggleApiKeyVisibility(null, null);
-            };
-            _apiKeyRevealTimer.Start();
-        }
-        else
-        {
-            _apiKeyRevealTimer?.Stop();
-            ApiKeyBox.Password = ApiKeyTextBox.Text;
-            ApiKeyTextBox.Text = ""; // Clear plaintext
-            ApiKeyBox.Visibility = Visibility.Visible;
-            ApiKeyTextBox.Visibility = Visibility.Collapsed;
-            ShowKeyBtn.Content = "Show";
-        }
+        ToggleSecretVisibility(_keyVisible, ApiKeyBox, ApiKeyTextBox, ShowKeyBtn,
+            ref _apiKeyRevealTimer, () => ToggleApiKeyVisibility(null, null));
     }
 
     private async void ValidateApiKey_Click(object sender, RoutedEventArgs e)
@@ -612,31 +589,44 @@ public partial class SettingsWindow : Window, IDisposable
     private void ToggleGitHubTokenVisibility(object? sender, RoutedEventArgs? e)
     {
         _ghTokenVisible = !_ghTokenVisible;
-        if (_ghTokenVisible)
+        ToggleSecretVisibility(_ghTokenVisible, GitHubTokenBox, GitHubTokenTextBox, ShowGitHubTokenBtn,
+            ref _ghTokenRevealTimer, () => ToggleGitHubTokenVisibility(null, null));
+    }
+
+    private static void ToggleSecretVisibility(
+        bool visible,
+        PasswordBox passwordBox,
+        TextBox textBox,
+        Button toggleButton,
+        ref DispatcherTimer? timer,
+        Action selfCall)
+    {
+        if (visible)
         {
-            GitHubTokenTextBox.Text = GitHubTokenBox.Password;
-            GitHubTokenTextBox.Visibility = Visibility.Visible;
-            GitHubTokenBox.Visibility = Visibility.Collapsed;
-            ShowGitHubTokenBtn.Content = "Hide";
+            textBox.Text = passwordBox.Password;
+            textBox.Visibility = Visibility.Visible;
+            passwordBox.Visibility = Visibility.Collapsed;
+            toggleButton.Content = "Hide";
 
             // Auto-hide after 30 seconds
-            _ghTokenRevealTimer?.Stop();
-            _ghTokenRevealTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _ghTokenRevealTimer.Tick += (_, _) =>
+            timer?.Stop();
+            var newTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            timer = newTimer;
+            newTimer.Tick += (_, _) =>
             {
-                _ghTokenRevealTimer.Stop();
-                ToggleGitHubTokenVisibility(null, null);
+                newTimer.Stop();
+                selfCall();
             };
-            _ghTokenRevealTimer.Start();
+            newTimer.Start();
         }
         else
         {
-            _ghTokenRevealTimer?.Stop();
-            GitHubTokenBox.Password = GitHubTokenTextBox.Text;
-            GitHubTokenTextBox.Text = ""; // Clear plaintext
-            GitHubTokenBox.Visibility = Visibility.Visible;
-            GitHubTokenTextBox.Visibility = Visibility.Collapsed;
-            ShowGitHubTokenBtn.Content = "Show";
+            timer?.Stop();
+            passwordBox.Password = textBox.Text;
+            textBox.Text = ""; // Clear plaintext
+            passwordBox.Visibility = Visibility.Visible;
+            textBox.Visibility = Visibility.Collapsed;
+            toggleButton.Content = "Show";
         }
     }
 
@@ -685,6 +675,7 @@ public partial class SettingsWindow : Window, IDisposable
         s.UseStreaming = StreamingCheck.IsChecked == true;
         s.AutoOpenMemoryBrowser = AutoOpenMemoryBrowserCheck.IsChecked == true;
         s.CheckForUpdatesOnStartup = CheckForUpdatesCheck.IsChecked == true;
+        s.EnableCrashTelemetry = CrashTelemetryCheck.IsChecked == true;
 
         if (int.TryParse(RateLimitBox.Text, out var rateLimit) && rateLimit >= 0)
             s.RateLimitSeconds = rateLimit;
@@ -927,6 +918,8 @@ public partial class SettingsWindow : Window, IDisposable
 
     public void Dispose()
     {
+        _apiKeyRevealTimer?.Stop();
+        _ghTokenRevealTimer?.Stop();
         _deviceFlowCts?.Dispose();
         GC.SuppressFinalize(this);
     }
@@ -1125,21 +1118,28 @@ public partial class SettingsWindow : Window, IDisposable
 
     private async void GeminiSignOut_Click(object sender, RoutedEventArgs e)
     {
-        if (ChatClientFactory.GeminiOAuth is { } geminiOAuth)
-            await geminiOAuth.RevokeAsync(_settingsService.Settings.GeminiOAuthToken);
+        try
+        {
+            if (ChatClientFactory.GeminiOAuth is { } geminiOAuth && !string.IsNullOrEmpty(_settingsService.Settings.GeminiOAuthToken))
+                await geminiOAuth.RevokeAsync(_settingsService.Settings.GeminiOAuthToken);
 
-        _settingsService.Settings.GeminiOAuthToken = null;
-        _settingsService.Settings.GeminiRefreshToken = null;
-        _settingsService.Settings.GeminiAuthMethod = "api_key";
+            _settingsService.Settings.GeminiOAuthToken = null;
+            _settingsService.Settings.GeminiRefreshToken = null;
+            _settingsService.Settings.GeminiAuthMethod = "api_key";
 
-        GeminiOAuthStatus.Text = "";
-        GeminiSignOutBtn.Visibility = Visibility.Collapsed;
-        GeminiSignInBtn.Content = "🔗  Sign in with Google";
+            GeminiOAuthStatus.Text = "";
+            GeminiSignOutBtn.Visibility = Visibility.Collapsed;
+            GeminiSignInBtn.Content = "🔗  Sign in with Google";
 
-        // Switch back to API key view
-        GeminiAuthApiKey.IsChecked = true;
+            // Switch back to API key view
+            GeminiAuthApiKey.IsChecked = true;
 
-        _settingsService.Save();
+            _settingsService.Save();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Sign-out error: {ex}");
+        }
     }
 
     private void CaptionClose_Click(object sender, RoutedEventArgs e) => Close();

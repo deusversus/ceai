@@ -73,10 +73,6 @@ public sealed partial class AiToolFunctions
                     }
                 }
 
-                if (watchdogService is not null && watchdogService.IsUnsafe(stealthAddr, "Stealth"))
-                {
-                    // Still allow but warn
-                }
                 var result = await codeCaveEngine.InstallHookAsync(processId, stealthAddr);
                 if (!result.Success) return $"Stealth hook failed: {result.ErrorMessage}";
                 var stealthMsg = $"Stealth code cave hook installed at 0x{result.Hook!.OriginalAddress:X} (ID: {result.Hook.Id}, cave at 0x{result.Hook.CaveAddress:X}). No debugger attached — game-safe.";
@@ -98,10 +94,6 @@ public sealed partial class AiToolFunctions
 
             var parsedAddr = ParseAddress(address);
             var modeStr = bpMode.ToString();
-            if (watchdogService is not null && watchdogService.IsUnsafe(parsedAddr, modeStr))
-            {
-                // Still allow but warn
-            }
 
             // ── PageGuard co-tenancy gate ──
             // Hard-reject PageGuard on pages shared with many address table entries.
@@ -109,7 +101,7 @@ public sealed partial class AiToolFunctions
             const int CoTenancyThreshold = 10;
             if (bpMode == BreakpointMode.PageGuard)
             {
-                var targetPage = parsedAddr & ~(nuint)4095;
+                var targetPage = parsedAddr & PageMask;
                 int coTenants = CountPageCoTenants(targetPage);
                 if (coTenants > CoTenancyThreshold)
                 {
@@ -276,7 +268,7 @@ public sealed partial class AiToolFunctions
         if (isPageGuard)
         {
             var addr = ParseAddress(bp.Address);
-            var pageBase = addr & ~(nuint)0xFFF;
+            var pageBase = addr & PageMask;
             coTenants = CountPageCoTenants(pageBase);
         }
 
@@ -403,8 +395,8 @@ public sealed partial class AiToolFunctions
                 riskLevel = "MEDIUM";
                 recommended.Add($"PageGuard (least intrusive for data) [{capabilityMap.GetValueOrDefault(BreakpointMode.PageGuard, "?")}]");
 
-                nuint pageBase = addr & ~(nuint)0xFFF;
-                nuint pageEnd = pageBase + 0x1000;
+                nuint pageBase = addr & PageMask;
+                nuint pageEnd = pageBase + PageSize;
                 warnings.Add($"Page-guard will trap ALL access to the 4KB page containing this address (0x{pageBase:X}–0x{pageEnd:X})");
                 warnings.Add("Hot data fields (e.g., HP/position/timer) may cause excessive hits — use singleHit=true");
 

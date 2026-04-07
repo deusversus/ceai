@@ -44,25 +44,39 @@ public partial class MemoryBrowserControl : UserControl
 
     private async void OnByteEdited(object? sender, ByteEditedEventArgs e)
     {
-        if (_viewModel is not null)
-            await _viewModel.HandleByteEditedAsync(e);
+        try
+        {
+            if (_viewModel is not null)
+                await _viewModel.HandleByteEditedAsync(e);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Handler error: {ex}");
+        }
     }
 
     private async void OnHexEditorKeyDown(object sender, KeyEventArgs e)
     {
-        if (_viewModel is null) return;
-        if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
-
-        switch (e.Key)
+        try
         {
-            case Key.C:
-                _viewModel.CopyHexCommand.Execute(null);
-                e.Handled = true;
-                break;
-            case Key.V:
-                await _viewModel.PasteHexCommand.ExecuteAsync(null);
-                e.Handled = true;
-                break;
+            if (_viewModel is null) return;
+            if ((Keyboard.Modifiers & ModifierKeys.Control) == 0) return;
+
+            switch (e.Key)
+            {
+                case Key.C:
+                    _viewModel.CopyHexCommand.Execute(null);
+                    e.Handled = true;
+                    break;
+                case Key.V:
+                    await _viewModel.PasteHexCommand.ExecuteAsync(null);
+                    e.Handled = true;
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Trace.TraceWarning($"Handler error: {ex}");
         }
     }
 }

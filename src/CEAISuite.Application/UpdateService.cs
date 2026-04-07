@@ -116,13 +116,13 @@ public sealed class UpdateService : IDisposable
     }
 
     /// <summary>
-    /// Verifies the SHA256 checksum of a file. Returns true if it matches or if
-    /// <paramref name="expectedChecksum"/> is null (skip verification).
+    /// Verifies the SHA256 checksum of a file. Returns true if it matches.
+    /// Returns false if <paramref name="expectedChecksum"/> is null or empty (unverified downloads are rejected).
     /// </summary>
     public static bool VerifyChecksum(string filePath, string? expectedChecksum)
     {
         if (string.IsNullOrWhiteSpace(expectedChecksum))
-            return true;
+            return false;
 
         using var stream = File.OpenRead(filePath);
         var hash = SHA256.HashData(stream);

@@ -229,11 +229,5 @@ public sealed class BreakpointService(
         new(bp.Id, $"0x{bp.Address:X}", bp.Type.ToString(), bp.HitAction.ToString(), bp.IsEnabled, bp.HitCount,
             bp.Mode.ToString(), bp.Condition?.Expression, bp.ThreadFilter);
 
-    private static nuint ParseAddress(string addressText)
-    {
-        var normalized = addressText.Trim();
-        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            return (nuint)ulong.Parse(normalized[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-        return (nuint)ulong.Parse(normalized, CultureInfo.InvariantCulture);
-    }
+    private static nuint ParseAddress(string addressText) => AddressTableService.ParseAddress(addressText);
 }

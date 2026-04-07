@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class ModuleListViewModel : ObservableObject
+public partial class ModuleListViewModel : ObservableObject, IDisposable
 {
     private readonly IEngineFacade _engineFacade;
     private readonly IProcessContext _processContext;
@@ -18,6 +18,7 @@ public partial class ModuleListViewModel : ObservableObject
     private List<ModuleDisplayItem> _allModules = [];
 
     private readonly IAiContextService _aiContext;
+    private readonly Action _processChangedHandler;
 
     public ModuleListViewModel(
         IEngineFacade engineFacade,
@@ -34,7 +35,14 @@ public partial class ModuleListViewModel : ObservableObject
         _clipboard = clipboard;
         _aiContext = aiContext;
 
-        _processContext.ProcessChanged += () => _ = RefreshAsync();
+        _processChangedHandler = () => _ = RefreshAsync();
+        _processContext.ProcessChanged += _processChangedHandler;
+    }
+
+    public void Dispose()
+    {
+        _processContext.ProcessChanged -= _processChangedHandler;
+        GC.SuppressFinalize(this);
     }
 
     [ObservableProperty] private ObservableCollection<ModuleDisplayItem> _modules = new();

@@ -46,6 +46,9 @@ public sealed partial class AiToolFunctions(
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
 
+    private static readonly nuint PageMask = ~(nuint)0xFFF;
+    private static readonly nuint PageSize = 0x1000;
+
     /// <summary>Store for large tool results that exceeded the context budget.</summary>
     internal ToolResultStore ToolResultStore { get; } = toolResultStore ?? new ToolResultStore();
     /// <summary>Queue of captured screenshots for injection into the AI conversation.</summary>
@@ -223,14 +226,7 @@ public sealed partial class AiToolFunctions(
     }
 
 
-    private static string FormatBytes(long bytes) =>
-        bytes switch
-        {
-            >= 1_073_741_824 => $"{bytes / 1_073_741_824.0:F1} GB",
-            >= 1_048_576 => $"{bytes / 1_048_576.0:F1} MB",
-            >= 1024 => $"{bytes / 1024.0:F1} KB",
-            _ => $"{bytes} B"
-        };
+    private static string FormatBytes(long bytes) => MemoryUtils.FormatBytes(bytes);
 
     [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
@@ -291,34 +287,6 @@ public sealed partial class AiToolFunctions(
         if (n.IsScriptEntry)
             return new { n.Id, n.Label, type = "script", enabled = n.IsScriptEnabled };
         return new { n.Id, n.Label, n.Address, n.DisplayValue, n.DataType, n.IsLocked };
-    }
-
-    private static void FormatNodes(System.Text.StringBuilder sb, IEnumerable<AddressTableNode> nodes, int indent)
-    {
-        var prefix = new string(' ', indent * 2);
-        foreach (var n in nodes)
-        {
-            if (n.IsGroup)
-            {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"{prefix}[{n.Id}] 📁 {n.Label} ({n.Children.Count} children)");
-                FormatNodes(sb, n.Children, indent + 1);
-            }
-            else if (n.IsScriptEntry)
-            {
-                sb.AppendLine(CultureInfo.InvariantCulture, $"{prefix}[{n.Id}] 📜 {n.Label} ({(n.IsScriptEnabled ? "ENABLED" : "disabled")})");
-            }
-            else
-            {
-                var resolved = n.ResolvedAddress.HasValue;
-                var addrDisplay = resolved ? $"addr=0x{n.ResolvedAddress!.Value:X}" : $"addr={n.Address}";
-                var parentInfo = n.IsOffset && n.Parent is not null
-                    ? $" | parent=\"{n.Parent.Label}\"+{n.Address}"
-                    : "";
-                var frozen = n.IsLocked ? " | FROZEN" : "";
-                var pointer = n.IsPointer ? " | ptr" : "";
-                sb.AppendLine(CultureInfo.InvariantCulture, $"{prefix}[{n.Id}] \"{n.Label}\" | {addrDisplay}{parentInfo} | value={n.CurrentValue} ({n.DataType}) | resolved={resolved}{pointer}{frozen}");
-            }
-        }
     }
 
     [ConcurrencySafe]
@@ -419,6 +387,12 @@ public sealed partial class AiToolFunctions(
     [Description("Load a .CT (Cheat Table) file and import entries into the address table.")]
     public Task<string> LoadCheatTable([Description("Full file path to the .CT file")] string filePath)
     {
+        filePath = System.IO.Path.GetFullPath(filePath);
+        if (!filePath.EndsWith(".CT", StringComparison.OrdinalIgnoreCase) &&
+            !filePath.EndsWith(".ct", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult("Error: Only .CT files are supported.");
+        if (filePath.Contains("..", StringComparison.Ordinal))
+            return Task.FromResult("Error: Path traversal is not allowed.");
         if (!System.IO.File.Exists(filePath))
             return Task.FromResult($"File not found: {filePath}");
 
@@ -440,6 +414,12 @@ public sealed partial class AiToolFunctions(
     [Description("Save the current address table as a Cheat Engine .CT file.")]
     public Task<string> SaveCheatTable([Description("File path to save to")] string filePath)
     {
+        filePath = System.IO.Path.GetFullPath(filePath);
+        if (!filePath.EndsWith(".CT", StringComparison.OrdinalIgnoreCase) &&
+            !filePath.EndsWith(".ct", StringComparison.OrdinalIgnoreCase))
+            return Task.FromResult("Error: Only .CT files are supported.");
+        if (filePath.Contains("..", StringComparison.Ordinal))
+            return Task.FromResult("Error: Path traversal is not allowed.");
         var roots = addressTableService.Roots;
         if (roots.Count == 0)
             return Task.FromResult("Address table is empty. Nothing to save.");
@@ -1559,7 +1539,7 @@ public sealed partial class AiToolFunctions(
                 isReadable = region.IsReadable,
                 isWritable = region.IsWritable,
                 isExecutable = region.IsExecutable,
-                pageBase = $"0x{(addr & ~(nuint)0xFFF):X}"
+                pageBase = $"0x{(addr & PageMask):X}"
             });
         }
         catch (Exception ex) { return $"QueryMemoryProtection failed: {ex.Message}"; }
@@ -1663,13 +1643,7 @@ public sealed partial class AiToolFunctions(
         return normalized;
     }
 
-    private static nuint ParseAddress(string address)
-    {
-        var addr = address.Trim();
-        if (addr.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-            addr = addr[2..];
-        return (nuint)ulong.Parse(addr, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
-    }
+    private static nuint ParseAddress(string address) => AddressTableService.ParseAddress(address);
 
     /// <summary>Find which module owns a memory region by checking if the region overlaps with any module's address range.</summary>
     private static string? FindOwningModule(nuint regionBase, long regionSize, IReadOnlyList<ModuleDescriptor>? modules)
@@ -1702,7 +1676,7 @@ public sealed partial class AiToolFunctions(
     {
         if (node.ResolvedAddress.HasValue)
         {
-            var entryPage = node.ResolvedAddress.Value & ~(nuint)0xFFF;
+            var entryPage = node.ResolvedAddress.Value & PageMask;
             if (entryPage == pageBase && node.ResolvedAddress.Value != excludeAddr)
                 count++;
         }

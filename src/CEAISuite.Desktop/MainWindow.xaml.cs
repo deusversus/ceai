@@ -202,54 +202,67 @@ public partial class MainWindow : Window, IDisposable
         MemoryBrowserTab.SetViewModel(memoryBrowserVm);
 
         // Wire Workspace events to MainViewModel session logic
-        workspaceVm.LoadSessionRequested += sessionId => _ = _mainVm.RestoreSession(sessionId);
-        workspaceVm.LoadCheatTableRequested += _ => _addressTableVm.LoadCheatTableCommand.Execute(null);
+        _subs.Subscribe<string>(h => workspaceVm.LoadSessionRequested += h, h => workspaceVm.LoadSessionRequested -= h,
+            sessionId => _ = _mainVm.RestoreSession(sessionId));
+        _subs.Subscribe<string>(h => workspaceVm.LoadCheatTableRequested += h, h => workspaceVm.LoadCheatTableRequested -= h,
+            _ => _addressTableVm.LoadCheatTableCommand.Execute(null));
 
         // Auto-populate workspace session list on startup
         _ = workspaceVm.RefreshCommand.ExecuteAsync(null);
 
         // Wire AI Operator ViewModel
         AiOperatorContent.DataContext = aiOperatorVm;
-        _aiOperatorVm.ScrollToBottomRequested += () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd());
-        _aiOperatorVm.StreamingBlocksUpdated += () => Dispatcher.BeginInvoke(() =>
-        {
-            StreamingBlocksList.Items.Refresh();
-            AiChatScrollViewer.ScrollToEnd();
-        });
-        _aiOperatorVm.ChatDisplayRefreshed += () => Dispatcher.BeginInvoke(() =>
-        {
-            for (int i = AiChatContainer.Children.Count - 1; i >= 0; i--)
+        _subs.Subscribe(h => _aiOperatorVm.ScrollToBottomRequested += h, h => _aiOperatorVm.ScrollToBottomRequested -= h,
+            () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd()));
+        _subs.Subscribe(h => _aiOperatorVm.StreamingBlocksUpdated += h, h => _aiOperatorVm.StreamingBlocksUpdated -= h,
+            () => Dispatcher.BeginInvoke(() =>
             {
-                var child = AiChatContainer.Children[i];
-                if (child != AiChatList && child != StreamingBlocksList)
-                    AiChatContainer.Children.RemoveAt(i);
-            }
-        });
-        _aiOperatorVm.ApprovalCardRequested += approval => ShowInlineApprovalCard(approval);
+                StreamingBlocksList.Items.Refresh();
+                AiChatScrollViewer.ScrollToEnd();
+            }));
+        _subs.Subscribe(h => _aiOperatorVm.ChatDisplayRefreshed += h, h => _aiOperatorVm.ChatDisplayRefreshed -= h,
+            () => Dispatcher.BeginInvoke(() =>
+            {
+                for (int i = AiChatContainer.Children.Count - 1; i >= 0; i--)
+                {
+                    var child = AiChatContainer.Children[i];
+                    if (child != AiChatList && child != StreamingBlocksList)
+                        AiChatContainer.Children.RemoveAt(i);
+                }
+            }));
+        _subs.Subscribe<AgentStreamEvent.ApprovalRequested>(
+            h => _aiOperatorVm.ApprovalCardRequested += h, h => _aiOperatorVm.ApprovalCardRequested -= h,
+            approval => ShowInlineApprovalCard(approval));
 
         // Subscribe to AddressTableViewModel navigation events
-        _addressTableVm.NavigateToMemoryBrowser += addr =>
-        {
-            // Ensure Memory Browser is attached (idempotent if already attached)
-            MemoryBrowserTab.AttachProcess();
-            ActivateDocument("memoryBrowser");
-            _ = MemoryBrowserTab.NavigateToAddress(addr);
-        };
-        _addressTableVm.NavigateToDisassembly += addrStr =>
-        {
-            disassemblerVm.NavigateToAddress(addrStr);
-            ActivateDocument("disassembler");
-        };
-        _addressTableVm.PopulateFindResults += (items, desc) =>
-        {
-            _mainVm.PopulateFindResults(items, desc);
-            ActivateAnchorable("findResults");
-        };
-        disassemblerVm.PopulateFindResults += (items, desc) =>
-        {
-            _mainVm.PopulateFindResults(items, desc);
-            ActivateAnchorable("findResults");
-        };
+        _subs.Subscribe<nuint>(h => _addressTableVm.NavigateToMemoryBrowser += h, h => _addressTableVm.NavigateToMemoryBrowser -= h,
+            addr =>
+            {
+                // Ensure Memory Browser is attached (idempotent if already attached)
+                MemoryBrowserTab.AttachProcess();
+                ActivateDocument("memoryBrowser");
+                _ = MemoryBrowserTab.NavigateToAddress(addr);
+            });
+        _subs.Subscribe<string>(h => _addressTableVm.NavigateToDisassembly += h, h => _addressTableVm.NavigateToDisassembly -= h,
+            addrStr =>
+            {
+                disassemblerVm.NavigateToAddress(addrStr);
+                ActivateDocument("disassembler");
+            });
+        _subs.Subscribe<IReadOnlyList<FindResultDisplayItem>, string>(
+            h => _addressTableVm.PopulateFindResults += h, h => _addressTableVm.PopulateFindResults -= h,
+            (items, desc) =>
+            {
+                _mainVm.PopulateFindResults(items, desc);
+                ActivateAnchorable("findResults");
+            });
+        _subs.Subscribe<IReadOnlyList<FindResultDisplayItem>, string>(
+            h => disassemblerVm.PopulateFindResults += h, h => disassemblerVm.PopulateFindResults -= h,
+            (items, desc) =>
+            {
+                _mainVm.PopulateFindResults(items, desc);
+                ActivateAnchorable("findResults");
+            });
 
         // Refresh chat switcher when chats change
         _subs.Subscribe(h => _aiOperatorService.ChatListChanged += h, h => _aiOperatorService.ChatListChanged -= h,
@@ -442,7 +455,7 @@ public partial class MainWindow : Window, IDisposable
                     return new IntPtr(HTMAXBUTTON);
                 }
             }
-            catch { /* button not yet in visual tree */ }
+            catch (InvalidOperationException) { /* button not yet in visual tree */ }
         }
 
         if (CaptionMaximizeButton != null)
@@ -507,6 +520,9 @@ public partial class MainWindow : Window, IDisposable
         _inspectionVm.Dispose();
         _processListVm.Dispose();
         _memoryBrowserVm.Dispose();
+        _addressTableVm.Dispose();
+        _aiOperatorVm.Dispose();
+        _mainVm.Dispose();
 
         base.OnClosed(e);
     }
@@ -879,7 +895,11 @@ public partial class MainWindow : Window, IDisposable
 
     // ─── Session Save / Load (UI dialog in code-behind, logic in MainViewModel) ──
 
-    private async void SaveSession(object sender, RoutedEventArgs e) => await _mainVm.SaveSessionAsync();
+    private async void SaveSession(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.SaveSessionAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
     private async void LoadSession(object sender, RoutedEventArgs e)
     {
@@ -979,14 +999,36 @@ public partial class MainWindow : Window, IDisposable
             ? new Thickness(7) : new Thickness(0);
     }
 
-    private async void MenuUndo(object sender, RoutedEventArgs e) => await _mainVm.PerformUndoAsync();
-    private async void MenuRedo(object sender, RoutedEventArgs e) => await _mainVm.PerformRedoAsync();
+    private async void MenuUndo(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.PerformUndoAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
+
+    private async void MenuRedo(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.PerformRedoAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
     private void ShowAbout(object sender, RoutedEventArgs e) => _mainVm.ShowAbout();
-    private async void CheckForUpdates(object sender, RoutedEventArgs e) => await _mainVm.CheckForUpdatesCommand.ExecuteAsync(null);
+    private async void CheckForUpdates(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.CheckForUpdatesCommand.ExecuteAsync(null); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
-    private async void CaptureScreenshot(object sender, RoutedEventArgs e) => await _mainVm.CaptureScreenshotAsync();
-    private async void ExportReport(object sender, RoutedEventArgs e) => await _mainVm.ExportReportAsync();
+    private async void CaptureScreenshot(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.CaptureScreenshotAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
+
+    private async void ExportReport(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.ExportReportAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
     private void OnPreviewKeyUp(object sender, KeyEventArgs e)
     {
@@ -1069,7 +1111,11 @@ public partial class MainWindow : Window, IDisposable
         StatusBarCenter.Text = "Select a process from the dropdown first";
     }
 
-    private async void CmdDetachProcess(object sender, RoutedEventArgs e) => await _mainVm.DetachProcessAsync();
+    private async void CmdDetachProcess(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.DetachProcessAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
     private void CmdFocusScanner(object sender, RoutedEventArgs e)
     {
@@ -1091,13 +1137,28 @@ public partial class MainWindow : Window, IDisposable
         _addressTableVm.ToggleSelectedScriptCommand.Execute(null);
     }
 
-    private async void CmdEmergencyStop(object sender, RoutedEventArgs e) => await _mainVm.EmergencyStopAsync();
+    private async void CmdEmergencyStop(object sender, RoutedEventArgs e)
+    {
+        try { await _mainVm.EmergencyStopAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
     #endregion
 
-    private async void ProcessComboBox_DropDownOpened(object sender, EventArgs e) => await _mainVm.RefreshProcessComboAsync();
+    private async void ProcessComboBox_DropDownOpened(object sender, EventArgs e)
+    {
+        try { await _mainVm.RefreshProcessComboAsync(); }
+        catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
+    }
 
     // ─── Drag and Drop: Sources ──────────────────────────────────────────
+
+    private static bool ShouldStartDrag(Point startPoint, Point currentPoint)
+    {
+        var diff = startPoint - currentPoint;
+        return Math.Abs(diff.X) > SystemParameters.MinimumHorizontalDragDistance ||
+               Math.Abs(diff.Y) > SystemParameters.MinimumVerticalDragDistance;
+    }
 
     private Point _dragStartPoint;
 
@@ -1107,9 +1168,7 @@ public partial class MainWindow : Window, IDisposable
     private void ProcessList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed) return;
-        var diff = _dragStartPoint - e.GetPosition(null);
-        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        if (!ShouldStartDrag(_dragStartPoint, e.GetPosition(null))) return;
 
         if (RunningProcessesList.SelectedItem is RunningProcessOverview proc)
         {
@@ -1125,9 +1184,7 @@ public partial class MainWindow : Window, IDisposable
     private void ModuleList_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed) return;
-        var diff = _dragStartPoint - e.GetPosition(null);
-        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        if (!ShouldStartDrag(_dragStartPoint, e.GetPosition(null))) return;
 
         if (sender is ListView lv && lv.SelectedItem is ModuleOverview mod)
         {
@@ -1144,9 +1201,7 @@ public partial class MainWindow : Window, IDisposable
     private void AddressTable_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed) return;
-        var diff = _dragStartPoint - e.GetPosition(null);
-        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        if (!ShouldStartDrag(_dragStartPoint, e.GetPosition(null))) return;
 
         if (AddressTableTree.SelectedItem is AddressTableNode node)
         {
@@ -1199,9 +1254,7 @@ public partial class MainWindow : Window, IDisposable
     private void ScanResults_PreviewMouseMove(object sender, MouseEventArgs e)
     {
         if (e.LeftButton != MouseButtonState.Pressed) return;
-        var diff = _dragStartPoint - e.GetPosition(null);
-        if (Math.Abs(diff.X) < SystemParameters.MinimumHorizontalDragDistance &&
-            Math.Abs(diff.Y) < SystemParameters.MinimumVerticalDragDistance) return;
+        if (!ShouldStartDrag(_dragStartPoint, e.GetPosition(null))) return;
 
         if (ScanResultsList.SelectedItem is ScanResultOverview result)
         {

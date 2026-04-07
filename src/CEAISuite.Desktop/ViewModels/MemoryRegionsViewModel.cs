@@ -7,7 +7,7 @@ using CommunityToolkit.Mvvm.Input;
 
 namespace CEAISuite.Desktop.ViewModels;
 
-public partial class MemoryRegionsViewModel : ObservableObject
+public partial class MemoryRegionsViewModel : ObservableObject, IDisposable
 {
     private readonly IScanEngine _scanEngine;
     private readonly IEngineFacade _engineFacade;
@@ -17,6 +17,7 @@ public partial class MemoryRegionsViewModel : ObservableObject
 
     private readonly IClipboardService _clipboard;
     private readonly IAiContextService _aiContext;
+    private readonly Action _processChangedHandler;
 
     public MemoryRegionsViewModel(
         IScanEngine scanEngine,
@@ -35,7 +36,14 @@ public partial class MemoryRegionsViewModel : ObservableObject
         _clipboard = clipboard;
         _aiContext = aiContext;
 
-        _processContext.ProcessChanged += () => _ = RefreshAsync();
+        _processChangedHandler = () => _ = RefreshAsync();
+        _processContext.ProcessChanged += _processChangedHandler;
+    }
+
+    public void Dispose()
+    {
+        _processContext.ProcessChanged -= _processChangedHandler;
+        GC.SuppressFinalize(this);
     }
 
     [ObservableProperty] private ObservableCollection<MemoryRegionDisplayItem> _regions = new();

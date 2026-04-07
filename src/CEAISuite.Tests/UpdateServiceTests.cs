@@ -91,16 +91,16 @@ public class UpdateServiceTests
     }
 
     [Fact]
-    public void VerifyChecksum_NullExpected_ReturnsTrue()
+    public void VerifyChecksum_NullOrEmptyExpected_ReturnsFalse()
     {
         var tempFile = Path.GetTempFileName();
         try
         {
             File.WriteAllBytes(tempFile, "Any content"u8.ToArray());
 
-            Assert.True(UpdateService.VerifyChecksum(tempFile, null));
-            Assert.True(UpdateService.VerifyChecksum(tempFile, ""));
-            Assert.True(UpdateService.VerifyChecksum(tempFile, "  "));
+            Assert.False(UpdateService.VerifyChecksum(tempFile, null));
+            Assert.False(UpdateService.VerifyChecksum(tempFile, ""));
+            Assert.False(UpdateService.VerifyChecksum(tempFile, "  "));
         }
         finally
         {

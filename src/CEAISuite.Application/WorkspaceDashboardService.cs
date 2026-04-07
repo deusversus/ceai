@@ -188,22 +188,7 @@ public sealed class WorkspaceDashboardService(
         return processes.FirstOrDefault(process => process.Id == processId)?.Architecture ?? "x64";
     }
 
-    private static nuint ParseAddress(string addressText)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(addressText);
-
-        var normalized = addressText.Trim();
-        if (normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
-        {
-            return ulong.TryParse(normalized[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var hexAddress)
-                ? (nuint)hexAddress
-                : throw new FormatException("Address must be a valid hexadecimal value.");
-        }
-
-        return ulong.TryParse(normalized, NumberStyles.Integer, CultureInfo.InvariantCulture, out var decimalAddress)
-            ? (nuint)decimalAddress
-            : throw new FormatException("Address must be a valid decimal or hexadecimal value.");
-    }
+    private static nuint ParseAddress(string addressText) => AddressTableService.ParseAddress(addressText);
 
     private static InvestigationSession CreateInitialSession() =>
         new(

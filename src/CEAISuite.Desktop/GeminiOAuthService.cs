@@ -129,7 +129,7 @@ internal sealed class GeminiOAuthService : IDisposable
         var json = await response.Content.ReadAsStringAsync(ct);
 
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Token exchange failed (HTTP {(int)response.StatusCode}): {json}");
+            throw new InvalidOperationException($"Token exchange failed (HTTP {(int)response.StatusCode}). Check network and credentials.");
 
         var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;

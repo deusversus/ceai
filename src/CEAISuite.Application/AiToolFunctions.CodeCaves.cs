@@ -3,7 +3,6 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
-using Microsoft.Extensions.AI;
 
 namespace CEAISuite.Application;
 

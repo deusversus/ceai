@@ -177,6 +177,8 @@ internal static class ToolCategories
 [SupportedOSPlatform("windows")]
 public sealed class AiOperatorService : IDisposable
 {
+    private const int DefaultMaxContextTokens = 200_000;
+
     private static readonly System.Text.Json.JsonSerializerOptions s_sessionMetaJsonOptions = new()
     {
         WriteIndented = true,
@@ -406,11 +408,11 @@ public sealed class AiOperatorService : IDisposable
         {
             var models = new List<ModelConfig>
             {
-                new() { ModelId = settings.Model ?? "default", MaxContextTokens = 200_000 }
+                new() { ModelId = settings.Model ?? "default", MaxContextTokens = DefaultMaxContextTokens }
             };
             // Fallback entries have ModelId only — client factory wired on Reconfigure
             foreach (var fb in fallbackModels)
-                models.Add(new ModelConfig { ModelId = fb, MaxContextTokens = 200_000 });
+                models.Add(new ModelConfig { ModelId = fb, MaxContextTokens = DefaultMaxContextTokens });
             _modelSwitcher = new ModelSwitcher(models, Log);
         }
 
@@ -457,7 +459,7 @@ public sealed class AiOperatorService : IDisposable
         NewChat();
 
         // Ensure log directory exists
-        try { Directory.CreateDirectory(LogDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiOperatorService] Failed to create log directory: {ex.Message}"); }
+        try { Directory.CreateDirectory(LogDir); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiOperatorService] Failed to create log directory: {ex}"); }
     }
 
     // ── Shared hook registry (single instance across sessions) ──
@@ -589,7 +591,7 @@ public sealed class AiOperatorService : IDisposable
     private void Log(string level, string message)
     {
         var line = $"[{DateTime.Now:HH:mm:ss.fff}] [{level}] {message}";
-        try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiOperatorService] Failed to write log: {ex.Message}"); }
+        try { File.AppendAllText(LogPath, line + Environment.NewLine); } catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[AiOperatorService] Failed to write log: {ex}"); }
     }
 
     private void UpdateStatus(string status)
@@ -852,8 +854,8 @@ public sealed class AiOperatorService : IDisposable
             }
             catch (Exception ex)
             {
-                var errorMsg = $"AI error: {ex.Message}";
-                Log("ERROR", $"New loop error: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+                var errorMsg = "AI error: The request failed. Check the log for details.";
+                Log("ERROR", $"New loop error: {ex.GetType().Name}: {ex}\n{ex.StackTrace}");
                 UpdateStatus("Error");
                 _displayHistory.Add(new AiChatMessage("assistant", errorMsg, DateTimeOffset.UtcNow));
                 await outerChannel.Writer.WriteAsync(
@@ -1216,7 +1218,7 @@ public sealed class AiOperatorService : IDisposable
             }
             catch (Exception ex)
             {
-                Log("MCP", $"Failed to connect to '{entry.Name}': {ex.Message}");
+                Log("MCP", $"Failed to connect to '{entry.Name}': {ex}");
             }
         }
 
@@ -1489,7 +1491,7 @@ public sealed class AiOperatorService : IDisposable
             if (!Directory.Exists(metaDir)) Directory.CreateDirectory(metaDir);
             File.WriteAllText(Path.Combine(metaDir, $"{CurrentChatId}.session.json"), metaJson);
         }
-        catch (Exception ex) { Log("SESSION", $"Failed to save session metadata: {ex.Message}"); }
+        catch (Exception ex) { Log("SESSION", $"Failed to save session metadata: {ex}"); }
     }
 
     /// <summary>Create a new chat, saving the current one first.</summary>
@@ -1505,7 +1507,7 @@ public sealed class AiOperatorService : IDisposable
             _ = Task.Run(async () =>
             {
                 try { await endHooks.RunSessionEndHooksAsync(endCtx, CancellationToken.None); }
-                catch (Exception ex) { Log("HOOK", $"Session end hook error: {ex.Message}"); }
+                catch (Exception ex) { Log("HOOK", $"Session end hook error: {ex}"); }
             });
         }
 
@@ -1527,7 +1529,7 @@ public sealed class AiOperatorService : IDisposable
             _ = Task.Run(async () =>
             {
                 try { await startHooks.RunSessionStartHooksAsync(startCtx, CancellationToken.None); }
-                catch (Exception ex) { Log("HOOK", $"Session start hook error: {ex.Message}"); }
+                catch (Exception ex) { Log("HOOK", $"Session start hook error: {ex}"); }
             });
         }
 
@@ -1535,32 +1537,39 @@ public sealed class AiOperatorService : IDisposable
     }
 
     /// <summary>Switch to an existing chat by ID.</summary>
-    public async void SwitchChat(string chatId)
+    public async Task SwitchChatAsync(string chatId)
     {
-        if (chatId == CurrentChatId) return;
+        try
+        {
+            if (chatId == CurrentChatId) return;
 
-        // Save current
-        if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
-            SaveCurrentChat();
+            // Save current
+            if (!string.IsNullOrEmpty(CurrentChatId) && _displayHistory.Count > 0)
+                SaveCurrentChat();
 
-        var chatSession = AiChatStore.Load(chatId);
-        if (chatSession is null) return;
+            var chatSession = AiChatStore.Load(chatId);
+            if (chatSession is null) return;
 
-        CurrentChatId = chatSession.Id;
-        CurrentChatTitle = chatSession.Title;
-        CurrentPermissionMode = chatSession.PermissionMode ?? "Normal";
-        ClearHistory();
+            CurrentChatId = chatSession.Id;
+            CurrentChatTitle = chatSession.Title;
+            CurrentPermissionMode = chatSession.PermissionMode ?? "Normal";
+            ClearHistory();
 
-        // Restore display history
-        _displayHistory.AddRange(chatSession.Messages);
+            // Restore display history
+            _displayHistory.AddRange(chatSession.Messages);
 
-        // Rebuild agent session history from saved messages
-        _historyManager?.ReplayFromSaved(chatSession.Messages, Limits.MaxReplayMessages, Limits, _toolResultStore);
+            // Rebuild agent session history from saved messages
+            _historyManager?.ReplayFromSaved(chatSession.Messages, Limits.MaxReplayMessages, Limits, _toolResultStore);
 
-        // Restore the chat's permission mode to the live engine
-        SetPermissionMode(CurrentPermissionMode);
+            // Restore the chat's permission mode to the live engine
+            SetPermissionMode(CurrentPermissionMode);
 
-        ChatListChanged?.Invoke();
+            ChatListChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            Log("CHAT", $"SwitchChat failed: {ex}");
+        }
     }
 
     /// <summary>List all saved chats, most recent first.</summary>
@@ -1625,7 +1634,7 @@ public sealed class AiOperatorService : IDisposable
             _lastContextSuffix = suffix;
             return suffix;
         }
-        catch (Exception ex) { Log("WARN", $"Context provider failed: {ex.GetType().Name}: {ex.Message}"); return null; }
+        catch (Exception ex) { Log("WARN", $"Context provider failed: {ex.GetType().Name}: {ex}"); return null; }
     }
 
     private const string SystemPrompt = """
@@ -1720,9 +1729,9 @@ public sealed class AiOperatorService : IDisposable
                             Description = $"[Scheduled] {task.Description}",
                             MaxTurns = 10,
                         }]);
-                    Log("SCHEDULER", $"Task {task.Id} completed: {results[0].Text[..Math.Min(200, results[0].Text.Length)]}");
+                    var text = results[0].Text ?? "(no output)"; Log("SCHEDULER", $"Task {task.Id} completed: {text[..Math.Min(200, text.Length)]}");
                 }
-                catch (Exception ex) { Log("SCHEDULER", $"Task {task.Id} failed: {ex.Message}"); }
+                catch (Exception ex) { Log("SCHEDULER", $"Task {task.Id} failed: {ex}"); }
             });
         }
     }
@@ -1763,14 +1772,24 @@ public sealed class AiOperatorService : IDisposable
                 Log("PLUGIN", $"Loaded {count} tools from plugins");
             }
         }
-        catch (Exception ex) { Log("PLUGIN", $"Plugin loading failed: {ex.Message}"); }
+        catch (Exception ex) { Log("PLUGIN", $"Plugin loading failed: {ex}"); }
     }
 
     public void Dispose()
     {
-        _mcpManager.DisposeAsync().AsTask().GetAwaiter().GetResult();
-        if (_pluginHost is not null)
-            _pluginHost.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        try
+        {
+            Task.Run(async () =>
+            {
+                await _mcpManager.DisposeAsync();
+                if (_pluginHost is not null)
+                    await _pluginHost.DisposeAsync();
+            }).Wait(TimeSpan.FromSeconds(5));
+        }
+        catch (Exception ex)
+        {
+            Log("DISPOSE", $"Dispose error (non-fatal): {ex}");
+        }
         _taskScheduler?.Dispose();
     }
 

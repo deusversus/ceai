@@ -237,6 +237,9 @@ public sealed class AppSettings
     /// <summary>Check GitHub for updates when the application starts.</summary>
     public bool CheckForUpdatesOnStartup { get; set; } = true;
 
+    /// <summary>Opt-in: write submission-ready crash telemetry JSON alongside local crash logs.</summary>
+    public bool EnableCrashTelemetry { get; set; }
+
     /// <summary>Version string the user chose to skip (e.g., "0.3.0"). Null = no skip.</summary>
     public string? SkippedVersion { get; set; }
 }
@@ -273,7 +276,7 @@ public sealed class AppSettingsService
     private static readonly string SettingsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite");
     private static readonly string SettingsPath = Path.Combine(SettingsDir, "settings.json");
-    private static readonly JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
 
     private readonly ILogger<AppSettingsService>? _logger;
     private AppSettings _settings = new();
@@ -307,75 +310,18 @@ public sealed class AppSettingsService
             _settings = new();
         }
 
-        // Decrypt stored API key
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedApiKey))
-        {
-            try
-            {
-                _settings.OpenAiApiKey = DecryptString(_settings.EncryptedApiKey);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to decrypt stored API key — clearing to null");
-                _settings.OpenAiApiKey = null;
-            }
-        }
-
-        // Decrypt stored GitHub token (for Copilot provider)
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGitHubToken))
-        {
-            try
-            {
-                _settings.GitHubToken = DecryptString(_settings.EncryptedGitHubToken);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogWarning(ex, "Failed to decrypt stored GitHub token — clearing to null");
-                _settings.GitHubToken = null;
-            }
-        }
+        // Decrypt stored secrets
+        _settings.OpenAiApiKey = TryDecryptField(_settings.EncryptedApiKey, _logger, "OpenAI API key");
+        _settings.GitHubToken = TryDecryptField(_settings.EncryptedGitHubToken, _logger, "GitHub token");
 
         // Decrypt per-provider API keys
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedAnthropicApiKey))
-        {
-            try { _settings.AnthropicApiKey = DecryptString(_settings.EncryptedAnthropicApiKey); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Anthropic API key"); }
-        }
-
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiApiKey))
-        {
-            try { _settings.GeminiApiKey = DecryptString(_settings.EncryptedGeminiApiKey); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini API key"); }
-        }
-
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiOAuthToken))
-        {
-            try { _settings.GeminiOAuthToken = DecryptString(_settings.EncryptedGeminiOAuthToken); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini OAuth token"); }
-        }
-
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiRefreshToken))
-        {
-            try { _settings.GeminiRefreshToken = DecryptString(_settings.EncryptedGeminiRefreshToken); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini refresh token"); }
-        }
-
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiOAuthClientId))
-        {
-            try { _settings.GeminiOAuthClientId = DecryptString(_settings.EncryptedGeminiOAuthClientId); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini OAuth client ID"); }
-        }
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiOAuthClientSecret))
-        {
-            try { _settings.GeminiOAuthClientSecret = DecryptString(_settings.EncryptedGeminiOAuthClientSecret); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini OAuth client secret"); }
-        }
-
-        if (!string.IsNullOrWhiteSpace(_settings.EncryptedCompatibleApiKey))
-        {
-            try { _settings.CompatibleApiKey = DecryptString(_settings.EncryptedCompatibleApiKey); }
-            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Compatible API key"); }
-        }
+        _settings.AnthropicApiKey = TryDecryptField(_settings.EncryptedAnthropicApiKey, _logger, "Anthropic API key");
+        _settings.GeminiApiKey = TryDecryptField(_settings.EncryptedGeminiApiKey, _logger, "Gemini API key");
+        _settings.GeminiOAuthToken = TryDecryptField(_settings.EncryptedGeminiOAuthToken, _logger, "Gemini OAuth token");
+        _settings.GeminiRefreshToken = TryDecryptField(_settings.EncryptedGeminiRefreshToken, _logger, "Gemini refresh token");
+        _settings.GeminiOAuthClientId = TryDecryptField(_settings.EncryptedGeminiOAuthClientId, _logger, "Gemini OAuth client ID");
+        _settings.GeminiOAuthClientSecret = TryDecryptField(_settings.EncryptedGeminiOAuthClientSecret, _logger, "Gemini OAuth client secret");
+        _settings.CompatibleApiKey = TryDecryptField(_settings.EncryptedCompatibleApiKey, _logger, "Compatible API key");
 
         // Decrypt MCP server environment variables
         foreach (var mcp in _settings.McpServers)
@@ -452,33 +398,18 @@ public sealed class AppSettingsService
 
     public void Save()
     {
-        // Encrypt API key before writing
-        if (!string.IsNullOrWhiteSpace(_settings.OpenAiApiKey))
-            _settings.EncryptedApiKey = EncryptString(_settings.OpenAiApiKey);
-        else
-            _settings.EncryptedApiKey = null;
-
-        // Encrypt GitHub token before writing
-        if (!string.IsNullOrWhiteSpace(_settings.GitHubToken))
-            _settings.EncryptedGitHubToken = EncryptString(_settings.GitHubToken);
-        else
-            _settings.EncryptedGitHubToken = null;
+        // Encrypt secrets before writing
+        _settings.EncryptedApiKey = EncryptField(_settings.OpenAiApiKey);
+        _settings.EncryptedGitHubToken = EncryptField(_settings.GitHubToken);
 
         // Encrypt per-provider API keys before writing
-        _settings.EncryptedAnthropicApiKey = !string.IsNullOrWhiteSpace(_settings.AnthropicApiKey)
-            ? EncryptString(_settings.AnthropicApiKey) : null;
-        _settings.EncryptedGeminiApiKey = !string.IsNullOrWhiteSpace(_settings.GeminiApiKey)
-            ? EncryptString(_settings.GeminiApiKey) : null;
-        _settings.EncryptedGeminiOAuthToken = !string.IsNullOrWhiteSpace(_settings.GeminiOAuthToken)
-            ? EncryptString(_settings.GeminiOAuthToken) : null;
-        _settings.EncryptedGeminiRefreshToken = !string.IsNullOrWhiteSpace(_settings.GeminiRefreshToken)
-            ? EncryptString(_settings.GeminiRefreshToken) : null;
-        _settings.EncryptedGeminiOAuthClientId = !string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientId)
-            ? EncryptString(_settings.GeminiOAuthClientId) : null;
-        _settings.EncryptedGeminiOAuthClientSecret = !string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientSecret)
-            ? EncryptString(_settings.GeminiOAuthClientSecret) : null;
-        _settings.EncryptedCompatibleApiKey = !string.IsNullOrWhiteSpace(_settings.CompatibleApiKey)
-            ? EncryptString(_settings.CompatibleApiKey) : null;
+        _settings.EncryptedAnthropicApiKey = EncryptField(_settings.AnthropicApiKey);
+        _settings.EncryptedGeminiApiKey = EncryptField(_settings.GeminiApiKey);
+        _settings.EncryptedGeminiOAuthToken = EncryptField(_settings.GeminiOAuthToken);
+        _settings.EncryptedGeminiRefreshToken = EncryptField(_settings.GeminiRefreshToken);
+        _settings.EncryptedGeminiOAuthClientId = EncryptField(_settings.GeminiOAuthClientId);
+        _settings.EncryptedGeminiOAuthClientSecret = EncryptField(_settings.GeminiOAuthClientSecret);
+        _settings.EncryptedCompatibleApiKey = EncryptField(_settings.CompatibleApiKey);
 
         // Encrypt MCP server environment variables before writing
         foreach (var mcp in _settings.McpServers)
@@ -496,9 +427,21 @@ public sealed class AppSettingsService
         }
 
         Directory.CreateDirectory(SettingsDir);
-        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(_settings, s_indentedJsonOptions));
+        File.WriteAllText(SettingsPath, JsonSerializer.Serialize(_settings, IndentedJsonOptions));
         SettingsChanged?.Invoke();
     }
+
+    /// <summary>Decrypt a stored field, returning null on failure or if input is blank.</summary>
+    private static string? TryDecryptField(string? encrypted, ILogger? logger, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(encrypted)) return null;
+        try { return DecryptString(encrypted); }
+        catch (Exception ex) { logger?.LogWarning(ex, "Failed to decrypt {Field}", fieldName); return null; }
+    }
+
+    /// <summary>Encrypt a field for storage, returning null if plaintext is blank.</summary>
+    private static string? EncryptField(string? plaintext)
+        => string.IsNullOrWhiteSpace(plaintext) ? null : EncryptString(plaintext);
 
     /// <summary>Encrypt a string using Windows DPAPI (CurrentUser scope).</summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]

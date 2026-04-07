@@ -1749,7 +1749,8 @@
                                                  TextChanged="ChatSearchBox_TextChanged" />
                                         <ListView x:Name="ChatHistoryList" Background="{DynamicResource PanelBackground}" BorderThickness="0"
                                                   ItemsSource="{Binding ChatHistory}"
-                                                  MouseDoubleClick="ChatHistoryList_DoubleClick">
+                                                  MouseDoubleClick="ChatHistoryList_DoubleClick"
+                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                             <ListView.ItemContainerStyle>
                                                 <Style TargetType="ListViewItem">
                                                     <Setter Property="Padding" Value="8,4" />

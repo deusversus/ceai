@@ -39,9 +39,9 @@ public partial class SettingsWindow : Window, IDisposable
 
     private static readonly ModelInfo[] GeminiModels =
     [
-        new("gemini-2.5-flash", "Gemini 2.5 Flash", "Fast & efficient"),
-        new("gemini-2.5-pro",   "Gemini 2.5 Pro",   "Most capable"),
-        new("gemini-3-flash-preview", "Gemini 3.0 Flash", "Next-gen preview"),
+        new("gemini-3.1-flash-lite-preview", "Gemini 3.1 Flash Lite", "Fastest & cheapest"),
+        new("gemini-3-flash-preview",      "Gemini 3.0 Flash",     "Fast & efficient"),
+        new("gemini-3.1-pro-preview",      "Gemini 3.1 Pro",       "Most capable"),
     ];
 
     private static readonly ModelInfo[] CopilotModels = []; // populated dynamically from API
@@ -90,9 +90,14 @@ public partial class SettingsWindow : Window, IDisposable
             ApiKeyStatus.Text = "✓ API key configured";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
         }
+        else if (s.Provider is "copilot")
+        {
+            // Copilot uses GitHub token, not API key — don't show misleading message
+            ApiKeyStatus.Text = "";
+        }
         else
         {
-            ApiKeyStatus.Text = "No API key — AI operator disabled";
+            ApiKeyStatus.Text = "No API key for this provider";
             ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
         }
 
@@ -261,6 +266,25 @@ public partial class SettingsWindow : Window, IDisposable
                 ApiKeyTextBox.Text = newKey ?? "";
         }
 
+        // Update API key status for the new provider
+        if (ApiKeyStatus is not null && provider != "copilot")
+        {
+            if (!string.IsNullOrWhiteSpace(newKey))
+            {
+                ApiKeyStatus.Text = "✓ API key configured";
+                ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
+            }
+            else
+            {
+                ApiKeyStatus.Text = "No API key for this provider";
+                ApiKeyStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
+            }
+        }
+
+        // Clear validation status when switching providers
+        if (ApiKeyValidationStatus is not null)
+            ApiKeyValidationStatus.Text = "";
+
         PopulateModelList(provider);
 
         // Auto-set default token pricing for the selected provider
@@ -314,7 +338,7 @@ public partial class SettingsWindow : Window, IDisposable
         if (provider == "copilot")
         {
             // Async fetch from API — show loading placeholder
-            var currentModel = _settingsService.Settings.Model;
+            var currentModel = _settingsService.Settings.GetModelForProvider(provider);
             var loadingItem = new ListBoxItem
             {
                 Content = new TextBlock { Text = "Loading models from Copilot API…", FontStyle = FontStyles.Italic },
@@ -340,7 +364,7 @@ public partial class SettingsWindow : Window, IDisposable
             _ => OpenAIModels,
         };
 
-        PopulateModelListItems(models, _settingsService.Settings.Model);
+        PopulateModelListItems(models, _settingsService.Settings.GetModelForProvider(provider));
     }
 
     private async Task FetchAndPopulateCopilotModelsAsync(string currentModel)
@@ -617,7 +641,11 @@ public partial class SettingsWindow : Window, IDisposable
         }
 
         s.GitHubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;
-        s.Model = GetSelectedModel();
+
+        // Save model per-provider so it persists across provider switches
+        var selectedModel = GetSelectedModel();
+        s.SetModelForProvider(GetSelectedProvider(), selectedModel);
+        s.Model = selectedModel;
 
         if (int.TryParse(RefreshIntervalBox.Text, out var interval) && interval >= 100)
             s.RefreshIntervalMs = interval;

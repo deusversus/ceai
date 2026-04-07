@@ -31,7 +31,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     private readonly IClipboardService _clipboard;
     private readonly ILogger<AiOperatorViewModel> _logger;
 
-    private static readonly string[] GeminiModels = ["gemini-2.5-flash", "gemini-2.5-pro"];
+    private static readonly string[] GeminiModels = ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview", "gemini-3.1-pro-preview"];
     private static readonly string[] AnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"];
     private static readonly string[] OpenAiModels = ["gpt-5.4", "gpt-4.1", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini"];
 

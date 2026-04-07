@@ -63,6 +63,14 @@ public sealed class AppSettings
     public string? EncryptedGitHubToken { get; set; }
 
     public string Model { get; set; } = "gpt-5.4";
+
+    // Per-provider model selection (preserves custom model across provider switches)
+    public string OpenAiModel { get; set; } = "gpt-5.4";
+    public string AnthropicModel { get; set; } = "claude-sonnet-4-6";
+    public string GeminiModel { get; set; } = "gemini-3.1-flash-lite-preview";
+    public string CopilotModel { get; set; } = "gpt-4o";
+    public string CompatibleModel { get; set; } = "";
+
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
     public string Theme { get; set; } = "System";
@@ -187,6 +195,29 @@ public sealed class AppSettings
         "copilot" => GitHubToken,
         _ => OpenAiApiKey,
     };
+
+    public string GetModelForProvider(string? provider) => provider?.ToLowerInvariant() switch
+    {
+        "openai" => OpenAiModel,
+        "anthropic" => AnthropicModel,
+        "gemini" => GeminiModel,
+        "copilot" => CopilotModel,
+        "openai-compatible" => CompatibleModel,
+        _ => Model,
+    };
+
+    public void SetModelForProvider(string? provider, string model)
+    {
+        switch (provider?.ToLowerInvariant())
+        {
+            case "openai": OpenAiModel = model; break;
+            case "anthropic": AnthropicModel = model; break;
+            case "gemini": GeminiModel = model; break;
+            case "copilot": CopilotModel = model; break;
+            case "openai-compatible": CompatibleModel = model; break;
+        }
+        Model = model; // Also update the active model
+    }
 
     // ── Auto-Update ──
 

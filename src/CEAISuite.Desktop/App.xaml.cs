@@ -60,8 +60,17 @@ public partial class App : System.Windows.Application
         loggerFactory.AddSerilog(Log.Logger);
         ChatClientFactory.SetLogger(loggerFactory);
 
-        // ── First-run welcome dialog ──
+        // Initialize Gemini OAuth service from encrypted settings (if configured)
         var settingsService = Services.GetRequiredService<AppSettingsService>();
+        if (!string.IsNullOrWhiteSpace(settingsService.Settings.GeminiOAuthClientId)
+            && !string.IsNullOrWhiteSpace(settingsService.Settings.GeminiOAuthClientSecret))
+        {
+            ChatClientFactory.SetGeminiOAuth(
+                settingsService.Settings.GeminiOAuthClientId,
+                settingsService.Settings.GeminiOAuthClientSecret);
+        }
+
+        // ── First-run welcome dialog ──
         if (settingsService.IsFirstRun)
         {
             var welcome = new WelcomeDialog();

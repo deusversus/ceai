@@ -41,6 +41,19 @@ public sealed class AppSettings
     public string? GeminiRefreshToken { get; set; }
     public string? EncryptedGeminiRefreshToken { get; set; }
 
+    /// <summary>Gemini authentication method: "api_key" or "oauth".</summary>
+    public string GeminiAuthMethod { get; set; } = "api_key";
+
+    /// <summary>Google OAuth client ID for Gemini (not serialized — encrypted on disk).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GeminiOAuthClientId { get; set; }
+    public string? EncryptedGeminiOAuthClientId { get; set; }
+
+    /// <summary>Google OAuth client secret for Gemini (not serialized — encrypted on disk).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GeminiOAuthClientSecret { get; set; }
+    public string? EncryptedGeminiOAuthClientSecret { get; set; }
+
     /// <summary>Runtime-only plaintext OpenAI-compatible key (not serialized).</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string? CompatibleApiKey { get; set; }
@@ -347,6 +360,17 @@ public sealed class AppSettingsService
             catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini refresh token"); }
         }
 
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiOAuthClientId))
+        {
+            try { _settings.GeminiOAuthClientId = DecryptString(_settings.EncryptedGeminiOAuthClientId); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini OAuth client ID"); }
+        }
+        if (!string.IsNullOrWhiteSpace(_settings.EncryptedGeminiOAuthClientSecret))
+        {
+            try { _settings.GeminiOAuthClientSecret = DecryptString(_settings.EncryptedGeminiOAuthClientSecret); }
+            catch (Exception ex) { _logger?.LogWarning(ex, "Failed to decrypt Gemini OAuth client secret"); }
+        }
+
         if (!string.IsNullOrWhiteSpace(_settings.EncryptedCompatibleApiKey))
         {
             try { _settings.CompatibleApiKey = DecryptString(_settings.EncryptedCompatibleApiKey); }
@@ -402,6 +426,13 @@ public sealed class AppSettingsService
         if (!string.IsNullOrWhiteSpace(envGeminiKey) && string.IsNullOrWhiteSpace(_settings.GeminiApiKey))
             _settings.GeminiApiKey = envGeminiKey;
 
+        var envGeminiClientId = Environment.GetEnvironmentVariable("GEMINI_OAUTH_CLIENT_ID");
+        if (!string.IsNullOrWhiteSpace(envGeminiClientId) && string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientId))
+            _settings.GeminiOAuthClientId = envGeminiClientId;
+        var envGeminiClientSecret = Environment.GetEnvironmentVariable("GEMINI_OAUTH_CLIENT_SECRET");
+        if (!string.IsNullOrWhiteSpace(envGeminiClientSecret) && string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientSecret))
+            _settings.GeminiOAuthClientSecret = envGeminiClientSecret;
+
         var envGitHub = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
         if (!string.IsNullOrWhiteSpace(envGitHub) && string.IsNullOrWhiteSpace(_settings.GitHubToken))
             _settings.GitHubToken = envGitHub;
@@ -442,6 +473,10 @@ public sealed class AppSettingsService
             ? EncryptString(_settings.GeminiOAuthToken) : null;
         _settings.EncryptedGeminiRefreshToken = !string.IsNullOrWhiteSpace(_settings.GeminiRefreshToken)
             ? EncryptString(_settings.GeminiRefreshToken) : null;
+        _settings.EncryptedGeminiOAuthClientId = !string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientId)
+            ? EncryptString(_settings.GeminiOAuthClientId) : null;
+        _settings.EncryptedGeminiOAuthClientSecret = !string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientSecret)
+            ? EncryptString(_settings.GeminiOAuthClientSecret) : null;
         _settings.EncryptedCompatibleApiKey = !string.IsNullOrWhiteSpace(_settings.CompatibleApiKey)
             ? EncryptString(_settings.CompatibleApiKey) : null;
 

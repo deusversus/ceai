@@ -16,10 +16,20 @@ internal static class ChatClientFactory
 {
     private static ILogger? _logger;
     private static CopilotTokenService? _copilotTokenService;
+    private static GeminiOAuthService? _geminiOAuthService;
 
     internal static CopilotTokenService CopilotService
     {
         get => _copilotTokenService ??= new CopilotTokenService();
+    }
+
+    /// <summary>Gemini OAuth service. Must be initialized via SetGeminiOAuth() with credentials from settings.</summary>
+    internal static GeminiOAuthService? GeminiOAuth => _geminiOAuthService;
+
+    internal static void SetGeminiOAuth(string clientId, string clientSecret)
+    {
+        _geminiOAuthService?.Dispose();
+        _geminiOAuthService = new GeminiOAuthService(clientId, clientSecret);
     }
 
     /// <summary>
@@ -39,7 +49,7 @@ internal static class ChatClientFactory
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, model, settings.CustomEndpoint)),
-            "gemini" => CreateIfKey(settings.GeminiApiKey, k => CreateGemini(k, model)),
+            "gemini" => CreateGeminiAuto(settings, model),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, model)),
         };
     }
@@ -51,9 +61,24 @@ internal static class ChatClientFactory
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, settings.Model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, settings.Model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, settings.Model, settings.CustomEndpoint)),
-            "gemini" => CreateIfKey(settings.GeminiApiKey, k => CreateGemini(k, settings.Model)),
+            "gemini" => CreateGeminiAuto(settings, settings.Model),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, settings.Model)),
         };
+    }
+
+    /// <summary>Create Gemini client using either API key or OAuth token based on auth method.</summary>
+    private static IChatClient? CreateGeminiAuto(AppSettings settings, string model)
+    {
+        if (settings.GeminiAuthMethod == "oauth" && !string.IsNullOrWhiteSpace(settings.GeminiRefreshToken))
+        {
+            // OAuth: get access token (auto-refreshes if expired)
+            if (GeminiOAuth is not { } geminiOAuth) return null;
+            var accessToken = geminiOAuth.GetAccessTokenAsync(settings.GeminiRefreshToken)
+                .GetAwaiter().GetResult();
+            return string.IsNullOrWhiteSpace(accessToken) ? null : CreateGemini(accessToken, model);
+        }
+
+        return CreateIfKey(settings.GeminiApiKey, k => CreateGemini(k, model));
     }
 
     private static IChatClient? CreateIfKey(string? key, Func<string, IChatClient> factory)

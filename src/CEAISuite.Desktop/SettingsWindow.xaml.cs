@@ -118,6 +118,23 @@ public partial class SettingsWindow : Window, IDisposable
             CopilotSignOutBtn.Visibility = Visibility.Collapsed;
         }
 
+        // Gemini OAuth state
+        if (s.GeminiAuthMethod == "oauth")
+        {
+            GeminiAuthOAuth.IsChecked = true;
+            if (!string.IsNullOrWhiteSpace(s.GeminiRefreshToken))
+            {
+                GeminiOAuthStatus.Text = "✓ Signed in to Google Gemini";
+                GeminiOAuthStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
+                GeminiSignOutBtn.Visibility = Visibility.Visible;
+                GeminiSignInBtn.Content = "✓  Signed in — sign in again?";
+            }
+        }
+        else
+        {
+            GeminiAuthApiKey.IsChecked = true;
+        }
+
         // General
         RefreshIntervalBox.Text = s.RefreshIntervalMs.ToString(CultureInfo.InvariantCulture);
         RefreshSlider.Value = s.RefreshIntervalMs;
@@ -232,11 +249,15 @@ public partial class SettingsWindow : Window, IDisposable
         if (CustomEndpointPanel is not null)
             CustomEndpointPanel.Visibility = provider == "openai-compatible" ? Visibility.Visible : Visibility.Collapsed;
 
-        // Toggle between API Key panel and GitHub Token panel
+        // Toggle between API Key panel, GitHub Token panel, and Gemini OAuth panel
+        var isGemini = provider == "gemini";
+        var isGeminiOAuth = isGemini && GeminiAuthOAuth?.IsChecked == true;
         if (ApiKeyPanel is not null)
-            ApiKeyPanel.Visibility = isCopilot ? Visibility.Collapsed : Visibility.Visible;
+            ApiKeyPanel.Visibility = (isCopilot || isGeminiOAuth) ? Visibility.Collapsed : Visibility.Visible;
         if (GitHubTokenPanel is not null)
             GitHubTokenPanel.Visibility = isCopilot ? Visibility.Visible : Visibility.Collapsed;
+        if (GeminiAuthPanel is not null)
+            GeminiAuthPanel.Visibility = isGemini ? Visibility.Visible : Visibility.Collapsed;
 
         if (ApiKeySubtitle is not null)
         {
@@ -650,6 +671,7 @@ public partial class SettingsWindow : Window, IDisposable
         }
 
         s.GitHubToken = _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password;
+        s.GeminiAuthMethod = GeminiAuthOAuth.IsChecked == true ? "oauth" : "api_key";
 
         // Save model per-provider so it persists across provider switches
         var selectedModel = GetSelectedModel();
@@ -1043,6 +1065,80 @@ public partial class SettingsWindow : Window, IDisposable
             PopulateModelList("copilot");
 
         // Save immediately
+        _settingsService.Save();
+    }
+
+    // ── Gemini OAuth ──
+
+    private void GeminiAuthMethod_Changed(object sender, RoutedEventArgs e)
+    {
+        if (GeminiOAuthPanel is null || ApiKeyPanel is null) return;
+
+        var isOAuth = GeminiAuthOAuth.IsChecked == true;
+        GeminiOAuthPanel.Visibility = isOAuth ? Visibility.Visible : Visibility.Collapsed;
+        // Only hide API key panel if Gemini is the current provider
+        if (GetSelectedProvider() == "gemini")
+            ApiKeyPanel.Visibility = isOAuth ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private async void GeminiSignIn_Click(object sender, RoutedEventArgs e)
+    {
+        GeminiSignInBtn.IsEnabled = false;
+        GeminiOAuthStatus.Text = "Opening browser for Google sign-in...";
+
+        try
+        {
+            var oauthService = ChatClientFactory.GeminiOAuth;
+            if (oauthService is null)
+            {
+                GeminiOAuthStatus.Text = "OAuth not configured. Set GEMINI_OAUTH_CLIENT_ID and GEMINI_OAUTH_CLIENT_SECRET environment variables, or configure in settings.json.";
+                GeminiOAuthStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
+                return;
+            }
+
+            var (accessToken, refreshToken) = await oauthService.AuthorizeAsync();
+
+            _settingsService.Settings.GeminiOAuthToken = accessToken;
+            _settingsService.Settings.GeminiRefreshToken = refreshToken;
+            _settingsService.Settings.GeminiAuthMethod = "oauth";
+            _settingsService.Save();
+
+            GeminiOAuthStatus.Text = "✓ Signed in to Google Gemini";
+            GeminiOAuthStatus.SetResourceReference(TextBlock.ForegroundProperty, "SuccessForeground");
+            GeminiSignOutBtn.Visibility = Visibility.Visible;
+            GeminiSignInBtn.Content = "✓  Signed in — sign in again?";
+        }
+        catch (OperationCanceledException)
+        {
+            GeminiOAuthStatus.Text = "Sign-in cancelled.";
+        }
+        catch (Exception ex)
+        {
+            GeminiOAuthStatus.Text = $"Sign-in failed: {ex.Message}";
+            GeminiOAuthStatus.SetResourceReference(TextBlock.ForegroundProperty, "WarningForeground");
+        }
+        finally
+        {
+            GeminiSignInBtn.IsEnabled = true;
+        }
+    }
+
+    private async void GeminiSignOut_Click(object sender, RoutedEventArgs e)
+    {
+        if (ChatClientFactory.GeminiOAuth is { } geminiOAuth)
+            await geminiOAuth.RevokeAsync(_settingsService.Settings.GeminiOAuthToken);
+
+        _settingsService.Settings.GeminiOAuthToken = null;
+        _settingsService.Settings.GeminiRefreshToken = null;
+        _settingsService.Settings.GeminiAuthMethod = "api_key";
+
+        GeminiOAuthStatus.Text = "";
+        GeminiSignOutBtn.Visibility = Visibility.Collapsed;
+        GeminiSignInBtn.Content = "🔗  Sign in with Google";
+
+        // Switch back to API key view
+        GeminiAuthApiKey.IsChecked = true;
+
         _settingsService.Save();
     }
 

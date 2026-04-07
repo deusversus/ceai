@@ -159,7 +159,6 @@ public partial class SettingsWindow : Window, IDisposable
         EarlyToolExecutionCheck.IsChecked = s.EnableEarlyToolExecution;
 
         // Additional General settings
-        AutoHideMenuBarCheck.IsChecked = s.AutoHideMenuBar;
         MaxConversationMessagesBox.Text = s.MaxConversationMessages.ToString(CultureInfo.InvariantCulture);
         AutoSaveIntervalBox.Text = s.AutoSaveIntervalMinutes.ToString(CultureInfo.InvariantCulture);
         LogRetentionBox.Text = s.LogRetentionDays.ToString(CultureInfo.InvariantCulture);
@@ -585,7 +584,6 @@ public partial class SettingsWindow : Window, IDisposable
         s.EnableEarlyToolExecution = EarlyToolExecutionCheck.IsChecked == true;
 
         // Additional General settings
-        s.AutoHideMenuBar = AutoHideMenuBarCheck.IsChecked == true;
         if (int.TryParse(MaxConversationMessagesBox.Text, out var maxMsg) && maxMsg >= 0)
             s.MaxConversationMessages = maxMsg;
         if (int.TryParse(AutoSaveIntervalBox.Text, out var autoSave) && autoSave >= 1)

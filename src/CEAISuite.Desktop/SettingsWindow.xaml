@@ -333,9 +333,6 @@
 
                         <Separator Margin="0,20,0,20" />
 
-                        <CheckBox x:Name="AutoHideMenuBarCheck" Content="Auto-hide menu bar"
-                                  FontSize="13" />
-
                         <Grid Margin="0,10,0,6">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="200" />

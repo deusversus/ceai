@@ -35,7 +35,6 @@ public sealed class AppSettings
     public string Model { get; set; } = "gpt-5.4";
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
-    public bool AutoHideMenuBar { get; set; }
     public string Theme { get; set; } = "System";
 
     /// <summary>UI density preset: "Clean", "Balanced", "Dense". Controls default panel visibility.</summary>

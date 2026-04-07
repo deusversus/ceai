@@ -37,16 +37,11 @@ internal static class ChatClientFactory
         return provider.ToLowerInvariant() switch
         {
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, model)),
-            "anthropic" => CreateIfKey(settings.OpenAiApiKey, k => CreateAnthropic(k, model)),
-            "openai-compatible" => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAICompatible(k, model, settings.CustomEndpoint)),
-            "gemini" => null, // Gemini support not yet available — will be filled in when Phase 2 merges
+            "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, model)),
+            "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, model, settings.CustomEndpoint)),
+            "gemini" => CreateIfKey(settings.GeminiApiKey, k => CreateGemini(k, model)),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, model)),
         };
-    }
-
-    private static IChatClient? CreateIfKey(string? key, Func<string, IChatClient> factory)
-    {
-        return string.IsNullOrWhiteSpace(key) ? null : factory(key);
     }
 
     public static IChatClient? Create(AppSettings settings)

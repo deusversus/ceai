@@ -472,11 +472,20 @@ public partial class SettingsWindow : Window, IDisposable
         }
 
         if (selectedIdx >= 0)
+        {
             ModelList.SelectedIndex = selectedIdx;
+            if (CustomModelBox is not null) CustomModelBox.Text = ""; // Listed model — clear custom
+        }
         else if (models.Length == 0 && CustomModelBox is not null)
+        {
+            // No model list (e.g., Compatible) — show current model in custom box
             CustomModelBox.Text = currentModel;
+        }
         else if (ModelList.Items.Count > 0)
+        {
             ModelList.SelectedIndex = 0;
+            if (CustomModelBox is not null) CustomModelBox.Text = ""; // Default to first — clear custom
+        }
 
         _suppressModelListChange = false;
     }

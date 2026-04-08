@@ -306,6 +306,76 @@ public class CheatTableRoundTripTests
         Assert.Equal(MemoryDataType.ByteArray, result.Entries[4].DataType);
     }
 
+    // ── Large-scale round-trip performance tests ──────────────────────
+
+    [Fact]
+    public void RoundTrip_2000FlatEntries_CompletesWithinTimeBudget()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries>");
+        for (int i = 0; i < 2000; i++)
+        {
+            sb.Append("<CheatEntry><ID>").Append(i).Append("</ID>");
+            sb.Append("<Description>\"Entry_").Append(i).Append("\"</Description>");
+            sb.Append("<VariableType>4 Bytes</VariableType>");
+            sb.Append("<Address>").Append((i * 4).ToString("X8", System.Globalization.CultureInfo.InvariantCulture)).Append("</Address>");
+            sb.AppendLine("</CheatEntry>");
+        }
+        sb.AppendLine("</CheatEntries></CheatTable>");
+        var xml = sb.ToString();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var exported = RoundTrip(xml);
+        var result = CheatTableParser.Parse(exported, "roundtrip-perf.ct");
+        sw.Stop();
+
+        Assert.Equal(2000, result.TotalEntryCount);
+        // Spot-check first, middle, last
+        Assert.Equal("Entry_0", result.Entries[0].Description);
+        Assert.Equal("Entry_999", result.Entries[999].Description);
+        Assert.Equal("Entry_1999", result.Entries[1999].Description);
+        Assert.True(sw.Elapsed.TotalSeconds < 15, $"Round-trip took {sw.Elapsed.TotalSeconds:F1}s (budget: 15s)");
+    }
+
+    [Fact]
+    public void RoundTrip_2000NestedGroupEntries_CompletesWithinTimeBudget()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries>");
+        for (int g = 0; g < 100; g++)
+        {
+            sb.Append("<CheatEntry><ID>").Append(g * 100).Append("</ID>");
+            sb.Append("<Description>\"Group_").Append(g).Append("\"</Description>");
+            sb.AppendLine("<GroupHeader>1</GroupHeader><CheatEntries>");
+            for (int c = 0; c < 20; c++)
+            {
+                int id = g * 100 + c + 1;
+                sb.Append("<CheatEntry><ID>").Append(id).Append("</ID>");
+                sb.Append("<Description>\"G").Append(g).Append("_C").Append(c).Append("\"</Description>");
+                sb.Append("<VariableType>4 Bytes</VariableType>");
+                sb.Append("<Address>").Append((id * 4).ToString("X8", System.Globalization.CultureInfo.InvariantCulture)).Append("</Address>");
+                sb.AppendLine("</CheatEntry>");
+            }
+            sb.AppendLine("</CheatEntries></CheatEntry>");
+        }
+        sb.AppendLine("</CheatEntries></CheatTable>");
+        var xml = sb.ToString();
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var exported = RoundTrip(xml);
+        var result = CheatTableParser.Parse(exported, "roundtrip-nested-perf.ct");
+        sw.Stop();
+
+        // 100 groups + 2000 children = 2100 total
+        Assert.Equal(2100, result.TotalEntryCount);
+        Assert.Equal(100, result.Entries.Count); // Top-level groups
+        Assert.True(result.Entries[0].IsGroupHeader);
+        Assert.Equal(20, result.Entries[0].Children.Count);
+        Assert.Equal("G0_C0", result.Entries[0].Children[0].Description);
+        Assert.Equal("G99_C19", result.Entries[99].Children[19].Description);
+        Assert.True(sw.Elapsed.TotalSeconds < 15, $"Round-trip took {sw.Elapsed.TotalSeconds:F1}s (budget: 15s)");
+    }
+
     [Fact]
     public void EntryCount_MatchesAfterRoundTrip()
     {

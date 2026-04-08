@@ -29,6 +29,17 @@
     <ProjectReference Include="..\CEAISuite.Engine.Windows\CEAISuite.Engine.Windows.csproj" />
     <ProjectReference Include="..\CEAISuite.Persistence.Sqlite\CEAISuite.Persistence.Sqlite.csproj" />
     <ProjectReference Include="..\CEAISuite.Desktop\CEAISuite.Desktop.csproj" />
+    <ProjectReference Include="..\CEAISuite.Tests.Harness\CEAISuite.Tests.Harness.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>true</CopyToOutputDirectory>
+    </ProjectReference>
   </ItemGroup>
+
+  <Target Name="CopyHarnessExe" AfterTargets="Build">
+    <ItemGroup>
+      <HarnessFiles Include="..\CEAISuite.Tests.Harness\bin\$(Configuration)\net10.0-windows\CEAISuite.Tests.Harness.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(HarnessFiles)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

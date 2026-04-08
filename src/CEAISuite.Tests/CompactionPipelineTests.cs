@@ -256,6 +256,140 @@ public class CompactionPipelineTests
         var result = new CompactionResult(true, 10_000, 3_000);
         Assert.Equal(7_000, result.TokensSaved);
     }
+
+    // ── PostCompactionRestorer round-trip tests ─────────────────────
+
+    [Fact]
+    public async Task PostCompactionRestorer_CaptureCompactRestore_ToolResultsSurvive()
+    {
+        var history = new ChatHistoryManager();
+
+        // Build a conversation with tool calls and results
+        for (int i = 0; i < 4; i++)
+        {
+            history.AddUserMessage($"Do operation {i}");
+
+            var assistantMsg = new ChatMessage(ChatRole.Assistant, $"Calling tool {i}");
+            assistantMsg.Contents.Add(new FunctionCallContent($"call_{i}", $"Tool_{i}"));
+            history.AddAssistantMessage(assistantMsg);
+
+            // Make results >50 chars so CaptureSnapshot doesn't skip them
+            history.AddToolResults([new FunctionResultContent($"call_{i}",
+                $"MARKER_RESULT_{i}_" + new string('D', 100))]);
+        }
+
+        var categories = new HashSet<string> { "Memory", "Scanning" };
+
+        // Step 1: Capture snapshot
+        var snapshot = PostCompactionRestorer.CaptureSnapshot(
+            history, categories, () => "Attached to TestGame.exe PID 9999");
+
+        Assert.True(snapshot.RecentToolResults.Count > 0);
+        Assert.Equal("Attached to TestGame.exe PID 9999", snapshot.ProcessContext);
+
+        // Step 2: Compact (aggressive limits to force summarization)
+        var limits = MakeLimits(
+            compactionToolResultMessages: 1,
+            compactionSummarizationTokens: 50,
+            compactionSlidingWindowTurns: 1,
+            compactionTruncationTokens: 100_000);
+        var pipeline = new CompactionPipeline(
+            new SummaryMockChatClient("Compacted conversation summary."), limits);
+
+        await pipeline.CompactAsync(history, TestContext.Current.CancellationToken);
+
+        // Step 3: Restore
+        PostCompactionRestorer.Restore(history, snapshot);
+
+        // Step 4: Verify restored content
+        var messages = history.GetMessages();
+        var restoredText = string.Join("\n", messages.Select(m => m.Text ?? ""));
+
+        // Tool results should be present
+        Assert.Contains("MARKER_RESULT_3", restoredText); // Most recent
+        Assert.Contains("Tool_3", restoredText); // Tool name
+
+        // Process context restored
+        Assert.Contains("TestGame.exe PID 9999", restoredText);
+
+        // Categories restored
+        Assert.Contains("Memory", restoredText);
+        Assert.Contains("Scanning", restoredText);
+    }
+
+    [Fact]
+    public void PostCompactionRestorer_CaptureSnapshot_RespectsMaxRecentResults()
+    {
+        var history = new ChatHistoryManager();
+
+        // Add 8 tool results (max is 5)
+        for (int i = 0; i < 8; i++)
+        {
+            var assistantMsg = new ChatMessage(ChatRole.Assistant, $"Call {i}");
+            assistantMsg.Contents.Add(new FunctionCallContent($"call_{i}", $"Tool_{i}"));
+            history.AddAssistantMessage(assistantMsg);
+
+            history.AddToolResults([new FunctionResultContent($"call_{i}",
+                $"Result_{i}_" + new string('X', 100))]);
+        }
+
+        var snapshot = PostCompactionRestorer.CaptureSnapshot(
+            history, new HashSet<string>());
+
+        Assert.True(snapshot.RecentToolResults.Count <= ContextSnapshot.MaxRecentResults);
+        // Should capture the most recent (7, 6, 5, 4, 3)
+        Assert.Contains(snapshot.RecentToolResults, r => r.ToolName == "Tool_7");
+        Assert.DoesNotContain(snapshot.RecentToolResults, r => r.ToolName == "Tool_0");
+    }
+
+    [Fact]
+    public void PostCompactionRestorer_Restore_TruncatesLargeResults()
+    {
+        var history = new ChatHistoryManager();
+        int countBefore = history.Count;
+
+        // Create a snapshot with one oversized result
+        var largeResult = new string('Z', 10_000);
+        var snapshot = new ContextSnapshot
+        {
+            RecentToolResults = [("BigTool", largeResult)],
+            ProcessContext = null,
+            AddressTableSummary = null,
+            ActiveCategories = new HashSet<string>(),
+        };
+
+        PostCompactionRestorer.Restore(history, snapshot);
+
+        var messages = history.GetMessages();
+        var restoredMsg = messages[^1];
+        var text = restoredMsg.Text ?? "";
+
+        // Should contain truncation marker
+        Assert.Contains("truncated at", text);
+        // The full 10K result should NOT be in the message
+        Assert.DoesNotContain(largeResult, text);
+    }
+
+    [Fact]
+    public void PostCompactionRestorer_Restore_EmptySnapshot_NoMessage()
+    {
+        var history = new ChatHistoryManager();
+        history.AddUserMessage("Hello");
+        int countBefore = history.Count;
+
+        var snapshot = new ContextSnapshot
+        {
+            RecentToolResults = [],
+            ProcessContext = null,
+            AddressTableSummary = null,
+            ActiveCategories = new HashSet<string>(),
+        };
+
+        PostCompactionRestorer.Restore(history, snapshot);
+
+        // Guard at line 75 of PostCompactionRestorer should prevent injection
+        Assert.Equal(countBefore, history.Count);
+    }
 }
 
 // ── Test double ──────────────────────────────────────────────────────

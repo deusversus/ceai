@@ -19,3 +19,7 @@ For this WPF/.NET project: always run `dotnet build` after changes and fix all e
 ## Code Review & Audits
 
 When running audits or reviews, do DEEP inspection — read actual file contents, don't just grep. Sub-agent audits must verify findings against real code, not just surface-level pattern matching.
+
+## Fix Issues As They Arise
+
+Always address issues the moment they are noticed. Never defer fixes with the assumption that someone else will catch them later. Presume the next person to encounter the issue may not recognize it or may lack the context to fix it correctly — we are always the best people for the job right now. Leaving issues undone creates compounding technical debt. No issue is minor enough to skip.

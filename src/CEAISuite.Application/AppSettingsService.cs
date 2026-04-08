@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using CEAISuite.Domain;
 using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
@@ -10,14 +11,16 @@ namespace CEAISuite.Application;
 /// the <see cref="OpenAiApiKey"/> property holds the *plaintext* at runtime,
 /// while <see cref="EncryptedApiKey"/> holds the Base64-encoded ciphertext for serialization.
 /// </summary>
-public sealed class AppSettings
+public sealed class AppSettings : IDisposable
 {
-    // TODO: Migrate runtime plaintext key properties (OpenAiApiKey, AnthropicApiKey,
-    // GeminiApiKey, GeminiOAuthToken, GeminiRefreshToken, CompatibleApiKey, GitHubToken)
-    // from string? to SensitiveString (CEAISuite.Domain.SensitiveString) so that key
-    // material is pinned in memory and zeroed on disposal. This requires updating all
-    // consumers (ChatClientFactory, GeminiOAuthService, CopilotTokenService, ViewModels)
-    // to call Dispose() on the old value before assigning a new one.
+    // ── SensitiveString pinned-memory backing for runtime keys ──
+    private SensitiveString? _sensitiveOpenAiKey;
+    private SensitiveString? _sensitiveAnthropicKey;
+    private SensitiveString? _sensitiveGeminiKey;
+    private SensitiveString? _sensitiveGeminiOAuthToken;
+    private SensitiveString? _sensitiveGeminiRefreshToken;
+    private SensitiveString? _sensitiveCompatibleKey;
+    private SensitiveString? _sensitiveGitHubToken;
 
     /// <summary>Runtime-only plaintext key (not serialized).</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -63,6 +66,18 @@ public sealed class AppSettings
         GeminiRefreshTokenIssuedUtc.HasValue
             ? (int)(DateTimeOffset.UtcNow - GeminiRefreshTokenIssuedUtc.Value).TotalDays
             : -1;
+
+    /// <summary>UTC timestamp when the OpenAI API key was last set/rotated.</summary>
+    public DateTimeOffset? OpenAiKeyIssuedUtc { get; set; }
+
+    /// <summary>UTC timestamp when the Anthropic API key was last set/rotated.</summary>
+    public DateTimeOffset? AnthropicKeyIssuedUtc { get; set; }
+
+    /// <summary>UTC timestamp when the Compatible API key was last set/rotated.</summary>
+    public DateTimeOffset? CompatibleKeyIssuedUtc { get; set; }
+
+    /// <summary>UTC timestamp when the GitHub token was last set/rotated.</summary>
+    public DateTimeOffset? GitHubTokenIssuedUtc { get; set; }
 
     /// <summary>Google OAuth client ID for Gemini (not serialized — encrypted on disk).</summary>
     [System.Text.Json.Serialization.JsonIgnore]
@@ -262,6 +277,97 @@ public sealed class AppSettings
 
     /// <summary>Version string the user chose to skip (e.g., "0.3.0"). Null = no skip.</summary>
     public string? SkippedVersion { get; set; }
+
+    // ── SensitiveString helpers ──
+
+    /// <summary>Returns the pinned-memory SensitiveString for a provider's key.</summary>
+    public SensitiveString? GetSensitiveKey(string? provider) => provider?.ToLowerInvariant() switch
+    {
+        "openai" => _sensitiveOpenAiKey,
+        "anthropic" => _sensitiveAnthropicKey,
+        "gemini" => _sensitiveGeminiKey,
+        "openai-compatible" => _sensitiveCompatibleKey,
+        "copilot" => _sensitiveGitHubToken,
+        _ => _sensitiveOpenAiKey,
+    };
+
+    /// <summary>Create pinned SensitiveString instances from plaintext keys after decryption.</summary>
+    internal void InitializeSensitiveKeys()
+    {
+        _sensitiveOpenAiKey?.Dispose();
+        _sensitiveOpenAiKey = OpenAiApiKey is not null ? SensitiveString.FromPlaintext(OpenAiApiKey) : null;
+        _sensitiveAnthropicKey?.Dispose();
+        _sensitiveAnthropicKey = AnthropicApiKey is not null ? SensitiveString.FromPlaintext(AnthropicApiKey) : null;
+        _sensitiveGeminiKey?.Dispose();
+        _sensitiveGeminiKey = GeminiApiKey is not null ? SensitiveString.FromPlaintext(GeminiApiKey) : null;
+        _sensitiveGeminiOAuthToken?.Dispose();
+        _sensitiveGeminiOAuthToken = GeminiOAuthToken is not null ? SensitiveString.FromPlaintext(GeminiOAuthToken) : null;
+        _sensitiveGeminiRefreshToken?.Dispose();
+        _sensitiveGeminiRefreshToken = GeminiRefreshToken is not null ? SensitiveString.FromPlaintext(GeminiRefreshToken) : null;
+        _sensitiveCompatibleKey?.Dispose();
+        _sensitiveCompatibleKey = CompatibleApiKey is not null ? SensitiveString.FromPlaintext(CompatibleApiKey) : null;
+        _sensitiveGitHubToken?.Dispose();
+        _sensitiveGitHubToken = GitHubToken is not null ? SensitiveString.FromPlaintext(GitHubToken) : null;
+    }
+
+    /// <summary>Update key-issued timestamps for any keys that changed from their previous values.</summary>
+    internal void TrackKeyRotation(AppSettings? previous)
+    {
+        if (previous is null) return;
+        var now = DateTimeOffset.UtcNow;
+        if (OpenAiApiKey != previous.OpenAiApiKey && !string.IsNullOrWhiteSpace(OpenAiApiKey))
+            OpenAiKeyIssuedUtc = now;
+        if (AnthropicApiKey != previous.AnthropicApiKey && !string.IsNullOrWhiteSpace(AnthropicApiKey))
+            AnthropicKeyIssuedUtc = now;
+        if (CompatibleApiKey != previous.CompatibleApiKey && !string.IsNullOrWhiteSpace(CompatibleApiKey))
+            CompatibleKeyIssuedUtc = now;
+        if (GitHubToken != previous.GitHubToken && !string.IsNullOrWhiteSpace(GitHubToken))
+            GitHubTokenIssuedUtc = now;
+        if (GeminiRefreshToken != previous.GeminiRefreshToken && !string.IsNullOrWhiteSpace(GeminiRefreshToken))
+            GeminiRefreshTokenIssuedUtc = now;
+    }
+
+    /// <summary>Returns a health report for all configured API keys.</summary>
+    public KeyHealthReport GetKeyHealth()
+    {
+        const int staleDays = 90;
+        var entries = new List<KeyHealthEntry>();
+
+        void Check(string provider, string? key, DateTimeOffset? issued)
+        {
+            if (string.IsNullOrWhiteSpace(key)) return;
+            int age = issued.HasValue ? (int)(DateTimeOffset.UtcNow - issued.Value).TotalDays : -1;
+            entries.Add(new KeyHealthEntry(provider, age, age > staleDays));
+        }
+
+        Check("openai", OpenAiApiKey, OpenAiKeyIssuedUtc);
+        Check("anthropic", AnthropicApiKey, AnthropicKeyIssuedUtc);
+        Check("gemini", GeminiApiKey, GeminiRefreshTokenIssuedUtc);
+        Check("openai-compatible", CompatibleApiKey, CompatibleKeyIssuedUtc);
+        Check("copilot", GitHubToken, GitHubTokenIssuedUtc);
+
+        return new KeyHealthReport(entries);
+    }
+
+    public void Dispose()
+    {
+        _sensitiveOpenAiKey?.Dispose();
+        _sensitiveAnthropicKey?.Dispose();
+        _sensitiveGeminiKey?.Dispose();
+        _sensitiveGeminiOAuthToken?.Dispose();
+        _sensitiveGeminiRefreshToken?.Dispose();
+        _sensitiveCompatibleKey?.Dispose();
+        _sensitiveGitHubToken?.Dispose();
+    }
+}
+
+/// <summary>Health assessment for a single provider key.</summary>
+public sealed record KeyHealthEntry(string Provider, int AgeDays, bool IsStale);
+
+/// <summary>Aggregate key health report across all configured providers.</summary>
+public sealed record KeyHealthReport(IReadOnlyList<KeyHealthEntry> Entries)
+{
+    public bool HasStaleKeys => Entries.Any(e => e.IsStale);
 }
 
 /// <summary>Settings entry for a configured MCP server.</summary>
@@ -291,7 +397,7 @@ public sealed class McpServerSettingsEntry
 }
 
 [System.Runtime.Versioning.SupportedOSPlatform("windows")]
-public sealed class AppSettingsService
+public sealed class AppSettingsService : IDisposable
 {
     private static readonly string SettingsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "CEAISuite");
@@ -300,6 +406,7 @@ public sealed class AppSettingsService
 
     private readonly ILogger<AppSettingsService>? _logger;
     private AppSettings _settings = new();
+    private Dictionary<string, string?> _previousKeySnapshot = new();
 
     public AppSettingsService(ILogger<AppSettingsService>? logger = null)
     {
@@ -414,10 +521,46 @@ public sealed class AppSettingsService
         var envEndpoint = Environment.GetEnvironmentVariable("CEAI_ENDPOINT");
         if (!string.IsNullOrWhiteSpace(envEndpoint))
             _settings.CustomEndpoint = envEndpoint;
+
+        // Initialize pinned-memory SensitiveString instances from decrypted keys
+        _settings.InitializeSensitiveKeys();
+
+        // Capture snapshot for key rotation tracking on next Save()
+        _previousKeySnapshot = CaptureKeySnapshot();
     }
+
+    private Dictionary<string, string?> CaptureKeySnapshot() => new()
+    {
+        ["openai"] = _settings.OpenAiApiKey,
+        ["anthropic"] = _settings.AnthropicApiKey,
+        ["compatible"] = _settings.CompatibleApiKey,
+        ["github"] = _settings.GitHubToken,
+        ["gemini_refresh"] = _settings.GeminiRefreshToken,
+    };
 
     public void Save()
     {
+        // Track key rotation: update issued timestamps for changed keys
+        var currentSnapshot = CaptureKeySnapshot();
+        var now = DateTimeOffset.UtcNow;
+        foreach (var (key, currentValue) in currentSnapshot)
+        {
+            if (_previousKeySnapshot.TryGetValue(key, out var previousValue)
+                && currentValue != previousValue
+                && !string.IsNullOrWhiteSpace(currentValue))
+            {
+                switch (key)
+                {
+                    case "openai": _settings.OpenAiKeyIssuedUtc = now; break;
+                    case "anthropic": _settings.AnthropicKeyIssuedUtc = now; break;
+                    case "compatible": _settings.CompatibleKeyIssuedUtc = now; break;
+                    case "github": _settings.GitHubTokenIssuedUtc = now; break;
+                    case "gemini_refresh": _settings.GeminiRefreshTokenIssuedUtc = now; break;
+                }
+            }
+        }
+        _previousKeySnapshot = currentSnapshot;
+
         // Encrypt secrets before writing
         _settings.EncryptedApiKey = EncryptField(_settings.OpenAiApiKey);
         _settings.EncryptedGitHubToken = EncryptField(_settings.GitHubToken);
@@ -450,6 +593,8 @@ public sealed class AppSettingsService
         File.WriteAllText(SettingsPath, JsonSerializer.Serialize(_settings, IndentedJsonOptions));
         SettingsChanged?.Invoke();
     }
+
+    public void Dispose() => _settings.Dispose();
 
     /// <summary>Decrypt a stored field, returning null on failure or if input is blank.</summary>
     private static string? TryDecryptField(string? encrypted, ILogger? logger, string fieldName)

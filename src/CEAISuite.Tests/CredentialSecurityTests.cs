@@ -166,3 +166,65 @@ public class GeminiRefreshTokenAgeTests
         Assert.True(age <= 90, string.Format(CultureInfo.InvariantCulture, "Expected age <= 90 but got {0}", age));
     }
 }
+
+public class SensitiveStringIntegrationTests
+{
+    [Fact]
+    public void AppSettings_Dispose_ZeroesSensitiveStrings()
+    {
+        var settings = new AppSettings();
+        settings.OpenAiApiKey = "sk-test-key-1234567890";
+        settings.AnthropicApiKey = "sk-ant-test-key";
+        settings.InitializeSensitiveKeys();
+
+        var sensitiveOpenAi = settings.GetSensitiveKey("openai");
+        var sensitiveAnthropic = settings.GetSensitiveKey("anthropic");
+        Assert.NotNull(sensitiveOpenAi);
+        Assert.NotNull(sensitiveAnthropic);
+
+        settings.Dispose();
+
+        Assert.True(sensitiveOpenAi!.IsDisposed);
+        Assert.True(sensitiveAnthropic!.IsDisposed);
+    }
+
+    [Fact]
+    public void GetKeyHealth_StaleKey_FlagsAsStale()
+    {
+        var settings = new AppSettings();
+        settings.OpenAiApiKey = "sk-test";
+        settings.OpenAiKeyIssuedUtc = DateTimeOffset.UtcNow.AddDays(-100);
+
+        var report = settings.GetKeyHealth();
+
+        Assert.Single(report.Entries);
+        Assert.True(report.Entries[0].IsStale);
+        Assert.Equal(100, report.Entries[0].AgeDays);
+        Assert.True(report.HasStaleKeys);
+    }
+
+    [Fact]
+    public void GetKeyHealth_FreshKey_NotStale()
+    {
+        var settings = new AppSettings();
+        settings.OpenAiApiKey = "sk-test";
+        settings.OpenAiKeyIssuedUtc = DateTimeOffset.UtcNow;
+
+        var report = settings.GetKeyHealth();
+
+        Assert.Single(report.Entries);
+        Assert.False(report.Entries[0].IsStale);
+        Assert.Equal(0, report.Entries[0].AgeDays);
+    }
+
+    [Fact]
+    public void GetKeyHealth_NoKeys_EmptyReport()
+    {
+        var settings = new AppSettings();
+
+        var report = settings.GetKeyHealth();
+
+        Assert.Empty(report.Entries);
+        Assert.False(report.HasStaleKeys);
+    }
+}

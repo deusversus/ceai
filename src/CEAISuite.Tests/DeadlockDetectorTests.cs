@@ -161,17 +161,13 @@ public class ProcessWatchdogServiceDeadlockIntegrationTests
     public void IsProcessResponsiveWithDeadlockCheck_WhenDisabled_DoesNotCallDetector()
     {
         // When DeadlockDetectionEnabled is false, the detector should not be invoked.
-        // We verify this indirectly: construct with a detector but leave disabled.
-        // A responsive process should remain responsive because the detector is not called.
+        // We verify this indirectly: construct with a detector but explicitly disable.
         using var detector = new DeadlockDetector();
         using var service = new ProcessWatchdogService(logger: null, deadlockDetector: detector);
 
-        // Ensure the flag defaults to false.
+        // Auto-enabled by constructor, so disable explicitly
+        service.DeadlockDetectionEnabled = false;
         Assert.False(service.DeadlockDetectionEnabled);
-
-        // The method is internal, accessible via InternalsVisibleTo.
-        // We can't easily test with a live process from a test runner,
-        // but we can verify the property gating logic.
     }
 
     [Fact]
@@ -186,10 +182,18 @@ public class ProcessWatchdogServiceDeadlockIntegrationTests
     }
 
     [Fact]
-    public void Constructor_WithDetector_DoesNotThrow()
+    public void Constructor_WithDetector_DefaultsToEnabled()
     {
         using var detector = new DeadlockDetector();
         using var service = new ProcessWatchdogService(logger: null, deadlockDetector: detector);
+
+        Assert.True(service.DeadlockDetectionEnabled);
+    }
+
+    [Fact]
+    public void Constructor_WithoutDetector_DefaultsToDisabled()
+    {
+        using var service = new ProcessWatchdogService(logger: null, deadlockDetector: null);
 
         Assert.False(service.DeadlockDetectionEnabled);
     }

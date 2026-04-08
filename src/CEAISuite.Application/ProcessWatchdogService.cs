@@ -21,6 +21,8 @@ public sealed class ProcessWatchdogService : IDisposable
     {
         _logger = logger;
         _deadlockDetector = deadlockDetector;
+        // Auto-enable deadlock detection when a detector is provided
+        DeadlockDetectionEnabled = deadlockDetector is not null;
     }
 
     /// <summary>Optional diagnostic log callback: (source, level, message).</summary>
@@ -577,7 +579,8 @@ internal sealed class WatchdogMonitor : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
+        try { _cts.Cancel(); }
+        catch (ObjectDisposedException) { /* Already disposed by concurrent caller */ }
         _cts.Dispose();
     }
 }

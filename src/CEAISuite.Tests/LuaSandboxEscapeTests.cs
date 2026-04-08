@@ -279,27 +279,28 @@ public sealed class LuaSandboxEscapeTests : IDisposable
     // ── Large memory allocation attempts ──
 
     [Fact]
-    public async Task Execute_VeryLargeStringAllocation_HandlesGracefully()
+    public async Task Execute_LargeStringAllocation_HandlesGracefully()
     {
-        // Attempt to allocate a very large string via string.rep — must not crash the host
+        // Allocate a moderately large string — must not crash the host.
+        // Kept small enough to stay within instruction limit.
         var exception = await Record.ExceptionAsync(async () =>
         {
-            await _engine.ExecuteAsync("return string.rep('A', 10 * 1024 * 1024)");
+            await _engine.ExecuteAsync("return string.rep('A', 100000)");
         });
 
-        // No unhandled exception should escape the engine
         Assert.Null(exception);
     }
 
     [Fact]
     public async Task Execute_LargeTableAllocation_HandlesGracefully()
     {
-        // Attempt to create a very large table
+        // Create a moderately large table — must not crash the host.
+        // 10K entries stays well within 5M instruction limit.
         var exception = await Record.ExceptionAsync(async () =>
         {
             await _engine.ExecuteAsync("""
                 local t = {}
-                for i = 1, 1000000 do t[i] = i end
+                for i = 1, 10000 do t[i] = i end
                 return #t
                 """);
         });

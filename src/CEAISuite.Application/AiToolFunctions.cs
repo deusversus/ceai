@@ -42,6 +42,7 @@ public sealed partial class AiToolFunctions(
     TokenLimits? tokenLimits = null,
     ToolResultStore? toolResultStore = null,
     ILuaScriptEngine? luaEngine = null,
+    ISymbolEngine? symbolEngine = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
@@ -1997,5 +1998,61 @@ public sealed partial class AiToolFunctions(
             totalLines = r.TotalLines,
             storedAt = r.StoredAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
         }));
+    }
+
+    // ── Symbol resolution tools ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Load debug symbols (PDB/exports) for a module. Must be called before ResolveAddressToSymbol can resolve addresses in that module.")]
+    public async Task<string> LoadSymbolsForModule(
+        [Description("Process ID")] int processId,
+        [Description("Module name (e.g. 'GameAssembly.dll')")] string moduleName)
+    {
+        if (symbolEngine is null) return "Symbol engine not available.";
+        try
+        {
+            var attachment = await engineFacade.AttachAsync(processId);
+            var mod = attachment.Modules.FirstOrDefault(m =>
+                m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase));
+            if (mod is null)
+            {
+                var available = string.Join(", ", attachment.Modules.Select(m => m.Name).Take(10));
+                return $"Module '{moduleName}' not found. Loaded modules: {available}";
+            }
+
+            var loaded = await symbolEngine.LoadSymbolsForModuleAsync(processId, mod.Name, mod.BaseAddress, mod.SizeBytes);
+            return loaded
+                ? $"Symbols loaded for {mod.Name} (base 0x{mod.BaseAddress:X}, size {mod.SizeBytes})."
+                : $"No symbols found for {mod.Name} (base 0x{mod.BaseAddress:X}).";
+        }
+        catch (Exception ex)
+        {
+            return $"LoadSymbolsForModule failed: {ex.Message}";
+        }
+    }
+
+    [ReadOnlyTool]
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Resolve a memory address to its symbol name (e.g. 'GameAssembly.dll!Player::TakeDamage+0x1A'). " +
+        "Requires LoadSymbolsForModule to have been called first for the relevant module.")]
+    public string ResolveAddressToSymbol(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex string)")] string address)
+    {
+        if (symbolEngine is null) return "Symbol engine not available.";
+        try
+        {
+            var addr = ParseAddress(address);
+            var info = symbolEngine.ResolveAddress(addr);
+            return info is not null
+                ? info.DisplayName
+                : $"No symbol found for address 0x{addr:X}";
+        }
+        catch (Exception ex)
+        {
+            return $"ResolveAddressToSymbol failed: {ex.Message}";
+        }
     }
 }

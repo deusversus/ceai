@@ -337,4 +337,64 @@ public sealed partial class AiToolFunctions
             return Task.FromResult($"Symbol '{name}' not found. Use ListRegisteredSymbols to see available symbols.");
         return Task.FromResult($"{name} = 0x{addr.Value:X}");
     }
+
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [Description("Execute an Auto Assembler script directly without creating an address table entry. Runs the [ENABLE] section. Use DisableAutoAssemblerScript to run the [DISABLE] section.")]
+    public async Task<string> ExecuteAutoAssemblerScript(
+        [Description("Process ID to execute the script against")] int processId,
+        [Description("Full Auto Assembler script text")] string script)
+    {
+        if (autoAssemblerEngine is null)
+            return "Auto Assembler engine not available.";
+        if (!IsProcessAlive(processId))
+            return $"Process {processId} is no longer running.";
+
+        var parseResult = autoAssemblerEngine.Parse(script);
+        if (!parseResult.IsValid)
+            return $"Script parse failed:\nErrors: {string.Join("; ", parseResult.Errors)}\nWarnings: {string.Join("; ", parseResult.Warnings)}";
+
+        try
+        {
+            var result = await autoAssemblerEngine.EnableAsync(processId, script);
+            if (result.Success)
+                return $"Script ENABLED successfully. {result.Allocations.Count} allocations, {result.Patches.Count} patches applied.";
+            else
+                return $"Script FAILED to enable: {result.Error}";
+        }
+        catch (Exception ex)
+        {
+            return $"Script execution error: {ex.Message}";
+        }
+    }
+
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [Description("Execute the [DISABLE] section of an Auto Assembler script to undo its changes.")]
+    public async Task<string> DisableAutoAssemblerScript(
+        [Description("Process ID to execute the script against")] int processId,
+        [Description("Full Auto Assembler script text (must match the previously enabled script)")] string script)
+    {
+        if (autoAssemblerEngine is null)
+            return "Auto Assembler engine not available.";
+        if (!IsProcessAlive(processId))
+            return $"Process {processId} is no longer running.";
+
+        var parseResult = autoAssemblerEngine.Parse(script);
+        if (!parseResult.IsValid)
+            return $"Script parse failed:\nErrors: {string.Join("; ", parseResult.Errors)}\nWarnings: {string.Join("; ", parseResult.Warnings)}";
+
+        try
+        {
+            var result = await autoAssemblerEngine.DisableAsync(processId, script);
+            if (result.Success)
+                return $"Script DISABLED successfully. {result.Patches.Count} patches restored.";
+            else
+                return $"Script FAILED to disable: {result.Error}";
+        }
+        catch (Exception ex)
+        {
+            return $"Script disable error: {ex.Message}";
+        }
+    }
 }

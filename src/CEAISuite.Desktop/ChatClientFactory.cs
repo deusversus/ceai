@@ -69,6 +69,13 @@ internal static class ChatClientFactory
     /// <summary>Create Gemini client using either API key or OAuth token based on auth method.</summary>
     private static async Task<IChatClient?> CreateGeminiAutoAsync(AppSettings settings, string model)
     {
+        // Warn if refresh token is stale
+        if (settings.GeminiRefreshTokenAgeDays > 90)
+        {
+            var ageDays = settings.GeminiRefreshTokenAgeDays;
+            _logger?.LogWarning("Gemini refresh token is {AgeDays} days old. Consider re-authenticating.", ageDays);
+        }
+
         if (settings.GeminiAuthMethod == "oauth" && !string.IsNullOrWhiteSpace(settings.GeminiRefreshToken))
         {
             // OAuth: get access token asynchronously (auto-refreshes if expired)

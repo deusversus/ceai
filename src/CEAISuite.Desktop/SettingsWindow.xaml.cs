@@ -1093,6 +1093,7 @@ public partial class SettingsWindow : Window, IDisposable
 
             _settingsService.Settings.GeminiOAuthToken = accessToken;
             _settingsService.Settings.GeminiRefreshToken = refreshToken;
+            _settingsService.Settings.GeminiRefreshTokenIssuedUtc = DateTimeOffset.UtcNow;
             _settingsService.Settings.GeminiAuthMethod = "oauth";
             _settingsService.Save();
 
@@ -1125,6 +1126,7 @@ public partial class SettingsWindow : Window, IDisposable
 
             _settingsService.Settings.GeminiOAuthToken = null;
             _settingsService.Settings.GeminiRefreshToken = null;
+            _settingsService.Settings.GeminiRefreshTokenIssuedUtc = null;
             _settingsService.Settings.GeminiAuthMethod = "api_key";
 
             GeminiOAuthStatus.Text = "";

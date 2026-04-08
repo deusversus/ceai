@@ -579,6 +579,19 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 {
                     var bytes = ParseByteString(bytePattern);
 
+                    // Opcode safety validation for db directive bytes
+                    var dbOpcodeResult = OpcodeValidator.ValidateBytes(bytes, ctx.Is64Bit);
+                    if (!dbOpcodeResult.IsValid)
+                    {
+                        var errMsg = string.Format(
+                            CultureInfo.InvariantCulture,
+                            "Opcode validation failed for db directive in block '{0}': {1}",
+                            block.Label, string.Join("; ", dbOpcodeResult.Errors));
+                        return new ScriptExecutionResult(false, errMsg, allocations, patches);
+                    }
+                    if (dbOpcodeResult.Warnings.Count > 0)
+                        warnings.AddRange(dbOpcodeResult.Warnings);
+
                     var origBytes = new byte[bytes.Length];
                     if (!ReadProcessMemory(ctx.ProcessHandle, (IntPtr)offset, origBytes, origBytes.Length, out var origRead)
                         || origRead != origBytes.Length)
@@ -628,6 +641,19 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             machineCode?.CopyTo(finalCode, 0);
             if (block.NopCount > 0)
                 Array.Fill(finalCode, (byte)0x90, machineCode?.Length ?? 0, block.NopCount);
+
+            // Opcode safety validation — block dangerous instructions before writing
+            var opcodeResult = OpcodeValidator.ValidateBytes(finalCode, ctx.Is64Bit);
+            if (!opcodeResult.IsValid)
+            {
+                var errMsg = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Opcode validation failed for block '{0}': {1}",
+                    block.Label, string.Join("; ", opcodeResult.Errors));
+                return new ScriptExecutionResult(false, errMsg, allocations, patches);
+            }
+            if (opcodeResult.Warnings.Count > 0)
+                warnings.AddRange(opcodeResult.Warnings);
 
             var writeAddr = blockAddress;
             if (block.DbDirectives.Count > 0)
@@ -738,6 +764,20 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             var addr = ResolveAddress(ExpandSymbols(destExpr, defines), defines, ctx);
             if (addr is null) continue;
             var bytes = ParseByteString(bytePattern);
+
+            // Opcode safety validation for writemem directive bytes
+            var wmOpcodeResult = OpcodeValidator.ValidateBytes(bytes, ctx.Is64Bit);
+            if (!wmOpcodeResult.IsValid)
+            {
+                var errMsg = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "Opcode validation failed for writemem directive at '{0}': {1}",
+                    destExpr, string.Join("; ", wmOpcodeResult.Errors));
+                return new ScriptExecutionResult(false, errMsg, allocations, patches, registeredSymbols);
+            }
+            if (wmOpcodeResult.Warnings.Count > 0)
+                warnings.AddRange(wmOpcodeResult.Warnings);
+
             var origBytes = new byte[bytes.Length];
             ReadProcessMemory(ctx.ProcessHandle, (IntPtr)addr.Value, origBytes, origBytes.Length, out _);
             WriteProcessMemory(ctx.ProcessHandle, (IntPtr)addr.Value, bytes, bytes.Length, out _);

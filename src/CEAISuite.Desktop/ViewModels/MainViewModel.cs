@@ -137,16 +137,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Wire AI operator with dynamic context injection
         _aiOperatorService.SetContextProvider(BuildAiContext);
 
-        // Configure AI provider (may be null if no API key configured)
-        try
-        {
-            var chatClient = CreateChatClient();
-            _aiOperatorService.Reconfigure(chatClient);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "AI provider init failed");
-        }
+        // Configure AI provider (may be null if no API key configured).
+        // Uses fire-and-forget to avoid blocking the constructor with async token refresh.
+        _ = InitializeAiProviderAsync();
         _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
         _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
         _aiOperatorService.Limits = TokenLimits.Resolve(_appSettingsService.Settings);
@@ -183,9 +176,22 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // ── AI Configuration ──
 
-    public IChatClient? CreateChatClient()
+    public async Task<IChatClient?> CreateChatClientAsync()
     {
-        return ChatClientFactory.Create(_appSettingsService.Settings);
+        return await ChatClientFactory.CreateAsync(_appSettingsService.Settings).ConfigureAwait(false);
+    }
+
+    private async Task InitializeAiProviderAsync()
+    {
+        try
+        {
+            var chatClient = await CreateChatClientAsync().ConfigureAwait(false);
+            _aiOperatorService.Reconfigure(chatClient);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "AI provider init failed");
+        }
     }
 
     /// <summary>Provides dynamic context to the AI agent before each message.</summary>
@@ -225,7 +231,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     // ── Settings Changed Handler ──
 
-    public void HandleSettingsChanged()
+    public async Task HandleSettingsChangedAsync()
     {
         _addressTableVm.SetRefreshInterval(
             _appSettingsService.Settings.RefreshIntervalMs > 0
@@ -235,7 +241,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         // Hot-swap AI provider when settings change
         try
         {
-            var newClient = CreateChatClient();
+            var newClient = await CreateChatClientAsync().ConfigureAwait(false);
             _aiOperatorService.Reconfigure(newClient);
             _aiOperatorService.RateLimitSeconds = _appSettingsService.Settings.RateLimitSeconds;
             _aiOperatorService.RateLimitWait = _appSettingsService.Settings.RateLimitWait;
@@ -676,11 +682,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         });
     }
 
-    public (bool success, string? errorMessage) ReloadSkills()
+    public async Task<(bool success, string? errorMessage)> ReloadSkillsAsync()
     {
         try
         {
-            var newClient = CreateChatClient();
+            var newClient = await CreateChatClientAsync().ConfigureAwait(false);
             _aiOperatorService.Reconfigure(newClient);
             return (true, null);
         }
@@ -690,11 +696,11 @@ public partial class MainViewModel : ObservableObject, IDisposable
         }
     }
 
-    public void ReconfigureAiAfterSkillsChange()
+    public async Task ReconfigureAiAfterSkillsChangeAsync()
     {
         try
         {
-            var newClient = CreateChatClient();
+            var newClient = await CreateChatClientAsync().ConfigureAwait(false);
             _aiOperatorService.Reconfigure(newClient);
         }
         catch (Exception ex) { _logger.LogWarning(ex, "AI reconfigure after skills change failed"); }

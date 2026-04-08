@@ -250,17 +250,11 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
                 var result = await Task.Run(() =>
                 {
                     _script.Options.DebugInput = _ => throw new ScriptRuntimeException("input() is disabled");
-
-                    // MoonSharp's debugger hook (when attached) checks instruction count
-                    // and aborts runaway scripts via ScriptRuntimeException.
-                    _script.Options.DebugPrint = _ => { }; // suppress debug prints
-
+                    _script.Options.DebugPrint = _ => { };
                     var callResult = _script.Call(func);
-
-                    // Check cancellation after execution completes
                     token.ThrowIfCancellationRequested();
                     return callResult;
-                }, token).ConfigureAwait(false);
+                }, CancellationToken.None).WaitAsync(token).ConfigureAwait(false);
 
                 var returnValue = result.Type != DataType.Void && result.Type != DataType.Nil
                     ? result.ToPrintString()

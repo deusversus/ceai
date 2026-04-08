@@ -63,13 +63,22 @@ CE AI Suite is a Cheat Engine-class memory analysis tool with an integrated AI o
 | `ChatClientFactory` abstracts provider creation | `ChatClientFactory.cs:45-67` — switch on provider string | Moderate — clean abstraction |
 | Cancellation propagation tested | `AgentLoopTests.cs:599-615` — CancellationToken stops slow clients | Strong — emits proper Error event |
 
+### Additional Mitigations (found in deep inspection)
+
+| Mitigation | Location | Effectiveness |
+|------------|----------|---------------|
+| `ModelSwitcher` with fallback chain | `AgentLoop/ModelSwitcher.cs` — `FallbackToNext()` on 3 consecutive overloads | Strong — automatic model downgrade |
+| `RetryPolicy` with exponential backoff | `AgentLoop/RetryPolicy.cs` — rate limit, overload, context-length-exceeded handling | Strong — cascading backoff strategy |
+| `TriggerCooldown` for rate-limited models | `ModelSwitcher.cs` — temporarily switches to faster model, auto-restores | Good — avoids expensive model during high load |
+| `CompactionPipeline` for context overflow | `AgentLoop/CompactionPipeline.cs` + `PostCompactionRestorer.cs` | Strong — summarizes history, restores essential tool results |
+
 ### Gaps
 
-- **No failover tests** — if a provider returns repeated 500s mid-conversation, no test verifies graceful degradation
+- **No failover chain test** — `ModelSwitcher.FallbackToNext()` and `TriggerCooldown()` have no unit tests verifying the fallback chain behavior
 - **No provider-switch-mid-conversation test** — changing provider while the agent has active context is untested
 - **Copilot token refresh race condition** — `ForceRefreshAsync` is called on 401/403 but concurrent requests could race
 - **Gemini OAuth blocking call** — `CreateGeminiAuto` calls `.GetAwaiter().GetResult()` (`ChatClientFactory.cs:77`), which could deadlock on UI thread
-- **No retry backoff tests** — `ErrorClassifier.ParseRetryAfter` is tested loosely (`retryAfter is null or { TotalSeconds: >= 0 }`)
+- **No compaction round-trip test** — `CompactionPipeline` and `PostCompactionRestorer` are mentioned but no tests verify data fidelity through compaction
 
 ### Recommendations
 
@@ -284,14 +293,14 @@ Add a test with a crafted adversarial `.CT` file (XXE, entity expansion, >1000 e
 
 ### Gaps
 
-- **No Lua sandbox escape tests** — if Lua `os.execute` or `io.popen` are accessible, scripts could execute arbitrary system commands
-- **Incomplete CE Lua API** — users porting CE Lua scripts will hit missing functions
-- **No test for Lua memory limits** — infinite loops or large allocations could hang the app
+- **Sandbox is configured but not adversarially tested** — `Preset_HardSandbox` disables `os`, `io`, `debug`, and dynamic code loading, and execution timeout is 30 seconds. However, no tests attempt sandbox escape (e.g., `debug.getinfo`, `loadstring`, FFI tricks)
+- **Incomplete CE Lua API** — users porting CE Lua scripts will hit missing functions (~15% of CE's Lua surface area)
+- **No test for Lua memory limits** — large string concatenation or table growth could exhaust host process memory within the 30-second timeout
 
 ### Recommendation
 
-1. Verify Lua sandbox restricts `os`, `io`, `debug`, `loadfile` modules
-2. Add memory/CPU time limits for Lua script execution
+1. Add adversarial sandbox escape tests (attempt `os.execute`, `io.popen`, `debug.getinfo`, `loadstring`)
+2. Add memory limit enforcement (MoonSharp supports memory tracking)
 3. Document which CE Lua functions are supported vs. missing
 
 ---

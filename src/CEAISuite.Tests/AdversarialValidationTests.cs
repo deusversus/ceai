@@ -1,3 +1,4 @@
+using System.Globalization;
 using CEAISuite.Engine.Abstractions;
 using CEAISuite.Engine.Windows;
 
@@ -112,12 +113,12 @@ public sealed class AdversarialValidationTests
         sb.AppendLine("[ENABLE]");
         for (int i = 0; i < 5000; i++)
         {
-            sb.AppendLine($"define(var_{i}, {i})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"define(var_{i}, {i})");
         }
         sb.AppendLine("[DISABLE]");
         for (int i = 0; i < 5000; i++)
         {
-            sb.AppendLine($"// cleanup line {i}");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"// cleanup line {i}");
         }
 
         var script = sb.ToString();
@@ -133,7 +134,7 @@ public sealed class AdversarialValidationTests
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("[ENABLE]");
         for (int i = 0; i < 10_000; i++)
-            sb.AppendLine($"label(lbl_{i})");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"label(lbl_{i})");
         sb.AppendLine("[DISABLE]");
         sb.AppendLine("nop");
 

@@ -265,6 +265,6 @@ public class ModelSwitcherTests
         switcher.SwitchToModel("b");
 
         Assert.NotEmpty(logMessages);
-        Assert.Contains(logMessages, l => l.Message.Contains("b"));
+        Assert.Contains(logMessages, l => l.Message.Contains('b'));
     }
 }

@@ -269,7 +269,7 @@ public partial class MainWindow : Window, IDisposable
             () => Dispatcher.BeginInvoke(() => _aiOperatorVm.RefreshChatSwitcher()));
 
         _subs.Subscribe(h => _appSettingsService.SettingsChanged += h, h => _appSettingsService.SettingsChanged -= h,
-            () => Dispatcher.Invoke(() => _mainVm.HandleSettingsChanged()));
+            () => Dispatcher.InvokeAsync(async () => await _mainVm.HandleSettingsChangedAsync()));
 
         // Wire MainViewModel UI action requests
         _subs.Add(() => _mainVm.UiActionRequested += OnMainVmUiAction, () => _mainVm.UiActionRequested -= OnMainVmUiAction);
@@ -931,13 +931,13 @@ public partial class MainWindow : Window, IDisposable
 
     // ── Menu bar handlers ──
 
-    private void OpenSkillsManager(object sender, RoutedEventArgs e)
+    private async void OpenSkillsManager(object sender, RoutedEventArgs e)
     {
         var window = new SkillsManagerWindow();
         window.Owner = this;
         window.ShowDialog();
         if (window.SkillsChanged)
-            _mainVm.ReconfigureAiAfterSkillsChange();
+            await _mainVm.ReconfigureAiAfterSkillsChangeAsync();
     }
 
     private void OpenMcpManager(object sender, RoutedEventArgs e)
@@ -949,9 +949,9 @@ public partial class MainWindow : Window, IDisposable
 
     private void OpenSkillsFolder(object sender, RoutedEventArgs e) => MainViewModel.OpenSkillsFolder();
 
-    private void ReloadSkills(object sender, RoutedEventArgs e)
+    private async void ReloadSkills(object sender, RoutedEventArgs e)
     {
-        var (success, errorMessage) = _mainVm.ReloadSkills();
+        var (success, errorMessage) = await _mainVm.ReloadSkillsAsync();
         if (success)
             MessageBox.Show("Skills reloaded successfully.", "Skills", MessageBoxButton.OK, MessageBoxImage.Information);
         else

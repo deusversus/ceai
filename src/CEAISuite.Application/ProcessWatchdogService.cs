@@ -15,9 +15,12 @@ public sealed class ProcessWatchdogService : IDisposable
     private static readonly System.Text.Json.JsonSerializerOptions s_indentedJsonOptions = new() { WriteIndented = true };
     private readonly ILogger<ProcessWatchdogService>? _logger;
 
-    public ProcessWatchdogService(ILogger<ProcessWatchdogService>? logger = null)
+    private readonly DeadlockDetector? _deadlockDetector;
+
+    public ProcessWatchdogService(ILogger<ProcessWatchdogService>? logger = null, DeadlockDetector? deadlockDetector = null)
     {
         _logger = logger;
+        _deadlockDetector = deadlockDetector;
     }
 
     /// <summary>Optional diagnostic log callback: (source, level, message).</summary>
@@ -34,6 +37,13 @@ public sealed class ProcessWatchdogService : IDisposable
     public int HeartbeatIntervalMs { get; set; } = 500;
     public int UnresponsiveThresholdMs { get; set; } = 3000;
     public int MaxRetries { get; set; } = 2;
+
+    /// <summary>
+    /// When true and a <see cref="DeadlockDetector"/> was provided, thread-level
+    /// deadlock detection via Wait Chain Traversal is performed as a 4th signal.
+    /// Opt-in because WCT has non-trivial overhead.
+    /// </summary>
+    public bool DeadlockDetectionEnabled { get; set; }
 
     // Unsafe address registry: address+mode combos that caused freezes
     private readonly ConcurrentDictionary<string, UnsafeAddressEntry> _unsafeAddresses = new();
@@ -95,7 +105,7 @@ public sealed class ProcessWatchdogService : IDisposable
         int verifyDelayMs = 1500)
     {
         // Step 1: Verify process is responsive before install
-        bool preCheck = IsProcessResponsive(processId);
+        bool preCheck = IsProcessResponsiveWithDeadlockCheck(processId);
         if (!preCheck)
             return new TransactionResult(false, "Process was already unresponsive before install.", TransactionPhase.PreCheck);
 
@@ -255,6 +265,48 @@ public sealed class ProcessWatchdogService : IDisposable
             // Telemetry should never throw
             System.Diagnostics.Trace.TraceWarning($"[ProcessWatchdog] Freeze telemetry logging failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Instance-level responsiveness check that includes the optional 4th signal
+    /// (deadlock detection via WCT) when <see cref="DeadlockDetectionEnabled"/> is true.
+    /// </summary>
+    internal bool IsProcessResponsiveWithDeadlockCheck(int processId)
+    {
+        bool responsive = IsProcessResponsive(processId);
+        if (!responsive)
+        {
+            return false;
+        }
+
+        // Signal 4 (optional): Thread-level deadlock detection via Wait Chain Traversal
+        if (DeadlockDetectionEnabled && _deadlockDetector is not null)
+        {
+            try
+            {
+                var result = _deadlockDetector.DetectDeadlocks(processId);
+                if (result.HasDeadlock)
+                {
+                    Log("Warning", string.Format(
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        "Deadlock detected in PID {0}: {1} deadlocked thread(s)",
+                        processId,
+                        result.WaitChains.Count(w => w.IsDeadlocked)));
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Deadlock detection is best-effort; don't fail the health check
+                System.Diagnostics.Trace.TraceWarning(string.Format(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    "[ProcessWatchdog] Deadlock detection failed for PID {0}: {1}",
+                    processId,
+                    ex.Message));
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

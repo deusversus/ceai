@@ -32,6 +32,7 @@ public sealed partial class AiToolFunctions(
     SignatureGeneratorService? signatureService = null,
     IMemoryProtectionEngine? memoryProtectionEngine = null,
     MemorySnapshotService? snapshotService = null,
+    PointerScannerService? pointerScannerService = null,
     PointerRescanService? pointerRescanService = null,
     ICallStackEngine? callStackEngine = null,
     ICodeCaveEngine? codeCaveEngine = null,
@@ -42,6 +43,7 @@ public sealed partial class AiToolFunctions(
     TokenLimits? tokenLimits = null,
     ToolResultStore? toolResultStore = null,
     ILuaScriptEngine? luaEngine = null,
+    ISymbolEngine? symbolEngine = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
@@ -544,6 +546,77 @@ public sealed partial class AiToolFunctions(
             return sb.ToString();
         }
         catch (Exception ex) { return $"ComparePointerMaps failed: {ex.Message}"; }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("Resume a previously cancelled pointer scan from where it left off.")]
+    public async Task<string> ResumePointerScan(
+        [Description("Process ID to scan")] int processId)
+    {
+        if (pointerScannerService is null) return "Pointer scanner service not available.";
+        try
+        {
+            var paths = await pointerScannerService.ResumeScanAsync(processId);
+            if (paths.Count == 0) return "No pointer paths found after resuming scan.";
+            var lines = paths.Take(50).Select((p, i) => $"{i + 1}. {p.Display}");
+            return $"Resumed scan found {paths.Count} pointer path(s):\n{string.Join('\n', lines)}";
+        }
+        catch (Exception ex)
+        {
+            return $"ResumePointerScan failed: {ex.Message}";
+        }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("Re-resolve all known pointer paths and rank by stability. Validates which paths still point to the correct address.")]
+    public async Task<string> RescanAllPointerPaths(
+        [Description("Process ID to validate against")] int processId,
+        [Description("Semicolon-separated pointer paths in 'module+moduleOffset:off1,off2,...' format")] string paths,
+        [Description("Expected target value (hex, optional)")] string? expectedValue = null)
+    {
+        if (pointerRescanService is null) return "Pointer rescan service not available.";
+        try
+        {
+            var parsedPaths = ParsePointerPaths(paths);
+            if (parsedPaths.Count == 0) return "No valid pointer paths provided.";
+            nuint? expected = string.IsNullOrWhiteSpace(expectedValue) ? null : AddressTableService.ParseAddress(expectedValue);
+            var results = await pointerRescanService.RescanAllAsync(processId, parsedPaths, expected);
+            if (results.Count == 0) return "No rescan results.";
+            var lines = results.Select((r, i) =>
+                $"{i + 1}. {r.OriginalPath.Display} — {r.Status} (stability: {r.StabilityScore:F2}, valid: {r.IsValid})");
+            var validCount = results.Count(r => r.IsValid);
+            return $"Rescanned {results.Count} path(s), {validCount} still valid:\n{string.Join('\n', lines)}";
+        }
+        catch (Exception ex)
+        {
+            return $"RescanAllPointerPaths failed: {ex.Message}";
+        }
+    }
+
+    private static List<PointerPath> ParsePointerPaths(string input)
+    {
+        var result = new List<PointerPath>();
+        foreach (var segment in input.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var colonIdx = segment.IndexOf(':', StringComparison.Ordinal);
+            if (colonIdx < 0) continue;
+            var basePart = segment[..colonIdx];
+            var offsetsPart = segment[(colonIdx + 1)..];
+
+            var plusIdx = basePart.IndexOf('+', StringComparison.Ordinal);
+            if (plusIdx < 0) continue;
+            var moduleName = basePart[..plusIdx].Trim();
+            var moduleOffset = AddressTableService.ParseAddress(basePart[(plusIdx + 1)..].Trim());
+
+            var offsets = offsetsPart.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(o => long.Parse(o, NumberStyles.HexNumber, CultureInfo.InvariantCulture))
+                .ToArray();
+
+            result.Add(new PointerPath(moduleName, 0, (long)moduleOffset, offsets, 0));
+        }
+        return result;
     }
 
     // ── Phase 7A: Grouped Scan ──
@@ -1320,6 +1393,23 @@ public sealed partial class AiToolFunctions(
         return $"Loaded session '{sessionId}': {processName} (PID {processId}), {entries.Count} entries restored.";
     }
 
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Delete a saved session by ID.")]
+    public async Task<string> DeleteSession([Description("Session ID to delete")] string sessionId)
+    {
+        if (sessionService is null) return "Session service not available.";
+        try
+        {
+            await sessionService.DeleteSessionAsync(sessionId);
+            return $"Session '{sessionId}' deleted.";
+        }
+        catch (Exception ex)
+        {
+            return $"DeleteSession failed: {ex.Message}";
+        }
+    }
+
     // ── Chat History Search ──
 
     [ReadOnlyTool]
@@ -1997,5 +2087,61 @@ public sealed partial class AiToolFunctions(
             totalLines = r.TotalLines,
             storedAt = r.StoredAt.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
         }));
+    }
+
+    // ── Symbol resolution tools ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Load debug symbols (PDB/exports) for a module. Must be called before ResolveAddressToSymbol can resolve addresses in that module.")]
+    public async Task<string> LoadSymbolsForModule(
+        [Description("Process ID")] int processId,
+        [Description("Module name (e.g. 'GameAssembly.dll')")] string moduleName)
+    {
+        if (symbolEngine is null) return "Symbol engine not available.";
+        try
+        {
+            var attachment = await engineFacade.AttachAsync(processId);
+            var mod = attachment.Modules.FirstOrDefault(m =>
+                m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase));
+            if (mod is null)
+            {
+                var available = string.Join(", ", attachment.Modules.Select(m => m.Name).Take(10));
+                return $"Module '{moduleName}' not found. Loaded modules: {available}";
+            }
+
+            var loaded = await symbolEngine.LoadSymbolsForModuleAsync(processId, mod.Name, mod.BaseAddress, mod.SizeBytes);
+            return loaded
+                ? $"Symbols loaded for {mod.Name} (base 0x{mod.BaseAddress:X}, size {mod.SizeBytes})."
+                : $"No symbols found for {mod.Name} (base 0x{mod.BaseAddress:X}).";
+        }
+        catch (Exception ex)
+        {
+            return $"LoadSymbolsForModule failed: {ex.Message}";
+        }
+    }
+
+    [ReadOnlyTool]
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Resolve a memory address to its symbol name (e.g. 'GameAssembly.dll!Player::TakeDamage+0x1A'). " +
+        "Requires LoadSymbolsForModule to have been called first for the relevant module.")]
+    public string ResolveAddressToSymbol(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex string)")] string address)
+    {
+        if (symbolEngine is null) return "Symbol engine not available.";
+        try
+        {
+            var addr = ParseAddress(address);
+            var info = symbolEngine.ResolveAddress(addr);
+            return info is not null
+                ? info.DisplayName
+                : $"No symbol found for address 0x{addr:X}";
+        }
+        catch (Exception ex)
+        {
+            return $"ResolveAddressToSymbol failed: {ex.Message}";
+        }
     }
 }

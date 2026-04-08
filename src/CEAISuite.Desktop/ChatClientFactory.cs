@@ -42,39 +42,46 @@ internal static class ChatClientFactory
     /// Creates an IChatClient for an explicit provider and model combination.
     /// Used by the multi-provider model selector to switch provider+model in one step.
     /// </summary>
-    public static IChatClient? Create(AppSettings settings, string provider, string model)
+    public static async Task<IChatClient?> CreateAsync(AppSettings settings, string provider, string model)
     {
         return provider.ToLowerInvariant() switch
         {
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, model, settings.CustomEndpoint)),
-            "gemini" => CreateGeminiAuto(settings, model),
+            "gemini" => await CreateGeminiAutoAsync(settings, model).ConfigureAwait(false),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, model)),
         };
     }
 
-    public static IChatClient? Create(AppSettings settings)
+    public static async Task<IChatClient?> CreateAsync(AppSettings settings)
     {
         return settings.Provider.ToLowerInvariant() switch
         {
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, settings.Model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, settings.Model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, settings.Model, settings.CustomEndpoint)),
-            "gemini" => CreateGeminiAuto(settings, settings.Model),
+            "gemini" => await CreateGeminiAutoAsync(settings, settings.Model).ConfigureAwait(false),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, settings.Model)),
         };
     }
 
     /// <summary>Create Gemini client using either API key or OAuth token based on auth method.</summary>
-    private static IChatClient? CreateGeminiAuto(AppSettings settings, string model)
+    private static async Task<IChatClient?> CreateGeminiAutoAsync(AppSettings settings, string model)
     {
+        // Warn if refresh token is stale
+        if (settings.GeminiRefreshTokenAgeDays > 90)
+        {
+            var ageDays = settings.GeminiRefreshTokenAgeDays;
+            _logger?.LogWarning("Gemini refresh token is {AgeDays} days old. Consider re-authenticating.", ageDays);
+        }
+
         if (settings.GeminiAuthMethod == "oauth" && !string.IsNullOrWhiteSpace(settings.GeminiRefreshToken))
         {
-            // OAuth: get access token (auto-refreshes if expired)
+            // OAuth: get access token asynchronously (auto-refreshes if expired)
             if (GeminiOAuth is not { } geminiOAuth) return null;
-            var accessToken = geminiOAuth.GetAccessTokenAsync(settings.GeminiRefreshToken)
-                .GetAwaiter().GetResult();
+            var accessToken = await geminiOAuth.GetAccessTokenAsync(settings.GeminiRefreshToken)
+                .ConfigureAwait(false);
             return string.IsNullOrWhiteSpace(accessToken) ? null : CreateGemini(accessToken, model);
         }
 

@@ -1,5 +1,6 @@
 using CEAISuite.Engine.Abstractions;
 using MoonSharp.Interpreter;
+using MoonSharp.Interpreter.Debugging;
 
 namespace CEAISuite.Engine.Lua;
 
@@ -26,16 +27,25 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
     public event Action<string>? OutputWritten;
 
+    /// <summary>
+    /// Maximum number of instructions a script may execute before being terminated.
+    /// Zero means unlimited (default). When set, a debug hook counts each instruction
+    /// and throws <see cref="ScriptRuntimeException"/> once the limit is exceeded.
+    /// </summary>
+    public long MaxInstructions { get; set; }
+
     public MoonSharpLuaEngine(
         IEngineFacade? engineFacade = null,
         IAutoAssemblerEngine? autoAssembler = null,
         ILuaFormHost? formHost = null,
-        TimeSpan? executionTimeout = null)
+        TimeSpan? executionTimeout = null,
+        long maxInstructions = 0)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
         _formHost = formHost;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
+        MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
     }
 
@@ -171,8 +181,22 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             formBindings.Register(script, _formHost);
         }
 
+        // Attach instruction-limit debugger when a limit is configured
+        if (MaxInstructions > 0)
+        {
+            _instructionDebugger = new InstructionLimitDebugger(MaxInstructions);
+            script.AttachDebugger(_instructionDebugger);
+            script.DebuggerEnabled = true;
+        }
+        else
+        {
+            _instructionDebugger = null;
+        }
+
         return script;
     }
+
+    private InstructionLimitDebugger? _instructionDebugger;
 
     private void RegisterPrint(Script script)
     {
@@ -216,6 +240,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             {
                 var func = _script.LoadString(code);
 
+                // Reset instruction counter before each execution
+                _instructionDebugger?.Reset();
+
                 // Use a cancellation flag checked by MoonSharp's DebuggerEnabled hook
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
                 timeoutCts.CancelAfter(_executionTimeout);
@@ -224,17 +251,11 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
                 var result = await Task.Run(() =>
                 {
                     _script.Options.DebugInput = _ => throw new ScriptRuntimeException("input() is disabled");
-
-                    // MoonSharp doesn't natively support cancellation, so we poll on
-                    // a per-line debug hook to abort runaway scripts.
-                    _script.Options.DebugPrint = _ => { }; // suppress debug prints
-
+                    _script.Options.DebugPrint = _ => { };
                     var callResult = _script.Call(func);
-
-                    // Check cancellation after execution completes
                     token.ThrowIfCancellationRequested();
                     return callResult;
-                }, token).ConfigureAwait(false);
+                }, CancellationToken.None).WaitAsync(token).ConfigureAwait(false);
 
                 var returnValue = result.Type != DataType.Void && result.Type != DataType.Nil
                     ? result.ToPrintString()

@@ -545,7 +545,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
 
         try
         {
-            var newClient = ChatClientFactory.Create(_appSettingsService.Settings, option.Provider, option.ModelId);
+            var newClient = await ChatClientFactory.CreateAsync(_appSettingsService.Settings, option.Provider, option.ModelId);
             _aiOperatorService.Reconfigure(newClient);
         }
         catch (Exception ex)

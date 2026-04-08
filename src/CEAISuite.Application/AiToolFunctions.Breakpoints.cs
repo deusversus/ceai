@@ -531,4 +531,24 @@ public sealed partial class AiToolFunctions
         }
     }
 
+    [Destructive]
+    [Description("Register a Lua function to be called when a breakpoint is hit. The Lua function receives the register snapshot as a table.")]
+    public string RegisterBreakpointLuaCallback(
+        [Description("Breakpoint ID")] string breakpointId,
+        [Description("Lua function name to call on hit")] string luaFunctionName)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        breakpointService.RegisterLuaCallback(breakpointId, luaFunctionName);
+        return $"Lua callback '{luaFunctionName}' registered for breakpoint {breakpointId}.";
+    }
+
+    [Description("Remove a previously registered Lua callback from a breakpoint.")]
+    public string UnregisterBreakpointLuaCallback(
+        [Description("Breakpoint ID")] string breakpointId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        breakpointService.UnregisterLuaCallback(breakpointId);
+        return $"Lua callback unregistered from breakpoint {breakpointId}.";
+    }
+
 }

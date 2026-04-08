@@ -211,6 +211,7 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<SignatureGeneratorService>(),
                 sp.GetRequiredService<IMemoryProtectionEngine>(),
                 sp.GetRequiredService<MemorySnapshotService>(),
+                sp.GetService<PointerScannerService>(),
                 sp.GetRequiredService<PointerRescanService>(),
                 sp.GetRequiredService<ICallStackEngine>(),
                 sp.GetRequiredService<ICodeCaveEngine>(),

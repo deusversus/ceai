@@ -373,7 +373,7 @@ ceai/
 │   ├── CEAISuite.AI.Contracts/       # AI provider interfaces
 │   ├── CEAISuite.Persistence.Sqlite/ # SQLite session storage
 │   ├── CEAISuite.Domain/             # Shared models, crypto
-│   └── CEAISuite.Tests/              # xUnit tests (65 tests)
+│   └── CEAISuite.Tests/              # xUnit tests (580+ tests)
 ├── skills/                           # 9 AI agent skill modules
 │   ├── memory-scanning/
 │   ├── code-analysis/
@@ -439,7 +439,7 @@ Built-in Dark and Light themes with System auto-detection. Toggle via **Settings
 ## Testing
 
 ```bash
-# Run all 65 tests
+# Run all 580+ tests
 dotnet test
 
 # Run specific test category
@@ -451,9 +451,17 @@ dotnet test --filter "FullyQualifiedName~AddressTableService"
 
 | Area | Tests | What's Validated |
 |------|-------|-----------------|
+| **Application & AI Tools** | ~76 | Session management, AI tool functions, label generation, scan workflows |
+| **Agent Loop** | ~41 | Streaming, tool execution, context management, error handling |
+| **Lua Scripting** | ~87 | Lua engine, CE API bindings, auto-assembler integration, console VM, gap closure |
 | **Breakpoint Engine** | ~30 | Mode selection, intrusiveness ordering, code cave JMP generation, risk assessment |
-| **Address Table** | ~25 | Entry CRUD, pointer chain resolution, module-relative addressing, value freezing |
-| **Application** | ~10 | Session management, label generation, scan workflows |
+| **Scanner** | ~23 | Scan refinement, undo/redo, grouped scans, benchmarks |
+| **Address Table** | ~26 | Entry CRUD, pointer chain resolution, module-relative addressing, improvements |
+| **Pointer Scanner** | ~24 | Pointer path discovery, map I/O, comparison, rescan, resume |
+| **UI & ViewModels** | ~120 | Lifecycle, data binding, navigation, all major view models |
+| **Skills** | ~49 | Frontmatter parsing, loading, permissions, catalog budgets, references, sanitization |
+| **Pipeline & Integration** | ~16 | End-to-end scan, session, export, snapshot pipelines |
+| **Other** | ~89 | Crash recovery, updates, symbol engine, cheat tables, API keys, auto-assembler |
 
 Tests use a `StubEngineFacade` that provides an in-memory implementation of `IEngineFacade` — no actual process attachment needed.
 

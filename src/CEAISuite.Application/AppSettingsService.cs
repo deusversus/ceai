@@ -12,6 +12,13 @@ namespace CEAISuite.Application;
 /// </summary>
 public sealed class AppSettings
 {
+    // TODO: Migrate runtime plaintext key properties (OpenAiApiKey, AnthropicApiKey,
+    // GeminiApiKey, GeminiOAuthToken, GeminiRefreshToken, CompatibleApiKey, GitHubToken)
+    // from string? to SensitiveString (CEAISuite.Domain.SensitiveString) so that key
+    // material is pinned in memory and zeroed on disposal. This requires updating all
+    // consumers (ChatClientFactory, GeminiOAuthService, CopilotTokenService, ViewModels)
+    // to call Dispose() on the old value before assigning a new one.
+
     /// <summary>Runtime-only plaintext key (not serialized).</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string? OpenAiApiKey { get; set; }
@@ -43,6 +50,19 @@ public sealed class AppSettings
 
     /// <summary>Gemini authentication method: "api_key" or "oauth".</summary>
     public string GeminiAuthMethod { get; set; } = "api_key";
+
+    /// <summary>UTC timestamp when the current Gemini refresh token was first obtained.</summary>
+    public DateTimeOffset? GeminiRefreshTokenIssuedUtc { get; set; }
+
+    /// <summary>
+    /// Number of days since the Gemini refresh token was issued.
+    /// Returns -1 if <see cref="GeminiRefreshTokenIssuedUtc"/> has not been set.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public int GeminiRefreshTokenAgeDays =>
+        GeminiRefreshTokenIssuedUtc.HasValue
+            ? (int)(DateTimeOffset.UtcNow - GeminiRefreshTokenIssuedUtc.Value).TotalDays
+            : -1;
 
     /// <summary>Google OAuth client ID for Gemini (not serialized — encrypted on disk).</summary>
     [System.Text.Json.Serialization.JsonIgnore]

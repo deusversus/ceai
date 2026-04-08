@@ -83,6 +83,9 @@ internal static class DangerousTools
         "AllocateMemory",
         "FreeMemory",
         "RollbackTransaction",
+        "RegisterBreakpointLuaCallback",
+        "ExecuteAutoAssemblerScript",
+        "DisableAutoAssemblerScript",
     };
 }
 

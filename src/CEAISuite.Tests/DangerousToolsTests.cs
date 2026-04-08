@@ -20,6 +20,8 @@ public class DangerousToolsTests
             "ToggleScript", "ForceDetachAndCleanup",
             "EmergencyRestorePageProtection", "ChangeMemoryProtection",
             "AllocateMemory", "FreeMemory", "RollbackTransaction",
+            "RegisterBreakpointLuaCallback",
+            "ExecuteAutoAssemblerScript", "DisableAutoAssemblerScript",
         };
 
         foreach (var tool in expected)

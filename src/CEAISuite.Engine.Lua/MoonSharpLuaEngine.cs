@@ -186,6 +186,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         {
             _instructionDebugger = new InstructionLimitDebugger(MaxInstructions);
             script.AttachDebugger(_instructionDebugger);
+            script.DebuggerEnabled = true;
         }
         else
         {

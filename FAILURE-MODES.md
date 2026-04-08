@@ -276,7 +276,8 @@ Add a test with a crafted adversarial `.CT` file (XXE, entity expansion, >1000 e
 | 7 | Anti-Cheat | LOW | Acknowledged | User responsibility |
 | 8 | CT Serialization | LOW | Good | Adversarial XML tests |
 | 9 | Lua Scripting Engine | MEDIUM | Good (implemented surface) | Sandbox hardening, API docs |
-| 10 | Tool-to-UI Parity | LOW-MED | By design | UI for critical-path functions |
+| 10 | Tool-to-UI Parity | LOW | 75% parity (not 21%) | AI-only tools are by design |
+| 11 | Unplumbed Capabilities | MEDIUM | Multiple gaps | Add symbol loading + reverse resolution tools |
 
 ---
 
@@ -307,17 +308,122 @@ Add a test with a crafted adversarial `.CT` file (XXE, entity expansion, >1000 e
 
 ## 10. Tool-to-UI Parity
 
-**Risk Level:** LOW-MEDIUM
+**Risk Level:** LOW *(corrected from initial assessment)*
 
-**Failure Mode:** Only ~21% of the ~90 AI tool functions have manual UI equivalents. Users relying on the UI without AI cannot access most capabilities.
+**Previous Claim:** Only ~21% of the ~96 AI tool functions have manual UI equivalents.
+
+**Actual Finding:** **~75% parity** — 72 of 96 AI tools have direct manual UI equivalents.
+
+### Detailed Mapping
+
+| Category | AI Tools | With UI | AI-Only | Notes |
+|----------|----------|---------|---------|-------|
+| **Process** | 5 | 5 | 0 | Process ComboBox, Attach/Detach, Modules/Threads |
+| **Memory Ops** | 10 | 10 | 0 | Memory Browser, Inspection panel, Memory Map |
+| **Scanning** | 5 | 4 | 1 | `GroupedScan` is AI-only |
+| **Address Table** | 12 | 11 | 1 | `SetEntryNotes` has no UI |
+| **Breakpoints** | 10 | 6 | 4 | `ProbeTargetRisk`, `TraceFromAddress`, `SampledWriteTrace`, `GetBreakpointHealth` AI-only |
+| **Code Caves** | 5 | 3 | 2 | `GetCodeCaveHookHits`, `CheckHookConflicts` AI-only |
+| **Disassembly/Analysis** | 9 | 4 | 5 | `FindFunctionBoundaries`, `FindByMemoryOperand`, `GetCallerGraph`, `TestSignatureUniqueness`, `DryRunHookInstall` AI-only |
+| **Scripts** | 7 | 6 | 1 | `ValidateScriptDeep` (live process validation) AI-only |
+| **Lua** | 3 | 2 | 1 | `ValidateLuaScript` AI-only |
+| **Pointers** | 7 | 5 | 2 | `RescanPointerPath`, `ResolveSymbol` AI-only |
+| **Snapshots** | 4 | 4 | 0 | Full parity |
+| **Sessions** | 5 | 5 | 0 | Full parity |
+| **Undo/Redo** | 4 | 4 | 0 | Full parity |
+| **Utility** | 7 | 4 | 3 | `SummarizeInvestigation`, `IdentifyArtifact`, `SetHotkey` AI-only |
+| **Symbols** | 3 | 0 | 3 | All AI-only (`ListRegisteredSymbols`, `RegisteredSymbol`, `ResolveRegisteredSymbol`) |
+| **TOTAL** | **96** | **~72** | **~24** | **75% parity** |
+
+### AI-Only Tools (by design)
+
+The 24 AI-only tools fall into categories that are inherently AI-centric:
+
+- **Safety pre-checks** (4): `ProbeTargetRisk`, `CheckHookConflicts`, `GetBreakpointHealth`, `DryRunHookInstall`
+- **Automated analysis** (5): `FindFunctionBoundaries`, `FindByMemoryOperand`, `GetCallerGraph`, `TraceFromAddress`, `SampledWriteTrace`
+- **Code generation** (3): `GenerateAutoAssemblerScript`, `GenerateLuaScript`, `SummarizeInvestigation`
+- **Validation helpers** (3): `ValidateScriptDeep`, `ValidateLuaScript`, `TestSignatureUniqueness`
+- **Symbol management** (3): `ListRegisteredSymbols`, `RegisteredSymbol`, `ResolveRegisteredSymbol`
+- **Orchestration** (6): `GroupedScan`, `SetEntryNotes`, `SetHotkey`, `IdentifyArtifact`, `GetCodeCaveHookHits`, `RescanPointerPath`
 
 ### Assessment
 
-This is a design decision, not a bug — the philosophy is "AI assists, not replaces." However, if the AI provider is unavailable, users lose access to ~70 functions including pointer scanning, structure dissection, AOB signature generation, and session management.
+The 75% parity rate is reasonable. The AI-only tools are predominantly orchestration helpers, safety checks, and code generation — capabilities that are inherently AI tasks. Users without AI access still have full manual control over all critical operations (scanning, breakpoints, scripting, sessions, memory editing).
 
-### Recommendation
+### UI-Only Capabilities (no AI tool)
 
-Prioritize UI for critical-path functions: pointer scanner, memory scanner refinement, and session save/load.
+Some UI features also have no AI counterpart:
+- Debugger stepping (Step In/Over/Out/Continue)
+- Memory Browser bookmarks and structure spider
+- Copy/Cut/Paste operations
+- Export C/CE struct from Structure Dissector
+- Script Editor templates (AOB Inject, Code Cave, NOP, JMP)
+- Theme switching, MCP server management, update checking
+
+---
+
+## 11. Unplumbed Engine Capabilities (New Features Without AI Tools)
+
+**Risk Level:** MEDIUM
+
+Multiple development phases have added engine capabilities that lack corresponding AI tool functions. The AI operator cannot use these features even though the engine supports them.
+
+### Confirmed Gaps
+
+| Engine Capability | Interface/Service | Missing AI Tool | Priority |
+|-------------------|-------------------|-----------------|----------|
+| **Symbol loading from PDB/exports** | `ISymbolEngine.LoadSymbolsForModuleAsync()` | `LoadSymbolsForModule` | HIGH — enables AI to resolve function names |
+| **Reverse address-to-symbol resolution** | `ISymbolEngine.ResolveAddress()` | `ResolveAddressToSymbol` | HIGH — AI can't identify what function an address belongs to |
+| **Breakpoint Lua callbacks** | `BreakpointService.RegisterLuaCallback()` | `RegisterBreakpointLuaCallback` | MEDIUM — AI can't wire Lua handlers to BP hits |
+| **Breakpoint Lua callback removal** | `BreakpointService.UnregisterLuaCallback()` | `UnregisterBreakpointLuaCallback` | MEDIUM |
+| **Direct AA script execution** | `IAutoAssemblerEngine.EnableAsync()` / `DisableAsync()` | `ExecuteAutoAssemblerScript` | MEDIUM — currently AI must CreateScriptEntry + ToggleScript (two-step workaround exists) |
+| **AA script parsing (standalone)** | `IAutoAssemblerEngine.Parse()` | `ParseAutoAssemblerScript` | LOW — `ValidateScript` exists but only for address table entries |
+| **Resume interrupted pointer scan** | `PointerScannerService.ResumeScanAsync()` | `ResumePointerScan` | LOW |
+| **Delete session** | `SessionService.DeleteSessionAsync()` | `DeleteSession` | LOW |
+| **Rescan all pointer paths** | `PointerRescanService.RescanAllAsync()` | `RescanAllPointerPaths` | LOW |
+
+### Non-Gaps (validated as already covered)
+
+The exploration agent flagged these as missing, but they are actually exposed:
+
+| Capability | AI Tool That Covers It |
+|------------|------------------------|
+| Structure dissection | `DissectStructure` in `AiToolFunctions.Snapshots.cs:164` |
+| Call stack walking (single thread) | `GetCallStack` in `AiToolFunctions.Snapshots.cs:167` |
+| Call stack walking (all threads) | `GetAllThreadStacks` in `AiToolFunctions.Snapshots.cs:202` |
+| Snapshot deletion | `DeleteSnapshot` in `AiToolFunctions.Snapshots.cs:97` |
+| Patch history | `PatchHistory` in `AiToolFunctions.cs:794` |
+| Pointer map loading | `LoadPointerMap` AI tool exists |
+| Pointer map comparison | `ComparePointerMaps` AI tool exists |
+| AA symbol registration | `RegisteredSymbol` / `ResolveRegisteredSymbol` AI tools exist |
+| AA symbol listing | `ListRegisteredSymbols` AI tool exists |
+
+### Lua CE API — Not a Real Gap
+
+The exploration flagged individual Lua CE API functions (`readInteger`, `writeFloat`, `getAddress`, etc.) as missing AI tools. These are **Lua-internal functions** meant for use within Lua scripts — the AI already has native equivalents:
+
+| Lua CE API | AI Native Equivalent |
+|------------|---------------------|
+| `readInteger(addr)` | `ReadMemory` tool |
+| `writeFloat(addr, val)` | `WriteMemory` tool |
+| `getAddress(expr)` | `ResolveSymbol` tool |
+| `autoAssemble(script)` | `CreateScriptEntry` + `ToggleScript` |
+| `getModuleBaseAddress(name)` | `InspectProcess` (returns module list with bases) |
+
+The AI doesn't need Lua wrappers — it calls the engine directly.
+
+### Recommendations
+
+**Immediate (HIGH priority):**
+1. Add `LoadSymbolsForModule` tool — enables the AI to load PDB/export symbols for a module, unlocking function name resolution throughout the analysis workflow
+2. Add `ResolveAddressToSymbol` tool — given an address, return `module!Function+0xDisplacement`; this is critical for the AI to interpret disassembly and breakpoint hits meaningfully
+
+**Short-term (MEDIUM priority):**
+3. Add `RegisterBreakpointLuaCallback` / `UnregisterBreakpointLuaCallback` — lets the AI wire Lua scripts to breakpoint events for complex conditional logic
+4. Consider `ExecuteAutoAssemblerScript` — direct AA execution without creating an address table entry (the 2-step workaround via CreateScriptEntry + ToggleScript works but is clunky)
+
+**Low priority:**
+5. `ResumePointerScan`, `DeleteSession`, `RescanAllPointerPaths` — convenience tools, workarounds exist
 
 ---
 
@@ -333,3 +439,4 @@ The initial scan contained several inaccuracies that this deep inspection correc
 | "Scripting engine validation: no visible tests" | **17 tests** in `AutoAssemblerImprovementsTests.cs` + `ValidateScript`/`ValidateScriptDeep` functions with live assert verification |
 | "No tests for malformed cheat table loads" | `CheatTableRoundTripTests.cs` has 10 tests including empty CT handling; `CrashRecoveryTests.cs` tests corrupt file rejection |
 | "ProcessWatchdog auto-rollback mentioned but untested" | Fully implemented with multi-signal health checks, transactional installs, unsafe address registry, and freeze telemetry |
+| "Only ~21% tool-to-UI parity" | **~75% parity** — 72 of 96 AI tools have direct UI equivalents; 24 AI-only tools are by design (safety checks, code generation, orchestration) |

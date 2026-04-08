@@ -55,7 +55,7 @@ internal sealed class InstructionLimitDebugger : IDebugger
 
     public void SignalExecutionEnded() { }
 
-    public void Update(WatchType watchType, IEnumerable<WatchItem> items, int stackFrameIndex) { }
+    public void Update(WatchType watchType, IEnumerable<WatchItem> items) { }
 
     public List<DynamicExpression> GetWatchItems() => [];
 

@@ -9,7 +9,9 @@ namespace CEAISuite.Tests;
 /// </summary>
 public sealed class LuaSandboxEscapeTests : IDisposable
 {
-    private readonly MoonSharpLuaEngine _engine = new(executionTimeout: TimeSpan.FromSeconds(5));
+    private readonly MoonSharpLuaEngine _engine = new(
+        executionTimeout: TimeSpan.FromSeconds(5),
+        maxInstructions: 5_000_000);
 
     public void Dispose() => _engine.Dispose();
 
@@ -249,23 +251,17 @@ public sealed class LuaSandboxEscapeTests : IDisposable
     [Fact]
     public async Task Execute_InfiniteLoop_TimesOut()
     {
-        // Use a shorter timeout engine for this test
-        using var shortEngine = new MoonSharpLuaEngine(executionTimeout: TimeSpan.FromSeconds(2));
+        // Use an engine with instruction limit to guarantee termination.
+        // CancellationToken-based timeout alone cannot interrupt tight MoonSharp loops
+        // because the VM never yields to check the token.
+        using var limitedEngine = new MoonSharpLuaEngine(
+            executionTimeout: TimeSpan.FromSeconds(5),
+            maxInstructions: 50_000);
 
-        var result = await shortEngine.ExecuteAsync("while true do end");
+        var result = await limitedEngine.ExecuteAsync("while true do end");
 
-        // MoonSharp may not have native instruction-count-based timeout,
-        // but the CancellationToken-based timeout should catch long-running scripts.
-        // The task timeout (via Task.Run + CancelAfter) should cause either:
-        // - Success=false with timeout error, OR
-        // - The task eventually completes (MoonSharp doesn't always interrupt tight loops)
-        // In either case, we verify it doesn't hang indefinitely by the test itself completing.
-        if (!result.Success)
-        {
-            Assert.NotNull(result.Error);
-        }
-        // If it somehow completed successfully, the test still passes —
-        // the important thing is it didn't hang (the test framework has its own timeout).
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
     }
 
     [Fact]

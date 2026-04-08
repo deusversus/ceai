@@ -455,7 +455,7 @@ public class UnsafeAddressRegistryThreadSafetyTests : IDisposable
                 for (int i = 0; i < 500; i++)
                 {
                     _service.ClearUnsafe(addr, "PageGuard");
-                    _ = _service.IsUnsafe(addr, "PageGuard");
+                    bool check = _service.IsUnsafe(addr, "PageGuard");
                 }
             }
             catch (Exception ex) { exceptions.Add(ex); }

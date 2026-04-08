@@ -80,7 +80,7 @@ public class EndToEndAgentLoopTests
             ],
             finalResponse: "Memory written successfully.");
 
-        var options = CreateTestOptions([tool], dangerousTools: ["write_memory"]);
+        var options = CreateTestOptions([tool], dangerousTools: new HashSet<string> { "write_memory" });
         var loop = new AgentLoopRunner(mockClient, options);
         var history = new ChatHistoryManager();
 
@@ -127,7 +127,7 @@ public class EndToEndAgentLoopTests
             ],
             finalResponse: "Tool was denied.");
 
-        var options = CreateTestOptions([tool], dangerousTools: ["dangerous_tool"]);
+        var options = CreateTestOptions([tool], dangerousTools: new HashSet<string> { "dangerous_tool" });
         var loop = new AgentLoopRunner(mockClient, options);
         var history = new ChatHistoryManager();
 

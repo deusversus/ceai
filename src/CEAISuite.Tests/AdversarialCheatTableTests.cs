@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 using CEAISuite.Application;
 
@@ -130,14 +131,14 @@ public class AdversarialCheatTableTests
         for (int i = 0; i < depth; i++)
         {
             sb.AppendLine("<CheatEntries><CheatEntry>");
-            sb.AppendLine($"<ID>{i}</ID>");
-            sb.AppendLine($"<Description>\"Level {i}\"</Description>");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"<ID>{i}</ID>");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"<Description>\"Level {i}\"</Description>");
             sb.AppendLine("<GroupHeader>1</GroupHeader>");
         }
 
         // Innermost leaf entry
         sb.AppendLine("<CheatEntries><CheatEntry>");
-        sb.AppendLine($"<ID>{depth}</ID>");
+        sb.AppendLine(CultureInfo.InvariantCulture, $"<ID>{depth}</ID>");
         sb.AppendLine("<Description>\"Leaf\"</Description>");
         sb.AppendLine("<VariableType>4 Bytes</VariableType>");
         sb.AppendLine("<Address>100</Address>");
@@ -186,7 +187,7 @@ public class AdversarialCheatTableTests
 
         for (int i = 0; i < entryCount; i++)
         {
-            sb.AppendLine($"""
+            sb.AppendLine(CultureInfo.InvariantCulture, $"""
                 <CheatEntry>
                   <ID>{i}</ID>
                   <Description>"Entry {i}"</Description>
@@ -226,7 +227,7 @@ public class AdversarialCheatTableTests
 
         for (int i = 0; i < entryCount; i++)
         {
-            sb.AppendLine($"""
+            sb.AppendLine(CultureInfo.InvariantCulture, $"""
                 <CheatEntry>
                   <ID>{i}</ID>
                   <Description>"Entry {i}"</Description>

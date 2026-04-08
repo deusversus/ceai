@@ -1,5 +1,8 @@
 # CE AI Suite
 
+[![CI](https://github.com/deusversus/ceai/actions/workflows/ci.yml/badge.svg)](https://github.com/deusversus/ceai/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/deusversus/ceai/graph/badge.svg)](https://codecov.io/gh/deusversus/ceai)
+
 **A Cheat Engine-class memory analysis desktop application with an integrated AI operator.**
 
 CE AI Suite combines professional-grade reverse engineering tools — memory scanning, breakpoints, disassembly, pointer resolution, Auto Assembler scripting — with an AI agent that can autonomously drive these tools to accomplish user goals. Built on .NET 10, WPF, and Microsoft Agent Framework (MAF).

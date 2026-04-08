@@ -28,8 +28,11 @@ jobs:
       - name: Build (Release)
         run: dotnet build CEAISuite.slnx -c Release --no-restore
 
-      - name: Test
+      - name: Test (Debug)
         run: dotnet test src/CEAISuite.Tests/CEAISuite.Tests.csproj -c Debug --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+      - name: Test (Release)
+        run: dotnet test src/CEAISuite.Tests/CEAISuite.Tests.csproj -c Release --no-build --verbosity normal
 
       - name: Install ReportGenerator
         run: dotnet tool install -g dotnet-reportgenerator-globaltool
@@ -50,6 +53,7 @@ jobs:
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: coverage/**/coverage.cobertura.xml
           flags: unittests
           fail_ci_if_error: false

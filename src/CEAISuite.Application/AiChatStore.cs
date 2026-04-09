@@ -36,6 +36,7 @@ public sealed class AiChatStore
 
     public static void Save(AiChatSession session)
     {
+        Directory.CreateDirectory(ChatsDir);
         session.UpdatedAt = DateTimeOffset.UtcNow;
         var path = Path.Combine(ChatsDir, $"{session.Id}.json");
         var json = JsonSerializer.Serialize(session, JsonOpts);

@@ -35,22 +35,27 @@ jobs:
         run: dotnet test src/CEAISuite.Tests/CEAISuite.Tests.csproj -c Release --no-build --verbosity normal
 
       - name: Install ReportGenerator
+        if: always()
         run: dotnet tool install -g dotnet-reportgenerator-globaltool
 
       - name: Generate Coverage Report
+        if: always()
         run: reportgenerator -reports:coverage/**/coverage.cobertura.xml -targetdir:coverage/report -reporttypes:TextSummary
 
       - name: Coverage Summary
+        if: always()
         run: cat coverage/report/Summary.txt
         shell: bash
 
       - name: Upload Coverage
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           name: coverage-report
           path: coverage/report/
 
       - name: Upload to Codecov
+        if: always()
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}

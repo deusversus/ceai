@@ -77,7 +77,10 @@ public sealed class StubEngineFacade : IEngineFacade
             MemoryDataType.Byte => raw[0].ToString(CultureInfo.InvariantCulture),
             MemoryDataType.Int16 => BitConverter.ToInt16(raw).ToString(CultureInfo.InvariantCulture),
             MemoryDataType.Int32 => BitConverter.ToInt32(raw).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Int64 => BitConverter.ToInt64(raw).ToString(CultureInfo.InvariantCulture),
             MemoryDataType.Float => BitConverter.ToSingle(raw).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Double => BitConverter.ToDouble(raw).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.Pointer => $"0x{BitConverter.ToUInt64(raw):X}",
             _ => "0"
         };
         return Task.FromResult(new TypedMemoryValue(processId, address, dataType, display, raw));
@@ -87,8 +90,12 @@ public sealed class StubEngineFacade : IEngineFacade
     {
         byte[] bytes = dataType switch
         {
+            MemoryDataType.Byte => new[] { byte.Parse(value, CultureInfo.InvariantCulture) },
+            MemoryDataType.Int16 => BitConverter.GetBytes(short.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Int32 => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture)),
+            MemoryDataType.Int64 => BitConverter.GetBytes(long.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Float => BitConverter.GetBytes(float.Parse(value, CultureInfo.InvariantCulture)),
+            MemoryDataType.Double => BitConverter.GetBytes(double.Parse(value, CultureInfo.InvariantCulture)),
             _ => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture))
         };
         _memory[address] = bytes;

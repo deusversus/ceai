@@ -41,6 +41,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CEAISuite.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Resource Include="icon.ico" />
   </ItemGroup>
 

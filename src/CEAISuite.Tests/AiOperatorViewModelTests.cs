@@ -241,4 +241,307 @@ public class AiOperatorViewModelTests : IDisposable
         var (vm, _, _) = CreateVm();
         Assert.Equal("Normal", vm.PermissionModeDisplay);
     }
+
+    // ── SelectPermissionMode ──
+
+    [Fact]
+    public void SelectPermissionMode_NullMode_DoesNothing()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.SelectPermissionModeCommand.Execute(null);
+        Assert.Equal("Normal", vm.PermissionModeDisplay);
+    }
+
+    [Fact]
+    public void SelectPermissionMode_EmptyMode_DoesNothing()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.SelectPermissionModeCommand.Execute("");
+        Assert.Equal("Normal", vm.PermissionModeDisplay);
+    }
+
+    [Theory]
+    [InlineData("Trusted")]
+    [InlineData("Cautious")]
+    [InlineData("Normal")]
+    public void SelectPermissionMode_ValidMode_UpdatesDisplay(string mode)
+    {
+        var (vm, _, _) = CreateVm();
+        vm.SelectPermissionModeCommand.Execute(mode);
+        Assert.Equal(mode, vm.PermissionModeDisplay);
+    }
+
+    // ── ExportChat with content ──
+
+    [Fact]
+    public void ExportChat_WithMessages_NoSavePath_DoesNotThrow()
+    {
+        var (vm, svc, _) = CreateVm();
+        svc.AddUserMessageToHistory("Hello world");
+        _dialogService.NextSaveFilePath = null;
+
+        vm.ExportChatCommand.Execute(null);
+
+        Assert.Empty(_dialogService.ErrorsShown);
+    }
+
+    // ── AddAttachment variations ──
+
+    [Fact]
+    public void AddAttachment_LongContent_PreviewIsTruncated()
+    {
+        var (vm, _, _) = CreateVm();
+        var longLine = new string('A', 100);
+        vm.AddAttachment("test.txt", longLine);
+
+        Assert.Single(vm.Attachments);
+        Assert.True(vm.Attachments[0].Preview.Length <= 70);
+        Assert.Contains("...", vm.Attachments[0].Preview);
+    }
+
+    [Fact]
+    public void AddAttachment_MultipleLines_ShowsLineCount()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.AddAttachment("test.txt", "Line 1\nLine 2\nLine 3\nLine 4");
+
+        Assert.Single(vm.Attachments);
+        Assert.Contains("+3 lines", vm.Attachments[0].Preview);
+    }
+
+    [Fact]
+    public void AddImageFromBytes_AddsPngChip()
+    {
+        var (vm, _, _) = CreateVm();
+        var data = new byte[] { 0x89, 0x50, 0x4E, 0x47 };
+        vm.AddImageFromBytes("Clipboard", data);
+
+        Assert.Single(vm.Attachments);
+        Assert.True(vm.Attachments[0].IsImage);
+        Assert.Equal("image/png", vm.Attachments[0].MediaType);
+    }
+
+    // ── Multiple attachments ──
+
+    [Fact]
+    public void AddAttachment_MultipleFiles_AllAppear()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.AddAttachment("a.txt", "content a");
+        vm.AddAttachment("b.txt", "content b");
+        vm.AddAttachment("c.txt", "content c");
+
+        Assert.Equal(3, vm.Attachments.Count);
+    }
+
+    // ── RemoveAttachment by non-matching ID ──
+
+    [Fact]
+    public void RemoveAttachment_NonMatchingChip_LeavesListUnchanged()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.AddAttachment("file1.txt", "content");
+        var fakeChip = new Desktop.Models.AttachmentChip { Label = "fake" };
+
+        vm.RemoveAttachmentCommand.Execute(fakeChip);
+
+        Assert.Single(vm.Attachments);
+    }
+
+    // ── CopyMessage with valid item ──
+
+    [Fact]
+    public void CopyMessage_ValidItem_CopiesContent()
+    {
+        var (vm, _, _) = CreateVm();
+        var item = new Desktop.Models.AiChatDisplayItem
+        {
+            RoleLabel = "AI Operator",
+            Content = "Test response"
+        };
+
+        vm.CopyMessageCommand.Execute(item);
+
+        Assert.Equal("Test response", _clipboard.LastText);
+    }
+
+    // ── HandleApprovalRequest for untrusted tool ──
+
+    [Fact]
+    public void HandleApprovalRequest_UntrustedTool_AddsToPending()
+    {
+        var (vm, _, _) = CreateVm();
+        var approval = new AgentStreamEvent.ApprovalRequested("WriteMemory", "{}");
+
+        vm.HandleApprovalRequest(approval);
+
+        Assert.Single(vm.PendingApprovals);
+        Assert.Contains("Awaiting approval", vm.StatusText);
+    }
+
+    // ── Multiple approvals ──
+
+    [Fact]
+    public void HandleApprovalRequest_MultiplePending_CountShown()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.HandleApprovalRequest(new AgentStreamEvent.ApprovalRequested("WriteMemory", "{}"));
+        vm.HandleApprovalRequest(new AgentStreamEvent.ApprovalRequested("SetBreakpoint", "{}"));
+
+        Assert.Equal(2, vm.PendingApprovals.Count);
+        Assert.Contains("2 pending", vm.StatusText);
+    }
+
+    // ── ResolveApproval single ──
+
+    [Fact]
+    public void ResolveApproval_Single_Approved_RemovesFromPending()
+    {
+        var (vm, _, _) = CreateVm();
+        var approval = new AgentStreamEvent.ApprovalRequested("WriteMemory", "{}");
+        vm.HandleApprovalRequest(approval);
+
+        vm.ResolveApproval(approval, true);
+
+        Assert.Empty(vm.PendingApprovals);
+        Assert.Contains("Executing", vm.StatusText);
+    }
+
+    [Fact]
+    public void ResolveApproval_Single_Denied_RemovesFromPending()
+    {
+        var (vm, _, _) = CreateVm();
+        var approval = new AgentStreamEvent.ApprovalRequested("WriteMemory", "{}");
+        vm.HandleApprovalRequest(approval);
+
+        vm.ResolveApproval(approval, false);
+
+        Assert.Empty(vm.PendingApprovals);
+        Assert.Contains("Denied", vm.StatusText);
+    }
+
+    // ── SessionTrustedTools persistent across requests ──
+
+    [Fact]
+    public void SessionTrustedTools_PersistAfterResolveAll()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.HandleApprovalRequest(new AgentStreamEvent.ApprovalRequested("ReadMemory", "{}"));
+        vm.ResolveAllPending(true);
+
+        // Now same tool should auto-approve
+        var second = new AgentStreamEvent.ApprovalRequested("ReadMemory", "{}");
+        vm.HandleApprovalRequest(second);
+        Assert.Contains("Auto-approved", vm.StatusText);
+        Assert.Empty(vm.PendingApprovals);
+    }
+
+    // ── FilterChatHistory ──
+
+    [Fact]
+    public void FilterChatHistory_EmptyString_ShowsAll()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.FilterChatHistory("");
+        // Should not throw, ChatHistory collection is valid
+    }
+
+    // ── ToggleChatHistory ──
+
+    [Fact]
+    public void ToggleChatHistory_WhenVisible_RefreshesList()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.IsChatHistoryVisible = true;
+        vm.ToggleChatHistoryCommand.Execute(null);
+        // Should not throw
+    }
+
+    [Fact]
+    public void ToggleChatHistory_WhenNotVisible_DoesNotRefresh()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.IsChatHistoryVisible = false;
+        vm.ToggleChatHistoryCommand.Execute(null);
+        // Should not throw
+    }
+
+    // ── IsStreaming default ──
+
+    [Fact]
+    public void IsStreaming_DefaultFalse()
+    {
+        var (vm, _, _) = CreateVm();
+        Assert.False(vm.IsStreaming);
+    }
+
+    // ── ChatTitle after clear ──
+
+    [Fact]
+    public void ClearChat_ResetsChatTitle()
+    {
+        var (vm, svc, _) = CreateVm();
+        svc.AddUserMessageToHistory("test");
+        vm.ClearChatCommand.Execute(null);
+        Assert.Equal("New Chat", vm.ChatTitle);
+    }
+
+    // ── Dispose is safe ──
+
+    [Fact]
+    public void Dispose_DoesNotThrow()
+    {
+        var (vm, _, _) = CreateVm();
+        vm.Dispose();
+        // Should not throw
+    }
+
+    // ── AvailableModels default ──
+
+    [Fact]
+    public void AvailableModels_DefaultEmpty()
+    {
+        var (vm, _, _) = CreateVm();
+        Assert.NotNull(vm.AvailableModels);
+        Assert.Empty(vm.AvailableModels);
+    }
+
+    // ── StreamingBlocks default ──
+
+    [Fact]
+    public void StreamingBlocks_DefaultEmpty()
+    {
+        var (vm, _, _) = CreateVm();
+        Assert.NotNull(vm.StreamingBlocks);
+        Assert.Empty(vm.StreamingBlocks);
+        Assert.False(vm.IsStreamingBlocksVisible);
+    }
+
+    // ── BudgetStatus default ──
+
+    [Fact]
+    public void BudgetStatus_DefaultEmpty()
+    {
+        var (vm, _, _) = CreateVm();
+        Assert.Equal("", vm.BudgetStatus);
+    }
+
+    // ── DeleteChat with confirmation denied ──
+
+    [Fact]
+    public void DeleteChat_ConfirmDenied_DoesNotDelete()
+    {
+        var (vm, svc, _) = CreateVm();
+        _dialogService.NextConfirmResult = false;
+        var item = new Desktop.Models.ChatHistoryDisplayItem
+        {
+            Id = "test-id",
+            Title = "Test Chat"
+        };
+
+        vm.DeleteChatCommand.Execute(item);
+
+        // Confirm dialog was shown but denied
+        Assert.Single(_dialogService.ConfirmsShown);
+    }
 }

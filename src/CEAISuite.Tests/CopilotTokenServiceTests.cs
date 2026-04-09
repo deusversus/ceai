@@ -157,4 +157,160 @@ public class CopilotTokenServiceTests : IDisposable
         var model = new CopilotModelInfo(modelId, modelId, "", "chat");
         Assert.Equal(expectedRate, model.GetRate());
     }
+
+    // ── Comprehensive known rate coverage ──
+
+    [Theory]
+    [InlineData("gpt-4o", "Included")]
+    [InlineData("gpt-5-mini", "Included")]
+    [InlineData("raptor-mini", "Included")]
+    [InlineData("gpt-5.1-codex-mini", "0.33x")]
+    [InlineData("gpt-5.4-mini", "0.33x")]
+    [InlineData("gemini-3-flash", "0.33x")]
+    [InlineData("gemini-3-flash-preview", "0.33x")]
+    [InlineData("grok-code-fast-1", "0.25x")]
+    [InlineData("claude-sonnet-4", "1x")]
+    [InlineData("claude-sonnet-4-5", "1x")]
+    [InlineData("gpt-5.1", "1x")]
+    [InlineData("gpt-5.2", "1x")]
+    [InlineData("gpt-5.4", "1x")]
+    [InlineData("o4-mini", "1x")]
+    [InlineData("gemini-2.5-pro", "1x")]
+    [InlineData("gemini-3-pro", "1x")]
+    [InlineData("gemini-3.1-pro", "1x")]
+    [InlineData("claude-opus-4-6", "3x")]
+    public void CopilotModelInfo_GetRate_AllKnownRates(string modelId, string expectedRate)
+    {
+        var model = new CopilotModelInfo(modelId, modelId, "", "chat");
+        Assert.Equal(expectedRate, model.GetRate());
+    }
+
+    // ── GetRate case insensitivity ──
+
+    [Fact]
+    public void CopilotModelInfo_GetRate_CaseInsensitiveLookup()
+    {
+        var model = new CopilotModelInfo("GPT-4O", "GPT-4o", "OpenAI", "chat");
+        Assert.Equal("Included", model.GetRate());
+    }
+
+    // ── CopilotModelInfo record equality ──
+
+    [Fact]
+    public void CopilotModelInfo_RecordEquality()
+    {
+        var a = new CopilotModelInfo("gpt-4o", "GPT-4o", "OpenAI", "chat");
+        var b = new CopilotModelInfo("gpt-4o", "GPT-4o", "OpenAI", "chat");
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
+    public void CopilotModelInfo_RecordInequality_DifferentId()
+    {
+        var a = new CopilotModelInfo("gpt-4o", "GPT-4o", "OpenAI", "chat");
+        var b = new CopilotModelInfo("gpt-4o-mini", "GPT-4o mini", "OpenAI", "chat");
+        Assert.NotEqual(a, b);
+    }
+
+    // ── CopilotQuota record equality ──
+
+    [Fact]
+    public void CopilotQuota_RecordEquality()
+    {
+        var a = new CopilotQuota(100, 80, 80.0, false);
+        var b = new CopilotQuota(100, 80, 80.0, false);
+        Assert.Equal(a, b);
+    }
+
+    [Fact]
+    public void CopilotQuota_RecordInequality()
+    {
+        var a = new CopilotQuota(100, 80, 80.0, false);
+        var b = new CopilotQuota(100, 50, 50.0, false);
+        Assert.NotEqual(a, b);
+    }
+
+    // ── CopilotUsageInfo record equality ──
+
+    [Fact]
+    public void CopilotUsageInfo_RecordEquality()
+    {
+        var q = new CopilotQuota(100, 80, 80.0, false);
+        var a = new CopilotUsageInfo("pro", "2026-05-01", q, q, q);
+        var b = new CopilotUsageInfo("pro", "2026-05-01", q, q, q);
+        Assert.Equal(a, b);
+    }
+
+    // ── DeviceFlowStart record equality ──
+
+    [Fact]
+    public void DeviceFlowStart_RecordEquality()
+    {
+        var a = new CopilotTokenService.DeviceFlowStart("dc", "UC", "https://gh.com/device", 900, 5);
+        var b = new CopilotTokenService.DeviceFlowStart("dc", "UC", "https://gh.com/device", 900, 5);
+        Assert.Equal(a, b);
+    }
+
+    // ── Multiple invalidations don't throw ──
+
+    [Fact]
+    public void Invalidate_MultipleCalls_DoNotThrow()
+    {
+        _service.Invalidate();
+        _service.Invalidate();
+        _service.Invalidate();
+    }
+
+    [Fact]
+    public void InvalidateModels_MultipleCalls_DoNotThrow()
+    {
+        _service.InvalidateModels();
+        _service.InvalidateModels();
+    }
+
+    // ── Dispose is idempotent ──
+
+    [Fact]
+    public void Dispose_MultipleCalls_DoNotThrow()
+    {
+        var service = new CopilotTokenService();
+        service.Dispose();
+        // Second dispose should not throw
+        service.Dispose();
+    }
+
+    // ── RequiredHeaders has exactly 4 entries ──
+
+    [Fact]
+    public void RequiredHeaders_HasExactly4Entries()
+    {
+        Assert.Equal(4, CopilotTokenService.RequiredHeaders.Count);
+    }
+
+    // ── RequiredHeaders Editor-Version format ──
+
+    [Fact]
+    public void RequiredHeaders_EditorVersion_MatchesVSCodeFormat()
+    {
+        var version = CopilotTokenService.RequiredHeaders["Editor-Version"];
+        Assert.StartsWith("vscode/", version);
+    }
+
+    // ── BaseUrl uses https ──
+
+    [Fact]
+    public void BaseUrl_UsesHttps()
+    {
+        Assert.Equal("https", CopilotTokenService.BaseUrl.Scheme);
+    }
+
+    // ── GetRate precedence: explicit > known > default ──
+
+    [Fact]
+    public void CopilotModelInfo_GetRate_ExplicitOverridesKnown()
+    {
+        // gpt-4o is "Included" in known table, but explicit "5x" takes precedence
+        var model = new CopilotModelInfo("gpt-4o", "GPT-4o", "OpenAI", "chat", "5x");
+        Assert.Equal("5x", model.GetRate());
+    }
 }

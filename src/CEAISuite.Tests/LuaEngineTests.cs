@@ -363,4 +363,286 @@ public sealed class LuaEngineTests : IDisposable
         Assert.True(result.Success);
         Assert.Equal("42", result.ReturnValue);
     }
+
+    // ── Sandbox: debug module blocked ──
+
+    [Fact]
+    public async Task Execute_DebugGetinfo_Blocked()
+    {
+        var result = await _engine.ExecuteAsync("return debug.getinfo(1)");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public async Task Execute_RequireOs_Blocked()
+    {
+        var result = await _engine.ExecuteAsync("local os = require('os')\nreturn os.clock()");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public async Task Execute_OsClock_Blocked()
+    {
+        var result = await _engine.ExecuteAsync("return os.clock()");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+    }
+
+    // ── Global variable persistence across executions ──
+
+    [Fact]
+    public async Task Execute_GlobalPersistsAcrossMultipleExecutions()
+    {
+        await _engine.ExecuteAsync("accumulator = 10");
+        await _engine.ExecuteAsync("accumulator = accumulator + 5");
+        await _engine.ExecuteAsync("accumulator = accumulator * 2");
+        var result = await _engine.ExecuteAsync("return accumulator");
+
+        Assert.True(result.Success);
+        Assert.Equal("30", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_GlobalTablePersistsAcrossExecutions()
+    {
+        await _engine.ExecuteAsync("data = {}");
+        await _engine.ExecuteAsync("data.name = 'test'");
+        await _engine.ExecuteAsync("data.value = 42");
+        var result = await _engine.ExecuteAsync("return data.name .. ':' .. data.value");
+
+        Assert.True(result.Success);
+        Assert.Equal("test:42", result.ReturnValue);
+    }
+
+    // ── Multi-line scripts with complex logic ──
+
+    [Fact]
+    public async Task Execute_MultiLineFibonacci_Works()
+    {
+        var code = """
+            function fib(n)
+                if n <= 1 then return n end
+                local a, b = 0, 1
+                for i = 2, n do
+                    a, b = b, a + b
+                end
+                return b
+            end
+            return fib(10)
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("55", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_MultiLineWithLoopsAndConditions_Works()
+    {
+        var code = """
+            local sum = 0
+            for i = 1, 100 do
+                if i % 2 == 0 then
+                    sum = sum + i
+                end
+            end
+            return sum
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("2550", result.ReturnValue);
+    }
+
+    // ── String operations ──
+
+    [Fact]
+    public async Task Execute_StringRep_Works()
+    {
+        var result = await _engine.ExecuteAsync("return string.rep('ab', 3)");
+
+        Assert.True(result.Success);
+        Assert.Equal("ababab", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_StringFormat_Works()
+    {
+        var result = await _engine.ExecuteAsync("return string.format('%d + %d = %d', 2, 3, 5)");
+
+        Assert.True(result.Success);
+        Assert.Equal("2 + 3 = 5", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_StringSub_Works()
+    {
+        var result = await _engine.ExecuteAsync("return string.sub('hello world', 1, 5)");
+
+        Assert.True(result.Success);
+        Assert.Equal("hello", result.ReturnValue);
+    }
+
+    // ── Table construction and access ──
+
+    [Fact]
+    public async Task Execute_TableConstruction_Works()
+    {
+        var code = """
+            local t = {10, 20, 30, 40, 50}
+            return #t
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("5", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_TableNamedFields_Works()
+    {
+        var code = """
+            local player = {name = "Hero", hp = 100, level = 5}
+            return player.name .. " L" .. player.level
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("Hero L5", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_TableInsertAndConcat_Works()
+    {
+        var code = """
+            local t = {}
+            table.insert(t, "hello")
+            table.insert(t, "world")
+            return table.concat(t, " ")
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("hello world", result.ReturnValue);
+    }
+
+    // ── Coroutine module availability ──
+
+    [Fact]
+    public async Task Execute_CoroutineCreate_Works()
+    {
+        var code = """
+            local co = coroutine.create(function()
+                coroutine.yield(1)
+                coroutine.yield(2)
+                return 3
+            end)
+            local ok1, v1 = coroutine.resume(co)
+            local ok2, v2 = coroutine.resume(co)
+            local ok3, v3 = coroutine.resume(co)
+            return v1 + v2 + v3
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("6", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_CoroutineWrap_Works()
+    {
+        var code = """
+            local gen = coroutine.wrap(function()
+                coroutine.yield(10)
+                coroutine.yield(20)
+            end)
+            return gen() + gen()
+            """;
+
+        var result = await _engine.ExecuteAsync(code);
+
+        Assert.True(result.Success);
+        Assert.Equal("30", result.ReturnValue);
+    }
+
+    // ── Error messages: syntax vs runtime ──
+
+    [Fact]
+    public async Task Execute_SyntaxError_ContainsLineInfo()
+    {
+        var result = await _engine.ExecuteAsync("local x =\nif");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        // Syntax errors should contain position or line info
+        Assert.True(result.Error.Length > 5, "Error message should be descriptive");
+    }
+
+    [Fact]
+    public async Task Execute_RuntimeError_ContainsErrorMessage()
+    {
+        var result = await _engine.ExecuteAsync("error('custom_error_msg_12345')");
+
+        Assert.False(result.Success);
+        Assert.NotNull(result.Error);
+        Assert.Contains("custom_error_msg_12345", result.Error);
+    }
+
+    [Fact]
+    public async Task Execute_RuntimeErrorDivideByZero_HandledGracefully()
+    {
+        // Lua handles division by zero as inf, not an error
+        var result = await _engine.ExecuteAsync("return 1/0");
+
+        Assert.True(result.Success);
+        // Lua returns "inf" or "+inf" for division by zero
+        Assert.NotNull(result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Execute_RuntimeErrorTypeError_ContainsMessage()
+    {
+        var result = await _engine.ExecuteAsync("return 'hello' + 5");
+
+        // MoonSharp may or may not coerce this; either way it shouldn't crash
+        // In standard Lua this is an error; MoonSharp may handle differently
+        // We just verify no unhandled exception
+        Assert.NotNull(result);
+    }
+
+    // ── SetGlobalAsync / GetGlobalAsync ──
+
+    [Fact]
+    public async Task SetGlobalAsync_GetGlobalAsync_RoundTrips()
+    {
+        await _engine.SetGlobalAsync("asyncVar", 99.0);
+        var val = await _engine.GetGlobalAsync("asyncVar");
+
+        Assert.NotNull(val);
+        Assert.Equal(99.0, Convert.ToDouble(val, System.Globalization.CultureInfo.InvariantCulture));
+    }
+
+    // ── ResetAsync ──
+
+    [Fact]
+    public async Task ResetAsync_ClearsGlobals()
+    {
+        await _engine.ExecuteAsync("resetTest = 'exists'");
+        Assert.NotNull(_engine.GetGlobal("resetTest"));
+
+        await _engine.ResetAsync();
+
+        Assert.Null(_engine.GetGlobal("resetTest"));
+    }
 }

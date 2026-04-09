@@ -615,20 +615,410 @@ public class AgentLoopTests
         Assert.Contains(events, e => e is AgentStreamEvent.Error);
     }
 
+    // ── Multi-turn tool execution ────────────────────────────────────
+
+    [Fact]
+    public async Task AgentLoop_MultiTurnToolExecution_ToolCallThenResultThenToolCallThenText()
+    {
+        // Arrange: two tools, called sequentially across turns
+        int tool1Calls = 0, tool2Calls = 0;
+        var tool1 = AIFunctionFactory.Create(() => { tool1Calls++; return "result_a"; },
+            "tool_a", "First tool.");
+        var tool2 = AIFunctionFactory.Create(() => { tool2Calls++; return "result_b"; },
+            "tool_b", "Second tool.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "tool_a")],
+                [new FunctionCallContent("c2", "tool_b")],
+            ],
+            finalResponse: "Both tools executed.");
+
+        var options = CreateTestOptions([tool1, tool2]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        // Act
+        var events = await CollectEventsAsync(loop, history, "Run both");
+
+        // Assert
+        Assert.Equal(1, tool1Calls);
+        Assert.Equal(1, tool2Calls);
+        var completed = events.OfType<AgentStreamEvent.Completed>().Single();
+        Assert.Equal(2, completed.ToolCallCount);
+        Assert.Equal(3, mockClient.CallCount); // 2 tool turns + 1 final
+        var fullText = string.Join("", events.OfType<AgentStreamEvent.TextDelta>().Select(d => d.Text));
+        Assert.Contains("Both tools executed", fullText);
+    }
+
+    [Fact]
+    public async Task AgentLoop_ToolCallReturnsError_LoopContinuesToFinalResponse()
+    {
+        // Arrange: tool that throws
+        var tool = AIFunctionFactory.Create(new Func<string>(() =>
+        {
+            throw new InvalidOperationException("tool_error_42");
+        }), "erroring_tool", "A tool that errors.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "erroring_tool")],
+            ],
+            finalResponse: "I see the error occurred.");
+
+        var options = CreateTestOptions([tool]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        // Act
+        var events = await CollectEventsAsync(loop, history, "Run erroring tool");
+
+        // Assert: loop completed with final text from LLM
+        Assert.Contains(events, e => e is AgentStreamEvent.Completed);
+        var fullText = string.Join("", events.OfType<AgentStreamEvent.TextDelta>().Select(d => d.Text));
+        Assert.Contains("error occurred", fullText);
+        Assert.Equal(2, mockClient.CallCount);
+    }
+
+    [Fact]
+    public async Task AgentLoop_CancellationDuringLoop_EmitsErrorEvent()
+    {
+        // Arrange: slow client that delays long enough for cancellation
+        var mockClient = new SlowMockChatClient();
+        var options = CreateTestOptions();
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        using var cts = new CancellationTokenSource(50);
+        var events = new List<AgentStreamEvent>();
+        var reader = loop.RunStreamingAsync("Hello", history, cancellationToken: cts.Token);
+
+        await foreach (var evt in reader.ReadAllAsync(CancellationToken.None))
+            events.Add(evt);
+
+        // Assert: error event present indicating cancellation/stop
+        Assert.Contains(events, e => e is AgentStreamEvent.Error);
+    }
+
+    [Fact]
+    public async Task AgentLoop_MaxTurnsEnforcement_StopsAfterLimit()
+    {
+        // Arrange: infinite tool caller with max turns = 1
+        int toolCalls = 0;
+        var tool = AIFunctionFactory.Create(() => { toolCalls++; return "ok"; },
+            "loop_tool", "Loops forever.");
+
+        var mockClient = new InfiniteToolCallingMockChatClient("loop_tool");
+        var options = CreateTestOptions([tool], maxTurns: 1);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        // Act
+        var events = await CollectEventsAsync(loop, history, "Go");
+
+        // Assert
+        Assert.Contains(events, e => e is AgentStreamEvent.Completed);
+        var fullText = string.Join("", events.OfType<AgentStreamEvent.TextDelta>().Select(d => d.Text));
+        Assert.Contains("Max turns", fullText);
+        Assert.True(toolCalls <= 1, $"Expected at most 1 tool call, got {toolCalls}");
+    }
+
+    [Fact]
+    public async Task AgentLoop_EmptyToolResult_LoopContinuesToFinalResponse()
+    {
+        // Arrange: tool returns empty string
+        var tool = AIFunctionFactory.Create(() => "", "empty_tool", "Returns empty.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "empty_tool")],
+            ],
+            finalResponse: "Done with empty result.");
+
+        var options = CreateTestOptions([tool]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        // Act
+        var events = await CollectEventsAsync(loop, history, "Run empty tool");
+
+        // Assert
+        Assert.Contains(events, e => e is AgentStreamEvent.Completed);
+        var fullText = string.Join("", events.OfType<AgentStreamEvent.TextDelta>().Select(d => d.Text));
+        Assert.Contains("empty result", fullText);
+    }
+
+    [Fact]
+    public async Task AgentLoop_StreamingEvents_EmitsTextDeltaAndCompleted()
+    {
+        var mockClient = new MockChatClient("Streaming test response");
+        var options = CreateTestOptions();
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Test streaming");
+
+        // Verify TextDelta events
+        var textDeltas = events.OfType<AgentStreamEvent.TextDelta>().ToList();
+        Assert.NotEmpty(textDeltas);
+        var fullText = string.Join("", textDeltas.Select(d => d.Text));
+        Assert.Contains("Streaming test response", fullText);
+
+        // Verify Completed event
+        var completed = events.OfType<AgentStreamEvent.Completed>().ToList();
+        Assert.Single(completed);
+        Assert.Equal(0, completed[0].ToolCallCount);
+        Assert.True(completed[0].Elapsed >= TimeSpan.Zero);
+    }
+
+    [Fact]
+    public async Task AgentLoop_ToolCallStartedAndCompleted_EventsEmitted()
+    {
+        int called = 0;
+        var tool = AIFunctionFactory.Create(() => { called++; return "result"; },
+            "tracked_tool", "A tracked tool.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "tracked_tool")],
+            ],
+            finalResponse: "Done.");
+
+        var options = CreateTestOptions([tool]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Track tool events");
+
+        Assert.Contains(events, e => e is AgentStreamEvent.ToolCallStarted s && s.ToolName == "tracked_tool");
+        Assert.Contains(events, e => e is AgentStreamEvent.ToolCallCompleted c && c.ToolName == "tracked_tool");
+    }
+
+    [Fact]
+    public async Task AgentLoop_ToolUseSummary_EmittedAfterToolExecution()
+    {
+        var tool = AIFunctionFactory.Create(() => "ok", "summary_tool", "Tool for summary test.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "summary_tool")],
+            ],
+            finalResponse: "Summary done.");
+
+        var options = CreateTestOptions([tool]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Get summary");
+
+        var summaryEvents = events.OfType<AgentStreamEvent.ToolUseSummary>().ToList();
+        Assert.NotEmpty(summaryEvents);
+        Assert.Equal(1, summaryEvents[0].TotalCalls);
+        Assert.True(summaryEvents[0].CallsByTool.ContainsKey("summary_tool"));
+    }
+
+    [Fact]
+    public async Task AgentLoop_MultipleToolCallsInSingleTurn_AllExecuted()
+    {
+        int toolACalls = 0, toolBCalls = 0;
+        var toolA = AIFunctionFactory.Create(() => { toolACalls++; return "a"; },
+            "parallel_a", "Parallel tool A.");
+        var toolB = AIFunctionFactory.Create(() => { toolBCalls++; return "b"; },
+            "parallel_b", "Parallel tool B.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                // Single turn with two tool calls
+                [
+                    new FunctionCallContent("c1", "parallel_a"),
+                    new FunctionCallContent("c2", "parallel_b"),
+                ],
+            ],
+            finalResponse: "Both parallel tools done.");
+
+        var options = CreateTestOptions([toolA, toolB]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Run parallel");
+
+        Assert.Equal(1, toolACalls);
+        Assert.Equal(1, toolBCalls);
+        var completed = events.OfType<AgentStreamEvent.Completed>().Single();
+        Assert.Equal(2, completed.ToolCallCount);
+    }
+
+    [Fact]
+    public async Task AgentLoop_ToolReturnsNull_LoopHandlesGracefully()
+    {
+        var tool = AIFunctionFactory.Create(() => (string?)null, "null_tool", "Returns null.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "null_tool")],
+            ],
+            finalResponse: "Handled null.");
+
+        var options = CreateTestOptions([tool]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Run null tool");
+
+        Assert.Contains(events, e => e is AgentStreamEvent.Completed);
+    }
+
+    [Fact]
+    public async Task AgentLoop_RunStreamingContinueAsync_WorksWithExistingHistory()
+    {
+        var mockClient = new MockChatClient("Continued response.");
+        var options = CreateTestOptions();
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+        history.AddUserMessage("Already added message");
+
+        var events = new List<AgentStreamEvent>();
+        var ct = TestContext.Current.CancellationToken;
+        var reader = loop.RunStreamingContinueAsync(history, cancellationToken: ct);
+        await foreach (var evt in reader.ReadAllAsync(ct))
+            events.Add(evt);
+
+        Assert.Contains(events, e => e is AgentStreamEvent.TextDelta);
+        Assert.Contains(events, e => e is AgentStreamEvent.Completed);
+    }
+
+    [Fact]
+    public async Task AgentLoop_MaxTurnsZero_ImmediatelyStops()
+    {
+        // maxTurns=0 means the loop should stop before any turn
+        // Turn 1 > maxTurns(0), so it should stop immediately
+        var mockClient = new InfiniteToolCallingMockChatClient("tool");
+        var tool = AIFunctionFactory.Create(() => "ok", "tool", "Tool.");
+        var options = CreateTestOptions([tool], maxTurns: 0);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Go");
+
+        Assert.Contains(events, e => e is AgentStreamEvent.Completed);
+        var fullText = string.Join("", events.OfType<AgentStreamEvent.TextDelta>().Select(d => d.Text));
+        Assert.Contains("Max turns", fullText);
+    }
+
+    [Fact]
+    public async Task AgentLoop_HistoryAccumulation_MessagesAddedCorrectly()
+    {
+        var tool = AIFunctionFactory.Create(() => "tool_output", "hist_tool", "History tool.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "hist_tool")],
+            ],
+            finalResponse: "Final answer.");
+
+        var options = CreateTestOptions([tool]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        await CollectEventsAsync(loop, history, "Test history");
+
+        var msgs = history.GetMessages();
+        // Should have: user msg, assistant (tool call), tool result, (final text is not added to history by the loop directly)
+        Assert.True(msgs.Count >= 3, $"Expected at least 3 messages, got {msgs.Count}");
+        Assert.Equal(ChatRole.User, msgs[0].Role);
+    }
+
+    [Fact]
+    public async Task AgentLoop_ThreeTurnChain_ToolCallResultToolCallResultText()
+    {
+        int t1 = 0, t2 = 0, t3 = 0;
+        var tool1 = AIFunctionFactory.Create(() => { t1++; return "r1"; }, "chain_1", "Chain 1.");
+        var tool2 = AIFunctionFactory.Create(() => { t2++; return "r2"; }, "chain_2", "Chain 2.");
+        var tool3 = AIFunctionFactory.Create(() => { t3++; return "r3"; }, "chain_3", "Chain 3.");
+
+        var mockClient = new ToolCallingMockChatClient(
+            toolCallSequence:
+            [
+                [new FunctionCallContent("c1", "chain_1")],
+                [new FunctionCallContent("c2", "chain_2")],
+                [new FunctionCallContent("c3", "chain_3")],
+            ],
+            finalResponse: "Chain complete.");
+
+        var options = CreateTestOptions([tool1, tool2, tool3]);
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = await CollectEventsAsync(loop, history, "Chain");
+
+        Assert.Equal(1, t1);
+        Assert.Equal(1, t2);
+        Assert.Equal(1, t3);
+        var completed = events.OfType<AgentStreamEvent.Completed>().Single();
+        Assert.Equal(3, completed.ToolCallCount);
+        Assert.Equal(4, mockClient.CallCount);
+    }
+
+    [Fact]
+    public async Task AgentLoop_ContextProvider_InjectsContextIntoUserMessage()
+    {
+        var mockClient = new MockChatClient("Got context.");
+        var options = CreateTestOptions();
+        var loop = new AgentLoopRunner(mockClient, options);
+        var history = new ChatHistoryManager();
+
+        var events = new List<AgentStreamEvent>();
+        var ct = TestContext.Current.CancellationToken;
+        var reader = loop.RunStreamingAsync("Hello", history,
+            contextProvider: () => "Process: TestGame.exe PID=1234",
+            cancellationToken: ct);
+        await foreach (var evt in reader.ReadAllAsync(ct))
+            events.Add(evt);
+
+        // Context should be injected into the user message
+        var msgs = history.GetMessages();
+        var userMsg = msgs[0];
+        Assert.Contains("TestGame.exe", userMsg.Text);
+    }
+
     // ── Test Helpers ─────────────────────────────────────────────────
 
-    private static AgentLoopOptions CreateTestOptions()
+    private static AgentLoopOptions CreateTestOptions(
+        IList<AITool>? tools = null,
+        IReadOnlySet<string>? dangerousTools = null,
+        int maxTurns = 10)
     {
         return new AgentLoopOptions
         {
             SystemPrompt = "You are a test assistant.",
-            Tools = new List<AITool>(),
+            Tools = tools ?? new List<AITool>(),
             Limits = TokenLimits.Balanced,
             ToolResultStore = new ToolResultStore(),
-            DangerousToolNames = new HashSet<string>(),
-            MaxTurns = 5,
+            DangerousToolNames = dangerousTools ?? new HashSet<string>(),
+            MaxTurns = maxTurns,
             Log = (level, msg) => { },
         };
+    }
+
+    private static async Task<List<AgentStreamEvent>> CollectEventsAsync(
+        AgentLoopRunner loop,
+        ChatHistoryManager history,
+        string userMessage)
+    {
+        var events = new List<AgentStreamEvent>();
+        var ct = TestContext.Current.CancellationToken;
+        var reader = loop.RunStreamingAsync(userMessage, history, cancellationToken: ct);
+        await foreach (var evt in reader.ReadAllAsync(ct))
+            events.Add(evt);
+        return events;
     }
 }
 

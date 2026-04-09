@@ -45,7 +45,7 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
             domainActions,
             chatId);
 
-        await repository.SaveAsync(session, cancellationToken);
+        await repository.SaveAsync(session, cancellationToken).ConfigureAwait(false);
         return sessionId;
     }
 
@@ -53,14 +53,14 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
         int limit = 10,
         CancellationToken cancellationToken = default)
     {
-        return await repository.ListRecentAsync(limit, cancellationToken);
+        return await repository.ListRecentAsync(limit, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<(IReadOnlyList<AddressTableEntry> Entries, string ProcessName, int? ProcessId, string? ChatId)?> LoadSessionAsync(
         string sessionId,
         CancellationToken cancellationToken = default)
     {
-        var session = await repository.LoadAsync(sessionId, cancellationToken);
+        var session = await repository.LoadAsync(sessionId, cancellationToken).ConfigureAwait(false);
         if (session is null) return null;
 
         var entries = session.AddressEntries.Select(e => new AddressTableEntry(
@@ -80,6 +80,6 @@ public sealed class SessionService(IInvestigationSessionRepository repository)
 
     public async Task DeleteSessionAsync(string sessionId, CancellationToken cancellationToken = default)
     {
-        await repository.DeleteAsync(sessionId, cancellationToken);
+        await repository.DeleteAsync(sessionId, cancellationToken).ConfigureAwait(false);
     }
 }

@@ -288,6 +288,9 @@
                                 <ListView x:Name="RunningProcessesList" ItemsSource="{Binding Processes}"
                                           SelectedItem="{Binding SelectedProcess, Mode=TwoWay}"
                                           Background="{DynamicResource SidebarBackground}" BorderThickness="0"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True"
                                           PreviewMouseLeftButtonDown="ProcessList_PreviewMouseLeftButtonDown"
                                           PreviewMouseMove="ProcessList_PreviewMouseMove">
                                     <ListView.ItemTemplate>
@@ -331,7 +334,10 @@
                                 <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
                                            Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
                                 <ListView ItemsSource="{Binding Modules}" SelectedItem="{Binding SelectedModule, Mode=TwoWay}"
-                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12">
+                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True">
                                     <ListView.ContextMenu>
                                         <ContextMenu Background="{DynamicResource ContextMenuBackground}" Foreground="{DynamicResource ContextMenuForeground}" BorderBrush="{DynamicResource ContextMenuBorder}">
                                             <MenuItem Header="Copy Address" Command="{Binding CopyAddressCommand}" />
@@ -378,7 +384,10 @@
                                         <RowDefinition Height="*" MaxHeight="180" />
                                     </Grid.RowDefinitions>
                                     <ListView Grid.Row="0" ItemsSource="{Binding Threads}" SelectedItem="{Binding SelectedThread, Mode=TwoWay}"
-                                              Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12">
+                                              Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.ContextMenu>
                                             <ContextMenu Background="{DynamicResource ContextMenuBackground}" Foreground="{DynamicResource ContextMenuForeground}" BorderBrush="{DynamicResource ContextMenuBorder}">
                                                 <MenuItem Header="Copy Thread ID" Command="{Binding CopyThreadIdCommand}" />
@@ -405,7 +414,10 @@
                                     </ListView>
                                     <GridSplitter Grid.Row="1" Height="4" HorizontalAlignment="Stretch" Background="{DynamicResource BorderBrush}" />
                                     <ListView Grid.Row="2" ItemsSource="{Binding ExpandedStack}" FontFamily="Consolas" FontSize="10"
-                                              Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0">
+                                              Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}" BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="#" Width="25" DisplayMemberBinding="{Binding FrameIndex}" />
@@ -431,7 +443,10 @@
                                 <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
                                            Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
                                 <ListView ItemsSource="{Binding Regions}" SelectedItem="{Binding SelectedRegion, Mode=TwoWay}"
-                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="11" FontFamily="Consolas">
+                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="11" FontFamily="Consolas"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True">
                                     <ListView.ContextMenu>
                                         <ContextMenu Background="{DynamicResource ContextMenuBackground}" Foreground="{DynamicResource ContextMenuForeground}" BorderBrush="{DynamicResource ContextMenuBorder}">
                                             <MenuItem Header="Copy Address" Command="{Binding CopyAddressCommand}" />
@@ -469,7 +484,10 @@
                                 <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
                                            Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
                                 <ListView ItemsSource="{Binding Sessions}" SelectedItem="{Binding SelectedSession, Mode=TwoWay}"
-                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12">
+                                          Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12"
+                                          VirtualizingStackPanel.IsVirtualizing="True"
+                                          VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                          ScrollViewer.CanContentScroll="True">
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
                                             <StackPanel Margin="0,2">
@@ -712,6 +730,9 @@
                                                    Foreground="{DynamicResource SecondaryForeground}" Margin="0,6,0,6" />
                                         <ListView x:Name="ModulesList" ItemsSource="{Binding CurrentInspection.Modules}" MaxHeight="160"
                                                   Background="{DynamicResource SidebarBackground}" BorderThickness="0" FontSize="12"
+                                                  VirtualizingStackPanel.IsVirtualizing="True"
+                                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                  ScrollViewer.CanContentScroll="True"
                                                   PreviewMouseLeftButtonDown="ModuleList_PreviewMouseLeftButtonDown"
                                                   PreviewMouseMove="ModuleList_PreviewMouseMove">
                                             <ListView.ItemTemplate>
@@ -736,7 +757,10 @@
                                         <TextBlock Margin="0,0,0,6" Foreground="{DynamicResource SecondaryForeground}" FontSize="12"
                                                    Text="{Binding Disassembly.Summary, TargetNullValue=Enter an address and click Disassemble.}" />
                                         <ListView ItemsSource="{Binding Disassembly.Lines}" MaxHeight="240"
-                                                  FontFamily="Consolas" FontSize="11" Background="{DynamicResource PanelBackground}">
+                                                  FontFamily="Consolas" FontSize="11" Background="{DynamicResource PanelBackground}"
+                                                  VirtualizingStackPanel.IsVirtualizing="True"
+                                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                  ScrollViewer.CanContentScroll="True">
                                             <ListView.View>
                                                 <GridView>
                                                     <GridViewColumn Header="Address" Width="130"
@@ -811,7 +835,10 @@
                                     </ProgressBar>
                                     <ListView ItemsSource="{Binding Lines}" SelectedItem="{Binding SelectedLine}" FontFamily="Consolas" FontSize="12"
                                               Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                              BorderThickness="0">
+                                              BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.ItemContainerStyle>
                                             <Style TargetType="ListViewItem">
                                                 <Setter Property="ToolTip">
@@ -1010,7 +1037,10 @@
                                     </ProgressBar>
                                     <ListView ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedResult}" FontFamily="Consolas" FontSize="12"
                                               Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                              BorderThickness="0">
+                                              BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.ContextMenu>
                                             <ContextMenu Background="{DynamicResource ContextMenuBackground}" Foreground="{DynamicResource ContextMenuForeground}" BorderBrush="{DynamicResource ContextMenuBorder}">
                                                 <MenuItem Header="Copy Pointer Chain" Command="{Binding CopyPathCommand}" />
@@ -1157,7 +1187,10 @@
                                                        Foreground="{DynamicResource SecondaryForeground}" Margin="4,2" />
                                             <ListView ItemsSource="{Binding CallStack}" FontFamily="Consolas" FontSize="11"
                                                       Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                                      BorderThickness="0">
+                                                      BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="#" Width="30" DisplayMemberBinding="{Binding FrameIndex}" />
@@ -1181,7 +1214,10 @@
                                             <ListView ItemsSource="{Binding HitDetails}" SelectedItem="{Binding SelectedHit}"
                                                       FontFamily="Consolas" FontSize="11"
                                                       Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                                      BorderThickness="0">
+                                                      BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="BP ID" Width="80" DisplayMemberBinding="{Binding BreakpointId}" />
@@ -1198,7 +1234,10 @@
                                                        Foreground="{DynamicResource SecondaryForeground}" Margin="4,2" />
                                             <ListView ItemsSource="{Binding TraceEntries}" FontFamily="Consolas" FontSize="11"
                                                       Background="{DynamicResource PanelBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                                      BorderThickness="0">
+                                                      BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="Address" Width="140" DisplayMemberBinding="{Binding Address}" />
@@ -1242,7 +1281,10 @@
                                         <!-- History -->
                                         <ListView Grid.Row="0" ItemsSource="{Binding History}" Margin="4,0,4,4"
                                                   Background="{DynamicResource InputBackground}" Foreground="{DynamicResource PrimaryForeground}"
-                                                  BorderBrush="{DynamicResource BorderBrush}" FontFamily="Consolas" FontSize="12">
+                                                  BorderBrush="{DynamicResource BorderBrush}" FontFamily="Consolas" FontSize="12"
+                                                  VirtualizingStackPanel.IsVirtualizing="True"
+                                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                  ScrollViewer.CanContentScroll="True">
                                             <ListView.ItemTemplate>
                                                 <DataTemplate>
                                                     <TextBlock>
@@ -1424,7 +1466,8 @@
                                               Background="{DynamicResource PanelBackground}" FontSize="11"
                                               BorderThickness="0"
                                               VirtualizingPanel.IsVirtualizing="True"
-                                              VirtualizingPanel.VirtualizationMode="Recycling">
+                                              VirtualizingPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.ContextMenu>
                                             <ContextMenu Background="{DynamicResource ContextMenuBackground}" Foreground="{DynamicResource ContextMenuForeground}" BorderBrush="{DynamicResource ContextMenuBorder}">
                                                 <MenuItem Header="Copy Line" Command="{Binding CopyLineCommand}" />
@@ -1476,7 +1519,10 @@
                                                 <Button Content="Set Conditional BP" FontSize="11" Margin="4,0,0,0" Command="{Binding SetConditionalBreakpointCommand}" />
                                             </StackPanel>
                                             <ListView Grid.Row="1" ItemsSource="{Binding Breakpoints}" SelectedItem="{Binding SelectedBreakpoint}"
-                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
+                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="Address" Width="130" DisplayMemberBinding="{Binding Address}" />
@@ -1503,7 +1549,10 @@
                                                            Foreground="{DynamicResource SecondaryForeground}" />
                                             </StackPanel>
                                             <ListView Grid.Row="1" ItemsSource="{Binding HitLog}"
-                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
+                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="Time" Width="100" DisplayMemberBinding="{Binding Timestamp}" />
@@ -1527,7 +1576,10 @@
                                                 <Button Content="Refresh" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RefreshHooksCommand}" />
                                             </StackPanel>
                                             <ListView Grid.Row="1" ItemsSource="{Binding CodeCaveHooks}" SelectedItem="{Binding SelectedCodeCaveHook}"
-                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
+                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="Original Addr" Width="130" DisplayMemberBinding="{Binding OriginalAddress}" />
@@ -1556,7 +1608,10 @@
                                         <Button Content="Toggle" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding ToggleSelectedCommand}" />
                                     </StackPanel>
                                     <ListView Grid.Row="1" ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}"
-                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Status" Width="80" DisplayMemberBinding="{Binding StatusText}" />
@@ -1586,7 +1641,10 @@
                                         <Button Content="Delete" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding DeleteSelectedCommand}" />
                                     </StackPanel>
                                     <ListView Grid.Row="1" x:Name="SnapshotList" ItemsSource="{Binding Snapshots}" SelectedItem="{Binding SelectedSnapshot}" MaxHeight="120"
-                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0" SelectionMode="Extended">
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0" SelectionMode="Extended"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Label" Width="150" DisplayMemberBinding="{Binding Label}" />
@@ -1597,7 +1655,10 @@
                                         </ListView.View>
                                     </ListView>
                                     <ListView Grid.Row="2" ItemsSource="{Binding DiffItems}"
-                                              Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Offset" Width="80" DisplayMemberBinding="{Binding Offset}" />
@@ -1626,7 +1687,10 @@
                                                    Foreground="{DynamicResource SecondaryForeground}" HorizontalAlignment="Right" Margin="0,0,8,0" />
                                     </DockPanel>
                                     <ListView Grid.Row="1" ItemsSource="{Binding Results}"
-                                              Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.View>
                                             <GridView>
                                                 <GridViewColumn Header="Address" Width="130" DisplayMemberBinding="{Binding Address}" />
@@ -1651,7 +1715,10 @@
                                         <Button Content="Remove" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RemoveSelectedCommand}" />
                                     </StackPanel>
                                     <ListView Grid.Row="1" ItemsSource="{Binding Hotkeys}" SelectedItem="{Binding SelectedHotkey}"
-                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
+                                              Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0"
+                                              VirtualizingStackPanel.IsVirtualizing="True"
+                                              VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                              ScrollViewer.CanContentScroll="True">
                                         <ListView.ContextMenu>
                                             <ContextMenu Background="{DynamicResource ContextMenuBackground}" Foreground="{DynamicResource ContextMenuForeground}" BorderBrush="{DynamicResource ContextMenuBorder}">
                                                 <MenuItem Header="Remove Selected" Command="{Binding RemoveSelectedCommand}" />
@@ -1685,7 +1752,10 @@
                                                 <Button Content="Rollback All" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RollbackAllCommand}" Foreground="OrangeRed" />
                                             </StackPanel>
                                             <ListView Grid.Row="1" ItemsSource="{Binding PatchHistory}"
-                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0">
+                                                      Background="{DynamicResource PanelBackground}" FontSize="11" FontFamily="Consolas" BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="Time" Width="100" DisplayMemberBinding="{Binding Timestamp}" />
@@ -1708,7 +1778,10 @@
                                                 <Button Content="Rollback Selected" FontSize="11" Style="{StaticResource ToolbarButton}" Command="{Binding RollbackSelectedEntryCommand}" />
                                             </StackPanel>
                                             <ListView Grid.Row="1" ItemsSource="{Binding JournalEntries}" SelectedItem="{Binding SelectedJournalEntry}"
-                                                      Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0">
+                                                      Background="{DynamicResource PanelBackground}" FontSize="11" BorderThickness="0"
+                                                      VirtualizingStackPanel.IsVirtualizing="True"
+                                                      VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                      ScrollViewer.CanContentScroll="True">
                                                 <ListView.View>
                                                     <GridView>
                                                         <GridViewColumn Header="Time" Width="100" DisplayMemberBinding="{Binding Timestamp}" />
@@ -1778,7 +1851,10 @@
                                         <ListView x:Name="ChatHistoryList" Background="{DynamicResource PanelBackground}" BorderThickness="0"
                                                   ItemsSource="{Binding ChatHistory}"
                                                   MouseDoubleClick="ChatHistoryList_DoubleClick"
-                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                  VirtualizingStackPanel.IsVirtualizing="True"
+                                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                  ScrollViewer.CanContentScroll="True">
                                             <ListView.ItemContainerStyle>
                                                 <Style TargetType="ListViewItem">
                                                     <Setter Property="Padding" Value="8,4" />
@@ -2047,8 +2123,31 @@
                                 <!-- Chat messages -->
                                 <ScrollViewer x:Name="AiChatScrollViewer" VerticalScrollBarVisibility="Auto" Margin="8,0,8,0">
                                     <StackPanel x:Name="AiChatContainer">
-                                        <ItemsControl x:Name="AiChatList" ItemsSource="{Binding ChatMessages}">
-                                            <ItemsControl.ItemTemplate>
+                                        <!-- 3A: ListBox with virtualization replaces ItemsControl for ChatMessages -->
+                                        <ListBox x:Name="AiChatList" ItemsSource="{Binding ChatMessages}"
+                                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 HorizontalContentAlignment="Stretch"
+                                                 SelectionMode="Single">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Margin" Value="0"/>
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ListBoxItem">
+                                                                <ContentPresenter/>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                            <ListBox.ItemTemplate>
                                                 <DataTemplate>
                                                     <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
                                                             Background="{Binding Background}">
@@ -2073,21 +2172,43 @@
                                                                    HorizontalAlignment="Left" Margin="0,4,0,4"
                                                                    Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}"
                                                                    ToolTip="Attached image" />
-                                                            <TextBox Text="{Binding Content, Mode=OneWay}" FontSize="12"
-                                                                     IsReadOnly="True" TextWrapping="Wrap"
-                                                                     Background="Transparent" BorderThickness="0" Padding="0"
-                                                                     Foreground="{DynamicResource PrimaryForeground}"
-                                                                     Cursor="IBeam" IsTabStop="False" />
+                                                            <!-- 3C: TextBlock replaces read-only TextBox for chat message content -->
+                                                            <TextBlock Text="{Binding Content, Mode=OneWay}" FontSize="12"
+                                                                       TextWrapping="Wrap"
+                                                                       Foreground="{DynamicResource PrimaryForeground}"/>
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
-                                            </ItemsControl.ItemTemplate>
-                                        </ItemsControl>
+                                            </ListBox.ItemTemplate>
+                                        </ListBox>
 
                                         <!-- Live streaming content blocks (OpenCode-style structured output) -->
-                                        <ItemsControl x:Name="StreamingBlocksList" ItemsSource="{Binding StreamingBlocks}"
-                                                      Visibility="{Binding IsStreamingBlocksVisible, Converter={StaticResource BoolToVisibility}}">
-                                            <ItemsControl.Resources>
+                                        <!-- 3A: ListBox with virtualization replaces ItemsControl for StreamingBlocks -->
+                                        <ListBox x:Name="StreamingBlocksList" ItemsSource="{Binding StreamingBlocks}"
+                                                 Visibility="{Binding IsStreamingBlocksVisible, Converter={StaticResource BoolToVisibility}}"
+                                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 HorizontalContentAlignment="Stretch"
+                                                 SelectionMode="Single">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Margin" Value="0"/>
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ListBoxItem">
+                                                                <ContentPresenter/>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                            <ListBox.Resources>
                                                 <!-- TextContentBlock template -->
                                                 <DataTemplate DataType="{x:Type models:TextContentBlock}">
                                                     <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
@@ -2097,11 +2218,10 @@
                                                                 <TextBlock FontWeight="SemiBold" FontSize="10"
                                                                            Foreground="{DynamicResource SecondaryForeground}" Text="{Binding RoleLabel}" />
                                                             </Grid>
-                                                            <TextBox Text="{Binding Content, Mode=OneWay}" FontSize="12"
-                                                                     IsReadOnly="True" TextWrapping="Wrap"
-                                                                     Background="Transparent" BorderThickness="0" Padding="0"
-                                                                     Foreground="{DynamicResource PrimaryForeground}"
-                                                                     Cursor="IBeam" IsTabStop="False" />
+                                                            <!-- 3C: TextBlock replaces read-only TextBox for streaming text content -->
+                                                            <TextBlock Text="{Binding Content, Mode=OneWay}" FontSize="12"
+                                                                       TextWrapping="Wrap"
+                                                                       Foreground="{DynamicResource PrimaryForeground}"/>
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
@@ -2127,13 +2247,11 @@
                                                                 <TextBlock Grid.Column="1" Text="{Binding Timestamp}" FontSize="9"
                                                                            Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
                                                             </Grid>
-                                                            <!-- Collapsible result (shown when completed) -->
-                                                            <TextBox Text="{Binding Result, Mode=OneWay}" FontSize="10" FontFamily="Consolas"
-                                                                     IsReadOnly="True" TextWrapping="Wrap" MaxHeight="200"
-                                                                     Background="Transparent" BorderThickness="0" Padding="0,4,0,0"
-                                                                     Foreground="{DynamicResource SecondaryForeground}"
-                                                                     Visibility="{Binding Result, Converter={StaticResource NullToCollapsed}}"
-                                                                     Cursor="IBeam" IsTabStop="False" />
+                                                            <!-- 3C: TextBlock replaces read-only TextBox for tool result content -->
+                                                            <TextBlock Text="{Binding Result, Mode=OneWay}" FontSize="10" FontFamily="Consolas"
+                                                                       TextWrapping="Wrap" MaxHeight="200"
+                                                                       Foreground="{DynamicResource SecondaryForeground}"
+                                                                       Visibility="{Binding Result, Converter={StaticResource NullToCollapsed}}"/>
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
@@ -2160,8 +2278,8 @@
                                                         </StackPanel>
                                                     </Border>
                                                 </DataTemplate>
-                                            </ItemsControl.Resources>
-                                        </ItemsControl>
+                                            </ListBox.Resources>
+                                        </ListBox>
                                     </StackPanel>
                                 </ScrollViewer>
                             </DockPanel>

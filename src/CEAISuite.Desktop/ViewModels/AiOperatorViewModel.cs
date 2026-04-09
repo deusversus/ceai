@@ -39,6 +39,11 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     private bool _suppressChatSwitch;
     private List<ChatHistoryDisplayItem> _allChatItems = new();
 
+    // Delta-batching fields for streaming text (flushes at ~60fps instead of per-token)
+    private readonly System.Text.StringBuilder _pendingDeltaText = new();
+    private System.Threading.Timer? _deltaFlushTimer;
+    private TextContentBlock? _currentStreamingTextBlock;
+
     // Pending approval events so "Allow All" / "Deny All" can resolve them
     private readonly List<AgentStreamEvent.ApprovalRequested> _pendingApprovals = new();
 
@@ -216,35 +221,22 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                     ScrollToBottomRequested?.Invoke();
                 });
 
-                TextContentBlock? currentTextBlock = null;
+                _currentStreamingTextBlock = null;
 
                 await foreach (var evt in reader.ReadAllAsync(_streamingCts.Token))
                 {
                     switch (evt)
                     {
                         case AgentStreamEvent.TextDelta delta:
-                            _dispatcher.Invoke(() =>
-                            {
-                                if (currentTextBlock is null)
-                                {
-                                    currentTextBlock = new TextContentBlock
-                                    {
-                                        RoleLabel = "AI Operator",
-                                        Timestamp = DateTime.Now.ToString("h:mm tt", CultureInfo.InvariantCulture),
-                                        Background = FindThemeBrush("ChatAiBubble")
-                                    };
-                                    StreamingBlocks.Add(currentTextBlock);
-                                }
-                                currentTextBlock.Content += delta.Text;
-                                StreamingBlocksUpdated?.Invoke();
-                                ScrollToBottomRequested?.Invoke();
-                            });
+                            lock (_pendingDeltaText)
+                                _pendingDeltaText.Append(delta.Text);
+                            _deltaFlushTimer ??= new System.Threading.Timer(_ => FlushPendingDeltas(), null, 16, 16);
                             break;
 
                         case AgentStreamEvent.ToolCallStarted tool:
                             _dispatcher.Invoke(() =>
                             {
-                                currentTextBlock = null; // Next text starts a new block
+                                _currentStreamingTextBlock = null; // Next text starts a new block
                                 var block = new ToolCallBlock
                                 {
                                     ToolName = tool.ToolName,
@@ -279,7 +271,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                         case AgentStreamEvent.ApprovalRequested approval:
                             await _dispatcher.InvokeAsync(() =>
                             {
-                                currentTextBlock = null;
+                                _currentStreamingTextBlock = null;
                                 var block = new ApprovalBlock
                                 {
                                     ToolName = approval.ToolName,
@@ -302,7 +294,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                         case AgentStreamEvent.Error err:
                             _dispatcher.Invoke(() =>
                             {
-                                currentTextBlock = null;
+                                _currentStreamingTextBlock = null;
                                 StreamingBlocks.Add(new TextContentBlock
                                 {
                                     RoleLabel = "Error",
@@ -315,6 +307,11 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                             break;
                     }
                 }
+
+                // Stop delta-batching timer and flush any remaining buffered text
+                _deltaFlushTimer?.Dispose();
+                _deltaFlushTimer = null;
+                FlushPendingDeltas();
 
                 // Convert streaming blocks to a flat history item
                 _dispatcher.Invoke(() =>
@@ -332,6 +329,8 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                         : fullText;
 
                     IsStreamingBlocksVisible = false;
+                    StreamingBlocks.Clear();          // 2D: release block memory after streaming
+                    _currentStreamingTextBlock = null;
                     // The history item is added by RefreshChatDisplay below
                 });
             }
@@ -362,6 +361,34 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
             RefreshChatSwitcher();
             RefreshStatusIndicators();
         }
+    }
+
+    /// <summary>Flush accumulated delta text to the UI on the dispatcher thread.</summary>
+    private void FlushPendingDeltas()
+    {
+        string? pending;
+        lock (_pendingDeltaText)
+        {
+            if (_pendingDeltaText.Length == 0) return;
+            pending = _pendingDeltaText.ToString();
+            _pendingDeltaText.Clear();
+        }
+        _dispatcher.Invoke(() =>
+        {
+            if (_currentStreamingTextBlock is null)
+            {
+                _currentStreamingTextBlock = new TextContentBlock
+                {
+                    RoleLabel = "AI Operator",
+                    Timestamp = DateTime.Now.ToString("h:mm tt", CultureInfo.InvariantCulture),
+                    Background = FindThemeBrush("ChatAiBubble")
+                };
+                StreamingBlocks.Add(_currentStreamingTextBlock);
+            }
+            _currentStreamingTextBlock.Content += pending;
+            StreamingBlocksUpdated?.Invoke();
+            ScrollToBottomRequested?.Invoke();
+        });
     }
 
     [RelayCommand]

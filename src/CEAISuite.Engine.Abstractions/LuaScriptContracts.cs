@@ -37,6 +37,15 @@ public interface ILuaScriptEngine
     /// <summary>Reset the Lua state, clearing all variables and loaded scripts.</summary>
     void Reset();
 
+    /// <summary>Async version of SetGlobal. Preferred in async contexts.</summary>
+    Task SetGlobalAsync(string name, object? value, CancellationToken ct = default);
+
+    /// <summary>Async version of GetGlobal. Preferred in async contexts.</summary>
+    Task<object?> GetGlobalAsync(string name, CancellationToken ct = default);
+
+    /// <summary>Async version of Reset. Preferred in async contexts.</summary>
+    Task ResetAsync(CancellationToken ct = default);
+
     /// <summary>Fired when a Lua script calls print() or writes output.</summary>
     event Action<string>? OutputWritten;
 

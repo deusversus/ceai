@@ -21,7 +21,10 @@
         <ListView Grid.Row="1" ItemsSource="{Binding Entries}" BorderThickness="0"
                   Background="Transparent"
                   Foreground="{DynamicResource PrimaryForeground}"
-                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                  VirtualizingStackPanel.IsVirtualizing="True"
+                  VirtualizingStackPanel.VirtualizationMode="Recycling"
+                  ScrollViewer.CanContentScroll="True">
             <ListView.View>
                 <GridView>
                     <GridViewColumn Header="Type" Width="60"

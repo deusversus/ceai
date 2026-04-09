@@ -110,7 +110,7 @@ public sealed class BreakpointService(
     {
         EnsureAvailable();
         var address = ParseAddress(addressText);
-        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, action, cancellationToken);
+        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, action, cancellationToken).ConfigureAwait(false);
         return ToOverview(bp);
     }
 
@@ -125,7 +125,7 @@ public sealed class BreakpointService(
     {
         EnsureAvailable();
         var address = ParseAddress(addressText);
-        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, singleHit, cancellationToken);
+        var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, singleHit, cancellationToken).ConfigureAwait(false);
         if (singleHit)
             _singleHitBreakpoints.Add(bp.Id);
         return ToOverview(bp);
@@ -141,7 +141,7 @@ public sealed class BreakpointService(
         CancellationToken cancellationToken = default)
     {
         EnsureAvailable();
-        return await breakpointEngine!.RemoveBreakpointAsync(processId, breakpointId, cancellationToken);
+        return await breakpointEngine!.RemoveBreakpointAsync(processId, breakpointId, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<BreakpointOverview>> ListBreakpointsAsync(
@@ -149,7 +149,7 @@ public sealed class BreakpointService(
         CancellationToken cancellationToken = default)
     {
         EnsureAvailable();
-        var breakpoints = await breakpointEngine!.ListBreakpointsAsync(processId, cancellationToken);
+        var breakpoints = await breakpointEngine!.ListBreakpointsAsync(processId, cancellationToken).ConfigureAwait(false);
         return breakpoints.Select(ToOverview).ToArray();
     }
 
@@ -159,7 +159,7 @@ public sealed class BreakpointService(
         CancellationToken cancellationToken = default)
     {
         EnsureAvailable();
-        var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, maxEntries, cancellationToken);
+        var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, maxEntries, cancellationToken).ConfigureAwait(false);
 
         // Invoke pending Lua callbacks for new hits
         await InvokePendingLuaCallbacksAsync(breakpointId, hits, cancellationToken).ConfigureAwait(false);
@@ -186,7 +186,7 @@ public sealed class BreakpointService(
         EnsureAvailable();
         var address = ParseAddress(addressText);
         var bp = await breakpointEngine!.SetConditionalBreakpointAsync(
-            processId, address, type, condition, mode, action, threadFilter, cancellationToken);
+            processId, address, type, condition, mode, action, threadFilter, cancellationToken).ConfigureAwait(false);
         return ToOverview(bp);
     }
 
@@ -201,21 +201,21 @@ public sealed class BreakpointService(
         EnsureAvailable();
         var address = ParseAddress(addressText);
         return await breakpointEngine!.TraceFromBreakpointAsync(
-            processId, address, maxInstructions, timeoutMs, cancellationToken);
+            processId, address, maxInstructions, timeoutMs, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>Emergency: restore all page guard protections without locks. For crash recovery.</summary>
     public async Task<int> EmergencyRestorePageProtectionAsync(int processId)
     {
         EnsureAvailable();
-        return await breakpointEngine!.EmergencyRestorePageProtectionAsync(processId);
+        return await breakpointEngine!.EmergencyRestorePageProtectionAsync(processId).ConfigureAwait(false);
     }
 
     /// <summary>Force detach debugger and clean up. Nuclear option for hung processes.</summary>
     public async Task ForceDetachAndCleanupAsync(int processId)
     {
         EnsureAvailable();
-        await breakpointEngine!.ForceDetachAndCleanupAsync(processId);
+        await breakpointEngine!.ForceDetachAndCleanupAsync(processId).ConfigureAwait(false);
     }
 
     private void EnsureAvailable()

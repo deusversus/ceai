@@ -28,7 +28,7 @@ public sealed class PointerRescanService(IEngineFacade engine)
     {
         try
         {
-            var attachment = await engine.AttachAsync(processId, ct);
+            var attachment = await engine.AttachAsync(processId, ct).ConfigureAwait(false);
             var module = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(path.ModuleName, StringComparison.OrdinalIgnoreCase));
 
@@ -44,7 +44,7 @@ public sealed class PointerRescanService(IEngineFacade engine)
                 ct.ThrowIfCancellationRequested();
                 try
                 {
-                    var readResult = await engine.ReadValueAsync(processId, currentAddr, MemoryDataType.Pointer, ct);
+                    var readResult = await engine.ReadValueAsync(processId, currentAddr, MemoryDataType.Pointer, ct).ConfigureAwait(false);
                     if (!nuint.TryParse(readResult.DisplayValue.Replace("0x", ""),
                         System.Globalization.NumberStyles.HexNumber, null, out var ptrValue))
                         return new PointerRescanResult(path, null, false, 0, $"Failed to read pointer at 0x{currentAddr:X}");
@@ -113,7 +113,7 @@ public sealed class PointerRescanService(IEngineFacade engine)
         foreach (var path in paths)
         {
             ct.ThrowIfCancellationRequested();
-            results.Add(await RescanPathAsync(processId, path, expectedValue, ct));
+            results.Add(await RescanPathAsync(processId, path, expectedValue, ct).ConfigureAwait(false));
         }
 
         return results.OrderByDescending(r => r.StabilityScore)
@@ -128,7 +128,7 @@ public sealed class PointerRescanService(IEngineFacade engine)
         int processId, IReadOnlyList<PointerPath> existingPaths, nuint originalTarget,
         CancellationToken ct = default)
     {
-        var results = await RescanAllAsync(processId, existingPaths, originalTarget, ct);
+        var results = await RescanAllAsync(processId, existingPaths, originalTarget, ct).ConfigureAwait(false);
         var validPaths = results.Where(r => r.IsValid).ToList();
 
         // If no paths are still valid, caller should run a fresh pointer scan

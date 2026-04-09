@@ -19,8 +19,8 @@ public partial class AiToolFunctions
 
         var pid = processId ?? engineFacade.AttachedProcessId;
         var result = pid.HasValue
-            ? await luaEngine.ExecuteAsync(code, pid.Value)
-            : await luaEngine.ExecuteAsync(code);
+            ? await luaEngine.ExecuteAsync(code, pid.Value).ConfigureAwait(false)
+            : await luaEngine.ExecuteAsync(code).ConfigureAwait(false);
 
         if (!result.Success)
             return $"Lua error: {result.Error}";
@@ -57,7 +57,7 @@ public partial class AiToolFunctions
         if (luaEngine is null)
             return "Lua engine is not available.";
 
-        var result = await luaEngine.EvaluateAsync(expression);
+        var result = await luaEngine.EvaluateAsync(expression).ConfigureAwait(false);
         return result.Success
             ? result.ReturnValue ?? "nil"
             : $"Lua error: {result.Error}";

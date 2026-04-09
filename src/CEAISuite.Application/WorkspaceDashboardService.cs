@@ -16,16 +16,16 @@ public sealed class WorkspaceDashboardService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dataStorePath);
 
-        await sessionRepository.InitializeAsync(cancellationToken);
+        await sessionRepository.InitializeAsync(cancellationToken).ConfigureAwait(false);
 
-        var recentSessions = await sessionRepository.ListRecentAsync(5, cancellationToken);
+        var recentSessions = await sessionRepository.ListRecentAsync(5, cancellationToken).ConfigureAwait(false);
         if (recentSessions.Count == 0)
         {
-            await sessionRepository.SaveAsync(CreateInitialSession(), cancellationToken);
-            recentSessions = await sessionRepository.ListRecentAsync(5, cancellationToken);
+            await sessionRepository.SaveAsync(CreateInitialSession(), cancellationToken).ConfigureAwait(false);
+            recentSessions = await sessionRepository.ListRecentAsync(5, cancellationToken).ConfigureAwait(false);
         }
 
-        var processes = await engineFacade.ListProcessesAsync(cancellationToken);
+        var processes = await engineFacade.ListProcessesAsync(cancellationToken).ConfigureAwait(false);
 
         return CurrentDashboard = new WorkspaceDashboard(
             WorkspaceBootstrap.CreateOverview(),
@@ -63,11 +63,11 @@ public sealed class WorkspaceDashboardService(
         int processId,
         CancellationToken cancellationToken = default)
     {
-        var processes = await engineFacade.ListProcessesAsync(cancellationToken);
+        var processes = await engineFacade.ListProcessesAsync(cancellationToken).ConfigureAwait(false);
         var process = processes.FirstOrDefault(candidate => candidate.Id == processId)
             ?? throw new InvalidOperationException($"Process {processId} is no longer available.");
 
-        var inspection = await engineFacade.AttachAsync(processId, cancellationToken);
+        var inspection = await engineFacade.AttachAsync(processId, cancellationToken).ConfigureAwait(false);
         var modules = inspection.Modules
             .Take(50)
             .Select(
@@ -85,9 +85,9 @@ public sealed class WorkspaceDashboardService(
         {
             try
             {
-                var bytes = await engineFacade.ReadMemoryAsync(processId, primaryModule.BaseAddress, 32, cancellationToken);
-                var int32Value = await engineFacade.ReadValueAsync(processId, primaryModule.BaseAddress, MemoryDataType.Int32, cancellationToken);
-                var pointerValue = await engineFacade.ReadValueAsync(processId, primaryModule.BaseAddress, MemoryDataType.Pointer, cancellationToken);
+                var bytes = await engineFacade.ReadMemoryAsync(processId, primaryModule.BaseAddress, 32, cancellationToken).ConfigureAwait(false);
+                var int32Value = await engineFacade.ReadValueAsync(processId, primaryModule.BaseAddress, MemoryDataType.Int32, cancellationToken).ConfigureAwait(false);
+                var pointerValue = await engineFacade.ReadValueAsync(processId, primaryModule.BaseAddress, MemoryDataType.Pointer, cancellationToken).ConfigureAwait(false);
 
                 sample = new MemorySampleOverview(
                     $"0x{primaryModule.BaseAddress:X}",
@@ -142,9 +142,9 @@ public sealed class WorkspaceDashboardService(
         CancellationToken cancellationToken = default)
     {
         var address = ParseAddress(addressText);
-        var readLen = await GetReadLengthAsync(processId, dataType);
-        var raw = await engineFacade.ReadMemoryAsync(processId, address, readLen, cancellationToken);
-        var typed = await engineFacade.ReadValueAsync(processId, address, dataType, cancellationToken);
+        var readLen = await GetReadLengthAsync(processId, dataType).ConfigureAwait(false);
+        var raw = await engineFacade.ReadMemoryAsync(processId, address, readLen, cancellationToken).ConfigureAwait(false);
+        var typed = await engineFacade.ReadValueAsync(processId, address, dataType, cancellationToken).ConfigureAwait(false);
 
         return new ManualMemoryProbeOverview(
             $"0x{address:X}",
@@ -161,7 +161,7 @@ public sealed class WorkspaceDashboardService(
         CancellationToken cancellationToken = default)
     {
         var address = ParseAddress(addressText);
-        var result = await engineFacade.WriteValueAsync(processId, address, dataType, valueText, cancellationToken);
+        var result = await engineFacade.WriteValueAsync(processId, address, dataType, valueText, cancellationToken).ConfigureAwait(false);
         return $"Wrote {result.WrittenValue} as {result.DataType} to 0x{result.Address:X} ({result.BytesWritten} bytes).";
     }
 
@@ -169,7 +169,7 @@ public sealed class WorkspaceDashboardService(
     {
         if (dataType == MemoryDataType.Pointer)
         {
-            var arch = await GetArchitectureAsync(processId);
+            var arch = await GetArchitectureAsync(processId).ConfigureAwait(false);
             return string.Equals(arch, "x86", StringComparison.OrdinalIgnoreCase) ? sizeof(int) : sizeof(long);
         }
         return dataType switch
@@ -184,7 +184,7 @@ public sealed class WorkspaceDashboardService(
 
     private async Task<string> GetArchitectureAsync(int processId)
     {
-        var processes = await engineFacade.ListProcessesAsync();
+        var processes = await engineFacade.ListProcessesAsync().ConfigureAwait(false);
         return processes.FirstOrDefault(process => process.Id == processId)?.Architecture ?? "x64";
     }
 

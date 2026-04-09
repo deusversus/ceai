@@ -98,7 +98,7 @@ public sealed class HookRegistry
 
             try
             {
-                var result = await hook.ExecuteAsync(context, ct);
+                var result = await hook.ExecuteAsync(context, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"Pre-tool [{hook.Name}] on {context.ToolName}: {result.Outcome}");
 
                 if (result.Outcome == HookOutcome.Block)
@@ -133,7 +133,7 @@ public sealed class HookRegistry
 
             try
             {
-                await hook.ExecuteAsync(context, result, isError, ct);
+                await hook.ExecuteAsync(context, result, isError, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"Post-tool [{hook.Name}] on {context.ToolName}");
             }
             catch (Exception ex)
@@ -159,7 +159,7 @@ public sealed class HookRegistry
             if (!hook.MatchesToolPattern(context.ToolName)) continue;
             try
             {
-                var action = await hook.ExecuteAsync(context, errorMessage, wasInterrupted, ct);
+                var action = await hook.ExecuteAsync(context, errorMessage, wasInterrupted, ct).ConfigureAwait(false);
                 if (action is not null)
                 {
                     // Merge: last non-null RetryHint wins, any SuppressDetailedError wins
@@ -192,7 +192,7 @@ public sealed class HookRegistry
         {
             try
             {
-                var result = await hook.ExecuteAsync(context, ct);
+                var result = await hook.ExecuteAsync(context, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"Pre-LLM [{hook.Name}]: {result.Outcome}");
 
                 if (result.Outcome == HookOutcome.Block)
@@ -217,7 +217,7 @@ public sealed class HookRegistry
         lock (_hooksLock) snapshot = _postLlmHooks.ToList();
         foreach (var hook in snapshot)
         {
-            try { await hook.ExecuteAsync(ctx, ct); }
+            try { await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false); }
             catch (Exception ex) { _log?.Invoke("HOOK", $"PostLlm hook error: {ex.Message}"); }
         }
     }
@@ -230,7 +230,7 @@ public sealed class HookRegistry
         {
             try
             {
-                var result = await hook.ExecuteAsync(ctx, ct);
+                var result = await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false);
                 if (result.Outcome == HookOutcome.Block)
                     return result;
             }
@@ -245,7 +245,7 @@ public sealed class HookRegistry
         lock (_hooksLock) snapshot = _postCompactionHooks.ToList();
         foreach (var hook in snapshot)
         {
-            try { await hook.ExecuteAsync(ctx, ct); }
+            try { await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false); }
             catch (Exception ex) { _log?.Invoke("HOOK", $"PostCompaction hook error: {ex.Message}"); }
         }
     }
@@ -263,7 +263,7 @@ public sealed class HookRegistry
         {
             try
             {
-                var result = await hook.ExecuteAsync(ctx, ct);
+                var result = await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"Stop [{hook.Name}]: {result.Outcome}");
                 if (result.Outcome == HookOutcome.Block)
                     return result; // Block means "force continue"
@@ -287,7 +287,7 @@ public sealed class HookRegistry
         {
             try
             {
-                await hook.ExecuteAsync(ctx, ct);
+                await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"SessionStart [{hook.Name}]");
             }
             catch (Exception ex)
@@ -307,7 +307,7 @@ public sealed class HookRegistry
         {
             try
             {
-                await hook.ExecuteAsync(ctx, ct);
+                await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"SessionEnd [{hook.Name}]");
             }
             catch (Exception ex)
@@ -327,7 +327,7 @@ public sealed class HookRegistry
         {
             try
             {
-                await hook.ExecuteAsync(ctx, ct);
+                await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"SubagentStart [{hook.Name}] on {ctx.SubagentId}");
             }
             catch (Exception ex)
@@ -347,7 +347,7 @@ public sealed class HookRegistry
         {
             try
             {
-                await hook.ExecuteAsync(ctx, ct);
+                await hook.ExecuteAsync(ctx, ct).ConfigureAwait(false);
                 _log?.Invoke("HOOK", $"SubagentEnd [{hook.Name}] on {ctx.SubagentId}");
             }
             catch (Exception ex)
@@ -762,8 +762,8 @@ public sealed class CommandHook : PreToolHook
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(_timeout);
 
-            var stdout = await process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
-            await process.WaitForExitAsync(timeoutCts.Token);
+            var stdout = await process.StandardOutput.ReadToEndAsync(timeoutCts.Token).ConfigureAwait(false);
+            await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
 
             _log?.Invoke("HOOK", $"Command hook '{_command}' exited with code {process.ExitCode}");
 

@@ -87,7 +87,7 @@ public sealed class RetryPolicy
 
             try
             {
-                var result = await operation(cancellationToken);
+                var result = await operation(cancellationToken).ConfigureAwait(false);
                 _consecutiveOverloadCount = 0; // Reset on success
                 return RetryResult<T>.Ok(result);
             }
@@ -99,7 +99,7 @@ public sealed class RetryPolicy
                 if (attempt > _maxRetries) break;
                 var stDelay = CalculateDelay(attempt, null);
                 _log?.Invoke("RETRY", $"Retrying in {stDelay.TotalSeconds:F1}s (attempt {attempt + 1})");
-                await Task.Delay(stDelay, cancellationToken);
+                await Task.Delay(stDelay, cancellationToken).ConfigureAwait(false);
                 continue;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -184,7 +184,7 @@ public sealed class RetryPolicy
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     var sleepTime = remaining < heartbeatInterval ? remaining : heartbeatInterval;
-                    await Task.Delay(sleepTime, cancellationToken);
+                    await Task.Delay(sleepTime, cancellationToken).ConfigureAwait(false);
                     remaining -= sleepTime;
                     if (remaining > TimeSpan.Zero)
                         onHeartbeat?.Invoke($"Retrying in {remaining.TotalSeconds:F0}s...");

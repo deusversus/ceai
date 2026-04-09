@@ -20,11 +20,11 @@ public static class ApiKeyValidator
         {
             return provider.ToLowerInvariant() switch
             {
-                "openai" => await ValidateOpenAI(apiKey, ct),
-                "anthropic" => await ValidateAnthropic(apiKey, ct),
-                "gemini" => await ValidateGemini(apiKey, ct),
-                "openai-compatible" => await ValidateCompatible(apiKey, endpoint, ct),
-                "copilot" => await ValidateCopilot(apiKey, ct),
+                "openai" => await ValidateOpenAI(apiKey, ct).ConfigureAwait(false),
+                "anthropic" => await ValidateAnthropic(apiKey, ct).ConfigureAwait(false),
+                "gemini" => await ValidateGemini(apiKey, ct).ConfigureAwait(false),
+                "openai-compatible" => await ValidateCompatible(apiKey, endpoint, ct).ConfigureAwait(false),
+                "copilot" => await ValidateCopilot(apiKey, ct).ConfigureAwait(false),
                 _ => (false, $"Unknown provider: {provider}"),
             };
         }
@@ -42,7 +42,7 @@ public static class ApiKeyValidator
     {
         using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.openai.com/v1/models");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        using var res = await Http.SendAsync(req, ct);
+        using var res = await Http.SendAsync(req, ct).ConfigureAwait(false);
         return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid API key.");
     }
 
@@ -51,7 +51,7 @@ public static class ApiKeyValidator
         using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.anthropic.com/v1/models");
         req.Headers.Add("x-api-key", apiKey);
         req.Headers.Add("anthropic-version", "2023-06-01");
-        using var res = await Http.SendAsync(req, ct);
+        using var res = await Http.SendAsync(req, ct).ConfigureAwait(false);
         return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid API key.");
     }
 
@@ -59,7 +59,7 @@ public static class ApiKeyValidator
     {
         using var req = new HttpRequestMessage(HttpMethod.Get,
             $"https://generativelanguage.googleapis.com/v1/models?key={apiKey}");
-        using var res = await Http.SendAsync(req, ct);
+        using var res = await Http.SendAsync(req, ct).ConfigureAwait(false);
         return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid API key.");
     }
 
@@ -77,7 +77,7 @@ public static class ApiKeyValidator
         var baseUrl = endpoint.TrimEnd('/');
         using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/models");
         req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        using var res = await Http.SendAsync(req, ct);
+        using var res = await Http.SendAsync(req, ct).ConfigureAwait(false);
         // Some compatible endpoints don't support /models -- accept any 2xx or 404
         return res.IsSuccessStatusCode || res.StatusCode == System.Net.HttpStatusCode.NotFound
             ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Connection failed.");
@@ -88,7 +88,7 @@ public static class ApiKeyValidator
         using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/user");
         req.Headers.Authorization = new AuthenticationHeaderValue("token", token);
         req.Headers.Add("User-Agent", "CEAISuite");
-        using var res = await Http.SendAsync(req, ct);
+        using var res = await Http.SendAsync(req, ct).ConfigureAwait(false);
         return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid GitHub token.");
     }
 }

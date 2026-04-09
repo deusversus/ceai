@@ -34,11 +34,11 @@ public sealed class UpdateService : IDisposable
     {
         try
         {
-            var response = await _http.GetAsync(GitHubApiUrl, ct);
+            var response = await _http.GetAsync(GitHubApiUrl, ct).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return null;
 
-            var release = await response.Content.ReadFromJsonAsync(GitHubReleaseJsonContext.Default.GitHubRelease, ct);
+            var release = await response.Content.ReadFromJsonAsync(GitHubReleaseJsonContext.Default.GitHubRelease, ct).ConfigureAwait(false);
             if (release is null)
                 return null;
 
@@ -92,20 +92,20 @@ public sealed class UpdateService : IDisposable
             fileName = "CEAISuite-update.zip";
         var filePath = Path.Combine(tempDir, fileName);
 
-        using var response = await _http.GetAsync(update.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+        using var response = await _http.GetAsync(update.DownloadUrl, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
         var totalBytes = response.Content.Headers.ContentLength ?? update.SizeBytes;
 
-        await using var contentStream = await response.Content.ReadAsStreamAsync(ct);
+        await using var contentStream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         await using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
 
         var buffer = new byte[81920];
         long bytesRead = 0;
         int read;
-        while ((read = await contentStream.ReadAsync(buffer, ct)) > 0)
+        while ((read = await contentStream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
         {
-            await fileStream.WriteAsync(buffer.AsMemory(0, read), ct);
+            await fileStream.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
             bytesRead += read;
             if (totalBytes > 0)
                 progress?.Report((double)bytesRead / totalBytes);

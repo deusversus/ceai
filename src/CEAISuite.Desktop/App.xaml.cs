@@ -315,10 +315,13 @@ public partial class App : System.Windows.Application
         services.AddSingleton<MainWindow>();
     }
 
-    protected override void OnExit(ExitEventArgs e)
+    protected override async void OnExit(ExitEventArgs e)
     {
         Log.CloseAndFlush();
-        (Services as IDisposable)?.Dispose();
+        if (Services is IAsyncDisposable asyncDisposable)
+            await asyncDisposable.DisposeAsync();
+        else
+            (Services as IDisposable)?.Dispose();
         base.OnExit(e);
     }
 

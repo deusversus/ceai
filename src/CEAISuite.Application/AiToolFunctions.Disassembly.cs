@@ -31,7 +31,7 @@ public sealed partial class AiToolFunctions
             if (!ulong.TryParse(offsetPart, System.Globalization.NumberStyles.HexNumber, null, out var offset))
                 return $"Cannot parse offset '{offsetPart}' as hex.";
 
-            var attachment = await engineFacade.AttachAsync(processId);
+            var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
             var mod = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(modulePart, StringComparison.OrdinalIgnoreCase));
 
@@ -57,7 +57,7 @@ public sealed partial class AiToolFunctions
         // Bare module name (contains '.') — resolve to base address
         if (normalized.Contains('.') && !normalized.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
         {
-            var attachment = await engineFacade.AttachAsync(processId);
+            var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
             var mod = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase));
 
@@ -130,7 +130,7 @@ public sealed partial class AiToolFunctions
         [Description("Start address (hex or symbolic like module+offset)")] string address)
     {
         // Resolve symbolic address (module+offset or bare module name) to raw hex
-        var resolvedAddress = await TryResolveToHex(processId, address);
+        var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
 
         // Pre-check: warn if the target address is not in executable memory
         string? execWarning = null;
@@ -140,7 +140,7 @@ public sealed partial class AiToolFunctions
             if (memoryProtectionEngine is not null)
             {
                 var addr = ParseAddress(resolvedAddress);
-                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr).ConfigureAwait(false);
                 if (!region.IsExecutable)
                 {
                     protectionString = (region.IsReadable, region.IsWritable) switch
@@ -160,7 +160,7 @@ public sealed partial class AiToolFunctions
             System.Diagnostics.Trace.TraceWarning($"[AiToolFunctions] Protection query failed: {ex.Message}");
         }
 
-        var overview = await disassemblyService.DisassembleAtAsync(processId, resolvedAddress);
+        var overview = await disassemblyService.DisassembleAtAsync(processId, resolvedAddress).ConfigureAwait(false);
 
         var symbolicNote = resolvedAddress != address.Trim()
             ? $"Resolved '{address.Trim()}' → {resolvedAddress}"
@@ -208,13 +208,13 @@ public sealed partial class AiToolFunctions
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
-            var regions = await scanService.EnumerateRegionsAsync(processId);
+            var regions = await scanService.EnumerateRegionsAsync(processId).ConfigureAwait(false);
 
             // Load modules for ownership annotation
             IReadOnlyList<ModuleDescriptor>? modules = null;
             try
             {
-                var attachment = await engineFacade.AttachAsync(processId);
+                var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
                 modules = attachment.Modules;
             }
             catch (Exception ex) { logger?.LogDebug(ex, "ListMemoryRegions module lookup failed"); }

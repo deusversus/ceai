@@ -77,7 +77,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
         _partialResults.Clear();
         _lastModuleIndex = 0;
 
-        var attachment = await engine.AttachAsync(processId, ct);
+        var attachment = await engine.AttachAsync(processId, ct).ConfigureAwait(false);
         var modules = FilterModules(attachment.Modules, moduleFilter);
 
         // Save state for potential resume
@@ -88,7 +88,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
         _lastModules = modules;
         _lastProcessId = processId;
 
-        return await ScanFromModuleIndex(processId, modules, targetAddress, maxDepth, maxOffset, 0, ct);
+        return await ScanFromModuleIndex(processId, modules, targetAddress, maxDepth, maxOffset, 0, ct).ConfigureAwait(false);
     }
 
     /// <summary>Resume a cancelled pointer scan from where it left off.</summary>
@@ -100,7 +100,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
 
         var additionalResults = await ScanFromModuleIndex(
             processId, _lastModules, _lastTargetAddress, _lastMaxDepth, _lastMaxOffset,
-            _lastModuleIndex, ct);
+            _lastModuleIndex, ct).ConfigureAwait(false);
 
         // Merge partial + new
         _partialResults.AddRange(additionalResults);
@@ -121,7 +121,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
         try
         {
             // Phase 1: Find all single-level pointers
-            var level1 = await FindPointersToAddress(processId, modules, targetAddress, maxOffset, startModuleIndex, ct);
+            var level1 = await FindPointersToAddress(processId, modules, targetAddress, maxOffset, startModuleIndex, ct).ConfigureAwait(false);
             foreach (var (addr, offset, mod) in level1)
             {
                 results.Add(new PointerPath(mod.Name, mod.BaseAddress,
@@ -134,7 +134,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
             foreach (var (l1Addr, l1Offset, l1Mod) in level1)
             {
                 ct.ThrowIfCancellationRequested();
-                var level2 = await FindPointersToAddress(processId, modules, l1Addr, maxOffset, 0, ct);
+                var level2 = await FindPointersToAddress(processId, modules, l1Addr, maxOffset, 0, ct).ConfigureAwait(false);
                 foreach (var (l2Addr, l2Offset, l2Mod) in level2)
                 {
                     results.Add(new PointerPath(l2Mod.Name, l2Mod.BaseAddress,
@@ -176,12 +176,12 @@ public sealed class PointerScannerService(IEngineFacade engine)
     public static async Task SavePointerMapAsync(string filePath, PointerMapFile map)
     {
         var json = JsonSerializer.Serialize(map, PtrJsonOptions);
-        await File.WriteAllTextAsync(filePath, json);
+        await File.WriteAllTextAsync(filePath, json).ConfigureAwait(false);
     }
 
     public static async Task<PointerMapFile> LoadPointerMapAsync(string filePath)
     {
-        var json = await File.ReadAllTextAsync(filePath);
+        var json = await File.ReadAllTextAsync(filePath).ConfigureAwait(false);
         return JsonSerializer.Deserialize<PointerMapFile>(json, PtrJsonOptions)
             ?? throw new InvalidOperationException("Failed to deserialize pointer map file.");
     }
@@ -221,7 +221,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
     {
         try
         {
-            var attachment = await engine.AttachAsync(processId, ct);
+            var attachment = await engine.AttachAsync(processId, ct).ConfigureAwait(false);
             var mod = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(path.ModuleName, StringComparison.OrdinalIgnoreCase));
             if (mod is null) return ("Broken", 0);
@@ -231,7 +231,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
             foreach (var offset in path.Offsets)
             {
                 ct.ThrowIfCancellationRequested();
-                var result = await engine.ReadMemoryAsync(processId, currentAddr, 8, ct);
+                var result = await engine.ReadMemoryAsync(processId, currentAddr, 8, ct).ConfigureAwait(false);
                 var ptrValue = BitConverter.ToUInt64(result.Bytes.ToArray(), 0);
                 if (ptrValue == 0) return ("Broken", 0);
                 currentAddr = (nuint)(ptrValue + (ulong)offset);
@@ -280,7 +280,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
                     try
                     {
                         var readAddr = (nuint)((long)mod.BaseAddress + offset);
-                        var result = await engine.ReadMemoryAsync(processId, readAddr, readSize, ct);
+                        var result = await engine.ReadMemoryAsync(processId, readAddr, readSize, ct).ConfigureAwait(false);
                         var bytes = result.Bytes.ToArray();
 
                         // Scan for pointer values that point near targetAddress

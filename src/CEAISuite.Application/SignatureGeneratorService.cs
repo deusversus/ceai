@@ -26,7 +26,7 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
         int length = 32,
         CancellationToken ct = default)
     {
-        var result = await engine.ReadMemoryAsync(processId, address, length, ct);
+        var result = await engine.ReadMemoryAsync(processId, address, length, ct).ConfigureAwait(false);
         var bytes = result.Bytes.ToArray();
 
         // Simple approach: wildcard bytes that look like they could be relocatable offsets
@@ -53,7 +53,7 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
         string pattern,
         CancellationToken ct = default)
     {
-        var attachment = await engine.AttachAsync(processId, ct);
+        var attachment = await engine.AttachAsync(processId, ct).ConfigureAwait(false);
         var module = attachment.Modules.FirstOrDefault(m =>
             string.Equals(m.Name, moduleName, StringComparison.OrdinalIgnoreCase));
 
@@ -85,7 +85,7 @@ public sealed class SignatureGeneratorService(IEngineFacade engine)
             try
             {
                 var readAddr = (nuint)((long)module.BaseAddress + offset);
-                var memResult = await engine.ReadMemoryAsync(processId, readAddr, readSize, ct);
+                var memResult = await engine.ReadMemoryAsync(processId, readAddr, readSize, ct).ConfigureAwait(false);
                 var bytes = memResult.Bytes.ToArray();
 
                 for (var i = 0; i <= bytes.Length - parts.Length; i++)

@@ -27,7 +27,7 @@ public sealed class StructureDissectorService(IEngineFacade engine)
         string typeHint = "auto",
         CancellationToken ct = default)
     {
-        var result = await engine.ReadMemoryAsync(processId, baseAddress, regionSize, ct);
+        var result = await engine.ReadMemoryAsync(processId, baseAddress, regionSize, ct).ConfigureAwait(false);
         var bytes = result.Bytes.ToArray();
         var fields = new List<StructureField>();
 

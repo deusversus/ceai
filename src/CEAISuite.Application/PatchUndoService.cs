@@ -36,10 +36,10 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
     {
         // Read original bytes before writing
         var size = GetDataTypeSize(dataType);
-        var originalRead = await engineFacade.ReadMemoryAsync(processId, address, size, ct);
+        var originalRead = await engineFacade.ReadMemoryAsync(processId, address, size, ct).ConfigureAwait(false);
         byte[] originalBytes = originalRead.Bytes.ToArray();
 
-        var result = await engineFacade.WriteValueAsync(processId, address, dataType, value, ct);
+        var result = await engineFacade.WriteValueAsync(processId, address, dataType, value, ct).ConfigureAwait(false);
         if (result.BytesWritten > 0)
         {
             _undoStack.Add(new Patch(processId, address, dataType, originalBytes, value, DateTimeOffset.UtcNow));
@@ -62,11 +62,11 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
 
         // Write original bytes back
         var writeResult = await engineFacade.ReadMemoryAsync(patch.ProcessId, patch.Address,
-            patch.OriginalBytes.Length, ct);
+            patch.OriginalBytes.Length, ct).ConfigureAwait(false);
         byte[] currentBytes = writeResult.Bytes.ToArray();
 
         // Write the original bytes directly using raw write
-        await WriteRawBytesAsync(patch.ProcessId, patch.Address, patch.OriginalBytes, ct);
+        await WriteRawBytesAsync(patch.ProcessId, patch.Address, patch.OriginalBytes, ct).ConfigureAwait(false);
 
         _redoStack.Add(patch with { OriginalBytes = currentBytes });
 
@@ -82,11 +82,11 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
         _redoStack.RemoveAt(_redoStack.Count - 1);
 
         var originalRead = await engineFacade.ReadMemoryAsync(patch.ProcessId, patch.Address,
-            GetDataTypeSize(patch.DataType), ct);
+            GetDataTypeSize(patch.DataType), ct).ConfigureAwait(false);
         byte[] currentBytes = originalRead.Bytes.ToArray();
 
         var result = await engineFacade.WriteValueAsync(patch.ProcessId, patch.Address,
-            patch.DataType, patch.NewValue, ct);
+            patch.DataType, patch.NewValue, ct).ConfigureAwait(false);
         if (result.BytesWritten > 0)
             _undoStack.Add(patch with { OriginalBytes = currentBytes });
 
@@ -107,7 +107,7 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
         {
             try
             {
-                await UndoAsync(ct);
+                await UndoAsync(ct).ConfigureAwait(false);
                 rolled++;
             }
             catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[PatchUndo] UndoAll stopped at rollback {rolled}: {ex.GetType().Name}: {ex.Message}"); break; }
@@ -122,7 +122,7 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
         for (int i = 0; i < data.Length; i++)
         {
             await engineFacade.WriteValueAsync(processId, address + (nuint)i,
-                MemoryDataType.Byte, data[i].ToString(CultureInfo.InvariantCulture), ct);
+                MemoryDataType.Byte, data[i].ToString(CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
         }
     }
 

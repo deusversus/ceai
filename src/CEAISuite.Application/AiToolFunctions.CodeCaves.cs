@@ -28,7 +28,7 @@ public sealed partial class AiToolFunctions
             // ── Executable-memory safety gate ──
             if (memoryProtectionEngine is not null)
             {
-                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr).ConfigureAwait(false);
                 if (!region.IsExecutable)
                 {
                     return $"❌ Code cave hook REJECTED: Target address 0x{addr:X} is in a non-executable memory region " +
@@ -42,7 +42,7 @@ public sealed partial class AiToolFunctions
             {
                 // Still allow but warn
             }
-            var result = await codeCaveEngine.InstallHookAsync(processId, addr, captureRegisters);
+            var result = await codeCaveEngine.InstallHookAsync(processId, addr, captureRegisters).ConfigureAwait(false);
             if (!result.Success) return $"Hook installation failed: {result.ErrorMessage}";
             var h = result.Hook!;
             var hookMsg = $"Stealth hook installed:\n  ID: {h.Id}\n  Target: 0x{h.OriginalAddress:X}\n  Cave: 0x{h.CaveAddress:X}\n  Stolen bytes: {h.OriginalBytesLength}\n  No debugger attached — completely game-safe.";
@@ -50,7 +50,7 @@ public sealed partial class AiToolFunctions
             {
                 var hookId = h.Id;
                 watchdogService.StartMonitoring(processId, hookId, addr, "CodeCaveHook", "Stealth",
-                    async () => await codeCaveEngine.RemoveHookAsync(processId, hookId));
+                    async () => await codeCaveEngine.RemoveHookAsync(processId, hookId).ConfigureAwait(false));
                 if (watchdogService.IsUnsafe(addr, "Stealth"))
                     hookMsg += "\n⚠️ WARNING: This address+Stealth previously caused a process freeze. Watchdog is monitoring.";
                 else
@@ -58,7 +58,7 @@ public sealed partial class AiToolFunctions
             }
             operationJournal?.RecordOperation(
                 h.Id, "CodeCaveHook", addr, "Stealth", groupId: null,
-                async () => await codeCaveEngine.RemoveHookAsync(processId, h.Id));
+                async () => await codeCaveEngine.RemoveHookAsync(processId, h.Id).ConfigureAwait(false));
             return hookMsg;
         }
         catch (Exception ex) { return $"InstallCodeCaveHook failed: {ex.Message}"; }
@@ -71,7 +71,7 @@ public sealed partial class AiToolFunctions
         [Description("Hook ID to remove")] string hookId)
     {
         if (codeCaveEngine is null) return "Code cave engine not available.";
-        var removed = await codeCaveEngine.RemoveHookAsync(processId, hookId);
+        var removed = await codeCaveEngine.RemoveHookAsync(processId, hookId).ConfigureAwait(false);
         return removed ? $"Hook {hookId} removed, original bytes restored." : $"Hook {hookId} not found.";
     }
 
@@ -81,7 +81,7 @@ public sealed partial class AiToolFunctions
     public async Task<string> ListCodeCaveHooks([Description("Process ID")] int processId)
     {
         if (codeCaveEngine is null) return "Code cave engine not available.";
-        var hooks = await codeCaveEngine.ListHooksAsync(processId);
+        var hooks = await codeCaveEngine.ListHooksAsync(processId).ConfigureAwait(false);
         if (hooks.Count == 0) return ToJson(new { hooks = Array.Empty<object>(), count = 0 });
         return ToJson(new
         {
@@ -102,7 +102,7 @@ public sealed partial class AiToolFunctions
         if (maxEntries <= 0) maxEntries = _limits.MaxHitLogEntries;
         dereference ??= _limits.DereferenceHookRegisters;
         if (codeCaveEngine is null) return "Code cave engine not available.";
-        var hits = await codeCaveEngine.GetHookHitsAsync(hookId, maxEntries);
+        var hits = await codeCaveEngine.GetHookHitsAsync(hookId, maxEntries).ConfigureAwait(false);
         if (hits.Count == 0) return $"No hits recorded for hook {hookId}.";
 
         var hitResults = new List<object>();
@@ -113,7 +113,7 @@ public sealed partial class AiToolFunctions
             Dictionary<string, string>? dereferences = null;
             if (dereference == true && processId > 0 && trimmedRegs.Count > 0)
             {
-                dereferences = await DereferenceRegistersAsync(processId, trimmedRegs);
+                dereferences = await DereferenceRegistersAsync(processId, trimmedRegs).ConfigureAwait(false);
             }
 
             hitResults.Add(new
@@ -167,7 +167,7 @@ public sealed partial class AiToolFunctions
 
             try
             {
-                var mem = await engineFacade.ReadMemoryAsync(processId, (nuint)addr, 8);
+                var mem = await engineFacade.ReadMemoryAsync(processId, (nuint)addr, 8).ConfigureAwait(false);
                 if (mem.Bytes.Count == 8)
                 {
                     var pointed = BitConverter.ToUInt64(mem.Bytes.ToArray(), 0);
@@ -203,7 +203,7 @@ public sealed partial class AiToolFunctions
             // 1. Check executability
             if (memoryProtectionEngine is not null)
             {
-                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+                var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr).ConfigureAwait(false);
                 if (!region.IsExecutable)
                 {
                     sb.AppendLine("❌ Address is NOT executable — cannot install code cave hook");
@@ -217,7 +217,7 @@ public sealed partial class AiToolFunctions
             }
 
             // 2. Disassemble at the target to determine stolen bytes
-            var disasm = await disassemblyService.DisassembleAtAsync(processId, $"0x{addr:X}", 10);
+            var disasm = await disassemblyService.DisassembleAtAsync(processId, $"0x{addr:X}", 10).ConfigureAwait(false);
 
             // We need at least 14 bytes for a 64-bit JMP (FF 25 00 00 00 00 + 8-byte address)
             const int minJmpSize = 14;
@@ -275,7 +275,7 @@ public sealed partial class AiToolFunctions
             }
 
             // 4. Read the actual bytes that would be overwritten
-            var liveRead = await engineFacade.ReadMemoryAsync(processId, addr, stolenBytes);
+            var liveRead = await engineFacade.ReadMemoryAsync(processId, addr, stolenBytes).ConfigureAwait(false);
             var hexDump = string.Join(" ", liveRead.Bytes.Take(stolenBytes).Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
             sb.AppendLine();
             sb.AppendLine($"### Bytes to be overwritten:");

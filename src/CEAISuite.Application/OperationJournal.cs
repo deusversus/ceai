@@ -150,7 +150,7 @@ public sealed class OperationJournal
                 "Re-attach to the target process and re-create the operation to enable rollback.");
 
         bool success = false;
-        try { success = await entry.RollbackAction(); }
+        try { success = await entry.RollbackAction().ConfigureAwait(false); }
         catch (Exception ex) { System.Diagnostics.Trace.TraceWarning($"[Journal] Rollback failed for {operationId}: {ex.GetType().Name}: {ex.Message}"); }
 
         _entries[operationId] = entry with { Status = success ? JournalEntryStatus.RolledBack : JournalEntryStatus.RollbackFailed };
@@ -169,7 +169,7 @@ public sealed class OperationJournal
         foreach (var id in ids.AsEnumerable().Reverse())
         {
             total++;
-            var result = await RollbackOperationAsync(id);
+            var result = await RollbackOperationAsync(id).ConfigureAwait(false);
             if (result.Success)
             {
                 succeeded++;

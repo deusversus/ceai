@@ -88,7 +88,7 @@ public sealed class StdioMcpTransport : IMcpTransport
 
     public async Task<JsonElement> SendRequestAsync(string method, object? parameters, int requestId, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var request = new
@@ -100,14 +100,14 @@ public sealed class StdioMcpTransport : IMcpTransport
             };
 
             var json = JsonSerializer.Serialize(request, JsonOpts);
-            await _stdin!.WriteLineAsync(json.AsMemory(), ct);
-            await _stdin.FlushAsync(ct);
+            await _stdin!.WriteLineAsync(json.AsMemory(), ct).ConfigureAwait(false);
+            await _stdin.FlushAsync(ct).ConfigureAwait(false);
 
             // Read response lines until we get our id back
             while (true)
             {
                 ct.ThrowIfCancellationRequested();
-                var line = await _stdout!.ReadLineAsync(ct);
+                var line = await _stdout!.ReadLineAsync(ct).ConfigureAwait(false);
                 if (line is null)
                     throw new InvalidOperationException("MCP server closed stdout unexpectedly");
 
@@ -144,7 +144,7 @@ public sealed class StdioMcpTransport : IMcpTransport
 
     public async Task SendNotificationAsync(string method, object? parameters, CancellationToken ct)
     {
-        await _lock.WaitAsync(ct);
+        await _lock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             var notification = new
@@ -155,8 +155,8 @@ public sealed class StdioMcpTransport : IMcpTransport
             };
 
             var json = JsonSerializer.Serialize(notification, JsonOpts);
-            await _stdin!.WriteLineAsync(json.AsMemory(), ct);
-            await _stdin.FlushAsync(ct);
+            await _stdin!.WriteLineAsync(json.AsMemory(), ct).ConfigureAwait(false);
+            await _stdin.FlushAsync(ct).ConfigureAwait(false);
         }
         finally
         {
@@ -207,9 +207,10 @@ public sealed class StdioMcpTransport : IMcpTransport
 /// </summary>
 public sealed class SseMcpTransport : IMcpTransport
 {
+    private static readonly HttpClient s_httpClient = new() { Timeout = TimeSpan.FromMinutes(5) };
+
     private readonly McpServerConfig _config;
     private readonly Action<string, string>? _log;
-    private readonly HttpClient _httpClient;
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = new();
     private CancellationTokenSource? _sseCts;
     private Task? _sseListenerTask;
@@ -220,7 +221,6 @@ public sealed class SseMcpTransport : IMcpTransport
     {
         _config = config;
         _log = log;
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
     }
 
     public bool IsConnected => _connected;
@@ -232,24 +232,24 @@ public sealed class SseMcpTransport : IMcpTransport
 
         _log?.Invoke("MCP", $"[sse] Connecting to {_config.Name} ({sseUrl})");
 
-        // Set auth headers if configured via environment
-        if (_config.Environment?.TryGetValue("MCP_AUTH_TOKEN", out var token) == true)
-            _httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
         // Open SSE stream
         _sseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
 
         var request = new HttpRequestMessage(HttpMethod.Get, sseUrl);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        // Set auth header per-request so the static client stays token-neutral
+        if (_config.Environment?.TryGetValue("MCP_AUTH_TOKEN", out var token) == true)
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await s_httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var stream = await response.Content.ReadAsStreamAsync(ct);
+        var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         var reader = new StreamReader(stream);
 
         // Read the initial endpoint event to discover the message URL
-        _messageEndpoint = await ReadEndpointFromSse(reader, sseUrl, ct);
+        _messageEndpoint = await ReadEndpointFromSse(reader, sseUrl, ct).ConfigureAwait(false);
         _log?.Invoke("MCP", $"[sse] Message endpoint: {_messageEndpoint}");
 
         // Start background listener for response events
@@ -281,11 +281,15 @@ public sealed class SseMcpTransport : IMcpTransport
             var json = JsonSerializer.Serialize(rpcRequest, StdioMcpTransport.JsonOpts);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync(_messageEndpoint, content, ct);
+            var postRequest = new HttpRequestMessage(HttpMethod.Post, _messageEndpoint) { Content = content };
+            if (_config.Environment?.TryGetValue("MCP_AUTH_TOKEN", out var token) == true)
+                postRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+            var response = await s_httpClient.SendAsync(postRequest, ct).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             // Wait for the SSE listener to deliver the matching response
-            return await tcs.Task;
+            return await tcs.Task.ConfigureAwait(false);
         }
         finally
         {
@@ -308,7 +312,11 @@ public sealed class SseMcpTransport : IMcpTransport
         var json = JsonSerializer.Serialize(notification, StdioMcpTransport.JsonOpts);
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-        var response = await _httpClient.PostAsync(_messageEndpoint, content, ct);
+        var notifRequest = new HttpRequestMessage(HttpMethod.Post, _messageEndpoint) { Content = content };
+        if (_config.Environment?.TryGetValue("MCP_AUTH_TOKEN", out var token) == true)
+            notifRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+
+        var response = await s_httpClient.SendAsync(notifRequest, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
     }
 
@@ -322,7 +330,7 @@ public sealed class SseMcpTransport : IMcpTransport
 
         while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync(ct);
+            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
             if (line is null) throw new InvalidOperationException("SSE stream closed before endpoint event");
 
             if (line.StartsWith("event:", StringComparison.Ordinal))
@@ -361,7 +369,7 @@ public sealed class SseMcpTransport : IMcpTransport
         {
             while (!ct.IsCancellationRequested)
             {
-                var line = await reader.ReadLineAsync(ct);
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
                 if (line is null) break; // Stream closed
 
                 if (line.StartsWith("event:", StringComparison.Ordinal))
@@ -430,11 +438,10 @@ public sealed class SseMcpTransport : IMcpTransport
 
         if (_sseListenerTask is not null)
         {
-            try { await _sseListenerTask; } catch (Exception ex) { _log?.Invoke("MCP", $"[sse] Listener task ended: {ex.Message}"); }
+            try { await _sseListenerTask.ConfigureAwait(false); } catch (Exception ex) { _log?.Invoke("MCP", $"[sse] Listener task ended: {ex.Message}"); }
         }
 
         _sseCts?.Dispose();
-        _httpClient.Dispose();
 
         // Cancel all pending requests
         foreach (var (_, tcs) in _pendingRequests)
@@ -505,7 +512,7 @@ public sealed class McpClient : IAsyncDisposable
     {
         _log?.Invoke("MCP", $"Connecting to {_config.Name} via {_config.Transport}");
 
-        await _transport.ConnectAsync(ct);
+        await _transport.ConnectAsync(ct).ConfigureAwait(false);
 
         // Send initialize request
         var initResult = await SendRequestAsync<JsonElement>("initialize", new
@@ -513,12 +520,12 @@ public sealed class McpClient : IAsyncDisposable
             protocolVersion = "2024-11-05",
             capabilities = new { },
             clientInfo = new { name = "CEAISuite", version = "1.0" },
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         _log?.Invoke("MCP", $"Server {_config.Name} initialized: {initResult}");
 
         // Send initialized notification
-        await _transport.SendNotificationAsync("notifications/initialized", null, ct);
+        await _transport.SendNotificationAsync("notifications/initialized", null, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -526,7 +533,7 @@ public sealed class McpClient : IAsyncDisposable
     /// </summary>
     public async Task<List<AIFunction>> DiscoverToolsAsync(CancellationToken ct = default)
     {
-        var result = await SendRequestAsync<McpToolListResult>("tools/list", new { }, ct);
+        var result = await SendRequestAsync<McpToolListResult>("tools/list", new { }, ct).ConfigureAwait(false);
         _discoveredTools.Clear();
 
         var functions = new List<AIFunction>();
@@ -545,7 +552,7 @@ public sealed class McpClient : IAsyncDisposable
             var fn = AIFunctionFactory.Create(
                 async (IDictionary<string, object?> arguments) =>
                 {
-                    return await client.CallToolAsync(mcpToolName, arguments);
+                    return await client.CallToolAsync(mcpToolName, arguments).ConfigureAwait(false);
                 },
                 $"mcp_{serverName}_{mcpToolName}",
                 $"[MCP:{serverName}] {description}");
@@ -568,7 +575,7 @@ public sealed class McpClient : IAsyncDisposable
         {
             name = toolName,
             arguments = arguments ?? new Dictionary<string, object?>(),
-        }, ct);
+        }, ct).ConfigureAwait(false);
 
         if (result.Content is null or { Length: 0 })
             return "(no output)";
@@ -594,11 +601,11 @@ public sealed class McpClient : IAsyncDisposable
             var delay = ReconnectDelays[Math.Min(i, ReconnectDelays.Length - 1)];
             _log?.Invoke("MCP", $"Reconnect attempt {i + 1}/{MaxReconnectAttempts} in {delay.TotalSeconds:F0}s...");
 
-            await Task.Delay(delay, ct);
+            await Task.Delay(delay, ct).ConfigureAwait(false);
 
             try
             {
-                await _transport.ConnectAsync(ct);
+                await _transport.ConnectAsync(ct).ConfigureAwait(false);
                 _reconnectAttempts = 0;
                 _log?.Invoke("MCP", $"Reconnected to {_config.Name}");
                 return true;
@@ -616,13 +623,13 @@ public sealed class McpClient : IAsyncDisposable
     private async Task<T> SendRequestAsync<T>(string method, object? parameters, CancellationToken ct)
     {
         var id = Interlocked.Increment(ref _requestId);
-        var result = await _transport.SendRequestAsync(method, parameters, id, ct);
+        var result = await _transport.SendRequestAsync(method, parameters, id, ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<T>(result.GetRawText(), StdioMcpTransport.JsonOpts)!;
     }
 
     public async ValueTask DisposeAsync()
     {
-        await _transport.DisposeAsync();
+        await _transport.DisposeAsync().ConfigureAwait(false);
     }
 
     /// <summary>Create the default transport based on config.</summary>
@@ -729,8 +736,8 @@ public sealed class McpManager : IAsyncDisposable
 
         try
         {
-            await client.ConnectAsync(ct);
-            var tools = await client.DiscoverToolsAsync(ct);
+            await client.ConnectAsync(ct).ConfigureAwait(false);
+            var tools = await client.DiscoverToolsAsync(ct).ConfigureAwait(false);
             lock (_clientsLock) _clients.Add(client);
             _log?.Invoke("MCP", $"Server '{config.Name}' connected via {config.Transport} with {tools.Count} tools");
             return tools;
@@ -738,7 +745,7 @@ public sealed class McpManager : IAsyncDisposable
         catch (Exception ex)
         {
             _log?.Invoke("MCP", $"Failed to connect to '{config.Name}': {ex.Message}");
-            await client.DisposeAsync();
+            await client.DisposeAsync().ConfigureAwait(false);
             throw;
         }
     }
@@ -755,7 +762,7 @@ public sealed class McpManager : IAsyncDisposable
             _clients.Remove(client);
         }
 
-        await client.DisposeAsync();
+        await client.DisposeAsync().ConfigureAwait(false);
         _log?.Invoke("MCP", $"Server '{name}' disconnected");
     }
 
@@ -783,6 +790,6 @@ public sealed class McpManager : IAsyncDisposable
         }
 
         foreach (var client in snapshot)
-            await client.DisposeAsync();
+            await client.DisposeAsync().ConfigureAwait(false);
     }
 }

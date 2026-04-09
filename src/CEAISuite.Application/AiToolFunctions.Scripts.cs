@@ -155,7 +155,7 @@ public sealed partial class AiToolFunctions
                         var modName = parts[0].Trim();
                         var offsetStr = parts[1].Trim();
 
-                        var attachment = await engineFacade.AttachAsync(processId);
+                        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
                         var mod = attachment.Modules.FirstOrDefault(m =>
                             m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
 
@@ -178,7 +178,7 @@ public sealed partial class AiToolFunctions
                         .Select(b => byte.Parse(b, NumberStyles.HexNumber, CultureInfo.InvariantCulture))
                         .ToArray();
 
-                    var liveRead = await engineFacade.ReadMemoryAsync(processId, assertAddr, expectedBytes.Length);
+                    var liveRead = await engineFacade.ReadMemoryAsync(processId, assertAddr, expectedBytes.Length).ConfigureAwait(false);
                     var liveBytes = liveRead.Bytes.ToArray();
 
                     if (liveBytes.SequenceEqual(expectedBytes))
@@ -223,7 +223,7 @@ public sealed partial class AiToolFunctions
                     {
                         var modName = match.Groups[1].Value;
                         var offsetStr = match.Groups[2].Value;
-                        var attachment = await engineFacade.AttachAsync(processId);
+                        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
                         var mod = attachment.Modules.FirstOrDefault(m =>
                             m.Name.Equals(modName, StringComparison.OrdinalIgnoreCase));
                         if (mod is null) continue;
@@ -234,7 +234,7 @@ public sealed partial class AiToolFunctions
                         hookAddr = ParseAddress(match.Groups[3].Value);
                     }
 
-                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, hookAddr);
+                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, hookAddr).ConfigureAwait(false);
                     if (region.IsExecutable)
                     {
                         sb.AppendLine(CultureInfo.InvariantCulture, $"✅ Hook target 0x{hookAddr:X}: executable ({(region.IsWritable ? "RWX" : "RX")})");
@@ -356,7 +356,7 @@ public sealed partial class AiToolFunctions
 
         try
         {
-            var result = await autoAssemblerEngine.EnableAsync(processId, script);
+            var result = await autoAssemblerEngine.EnableAsync(processId, script).ConfigureAwait(false);
             if (result.Success)
                 return $"Script ENABLED successfully. {result.Allocations.Count} allocations, {result.Patches.Count} patches applied.";
             else
@@ -386,7 +386,7 @@ public sealed partial class AiToolFunctions
 
         try
         {
-            var result = await autoAssemblerEngine.DisableAsync(processId, script);
+            var result = await autoAssemblerEngine.DisableAsync(processId, script).ConfigureAwait(false);
             if (result.Success)
                 return $"Script DISABLED successfully. {result.Patches.Count} patches restored.";
             else

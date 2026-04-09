@@ -62,18 +62,18 @@ public sealed class AgentLoop
             try
             {
                 await RunLoopAsync(userMessage, history, channel.Writer,
-                    contextProvider, activeCategories, cancellationToken);
+                    contextProvider, activeCategories, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error("Stopped by user."));
+                    new AgentStreamEvent.Error("Stopped by user.")).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _log?.Invoke("LOOP", $"Unhandled error: {ex}");
                 await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error($"Agent error: {ex.Message}"));
+                    new AgentStreamEvent.Error($"Agent error: {ex.Message}")).ConfigureAwait(false);
             }
             finally
             {
@@ -102,18 +102,18 @@ public sealed class AgentLoop
             try
             {
                 await RunLoopAsync(null, history, channel.Writer,
-                    contextProvider, activeCategories, cancellationToken);
+                    contextProvider, activeCategories, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error("Stopped by user."));
+                    new AgentStreamEvent.Error("Stopped by user.")).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _log?.Invoke("LOOP", $"Unhandled error: {ex}");
                 await channel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error($"Agent error: {ex.Message}"));
+                    new AgentStreamEvent.Error($"Agent error: {ex.Message}")).ConfigureAwait(false);
             }
             finally
             {
@@ -192,12 +192,12 @@ public sealed class AgentLoop
                     Options = chatOptions,
                     TurnNumber = state.TurnCount,
                 };
-                var preLlmResult = await preLlmHooks.RunPreLlmHooksAsync(preLlmCtx, ct);
+                var preLlmResult = await preLlmHooks.RunPreLlmHooksAsync(preLlmCtx, ct).ConfigureAwait(false);
                 if (preLlmResult.Outcome == HookOutcome.Block)
                 {
                     _log?.Invoke("HOOK", $"Pre-LLM hook blocked LLM call: {preLlmResult.Message}");
                     await channel.WriteAsync(
-                        new AgentStreamEvent.TextDelta($"\n[LLM call blocked by hook: {preLlmResult.Message}]"), ct);
+                        new AgentStreamEvent.TextDelta($"\n[LLM call blocked by hook: {preLlmResult.Message}]"), ct).ConfigureAwait(false);
                     state = state with { Transition = AgentTransition.Completed };
                     break;
                 }
@@ -205,7 +205,7 @@ public sealed class AgentLoop
 
             // Call LLM with retry
             var (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks) =
-                await CallLlmWithRetry(history, chatOptions, channel, state, ct);
+                await CallLlmWithRetry(history, chatOptions, channel, state, ct).ConfigureAwait(false);
 
             // Handle max output tokens recovery
             if (ErrorClassifier.IsMaxOutputTokens(finishReason) && toolCalls.Count == 0)
@@ -244,7 +244,7 @@ public sealed class AgentLoop
                         TotalToolCalls = state.TotalToolCalls,
                         LastAssistantText = assistantText,
                     };
-                    var stopResult = await stopHooks.RunStopHooksAsync(stopCtx, ct);
+                    var stopResult = await stopHooks.RunStopHooksAsync(stopCtx, ct).ConfigureAwait(false);
                     if (stopResult.Outcome == HookOutcome.Block)
                     {
                         _log?.Invoke("HOOK", $"Stop hook forced continuation: {stopResult.Message}");
@@ -276,7 +276,7 @@ public sealed class AgentLoop
             List<ToolExecutor.ToolCallResult> results;
             try
             {
-                results = await _toolExecutor.ExecuteAsync(toolCalls, channel, ct, speculativeTasks);
+                results = await _toolExecutor.ExecuteAsync(toolCalls, channel, ct, speculativeTasks).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -295,7 +295,7 @@ public sealed class AgentLoop
             {
                 var byTool = results.GroupBy(r => r.Call.Name ?? "unknown")
                     .ToDictionary(g => g.Key, g => g.Count());
-                await channel.WriteAsync(new AgentStreamEvent.ToolUseSummary(results.Count, byTool), ct);
+                await channel.WriteAsync(new AgentStreamEvent.ToolUseSummary(results.Count, byTool), ct).ConfigureAwait(false);
             }
 
             state = state with
@@ -333,7 +333,7 @@ public sealed class AgentLoop
                 var snapshot = PostCompactionRestorer.CaptureSnapshot(
                     history, activeCategories ?? new HashSet<string>(), contextProvider);
 
-                var compactionResult = await _compactionPipeline.CompactAsync(history, ct);
+                var compactionResult = await _compactionPipeline.CompactAsync(history, ct).ConfigureAwait(false);
                 if (compactionResult.Success)
                 {
                     PostCompactionRestorer.Restore(history, snapshot);
@@ -351,9 +351,9 @@ public sealed class AgentLoop
                     }
 
                     // Notify UI that old messages were compacted away
-                    await channel.WriteAsync(new AgentStreamEvent.Tombstone("compacted"), ct);
+                    await channel.WriteAsync(new AgentStreamEvent.Tombstone("compacted"), ct).ConfigureAwait(false);
                     await channel.WriteAsync(new AgentStreamEvent.ContentReplace(
-                        "compacted", "[Context compacted — earlier messages summarized]"), ct);
+                        "compacted", "[Context compacted — earlier messages summarized]"), ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -370,7 +370,7 @@ public sealed class AgentLoop
 
         // Emit completion
         await channel.WriteAsync(
-            new AgentStreamEvent.Completed(state.TotalToolCalls, sw.Elapsed), ct);
+            new AgentStreamEvent.Completed(state.TotalToolCalls, sw.Elapsed), ct).ConfigureAwait(false);
     }
 
     private async Task<(string assistantText, List<FunctionCallContent> toolCalls, int outputTokens, string? finishReason, Dictionary<string, Task<ToolExecutor.ToolCallResult>>? speculativeTasks)>
@@ -406,7 +406,7 @@ public sealed class AgentLoop
                     if (content is TextContent tc && !string.IsNullOrEmpty(tc.Text))
                     {
                         assistantText += tc.Text;
-                        await channel.WriteAsync(new AgentStreamEvent.TextDelta(tc.Text), retryCt);
+                        await channel.WriteAsync(new AgentStreamEvent.TextDelta(tc.Text), retryCt).ConfigureAwait(false);
                     }
                     else if (content is FunctionCallContent fc)
                     {
@@ -447,7 +447,7 @@ public sealed class AgentLoop
             return (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks);
         },
         onHeartbeat: msg => channel.TryWrite(new AgentStreamEvent.TextDelta($"\n[{msg}]\n")),
-        cancellationToken: ct);
+        cancellationToken: ct).ConfigureAwait(false);
 
         if (retryResult.Success)
         {
@@ -459,12 +459,12 @@ public sealed class AgentLoop
             && state.ConsecutiveCompactionFailures < AgentLoopState.MaxConsecutiveCompactionFailures)
         {
             _log?.Invoke("LOOP", "Prompt too long — triggering compaction and retry");
-            var compactionResult = await _compactionPipeline.CompactAsync(history, ct);
+            var compactionResult = await _compactionPipeline.CompactAsync(history, ct).ConfigureAwait(false);
             var compactedState = compactionResult.Success
                 ? state with { ConsecutiveCompactionFailures = 0, LastCompactionTurn = state.TurnCount }
                 : state with { ConsecutiveCompactionFailures = state.ConsecutiveCompactionFailures + 1, LastCompactionTurn = state.TurnCount };
             return await CallLlmWithRetry(history, BuildChatOptions(compactedState), channel,
-                compactedState, ct);
+                compactedState, ct).ConfigureAwait(false);
         }
 
         if (retryResult.NeedsModelFallback)
@@ -475,14 +475,14 @@ public sealed class AgentLoop
                 if (retryResult.NeedsFastModeCooldown)
                 {
                     switcher.TriggerCooldown(RetryPolicy.FastModeCooldownDuration);
-                    return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct);
+                    return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct).ConfigureAwait(false);
                 }
 
                 var fallback = switcher.FallbackToNext();
                 if (fallback is not null)
                 {
                     _log?.Invoke("LOOP", $"Model fallback: switching to {fallback.ModelId}");
-                    return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct);
+                    return await CallLlmWithRetry(history, BuildChatOptions(state), channel, state, ct).ConfigureAwait(false);
                 }
                 _log?.Invoke("LOOP", "Model fallback exhausted — no more fallback models");
             }
@@ -499,7 +499,7 @@ public sealed class AgentLoop
             var adjustedState = state with { MaxOutputTokensOverride = retryResult.AdjustedMaxTokens };
             var adjustedOptions = BuildChatOptions(adjustedState);
             return await CallLlmWithRetry(history, adjustedOptions, channel,
-                adjustedState, ct);
+                adjustedState, ct).ConfigureAwait(false);
         }
 
         // All retries failed

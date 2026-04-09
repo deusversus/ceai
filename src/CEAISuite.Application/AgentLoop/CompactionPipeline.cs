@@ -56,7 +56,7 @@ public sealed class CompactionPipeline
             if (history.EstimateTokens() > _limits.CompactionSummarizationTokens)
             {
                 _log?.Invoke("COMPACT", $"Stage 2: LLM summarization (~{history.EstimateTokens():#,0} tokens > {_limits.CompactionSummarizationTokens:#,0})");
-                await SummarizeOlderMessages(history, cancellationToken);
+                await SummarizeOlderMessages(history, cancellationToken).ConfigureAwait(false);
                 compacted = true;
             }
 
@@ -170,7 +170,7 @@ public sealed class CompactionPipeline
                     new ChatMessage(ChatRole.User, summaryText),
                 ],
                 new ChatOptions { MaxOutputTokens = 4096, Temperature = 0.1f },
-                ct);
+                ct).ConfigureAwait(false);
 
             var summary = summaryResponse.Text ?? "[summary unavailable]";
             _log?.Invoke("COMPACT", $"Summarized {summarizeCount} messages into {summary.Length} chars");

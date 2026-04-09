@@ -461,7 +461,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         // Always refresh module list — base addresses change due to ASLR on every process restart
         try
         {
-            var attachment = await engineFacade.AttachAsync(processId, cancellationToken);
+            var attachment = await engineFacade.AttachAsync(processId, cancellationToken).ConfigureAwait(false);
             var arch = "x64"; // default
             try { arch = TryDetectArchitecture(processId); }
             catch (Exception archEx) { Log("Warning", $"Architecture detection failed for PID {processId}: {archEx.Message}"); }
@@ -480,7 +480,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
             }
             return;
         }
-        await RefreshNodes(_roots, processId, cancellationToken);
+        await RefreshNodes(_roots, processId, cancellationToken).ConfigureAwait(false);
     }
 
     private static string TryDetectArchitecture(int processId)
@@ -512,7 +512,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                 {
                     try
                     {
-                        var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
+                        var resolvedAddr = await ResolveAddress(node, processId, cancellationToken).ConfigureAwait(false);
                         node.ResolvedAddress = resolvedAddr != nuint.Zero ? resolvedAddr : null;
                     }
                     catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "Failed to resolve address for node {Label}", node.Label); node.ResolvedAddress = null; }
@@ -524,7 +524,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                     SetChildrenUnresolved(node);
                     continue;
                 }
-                await RefreshNodes(node.Children, processId, cancellationToken);
+                await RefreshNodes(node.Children, processId, cancellationToken).ConfigureAwait(false);
                 continue;
             }
 
@@ -532,7 +532,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
 
             try
             {
-                var resolvedAddr = await ResolveAddress(node, processId, cancellationToken);
+                var resolvedAddr = await ResolveAddress(node, processId, cancellationToken).ConfigureAwait(false);
                 if (resolvedAddr == nuint.Zero)
                 {
                     node.ResolvedAddress = null;
@@ -541,7 +541,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                 }
                 node.ResolvedAddress = resolvedAddr;
 
-                var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, node.DataType, cancellationToken);
+                var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, node.DataType, cancellationToken).ConfigureAwait(false);
                 node.PreviousValue = node.CurrentValue;
 
                 // Format the display value: hex mode, unsigned mode, or default
@@ -562,7 +562,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
 
                 if (node.IsLocked && node.LockedValue is not null)
                 {
-                    await engineFacade.WriteValueAsync(processId, resolvedAddr, node.DataType, node.LockedValue, cancellationToken);
+                    await engineFacade.WriteValueAsync(processId, resolvedAddr, node.DataType, node.LockedValue, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
@@ -573,7 +573,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
             }
             // Also recurse into any children of this entry
             if (node.Children.Count > 0)
-                await RefreshNodes(node.Children, processId, cancellationToken);
+                await RefreshNodes(node.Children, processId, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -618,7 +618,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
         {
             // Read pointer at current address
             var ptrSize = _is32Bit ? 4 : 8;
-            var ptrRead = await engineFacade.ReadMemoryAsync(processId, current, ptrSize, ct);
+            var ptrRead = await engineFacade.ReadMemoryAsync(processId, current, ptrSize, ct).ConfigureAwait(false);
             var ptrBytes = ptrRead.Bytes.ToArray();
             var ptrValue = _is32Bit
                 ? (nuint)BitConverter.ToUInt32(ptrBytes, 0)
@@ -828,8 +828,8 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
     /// <summary>Write a node's current value to process memory.</summary>
     public async Task WriteValueAsync(int processId, AddressTableNode node, CancellationToken ct = default)
     {
-        var addr = node.ResolvedAddress ?? await ResolveAddress(node, processId, ct);
+        var addr = node.ResolvedAddress ?? await ResolveAddress(node, processId, ct).ConfigureAwait(false);
         if (addr == nuint.Zero) throw new InvalidOperationException("Cannot resolve address for this entry.");
-        await engineFacade.WriteValueAsync(processId, addr, node.DataType, node.CurrentValue, ct);
+        await engineFacade.WriteValueAsync(processId, addr, node.DataType, node.CurrentValue, ct).ConfigureAwait(false);
     }
 }

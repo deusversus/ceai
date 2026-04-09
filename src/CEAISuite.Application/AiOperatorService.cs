@@ -178,7 +178,7 @@ internal static class ToolCategories
 }
 
 [SupportedOSPlatform("windows")]
-public sealed class AiOperatorService : IDisposable
+public sealed class AiOperatorService : IDisposable, IAsyncDisposable
 {
     private const int DefaultMaxContextTokens = 200_000;
 
@@ -689,12 +689,12 @@ public sealed class AiOperatorService : IDisposable
                         {
                             var remaining = cooldown - elapsed;
                             UpdateStatus($"Rate limited — waiting {remaining.TotalSeconds:F1}s…");
-                            await Task.Delay(remaining, cancellationToken);
+                            await Task.Delay(remaining, cancellationToken).ConfigureAwait(false);
                         }
                         else
                         {
                             await outerChannel.Writer.WriteAsync(
-                                new AgentStreamEvent.Error($"Rate limited: wait {(cooldown - elapsed).TotalSeconds:F0}s"), cancellationToken);
+                                new AgentStreamEvent.Error($"Rate limited: wait {(cooldown - elapsed).TotalSeconds:F0}s"), cancellationToken).ConfigureAwait(false);
                             outerChannel.Writer.Complete();
                             return;
                         }
@@ -719,7 +719,7 @@ public sealed class AiOperatorService : IDisposable
 
             var toolCalls = new List<AiToolCallInfo>();
             var toolResults = new List<AiToolResultInfo>();
-            var assistantText = "";
+            var assistantTextSb = new System.Text.StringBuilder();
             int toolCallCount = 0;
 
             try
@@ -733,7 +733,7 @@ public sealed class AiOperatorService : IDisposable
                     switch (evt)
                     {
                         case AgentStreamEvent.TextDelta delta:
-                            assistantText += delta.Text;
+                            assistantTextSb.Append(delta.Text);
                             break;
 
                         case AgentStreamEvent.ToolCallStarted started:
@@ -768,7 +768,7 @@ public sealed class AiOperatorService : IDisposable
                     }
 
                     // Forward all events to the outer channel for the ViewModel
-                    await outerChannel.Writer.WriteAsync(evt, cancellationToken);
+                    await outerChannel.Writer.WriteAsync(evt, cancellationToken).ConfigureAwait(false);
                 }
 
                 // Pending images — inject as DataContent so vision-capable models can analyze them
@@ -797,8 +797,8 @@ public sealed class AiOperatorService : IDisposable
                         await foreach (var evt in imageReader.ReadAllAsync(cancellationToken))
                         {
                             if (evt is AgentStreamEvent.TextDelta delta)
-                                assistantText += "\n" + delta.Text;
-                            await outerChannel.Writer.WriteAsync(evt, cancellationToken);
+                                assistantTextSb.Append('\n').Append(delta.Text);
+                            await outerChannel.Writer.WriteAsync(evt, cancellationToken).ConfigureAwait(false);
                         }
                     }
                     while (_toolFunctions.PendingImages.TryDequeue(out _))
@@ -815,6 +815,7 @@ public sealed class AiOperatorService : IDisposable
                 if (_tokenBudget.EstimatedCostUsd > 0)
                     _sessionMetadata.CumulativeCost = _tokenBudget.EstimatedCostUsd;
 
+                var assistantText = assistantTextSb.ToString();
                 if (string.IsNullOrWhiteSpace(assistantText))
                     assistantText = "(Tool calls executed — see action log for details)";
 
@@ -845,7 +846,7 @@ public sealed class AiOperatorService : IDisposable
                 Log("INFO", "Streaming cancelled by user (new loop)");
                 UpdateStatus("Stopped");
                 _displayHistory.Add(new AiChatMessage("assistant",
-                    assistantText.Length > 0 ? assistantText + "\n\n" + cancelMsg : cancelMsg,
+                    assistantTextSb.Length > 0 ? assistantTextSb.ToString() + "\n\n" + cancelMsg : cancelMsg,
                     DateTimeOffset.UtcNow)
                 {
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,
@@ -853,7 +854,7 @@ public sealed class AiOperatorService : IDisposable
                 });
                 SaveCurrentChat();
                 await outerChannel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error(cancelMsg), CancellationToken.None);
+                    new AgentStreamEvent.Error(cancelMsg), CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -862,7 +863,7 @@ public sealed class AiOperatorService : IDisposable
                 UpdateStatus("Error");
                 _displayHistory.Add(new AiChatMessage("assistant", errorMsg, DateTimeOffset.UtcNow));
                 await outerChannel.Writer.WriteAsync(
-                    new AgentStreamEvent.Error(errorMsg), CancellationToken.None);
+                    new AgentStreamEvent.Error(errorMsg), CancellationToken.None).ConfigureAwait(false);
             }
             finally
             {
@@ -1208,7 +1209,7 @@ public sealed class AiOperatorService : IDisposable
                     AutoConnect = entry.AutoConnect,
                 };
 
-                var discoveredTools = await _mcpManager.AddServerAsync(config);
+                var discoveredTools = await _mcpManager.AddServerAsync(config).ConfigureAwait(false);
 
                 // Inject discovered MCP tools into the tool index
                 foreach (var fn in discoveredTools)
@@ -1320,7 +1321,7 @@ public sealed class AiOperatorService : IDisposable
                     presetRequest = presetRequest with { Description = description };
 
                 if (_subagentManager is null) return "SubagentManager not initialized. Start a new chat first.";
-                var presetResults = await _subagentManager.SpawnAndWaitAsync(new[] { presetRequest });
+                var presetResults = await _subagentManager.SpawnAndWaitAsync(new[] { presetRequest }).ConfigureAwait(false);
                 return presetResults[0].Text;
             }
             return $"Unknown preset: '{preset}'. Available: explore, plan, verify, script";
@@ -1344,7 +1345,7 @@ public sealed class AiOperatorService : IDisposable
         Log("SUBAGENT", $"Spawned [{handle.Id}]: {description}");
 
         // Wait for the subagent to complete
-        var result = await handle.Task;
+        var result = await handle.Task.ConfigureAwait(false);
         return result.Success
             ? $"[Subagent completed: {result.ToolCallCount} tool calls, {result.Duration.TotalSeconds:F1}s]\n\n{result.Text}"
             : $"[Subagent failed: {result.Duration.TotalSeconds:F1}s]\n\n{result.Text}";
@@ -1359,7 +1360,7 @@ public sealed class AiOperatorService : IDisposable
         if (_planExecutor is null || _historyManager is null)
             return "Plan system not initialized.";
 
-        var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider);
+        var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider).ConfigureAwait(false);
 
         // Format the plan for display
         var sb = new System.Text.StringBuilder();
@@ -1403,7 +1404,7 @@ public sealed class AiOperatorService : IDisposable
             return "Plan system not initialized.";
 
         // Phase 1: Generate the plan
-        var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider);
+        var plan = await _planExecutor.GeneratePlanAsync(task, _historyManager, _contextProvider).ConfigureAwait(false);
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(CultureInfo.InvariantCulture, $"## Executing Plan: {plan.Title}");
@@ -1509,7 +1510,7 @@ public sealed class AiOperatorService : IDisposable
             var endCtx = new SessionLifecycleContext { SessionId = CurrentChatId, IsNewSession = false };
             _ = Task.Run(async () =>
             {
-                try { await endHooks.RunSessionEndHooksAsync(endCtx, CancellationToken.None); }
+                try { await endHooks.RunSessionEndHooksAsync(endCtx, CancellationToken.None).ConfigureAwait(false); }
                 catch (Exception ex) { Log("HOOK", $"Session end hook error: {ex}"); }
             });
         }
@@ -1531,7 +1532,7 @@ public sealed class AiOperatorService : IDisposable
             var startCtx = new SessionLifecycleContext { SessionId = CurrentChatId, IsNewSession = true };
             _ = Task.Run(async () =>
             {
-                try { await startHooks.RunSessionStartHooksAsync(startCtx, CancellationToken.None); }
+                try { await startHooks.RunSessionStartHooksAsync(startCtx, CancellationToken.None).ConfigureAwait(false); }
                 catch (Exception ex) { Log("HOOK", $"Session start hook error: {ex}"); }
             });
         }
@@ -1731,7 +1732,7 @@ public sealed class AiOperatorService : IDisposable
                             Task = task.Prompt,
                             Description = $"[Scheduled] {task.Description}",
                             MaxTurns = 10,
-                        }]);
+                        }]).ConfigureAwait(false);
                     var text = results[0].Text ?? "(no output)"; Log("SCHEDULER", $"Task {task.Id} completed: {text[..Math.Min(200, text.Length)]}");
                 }
                 catch (Exception ex) { Log("SCHEDULER", $"Task {task.Id} failed: {ex}"); }
@@ -1764,7 +1765,7 @@ public sealed class AiOperatorService : IDisposable
                     Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                     "CEAISuite", "plugins"),
             };
-            var count = await _pluginHost.LoadAllAsync(ctx);
+            var count = await _pluginHost.LoadAllAsync(ctx).ConfigureAwait(false);
             if (count > 0)
             {
                 foreach (var tool in _pluginHost.GetAllTools())
@@ -1778,16 +1779,38 @@ public sealed class AiOperatorService : IDisposable
         catch (Exception ex) { Log("PLUGIN", $"Plugin loading failed: {ex}"); }
     }
 
+    public async ValueTask DisposeAsync()
+    {
+        try
+        {
+            await _mcpManager.DisposeAsync().ConfigureAwait(false);
+            if (_pluginHost is not null)
+                await _pluginHost.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            Log("DISPOSE", $"DisposeAsync error (non-fatal): {ex}");
+        }
+        _taskScheduler?.Dispose();
+    }
+
     public void Dispose()
     {
         try
         {
-            Task.Run(async () =>
+            // Fire-and-forget with timeout — DisposeAsync is the preferred path.
+            // This fallback avoids the 5s hang when callers use IDisposable.
+            _ = Task.Run(async () =>
             {
-                await _mcpManager.DisposeAsync();
-                if (_pluginHost is not null)
-                    await _pluginHost.DisposeAsync();
-            }).Wait(TimeSpan.FromSeconds(5));
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await _mcpManager.DisposeAsync().ConfigureAwait(false);
+                    if (_pluginHost is not null)
+                        await _pluginHost.DisposeAsync().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { }
+            });
         }
         catch (Exception ex)
         {

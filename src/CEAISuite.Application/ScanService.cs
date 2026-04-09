@@ -61,8 +61,8 @@ public sealed class ScanService(IScanEngine scanEngine)
     {
         var constraints = new ScanConstraints(dataType, scanType, value?.Trim());
         var results = options is not null
-            ? await scanEngine.StartScanAsync(processId, constraints, options, progress, cancellationToken)
-            : await scanEngine.StartScanAsync(processId, constraints, cancellationToken);
+            ? await scanEngine.StartScanAsync(processId, constraints, options, progress, cancellationToken).ConfigureAwait(false)
+            : await scanEngine.StartScanAsync(processId, constraints, cancellationToken).ConfigureAwait(false);
         _scanHistory.Clear(); // new scan clears history
         _lastScanResults = results;
         return ToOverview(results, options?.ShowAsHex ?? false);
@@ -101,8 +101,8 @@ public sealed class ScanService(IScanEngine scanEngine)
 
         var refinement = new ScanConstraints(_lastScanResults.Constraints.DataType, scanType, value?.Trim());
         var results = options is not null
-            ? await scanEngine.RefineScanAsync(_lastScanResults, refinement, options, progress, cancellationToken)
-            : await scanEngine.RefineScanAsync(_lastScanResults, refinement, cancellationToken);
+            ? await scanEngine.RefineScanAsync(_lastScanResults, refinement, options, progress, cancellationToken).ConfigureAwait(false)
+            : await scanEngine.RefineScanAsync(_lastScanResults, refinement, cancellationToken).ConfigureAwait(false);
         _lastScanResults = results;
         return ToOverview(results, options?.ShowAsHex ?? false);
     }
@@ -129,7 +129,7 @@ public sealed class ScanService(IScanEngine scanEngine)
         IProgress<ScanProgress>? progress = null,
         CancellationToken cancellationToken = default)
     {
-        return await scanEngine.GroupedScanAsync(processId, groups, options, progress, cancellationToken);
+        return await scanEngine.GroupedScanAsync(processId, groups, options, progress, cancellationToken).ConfigureAwait(false);
     }
 
     public Task<IReadOnlyList<MemoryRegionDescriptor>> EnumerateRegionsAsync(

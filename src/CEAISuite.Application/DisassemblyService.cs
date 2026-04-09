@@ -24,7 +24,7 @@ public sealed class DisassemblyService(IDisassemblyEngine disassemblyEngine)
         CancellationToken cancellationToken = default)
     {
         var address = ParseAddress(addressText);
-        var result = await disassemblyEngine.DisassembleAsync(processId, address, maxInstructions, cancellationToken);
+        var result = await disassemblyEngine.DisassembleAsync(processId, address, maxInstructions, cancellationToken).ConfigureAwait(false);
 
         var lines = result.Instructions
             .Select(

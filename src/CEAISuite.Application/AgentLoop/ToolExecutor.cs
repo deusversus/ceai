@@ -66,16 +66,16 @@ public sealed class ToolExecutor
             if (speculativeResults?.TryGetValue(callId, out var specTask) == true
                 && specTask.IsCompletedSuccessfully)
             {
-                var specResult = await specTask;
+                var specResult = await specTask.ConfigureAwait(false);
                 _log?.Invoke("SPECULATIVE", $"Using pre-computed result for {toolCalls[0].Name}");
                 await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(
-                    toolCalls[0].Name ?? "unknown", FormatArguments(toolCalls[0])), cancellationToken);
+                    toolCalls[0].Name ?? "unknown", FormatArguments(toolCalls[0])), cancellationToken).ConfigureAwait(false);
                 await channel.WriteAsync(new AgentStreamEvent.ToolCallCompleted(
-                    toolCalls[0].Name ?? "unknown", Truncate(specResult.Result.Result?.ToString() ?? "", 200)), cancellationToken);
+                    toolCalls[0].Name ?? "unknown", Truncate(specResult.Result.Result?.ToString() ?? "", 200)), cancellationToken).ConfigureAwait(false);
                 return [specResult];
             }
 
-            var result = await ExecuteSingleAsync(toolCalls[0], channel, cancellationToken);
+            var result = await ExecuteSingleAsync(toolCalls[0], channel, cancellationToken).ConfigureAwait(false);
             return [result];
         }
 
@@ -96,15 +96,15 @@ public sealed class ToolExecutor
                 // Flush any accumulated parallel batch first
                 if (parallelBatch.Count > 0)
                 {
-                    await ExecuteParallelBatch(parallelBatch, allResults, channel, cancellationToken);
+                    await ExecuteParallelBatch(parallelBatch, allResults, channel, cancellationToken).ConfigureAwait(false);
                     parallelBatch.Clear();
                 }
 
-                var specResult = await specTask;
+                var specResult = await specTask.ConfigureAwait(false);
                 _log?.Invoke("SPECULATIVE", $"Using pre-computed result for {name}");
-                await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(name, FormatArguments(call)), cancellationToken);
+                await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(name, FormatArguments(call)), cancellationToken).ConfigureAwait(false);
                 await channel.WriteAsync(new AgentStreamEvent.ToolCallCompleted(name,
-                    Truncate(specResult.Result.Result?.ToString() ?? "", 200)), cancellationToken);
+                    Truncate(specResult.Result.Result?.ToString() ?? "", 200)), cancellationToken).ConfigureAwait(false);
                 allResults[i] = specResult;
                 continue;
             }
@@ -121,17 +121,17 @@ public sealed class ToolExecutor
                 // Flush any accumulated parallel batch first
                 if (parallelBatch.Count > 0)
                 {
-                    await ExecuteParallelBatch(parallelBatch, allResults, channel, cancellationToken);
+                    await ExecuteParallelBatch(parallelBatch, allResults, channel, cancellationToken).ConfigureAwait(false);
                     parallelBatch.Clear();
                 }
                 // Execute serial call
-                allResults[i] = await ExecuteSingleAsync(call, channel, cancellationToken);
+                allResults[i] = await ExecuteSingleAsync(call, channel, cancellationToken).ConfigureAwait(false);
             }
         }
 
         // Flush trailing parallel batch
         if (parallelBatch.Count > 0)
-            await ExecuteParallelBatch(parallelBatch, allResults, channel, cancellationToken);
+            await ExecuteParallelBatch(parallelBatch, allResults, channel, cancellationToken).ConfigureAwait(false);
 
         return [.. allResults];
     }
@@ -169,7 +169,7 @@ public sealed class ToolExecutor
         return Task.Run(async () =>
         {
             var toolName = call.Name ?? "unknown";
-            var (result, isError) = await InvokeToolAsync(call, ct);
+            var (result, isError) = await InvokeToolAsync(call, ct).ConfigureAwait(false);
             Interlocked.Increment(ref _totalToolCalls);
             var capped = CapResult(toolName, result);
             return new ToolCallResult(call, CreateResult(call, capped), isError);
@@ -187,7 +187,7 @@ public sealed class ToolExecutor
         if (batch.Count == 1)
         {
             // Single item — no parallelism needed
-            results[batch[0].Index] = await ExecuteSingleAsync(batch[0].Call, channel, ct);
+            results[batch[0].Index] = await ExecuteSingleAsync(batch[0].Call, channel, ct).ConfigureAwait(false);
             return;
         }
 
@@ -200,7 +200,7 @@ public sealed class ToolExecutor
         {
             var name = call.Name ?? "unknown";
             await channel.WriteAsync(
-                new AgentStreamEvent.ToolCallStarted(name, FormatArguments(call)), ct);
+                new AgentStreamEvent.ToolCallStarted(name, FormatArguments(call)), ct).ConfigureAwait(false);
         }
 
         // Execute all in parallel with semaphore throttling
@@ -208,7 +208,7 @@ public sealed class ToolExecutor
         // but without the serial-only event emission for "started" — those were emitted above).
         var tasks = batch.Select(async item =>
         {
-            await semaphore.WaitAsync(ct);
+            await semaphore.WaitAsync(ct).ConfigureAwait(false);
             try
             {
                 var call = item.Call;
@@ -225,7 +225,7 @@ public sealed class ToolExecutor
                         TurnNumber = TurnNumber,
                         TotalToolCalls = _totalToolCalls,
                     };
-                    var hookResult = await hooks.RunPreToolHooksAsync(hookCtx, ct);
+                    var hookResult = await hooks.RunPreToolHooksAsync(hookCtx, ct).ConfigureAwait(false);
                     if (hookResult.Outcome == HookOutcome.Block)
                     {
                         var msg = hookResult.Message ?? $"Tool '{toolName}' blocked by hook";
@@ -238,7 +238,7 @@ public sealed class ToolExecutor
                 // Permission check (skip Ask if hook granted, but still enforce Deny)
                 if (!hookGrantedPermission)
                 {
-                    var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, ct);
+                    var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, ct).ConfigureAwait(false);
                     if (permResult is not null)
                         return (item.Index, (permResult.Result.Result?.ToString() ?? "denied", true));
                 }
@@ -253,7 +253,7 @@ public sealed class ToolExecutor
                 }
 
                 // Invoke tool
-                var result = await InvokeToolAsync(call, ct);
+                var result = await InvokeToolAsync(call, ct).ConfigureAwait(false);
                 Interlocked.Increment(ref _totalToolCalls);
 
                 // Post-tool hooks: failure hooks for errors, success hooks for success
@@ -267,7 +267,7 @@ public sealed class ToolExecutor
                         TotalToolCalls = _totalToolCalls,
                     };
                     var failureAction = await failHooks.RunPostToolFailureHooksAsync(
-                        hookCtx, result.Result, wasInterrupted: false, ct);
+                        hookCtx, result.Result, wasInterrupted: false, ct).ConfigureAwait(false);
                     if (failureAction is not null)
                     {
                         var modifiedResult = result.Result;
@@ -287,7 +287,7 @@ public sealed class ToolExecutor
                         TurnNumber = TurnNumber,
                         TotalToolCalls = _totalToolCalls,
                     };
-                    await postHooks.RunPostToolHooksAsync(hookCtx, result.Result, result.IsError, ct);
+                    await postHooks.RunPostToolHooksAsync(hookCtx, result.Result, result.IsError, ct).ConfigureAwait(false);
                 }
 
                 return (item.Index, result);
@@ -298,7 +298,7 @@ public sealed class ToolExecutor
             }
         }).ToList();
 
-        var completedTasks = await Task.WhenAll(tasks);
+        var completedTasks = await Task.WhenAll(tasks).ConfigureAwait(false);
 
         // Write results in original order and emit completed events
         foreach (var (index, (resultStr, isError)) in completedTasks)
@@ -308,7 +308,7 @@ public sealed class ToolExecutor
 
             var cappedResult = CapResult(toolName, resultStr);
             await channel.WriteAsync(
-                new AgentStreamEvent.ToolCallCompleted(toolName, Truncate(cappedResult, 200)), ct);
+                new AgentStreamEvent.ToolCallCompleted(toolName, Truncate(cappedResult, 200)), ct).ConfigureAwait(false);
 
             _log?.Invoke("TOOL", $"{(isError ? "FAIL" : "OK")}: {toolName} → {Truncate(cappedResult, 120)}");
             results[index] = new ToolCallResult(call, CreateResult(call, cappedResult), isError);
@@ -331,7 +331,7 @@ public sealed class ToolExecutor
         {
             var errorResult = $"Tool '{toolName}' not found. Use list_tool_categories() to see available tools, or request_tools(category) to load more.";
             _log?.Invoke("TOOL", $"NOT FOUND: {toolName}");
-            await EmitCompleted(channel, toolName, argsStr, errorResult, isError: true);
+            await EmitCompleted(channel, toolName, argsStr, errorResult, isError: true).ConfigureAwait(false);
             return new ToolCallResult(call, CreateResult(call, errorResult), IsError: true);
         }
 
@@ -346,12 +346,12 @@ public sealed class ToolExecutor
                 TurnNumber = TurnNumber,
                 TotalToolCalls = _totalToolCalls,
             };
-            var hookResult = await hooks.RunPreToolHooksAsync(hookCtx, cancellationToken);
+            var hookResult = await hooks.RunPreToolHooksAsync(hookCtx, cancellationToken).ConfigureAwait(false);
             if (hookResult.Outcome == HookOutcome.Block)
             {
                 var blockedMsg = hookResult.Message ?? $"Tool '{toolName}' blocked by hook";
                 _log?.Invoke("HOOK", $"BLOCKED: {toolName} — {blockedMsg}");
-                await EmitCompleted(channel, toolName, argsStr, blockedMsg, isError: true);
+                await EmitCompleted(channel, toolName, argsStr, blockedMsg, isError: true).ConfigureAwait(false);
                 return new ToolCallResult(call, CreateResult(call, blockedMsg), IsError: true);
             }
             if (hookResult.Outcome == HookOutcome.Allow)
@@ -361,7 +361,7 @@ public sealed class ToolExecutor
         // 3. Permission check (skip Ask if hook granted, but still enforce Deny rules)
         if (!hookGrantedPermission)
         {
-            var permissionResult = await CheckPermissionAsync(call, toolName, argsStr, channel, cancellationToken);
+            var permissionResult = await CheckPermissionAsync(call, toolName, argsStr, channel, cancellationToken).ConfigureAwait(false);
             if (permissionResult is not null)
                 return permissionResult; // Denied or error
         }
@@ -374,16 +374,16 @@ public sealed class ToolExecutor
                 var reason = decision.MatchedRule?.Description ?? "denied by permission rule";
                 var deniedResult = $"Tool '{toolName}' blocked: {reason}";
                 _log?.Invoke("PERMISSION", $"DENIED (override hook allow): {toolName} — {reason}");
-                await EmitCompleted(channel, toolName, argsStr, deniedResult, isError: true);
+                await EmitCompleted(channel, toolName, argsStr, deniedResult, isError: true).ConfigureAwait(false);
                 return new ToolCallResult(call, CreateResult(call, deniedResult), IsError: true);
             }
         }
 
         // 4. Emit started
-        await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(toolName, argsStr), cancellationToken);
+        await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(toolName, argsStr), cancellationToken).ConfigureAwait(false);
 
         // 5. Execute
-        var (resultStr, isError) = await InvokeToolAsync(call, cancellationToken);
+        var (resultStr, isError) = await InvokeToolAsync(call, cancellationToken).ConfigureAwait(false);
 
         // 6. Track tool call count
         _totalToolCalls++;
@@ -399,7 +399,7 @@ public sealed class ToolExecutor
                 TotalToolCalls = _totalToolCalls,
             };
             var failureAction = await failureHooks.RunPostToolFailureHooksAsync(
-                hookCtx, resultStr, wasInterrupted: false, cancellationToken);
+                hookCtx, resultStr, wasInterrupted: false, cancellationToken).ConfigureAwait(false);
 
             if (failureAction?.SuppressDetailedError == true)
                 resultStr = $"Tool '{toolName}' failed. Details suppressed by hook.";
@@ -415,7 +415,7 @@ public sealed class ToolExecutor
                 TurnNumber = TurnNumber,
                 TotalToolCalls = _totalToolCalls,
             };
-            await postHooks.RunPostToolHooksAsync(hookCtx, resultStr, isError, cancellationToken);
+            await postHooks.RunPostToolHooksAsync(hookCtx, resultStr, isError, cancellationToken).ConfigureAwait(false);
         }
 
         // 8. Cap result if oversized
@@ -424,7 +424,7 @@ public sealed class ToolExecutor
         // 9. Emit completed
         await channel.WriteAsync(
             new AgentStreamEvent.ToolCallCompleted(toolName, Truncate(resultStr, 200)),
-            cancellationToken);
+            cancellationToken).ConfigureAwait(false);
 
         _log?.Invoke("TOOL", $"{(isError ? "FAIL" : "OK")}: {toolName} → {Truncate(resultStr, 120)}");
         return new ToolCallResult(call, CreateResult(call, resultStr), isError);
@@ -489,7 +489,7 @@ public sealed class ToolExecutor
             var args = call.Arguments is not null
                 ? new AIFunctionArguments(call.Arguments)
                 : new AIFunctionArguments();
-            var rawResult = await tool.InvokeAsync(args, toolCt);
+            var rawResult = await tool.InvokeAsync(args, toolCt).ConfigureAwait(false);
             return (rawResult?.ToString() ?? "(no output)", false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -535,7 +535,7 @@ public sealed class ToolExecutor
                     var reason = decision.MatchedRule?.Description ?? "denied by permission rule";
                     var deniedResult = $"Tool '{toolName}' blocked: {reason}";
                     _log?.Invoke("PERMISSION", $"DENIED: {toolName}({argsStr}) — {reason}");
-                    await EmitCompleted(channel, toolName, argsStr, deniedResult, isError: true);
+                    await EmitCompleted(channel, toolName, argsStr, deniedResult, isError: true).ConfigureAwait(false);
                     return new ToolCallResult(call, CreateResult(call, deniedResult), IsError: true);
 
                 case PermissionEffect.Ask:
@@ -550,12 +550,12 @@ public sealed class ToolExecutor
         }
 
         // Tool requires user approval (either from permission engine Ask or dangerous tools fallback)
-        var approved = await RequestApproval(channel, toolName, argsStr, ct);
+        var approved = await RequestApproval(channel, toolName, argsStr, ct).ConfigureAwait(false);
         if (!approved)
         {
             var deniedMsg = $"Tool '{toolName}' execution denied by user.";
             _log?.Invoke("APPROVAL", $"DENIED: {toolName}({argsStr})");
-            await EmitCompleted(channel, toolName, argsStr, deniedMsg, isError: true);
+            await EmitCompleted(channel, toolName, argsStr, deniedMsg, isError: true).ConfigureAwait(false);
             return new ToolCallResult(call, CreateResult(call, deniedMsg), IsError: true);
         }
         _log?.Invoke("APPROVAL", $"APPROVED: {toolName}({argsStr})");
@@ -583,7 +583,7 @@ public sealed class ToolExecutor
         CancellationToken ct)
     {
         var approval = new AgentStreamEvent.ApprovalRequested(toolName, argsStr);
-        await channel.WriteAsync(approval, ct);
+        await channel.WriteAsync(approval, ct).ConfigureAwait(false);
 
         // Wait for user decision with 5-minute timeout
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -591,7 +591,7 @@ public sealed class ToolExecutor
 
         try
         {
-            return await approval.UserDecision.WaitAsync(timeoutCts.Token);
+            return await approval.UserDecision.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -629,9 +629,9 @@ public sealed class ToolExecutor
         string result,
         bool isError)
     {
-        await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(toolName, args));
+        await channel.WriteAsync(new AgentStreamEvent.ToolCallStarted(toolName, args)).ConfigureAwait(false);
         await channel.WriteAsync(new AgentStreamEvent.ToolCallCompleted(toolName,
-            isError ? $"[ERROR] {Truncate(result, 150)}" : Truncate(result, 200)));
+            isError ? $"[ERROR] {Truncate(result, 150)}" : Truncate(result, 200))).ConfigureAwait(false);
     }
 
     private static string FormatArguments(FunctionCallContent call)

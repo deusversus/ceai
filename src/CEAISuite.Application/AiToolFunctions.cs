@@ -60,6 +60,11 @@ public sealed partial class AiToolFunctions(
     private int _sessionGeneration;
     private int _lastAttachedPid;
 
+    // Phase 5A: short-TTL cache for process list
+    private IReadOnlyList<ProcessDescriptor>? _processListCache;
+    private DateTime _processListCacheExpiry;
+    private static readonly TimeSpan ProcessListCacheTtl = TimeSpan.FromSeconds(2);
+
     private object GetProcessStatusJson(int processId)
     {
         bool alive = IsProcessAlive(processId);
@@ -79,7 +84,12 @@ public sealed partial class AiToolFunctions(
     [Description("List running processes. Returns PID, name, architecture.")]
     public async Task<string> ListProcesses()
     {
-        var processes = await engineFacade.ListProcessesAsync();
+        if (_processListCache is null || DateTime.UtcNow >= _processListCacheExpiry)
+        {
+            _processListCache = await engineFacade.ListProcessesAsync().ConfigureAwait(false);
+            _processListCacheExpiry = DateTime.UtcNow + ProcessListCacheTtl;
+        }
+        var processes = _processListCache;
         var cap = _limits.MaxListProcesses;
         var lines = processes.Take(cap).Select(p => $"PID {p.Id} | {p.Name} | {p.Architecture}");
         return $"Found {processes.Count} processes (showing {Math.Min(cap, processes.Count)}):\n{string.Join('\n', lines)}";
@@ -90,7 +100,7 @@ public sealed partial class AiToolFunctions(
     [Description("Inspect process by PID. Returns modules and architecture.")]
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
-        var inspection = await dashboardService.InspectProcessAsync(processId);
+        var inspection = await dashboardService.InspectProcessAsync(processId).ConfigureAwait(false);
         var cap = _limits.MaxInspectModules;
         var modules = inspection.Modules.Take(cap)
             .Select(m => $"  {m.Name} @ {m.BaseAddress} ({m.Size})");
@@ -110,9 +120,9 @@ public sealed partial class AiToolFunctions(
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
-            var resolvedAddress = await TryResolveToHex(processId, address);
+            var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
             var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
-            var probe = await dashboardService.ReadAddressAsync(processId, resolvedAddress, dt);
+            var probe = await dashboardService.ReadAddressAsync(processId, resolvedAddress, dt).ConfigureAwait(false);
             return $"Read {dt} at {probe.Address}: {probe.DisplayValue}";
         }
         catch (Exception ex)
@@ -134,17 +144,17 @@ public sealed partial class AiToolFunctions(
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
-            var resolvedAddress = await TryResolveToHex(processId, address);
+            var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
             var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
             if (patchUndoService is not null)
             {
                 var addr = AddressTableService.ParseAddress(resolvedAddress);
-                var result = await patchUndoService.WriteWithUndoAsync(processId, addr, dt, value);
+                var result = await patchUndoService.WriteWithUndoAsync(processId, addr, dt, value).ConfigureAwait(false);
                 return result.BytesWritten > 0
                     ? $"Wrote '{value}' ({dt}) to 0x{addr:X}. {patchUndoService.UndoCount} patches in undo stack."
                     : $"Write failed at 0x{addr:X}.";
             }
-            var message = await dashboardService.WriteAddressAsync(processId, resolvedAddress, dt, value);
+            var message = await dashboardService.WriteAddressAsync(processId, resolvedAddress, dt, value).ConfigureAwait(false);
             return message;
         }
         catch (Exception ex)
@@ -177,7 +187,7 @@ public sealed partial class AiToolFunctions(
                 FloatEpsilon: floatEpsilon,
                 WritableOnly: writableOnly,
                 SuspendProcess: pauseProcess);
-            var overview = await scanService.StartScanAsync(processId, dt, st, value ?? "", options);
+            var overview = await scanService.StartScanAsync(processId, dt, st, value ?? "", options).ConfigureAwait(false);
             var topResults = overview.Results.Take(10)
                 .Select(r => $"  {r.Address} = {r.CurrentValue}");
             return $"Scan complete: {overview.ResultCount:N0} results found.\n{string.Join('\n', topResults)}";
@@ -216,7 +226,7 @@ public sealed partial class AiToolFunctions(
                 Alignment: alignment,
                 FloatEpsilon: floatEpsilon,
                 WritableOnly: writableOnly);
-            var overview = await scanService.RefineScanAsync(st, value ?? "", options);
+            var overview = await scanService.RefineScanAsync(st, value ?? "", options).ConfigureAwait(false);
             var topResults = overview.Results.Take(10)
                 .Select(r => $"  {r.Address} = {r.CurrentValue} (was {r.PreviousValue})");
             return $"Refinement complete: {overview.ResultCount:N0} results remaining.\n{string.Join('\n', topResults)}";
@@ -296,7 +306,7 @@ public sealed partial class AiToolFunctions(
     [Description("Refresh address table values from process memory.")]
     public async Task<string> RefreshAddressTable([Description("Process ID")] int processId)
     {
-        await addressTableService.RefreshAllAsync(processId);
+        await addressTableService.RefreshAllAsync(processId).ConfigureAwait(false);
         var entries = addressTableService.Entries;
         var total = entries.Count;
 
@@ -362,7 +372,7 @@ public sealed partial class AiToolFunctions(
         var dashboard = await dashboardService.BuildAsync(
             System.IO.Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "CEAISuite", "workspace.db"));
+                "CEAISuite", "workspace.db")).ConfigureAwait(false);
         var summary = ScriptGenerationService.SummarizeInvestigation(
             processName, processId, addressTableService.Entries.ToList(),
             scanService.LastScanResults is not null
@@ -379,7 +389,7 @@ public sealed partial class AiToolFunctions(
     [Description("Attach to a process by PID for memory operations.")]
     public async Task<string> AttachProcess([Description("Process ID")] int processId)
     {
-        var inspection = await dashboardService.InspectProcessAsync(processId);
+        var inspection = await dashboardService.InspectProcessAsync(processId).ConfigureAwait(false);
         return $"Attached to {inspection.ProcessName} (PID {inspection.ProcessId}, {inspection.Architecture}). " +
                $"{inspection.Modules.Count} modules loaded.";
     }
@@ -468,7 +478,7 @@ public sealed partial class AiToolFunctions(
         var addr = AddressTableService.ParseAddress(targetAddress);
         IReadOnlyList<string>? filter = string.IsNullOrWhiteSpace(moduleFilter) ? null
             : moduleFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth, moduleFilter: filter);
+        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth, moduleFilter: filter).ConfigureAwait(false);
 
         if (paths.Count == 0) return "No pointer paths found to the target address.";
 
@@ -492,12 +502,12 @@ public sealed partial class AiToolFunctions(
             var addr = AddressTableService.ParseAddress(targetAddress);
 
             // Re-scan to get fresh paths (the service doesn't persist scan state)
-            var paths = await scanner.ScanForPointersAsync(processId, addr, 2);
+            var paths = await scanner.ScanForPointersAsync(processId, addr, 2).ConfigureAwait(false);
             if (paths.Count == 0) return "No pointer paths found. Run ScanForPointers first.";
 
             var map = new PointerMapFile(
                 $"process-{processId}", addr, DateTimeOffset.UtcNow, 2, 0x2000, paths);
-            await PointerScannerService.SavePointerMapAsync(filePath, map);
+            await PointerScannerService.SavePointerMapAsync(filePath, map).ConfigureAwait(false);
             return $"Saved {paths.Count} pointer paths to {filePath}";
         }
         catch (Exception ex) { return $"SavePointerMap failed: {ex.Message}"; }
@@ -511,7 +521,7 @@ public sealed partial class AiToolFunctions(
     {
         try
         {
-            var map = await PointerScannerService.LoadPointerMapAsync(filePath);
+            var map = await PointerScannerService.LoadPointerMapAsync(filePath).ConfigureAwait(false);
             var lines = map.Paths.Take(50).Select((p, i) => $"{i + 1}. {p.Display}");
             return $"Loaded {map.Paths.Count} pointer paths from {System.IO.Path.GetFileName(filePath)}\n" +
                    $"Target: 0x{map.OriginalTargetAddress:X} | Scanned: {map.ScanTimestamp:g}\n" +
@@ -530,8 +540,8 @@ public sealed partial class AiToolFunctions(
     {
         try
         {
-            var mapA = await PointerScannerService.LoadPointerMapAsync(filePathA);
-            var mapB = await PointerScannerService.LoadPointerMapAsync(filePathB);
+            var mapA = await PointerScannerService.LoadPointerMapAsync(filePathA).ConfigureAwait(false);
+            var mapB = await PointerScannerService.LoadPointerMapAsync(filePathB).ConfigureAwait(false);
             var result = PointerScannerService.CompareMaps(mapA, mapB);
 
             var sb = new System.Text.StringBuilder();
@@ -557,7 +567,7 @@ public sealed partial class AiToolFunctions(
         if (pointerScannerService is null) return "Pointer scanner service not available.";
         try
         {
-            var paths = await pointerScannerService.ResumeScanAsync(processId);
+            var paths = await pointerScannerService.ResumeScanAsync(processId).ConfigureAwait(false);
             if (paths.Count == 0) return "No pointer paths found after resuming scan.";
             var lines = paths.Take(50).Select((p, i) => $"{i + 1}. {p.Display}");
             return $"Resumed scan found {paths.Count} pointer path(s):\n{string.Join('\n', lines)}";
@@ -582,7 +592,7 @@ public sealed partial class AiToolFunctions(
             var parsedPaths = ParsePointerPaths(paths);
             if (parsedPaths.Count == 0) return "No valid pointer paths provided.";
             nuint? expected = string.IsNullOrWhiteSpace(expectedValue) ? null : AddressTableService.ParseAddress(expectedValue);
-            var results = await pointerRescanService.RescanAllAsync(processId, parsedPaths, expected);
+            var results = await pointerRescanService.RescanAllAsync(processId, parsedPaths, expected).ConfigureAwait(false);
             if (results.Count == 0) return "No rescan results.";
             var lines = results.Select((r, i) =>
                 $"{i + 1}. {r.OriginalPath.Display} — {r.Status} (stability: {r.StabilityScore:F2}, valid: {r.IsValid})");
@@ -646,7 +656,7 @@ public sealed partial class AiToolFunctions(
 
             if (parsedGroups.Count == 0) return "No valid groups provided.";
 
-            var results = await scanService.GroupedScanAsync(processId, parsedGroups, new ScanOptions());
+            var results = await scanService.GroupedScanAsync(processId, parsedGroups, new ScanOptions()).ConfigureAwait(false);
 
             var sb = new System.Text.StringBuilder();
             sb.AppendLine(CultureInfo.InvariantCulture, $"Grouped scan: {results.Results.Count} total results across {parsedGroups.Count} groups");
@@ -671,9 +681,9 @@ public sealed partial class AiToolFunctions(
         [Description("Number of bytes to read")] int length = 128)
     {
         length = Math.Clamp(length, 1, _limits.MaxBrowseMemoryBytes);
-        var resolvedAddress = await TryResolveToHex(processId, address);
+        var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
         var addr = AddressTableService.ParseAddress(resolvedAddress);
-        var result = await engineFacade.ReadMemoryAsync(processId, addr, length);
+        var result = await engineFacade.ReadMemoryAsync(processId, addr, length).ConfigureAwait(false);
         var bytes = result.Bytes.ToArray();
 
         var sb = new System.Text.StringBuilder();
@@ -708,9 +718,9 @@ public sealed partial class AiToolFunctions(
         [Description("Hint: auto, int32, float, or pointers")] string typeHint = "auto")
     {
         var dissector = new StructureDissectorService(engineFacade);
-        var resolvedAddress = await TryResolveToHex(processId, address);
+        var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
         var addr = AddressTableService.ParseAddress(resolvedAddress);
-        var (fields, clustersDetected) = await dissector.DissectAsync(processId, addr, regionSize, typeHint);
+        var (fields, clustersDetected) = await dissector.DissectAsync(processId, addr, regionSize, typeHint).ConfigureAwait(false);
 
         if (fields.Count == 0) return "No identifiable fields found in this region.";
 
@@ -845,7 +855,7 @@ public sealed partial class AiToolFunctions(
     public async Task<string> UndoWrite()
     {
         if (patchUndoService is null) return "Undo service not available.";
-        return await patchUndoService.UndoAsync();
+        return await patchUndoService.UndoAsync().ConfigureAwait(false);
     }
 
     [Destructive]
@@ -855,7 +865,7 @@ public sealed partial class AiToolFunctions(
     public async Task<string> RedoWrite()
     {
         if (patchUndoService is null) return "Undo service not available.";
-        return await patchUndoService.RedoAsync();
+        return await patchUndoService.RedoAsync().ConfigureAwait(false);
     }
 
     [ReadOnlyTool]
@@ -880,7 +890,7 @@ public sealed partial class AiToolFunctions(
     [Description("Find a process by name (partial match). Returns PID.")]
     public async Task<string> FindProcess([Description("Process name or partial name")] string name)
     {
-        var processes = await engineFacade.ListProcessesAsync();
+        var processes = await engineFacade.ListProcessesAsync().ConfigureAwait(false);
         var matches = processes
             .Where(p => p.Name.Contains(name, StringComparison.OrdinalIgnoreCase))
             .Take(10).ToList();
@@ -948,7 +958,7 @@ public sealed partial class AiToolFunctions(
         {
             if (wantEnabled)
             {
-                var result = await autoAssemblerEngine.EnableAsync(processId, node.AssemblerScript!);
+                var result = await autoAssemblerEngine.EnableAsync(processId, node.AssemblerScript!).ConfigureAwait(false);
                 if (result.Success)
                 {
                     node.IsScriptEnabled = true;
@@ -963,7 +973,7 @@ public sealed partial class AiToolFunctions(
             }
             else
             {
-                var result = await autoAssemblerEngine.DisableAsync(processId, node.AssemblerScript!);
+                var result = await autoAssemblerEngine.DisableAsync(processId, node.AssemblerScript!).ConfigureAwait(false);
                 node.IsScriptEnabled = false;
                 node.ScriptStatus = result.Success ? "Disabled" : $"Disable failed: {result.Error}";
                 return $"Script '{node.Label}' DISABLED. {(result.Success ? "Clean disable." : $"Warning: {result.Error}")}";
@@ -1107,7 +1117,7 @@ public sealed partial class AiToolFunctions(
         [Description("Memory address (hex string)")] string address)
     {
         var addr = ParseAddress(address);
-        var bytes = await engineFacade.ReadMemoryAsync(processId, addr, 8);
+        var bytes = await engineFacade.ReadMemoryAsync(processId, addr, 8).ConfigureAwait(false);
         var raw = bytes.Bytes.ToArray();
         if (raw.Length < 8) return $"Could not read 8 bytes at {address}.";
 
@@ -1223,7 +1233,7 @@ public sealed partial class AiToolFunctions(
             return "No process attached. Attach to a process first.";
 
         var processId = dashboard.CurrentInspection.ProcessId;
-        var result = await screenCaptureEngine.CaptureWindowAsync(processId);
+        var result = await screenCaptureEngine.CaptureWindowAsync(processId).ConfigureAwait(false);
         if (result is null)
             return "Failed to capture process window. The window may be minimized or not visible.";
 
@@ -1242,9 +1252,9 @@ public sealed partial class AiToolFunctions(
         [Description("Number of bytes to read (default 64)")] int length = 64)
     {
         length = Math.Clamp(length, 1, _limits.MaxHexDumpBytes);
-        var resolvedAddress = await TryResolveToHex(processId, address);
+        var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
         var addr = ParseAddress(resolvedAddress);
-        var mem = await engineFacade.ReadMemoryAsync(processId, addr, length);
+        var mem = await engineFacade.ReadMemoryAsync(processId, addr, length).ConfigureAwait(false);
         var raw = mem.Bytes.ToArray();
 
         var sb = new System.Text.StringBuilder();
@@ -1364,7 +1374,7 @@ public sealed partial class AiToolFunctions(
             dashboard?.CurrentInspection?.ProcessName,
             dashboard?.CurrentInspection?.ProcessId,
             addressTableService.Entries,
-            new List<AiActionLogEntry>());
+            new List<AiActionLogEntry>()).ConfigureAwait(false);
         return $"Session saved: {sessionId}";
     }
 
@@ -1374,7 +1384,7 @@ public sealed partial class AiToolFunctions(
     public async Task<string> ListSessions([Description("Max sessions to list")] int limit = 10)
     {
         if (sessionService is null) return "Session service not available.";
-        var sessions = await sessionService.ListSessionsAsync(limit);
+        var sessions = await sessionService.ListSessionsAsync(limit).ConfigureAwait(false);
         if (sessions.Count == 0) return "No saved sessions.";
         var lines = sessions.Select(s => $"  [{s.Id}] {s.ProcessName} — {s.CreatedAtUtc:g} ({s.AddressEntryCount} entries)");
         return $"Sessions ({sessions.Count}):\n{string.Join('\n', lines)}";
@@ -1386,7 +1396,7 @@ public sealed partial class AiToolFunctions(
     public async Task<string> LoadSession([Description("Session ID to load")] string sessionId)
     {
         if (sessionService is null) return "Session service not available.";
-        var result = await sessionService.LoadSessionAsync(sessionId);
+        var result = await sessionService.LoadSessionAsync(sessionId).ConfigureAwait(false);
         if (result is null) return $"Session '{sessionId}' not found.";
         var (entries, processName, processId) = (result.Value.Entries, result.Value.ProcessName, result.Value.ProcessId);
         addressTableService.ImportFlat(entries);
@@ -1401,7 +1411,7 @@ public sealed partial class AiToolFunctions(
         if (sessionService is null) return "Session service not available.";
         try
         {
-            await sessionService.DeleteSessionAsync(sessionId);
+            await sessionService.DeleteSessionAsync(sessionId).ConfigureAwait(false);
             return $"Session '{sessionId}' deleted.";
         }
         catch (Exception ex)
@@ -1511,7 +1521,7 @@ public sealed partial class AiToolFunctions(
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
-            var sig = await signatureService.GenerateAsync(processId, addr, length);
+            var sig = await signatureService.GenerateAsync(processId, addr, length).ConfigureAwait(false);
             return $"Signature at 0x{addr:X} ({sig.Length} bytes):\n{sig.Pattern}\n\nUse this pattern with ArrayOfBytes scan type to find this code in future sessions.";
         }
         catch (Exception ex)
@@ -1532,7 +1542,7 @@ public sealed partial class AiToolFunctions(
         try
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
-            var count = await signatureService.TestUniquenessAsync(processId, moduleName, pattern);
+            var count = await signatureService.TestUniquenessAsync(processId, moduleName, pattern).ConfigureAwait(false);
             if (count < 0) return $"Module '{moduleName}' not found.";
             return count switch
             {
@@ -1564,7 +1574,7 @@ public sealed partial class AiToolFunctions(
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
             var prot = Enum.Parse<MemoryProtection>(protection, ignoreCase: true);
-            var result = await memoryProtectionEngine.ChangeProtectionAsync(processId, addr, size, prot);
+            var result = await memoryProtectionEngine.ChangeProtectionAsync(processId, addr, size, prot).ConfigureAwait(false);
             return $"Protection changed at 0x{result.Address:X}: {result.OldProtection} → {result.NewProtection} ({result.Size} bytes)";
         }
         catch (Exception ex) { return $"ChangeMemoryProtection failed: {ex.Message}"; }
@@ -1585,7 +1595,7 @@ public sealed partial class AiToolFunctions(
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var prot = Enum.Parse<MemoryProtection>(protection, ignoreCase: true);
             var preferred = ParseAddress(preferredAddress);
-            var result = await memoryProtectionEngine.AllocateAsync(processId, size, prot, preferred);
+            var result = await memoryProtectionEngine.AllocateAsync(processId, size, prot, preferred).ConfigureAwait(false);
             return $"Allocated {result.Size} bytes at 0x{result.BaseAddress:X} with {result.Protection}";
         }
         catch (Exception ex) { return $"AllocateMemory failed: {ex.Message}"; }
@@ -1602,7 +1612,7 @@ public sealed partial class AiToolFunctions(
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
-            var success = await memoryProtectionEngine.FreeAsync(processId, addr);
+            var success = await memoryProtectionEngine.FreeAsync(processId, addr).ConfigureAwait(false);
             return success ? $"Memory freed at 0x{addr:X}" : $"Failed to free memory at 0x{addr:X}";
         }
         catch (Exception ex) { return $"FreeMemory failed: {ex.Message}"; }
@@ -1620,7 +1630,7 @@ public sealed partial class AiToolFunctions(
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
-            var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+            var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr).ConfigureAwait(false);
             return ToJson(new
             {
                 address = $"0x{addr:X}",
@@ -1703,7 +1713,7 @@ public sealed partial class AiToolFunctions(
 
             if (ulong.TryParse(offsetPart, NumberStyles.HexNumber, null, out var offset))
             {
-                var attachment = await engineFacade.AttachAsync(processId);
+                var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
                 var mod = attachment.Modules.FirstOrDefault(m =>
                     m.Name.Equals(modulePart, StringComparison.OrdinalIgnoreCase));
                 if (mod is not null)
@@ -1718,7 +1728,7 @@ public sealed partial class AiToolFunctions(
         // Bare module name (contains '.')
         if (normalized.Contains('.') && !ulong.TryParse(normalized, NumberStyles.HexNumber, null, out _))
         {
-            var attachment = await engineFacade.AttachAsync(processId);
+            var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
             var mod = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(normalized, StringComparison.OrdinalIgnoreCase));
             if (mod is not null)
@@ -1805,7 +1815,7 @@ public sealed partial class AiToolFunctions(
 
             for (int i = 0; i < sampleCount; i++)
             {
-                var read = await engineFacade.ReadMemoryAsync(processId, addr, byteCount);
+                var read = await engineFacade.ReadMemoryAsync(processId, addr, byteCount).ConfigureAwait(false);
                 var bytes = read.Bytes.ToArray();
                 var hex = string.Join(" ", bytes.Select(b => b.ToString("X2", CultureInfo.InvariantCulture)));
 
@@ -1826,7 +1836,7 @@ public sealed partial class AiToolFunctions(
                 prevBytes = bytes;
 
                 if (i < sampleCount - 1)
-                    await Task.Delay(sampleDelayMs);
+                    await Task.Delay(sampleDelayMs).ConfigureAwait(false);
             }
 
             int changeCount = snapshots.Cast<dynamic>().Count(s => (bool)((dynamic)s).changed);
@@ -1867,7 +1877,7 @@ public sealed partial class AiToolFunctions(
     public async Task<string> RollbackTransaction([Description("Transaction group ID")] string groupId)
     {
         if (operationJournal is null) return "Operation journal not available.";
-        var result = await operationJournal.RollbackGroupAsync(groupId);
+        var result = await operationJournal.RollbackGroupAsync(groupId).ConfigureAwait(false);
         return JsonSerializer.Serialize(new { result.Success, result.TotalOperations, result.SucceededRollbacks, result.Message }, _jsonOpts);
     }
 
@@ -1907,7 +1917,7 @@ public sealed partial class AiToolFunctions(
             // Check code cave hooks
             if (codeCaveEngine is not null)
             {
-                var hooks = await codeCaveEngine.ListHooksAsync(processId);
+                var hooks = await codeCaveEngine.ListHooksAsync(processId).ConfigureAwait(false);
                 foreach (var hook in hooks)
                 {
                     if (hook.OriginalAddress >= addr && hook.OriginalAddress < (nuint)((ulong)addr + (ulong)byteCount))
@@ -1920,7 +1930,7 @@ public sealed partial class AiToolFunctions(
             // Check breakpoints
             if (breakpointService is not null)
             {
-                var bps = await breakpointService.ListBreakpointsAsync(processId);
+                var bps = await breakpointService.ListBreakpointsAsync(processId).ConfigureAwait(false);
                 foreach (var bp in bps)
                 {
                     var bpAddr = AddressTableService.ParseAddress(bp.Address);
@@ -2101,7 +2111,7 @@ public sealed partial class AiToolFunctions(
         if (symbolEngine is null) return "Symbol engine not available.";
         try
         {
-            var attachment = await engineFacade.AttachAsync(processId);
+            var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
             var mod = attachment.Modules.FirstOrDefault(m =>
                 m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase));
             if (mod is null)
@@ -2110,7 +2120,7 @@ public sealed partial class AiToolFunctions(
                 return $"Module '{moduleName}' not found. Loaded modules: {available}";
             }
 
-            var loaded = await symbolEngine.LoadSymbolsForModuleAsync(processId, mod.Name, mod.BaseAddress, mod.SizeBytes);
+            var loaded = await symbolEngine.LoadSymbolsForModuleAsync(processId, mod.Name, mod.BaseAddress, mod.SizeBytes).ConfigureAwait(false);
             return loaded
                 ? $"Symbols loaded for {mod.Name} (base 0x{mod.BaseAddress:X}, size {mod.SizeBytes})."
                 : $"No symbols found for {mod.Name} (base 0x{mod.BaseAddress:X}).";

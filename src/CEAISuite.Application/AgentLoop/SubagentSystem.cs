@@ -89,7 +89,7 @@ public sealed class SubagentManager
             };
             _ = Task.Run(async () =>
             {
-                try { await hooks.RunSubagentStartHooksAsync(startCtx, CancellationToken.None); }
+                try { await hooks.RunSubagentStartHooksAsync(startCtx, CancellationToken.None).ConfigureAwait(false); }
                 catch (Exception ex) { _log?.Invoke("HOOK", $"Subagent start hook error: {ex.Message}"); }
             });
         }
@@ -168,7 +168,7 @@ public sealed class SubagentManager
                         Duration = duration,
                         ToolCallCount = toolCalls,
                     };
-                    try { await endHooks.RunSubagentEndHooksAsync(endCtx, CancellationToken.None); }
+                    try { await endHooks.RunSubagentEndHooksAsync(endCtx, CancellationToken.None).ConfigureAwait(false); }
                     catch (Exception ex) { _log?.Invoke("HOOK", $"Subagent end hook error: {ex.Message}"); }
                 }
 
@@ -204,7 +204,7 @@ public sealed class SubagentManager
         });
 
         var tasks = handles.Select(h => h.Task).ToArray();
-        return await Task.WhenAll(tasks);
+        return await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     /// <summary>Cancel all active subagents.</summary>

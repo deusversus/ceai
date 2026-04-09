@@ -285,7 +285,7 @@ public sealed class AddressTableExportService
         var dir = Path.GetDirectoryName(filePath);
         if (dir is not null) Directory.CreateDirectory(dir);
         await using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, useAsync: true);
-        await JsonSerializer.SerializeAsync(fs, dtos, s_recoveryOptions);
+        await JsonSerializer.SerializeAsync(fs, dtos, s_recoveryOptions).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -299,7 +299,7 @@ public sealed class AddressTableExportService
         try
         {
             await using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-            var dtos = await JsonSerializer.DeserializeAsync<List<RecoveryNodeDto>>(fs, s_recoveryOptions);
+            var dtos = await JsonSerializer.DeserializeAsync<List<RecoveryNodeDto>>(fs, s_recoveryOptions).ConfigureAwait(false);
             if (dtos is null) return null;
             return dtos.Select(d => d.ToNode()).ToList();
         }

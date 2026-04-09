@@ -60,7 +60,7 @@ public sealed partial class AiToolFunctions
                 // the detour overwrites live data and crashes/freezes the process.
                 if (memoryProtectionEngine is not null)
                 {
-                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, stealthAddr);
+                    var region = await memoryProtectionEngine.QueryProtectionAsync(processId, stealthAddr).ConfigureAwait(false);
                     if (!region.IsExecutable)
                     {
                         return $"❌ Stealth hook REJECTED: Target address 0x{stealthAddr:X} is in a non-executable memory region " +
@@ -73,14 +73,14 @@ public sealed partial class AiToolFunctions
                     }
                 }
 
-                var result = await codeCaveEngine.InstallHookAsync(processId, stealthAddr);
+                var result = await codeCaveEngine.InstallHookAsync(processId, stealthAddr).ConfigureAwait(false);
                 if (!result.Success) return $"Stealth hook failed: {result.ErrorMessage}";
                 var stealthMsg = $"Stealth code cave hook installed at 0x{result.Hook!.OriginalAddress:X} (ID: {result.Hook.Id}, cave at 0x{result.Hook.CaveAddress:X}). No debugger attached — game-safe.";
                 if (watchdogService is not null)
                 {
                     var hookId = result.Hook.Id;
                     watchdogService.StartMonitoring(processId, hookId, stealthAddr, "CodeCaveHook", "Stealth",
-                        async () => await codeCaveEngine.RemoveHookAsync(processId, hookId));
+                        async () => await codeCaveEngine.RemoveHookAsync(processId, hookId).ConfigureAwait(false));
                     if (watchdogService.IsUnsafe(stealthAddr, "Stealth"))
                         stealthMsg += "\n⚠️ WARNING: This address+Stealth previously caused a process freeze. Watchdog is monitoring.";
                     else
@@ -88,7 +88,7 @@ public sealed partial class AiToolFunctions
                 }
                 operationJournal?.RecordOperation(
                     result.Hook.Id, "CodeCaveHook", stealthAddr, "Stealth", groupId: null,
-                    async () => await codeCaveEngine.RemoveHookAsync(processId, result.Hook.Id));
+                    async () => await codeCaveEngine.RemoveHookAsync(processId, result.Hook.Id).ConfigureAwait(false));
                 return stealthMsg;
             }
 
@@ -122,9 +122,9 @@ public sealed partial class AiToolFunctions
                     processId, $"bp-{Guid.NewGuid():N}", parsedAddr, "Breakpoint", modeStr,
                     installAction: async () =>
                     {
-                        txBp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit);
+                        txBp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit).ConfigureAwait(false);
                     },
-                    rollbackAction: async () => txBp is not null && await breakpointService.RemoveBreakpointAsync(processId, txBp.Id));
+                    rollbackAction: async () => txBp is not null && await breakpointService.RemoveBreakpointAsync(processId, txBp.Id).ConfigureAwait(false)).ConfigureAwait(false);
 
                 if (!txResult.Success)
                     return $"⚠️ Transactional install failed at {txResult.Phase}: {txResult.Message}";
@@ -137,11 +137,11 @@ public sealed partial class AiToolFunctions
                 msg += "\n✅ Transaction committed. Watchdog monitoring active.";
                 operationJournal?.RecordOperation(
                     txBp!.Id, "Breakpoint", parsedAddr, modeStr, groupId: null,
-                    async () => await breakpointService.RemoveBreakpointAsync(processId, txBp.Id));
+                    async () => await breakpointService.RemoveBreakpointAsync(processId, txBp.Id).ConfigureAwait(false));
                 return msg;
             }
 
-            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit);
+            var bp = await breakpointService.SetBreakpointAsync(processId, address, bpType, bpMode, bpAction, singleHit: singleHit).ConfigureAwait(false);
             var msg2 = $"Breakpoint {bp.Id} set at {bp.Address} (type: {bp.Type}, mode: {bpMode}, action: {bp.HitAction})";
             if (singleHit) msg2 += " [SINGLE-HIT: will auto-remove after first trigger]";
             if (wasDowngraded) msg2 += "\n⚠️ Mode was auto-downgraded from Stealth→PageGuard. Stealth (code cave) only works on executable code, not data write targets.";
@@ -149,7 +149,7 @@ public sealed partial class AiToolFunctions
             {
                 var bpId = bp.Id;
                 watchdogService.StartMonitoring(processId, bpId, parsedAddr, "Breakpoint", modeStr,
-                    async () => await breakpointService.RemoveBreakpointAsync(processId, bpId));
+                    async () => await breakpointService.RemoveBreakpointAsync(processId, bpId).ConfigureAwait(false));
                 if (watchdogService.IsUnsafe(parsedAddr, modeStr))
                     msg2 += $"\n⚠️ WARNING: This address+{modeStr} previously caused a process freeze. Watchdog is monitoring.";
                 else
@@ -157,7 +157,7 @@ public sealed partial class AiToolFunctions
             }
             operationJournal?.RecordOperation(
                 bp.Id, "Breakpoint", parsedAddr, modeStr, groupId: null,
-                async () => await breakpointService.RemoveBreakpointAsync(processId, bp.Id));
+                async () => await breakpointService.RemoveBreakpointAsync(processId, bp.Id).ConfigureAwait(false));
             return msg2;
         }
         catch (Exception ex)
@@ -173,7 +173,7 @@ public sealed partial class AiToolFunctions
         [Description("Breakpoint ID to remove")] string breakpointId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
-        var removed = await breakpointService.RemoveBreakpointAsync(processId, breakpointId);
+        var removed = await breakpointService.RemoveBreakpointAsync(processId, breakpointId).ConfigureAwait(false);
         return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
     }
 
@@ -183,7 +183,7 @@ public sealed partial class AiToolFunctions
         [Description("Process ID of the hung process")] int processId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
-        var restored = await breakpointService.EmergencyRestorePageProtectionAsync(processId);
+        var restored = await breakpointService.EmergencyRestorePageProtectionAsync(processId).ConfigureAwait(false);
         return restored > 0
             ? $"✅ Emergency restore complete: {restored} page guard protection(s) restored. Target process should recover."
             : "No active page guard breakpoints found to restore.";
@@ -195,7 +195,7 @@ public sealed partial class AiToolFunctions
         [Description("Process ID of the hung process")] int processId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
-        await breakpointService.ForceDetachAndCleanupAsync(processId);
+        await breakpointService.ForceDetachAndCleanupAsync(processId).ConfigureAwait(false);
         return $"✅ Force detach complete for process {processId}. Page guards restored, debugger detached, session torn down.";
     }
 
@@ -205,7 +205,7 @@ public sealed partial class AiToolFunctions
     public async Task<string> ListBreakpoints([Description("Process ID")] int processId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
-        var bps = await breakpointService.ListBreakpointsAsync(processId);
+        var bps = await breakpointService.ListBreakpointsAsync(processId).ConfigureAwait(false);
         if (bps.Count == 0) return ToJson(new { breakpoints = Array.Empty<object>(), count = 0 });
         return ToJson(new
         {
@@ -232,7 +232,7 @@ public sealed partial class AiToolFunctions
     {
         if (maxEntries <= 0) maxEntries = _limits.MaxHitLogEntries;
         if (breakpointService is null) return "Breakpoint engine not available.";
-        var hits = await breakpointService.GetHitLogAsync(breakpointId, maxEntries);
+        var hits = await breakpointService.GetHitLogAsync(breakpointId, maxEntries).ConfigureAwait(false);
         if (hits.Count == 0) return $"No hits recorded for breakpoint {breakpointId}.";
         return ToJson(new
         {
@@ -254,12 +254,12 @@ public sealed partial class AiToolFunctions
         [Description("Process ID")] int processId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
-        var bps = await breakpointService.ListBreakpointsAsync(processId);
+        var bps = await breakpointService.ListBreakpointsAsync(processId).ConfigureAwait(false);
         var bp = bps.FirstOrDefault(b => string.Equals(b.Id, breakpointId, StringComparison.Ordinal));
         if (bp is null) return $"Breakpoint {breakpointId} not found on process {processId}.";
 
         var lifecycle = breakpointService.GetLifecycleStatus(breakpointId);
-        var hits = await breakpointService.GetHitLogAsync(breakpointId, 1);
+        var hits = await breakpointService.GetHitLogAsync(breakpointId, 1).ConfigureAwait(false);
         var lastHit = hits.Count > 0 ? hits[0].Timestamp : "none";
 
         // Page co-tenancy for PageGuard breakpoints
@@ -329,7 +329,7 @@ public sealed partial class AiToolFunctions
             var addr = ParseAddress(address);
 
             if (memoryProtectionEngine is null) return "Memory protection engine not available.";
-            var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr);
+            var region = await memoryProtectionEngine.QueryProtectionAsync(processId, addr).ConfigureAwait(false);
 
             bool isExecutable = region.IsExecutable;
             bool isWritable = region.IsWritable;
@@ -352,7 +352,7 @@ public sealed partial class AiToolFunctions
             string regionKind = "heap/dynamic";
             try
             {
-                var attachment = await engineFacade.AttachAsync(processId);
+                var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
                 foreach (var mod in attachment.Modules)
                 {
                     if (addr >= mod.BaseAddress && addr < (nuint)((ulong)mod.BaseAddress + (ulong)mod.SizeBytes))
@@ -478,7 +478,7 @@ public sealed partial class AiToolFunctions
             var condition = new BreakpointCondition(expression, ct);
 
             var bp = await breakpointService.SetConditionalBreakpointAsync(
-                processId, address, bpType, condition, bpMode, threadFilter: threadFilter);
+                processId, address, bpType, condition, bpMode, threadFilter: threadFilter).ConfigureAwait(false);
 
             return $"Conditional breakpoint set: {bp.Id} at {bp.Address} ({bp.Mode})\n" +
                    $"Condition: {expression} ({conditionType})" +
@@ -507,7 +507,7 @@ public sealed partial class AiToolFunctions
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
 
             var result = await breakpointService.TraceFromBreakpointAsync(
-                processId, address, maxInstructions, timeoutMs);
+                processId, address, maxInstructions, timeoutMs).ConfigureAwait(false);
 
             if (result.Entries.Count == 0)
                 return $"Trace from {address}: no instructions decoded (address may be invalid or unreadable).";

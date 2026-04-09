@@ -116,6 +116,37 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         }
     }
 
+    public async Task SetGlobalAsync(string name, object? value, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            _script.Globals[name] = value is null
+                ? DynValue.Nil
+                : DynValue.FromObject(_script, value);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<object?> GetGlobalAsync(string name, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var val = _script.Globals.Get(name);
+            return val.Type == DataType.Nil ? null : val.ToObject();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     private readonly HashSet<string> _breakpointCallbacks = new(StringComparer.OrdinalIgnoreCase);
 
     public void RegisterBreakpointCallback(string functionName)
@@ -144,6 +175,21 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     public void Reset()
     {
         _gate.Wait();
+        try
+        {
+            _currentProcessId = null;
+            _breakpointCallbacks.Clear();
+            _script = CreateSandboxedScript();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task ResetAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
             _currentProcessId = null;

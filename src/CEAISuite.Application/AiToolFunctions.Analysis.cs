@@ -28,7 +28,7 @@ public sealed partial class AiToolFunctions
     {
         if (maxResults <= 0) maxResults = _limits.MaxCodeSearchResults;
         var dispValue = (long)(ulong)ParseAddress(offset);
-        var attachment = await engineFacade.AttachAsync(processId);
+        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
         var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
             ? attachment.Modules.ToList()
             : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -50,7 +50,7 @@ public sealed partial class AiToolFunctions
                 var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
 
                 MemoryReadResult memResult;
-                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false); }
                 catch (Exception ex) { logger?.LogDebug(ex, "FindWritersToOffset: Memory read failed at chunk offset"); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
@@ -121,7 +121,7 @@ public sealed partial class AiToolFunctions
             var readLen = (int)Math.Min(chunkSize, totalLen - off);
             try
             {
-                var memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen);
+                var memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false);
                 var chunk = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
                 allBytes.AddRange(chunk);
             }
@@ -261,7 +261,7 @@ public sealed partial class AiToolFunctions
     {
         if (maxResults <= 0) maxResults = _limits.MaxCodeSearchResults;
         var target = (ulong)ParseAddress(targetAddress);
-        var attachment = await engineFacade.AttachAsync(processId);
+        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
         var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
             ? attachment.Modules.ToList()
             : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -283,7 +283,7 @@ public sealed partial class AiToolFunctions
                 var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
 
                 MemoryReadResult memResult;
-                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false); }
                 catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "FindCallsTo: Failed to read memory at {Address}", readAddr); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
@@ -316,7 +316,7 @@ public sealed partial class AiToolFunctions
                         try
                         {
                             var ptrResult = await engineFacade.ReadMemoryAsync(processId,
-                                (nuint)instr.IPRelativeMemoryAddress, 8);
+                                (nuint)instr.IPRelativeMemoryAddress, 8).ConfigureAwait(false);
                             var ptrBytes = ptrResult.Bytes is byte[] pb ? pb : ptrResult.Bytes.ToArray();
                             if (ptrBytes.Length == 8)
                             {
@@ -361,7 +361,7 @@ public sealed partial class AiToolFunctions
         try { regex = new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(5)); }
         catch (ArgumentException ex) { return $"Invalid regex pattern: {ex.Message}"; }
 
-        var attachment = await engineFacade.AttachAsync(processId);
+        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
         var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
             ? attachment.Modules.ToList()
             : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -383,7 +383,7 @@ public sealed partial class AiToolFunctions
                 var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
 
                 MemoryReadResult memResult;
-                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false); }
                 catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "SearchInstructionPattern: Failed to read memory at {Address}", readAddr); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
@@ -429,7 +429,7 @@ public sealed partial class AiToolFunctions
         var dispValue = (long)(ulong)ParseAddress(displacement);
         bool filterAnyBase = baseRegister.Equals("any", StringComparison.OrdinalIgnoreCase);
 
-        var attachment = await engineFacade.AttachAsync(processId);
+        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
         var targetModules = moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
             ? attachment.Modules.ToList()
             : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -451,7 +451,7 @@ public sealed partial class AiToolFunctions
                 var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
 
                 MemoryReadResult memResult;
-                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false); }
                 catch (Exception ex) { logger?.LogDebug(ex, "FindByMemoryOperand: Memory read failed at chunk offset"); continue; }
 
                 var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
@@ -557,7 +557,7 @@ public sealed partial class AiToolFunctions
         }
 
         // Step 3: Determine search module(s)
-        var attachment = await engineFacade.AttachAsync(processId);
+        var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
         var searchModules = string.IsNullOrWhiteSpace(moduleName) || moduleName.Equals("all", StringComparison.OrdinalIgnoreCase)
             ? attachment.Modules.Where(m => m.SizeBytes > 0x1000).ToList()
             : attachment.Modules.Where(m => m.Name.Equals(moduleName, StringComparison.OrdinalIgnoreCase)).ToList();
@@ -594,7 +594,7 @@ public sealed partial class AiToolFunctions
                     var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
 
                     MemoryReadResult memResult;
-                    try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                    try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false); }
                     catch (Exception ex) { logger?.LogDebug(ex, "FindStructureAccess: Strategy A memory read failed"); continue; }
 
                     var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
@@ -662,7 +662,7 @@ public sealed partial class AiToolFunctions
                         var readLen = (int)Math.Min(chunkSize, mod.SizeBytes - off);
 
                         MemoryReadResult memResult;
-                        try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen); }
+                        try { memResult = await engineFacade.ReadMemoryAsync(processId, readAddr, readLen).ConfigureAwait(false); }
                         catch (Exception ex) { logger?.LogDebug(ex, "FindStructureAccess: Strategy B memory read failed"); continue; }
 
                         var bytes = memResult.Bytes is byte[] arr ? arr : memResult.Bytes.ToArray();
@@ -729,7 +729,7 @@ public sealed partial class AiToolFunctions
                 var scanLen = (int)((ulong)writerAddr - (ulong)scanStart + 0x20);
 
                 MemoryReadResult scanMem;
-                try { scanMem = await engineFacade.ReadMemoryAsync(processId, scanStart, scanLen); }
+                try { scanMem = await engineFacade.ReadMemoryAsync(processId, scanStart, scanLen).ConfigureAwait(false); }
                 catch (Exception ex) { logger?.LogDebug(ex, "FindStructureAccess: Strategy C memory read failed"); continue; }
 
                 var scanBytes = scanMem.Bytes is byte[] sa ? sa : scanMem.Bytes.ToArray();

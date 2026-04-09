@@ -43,12 +43,30 @@ public sealed class StubLuaScriptEngine : ILuaScriptEngine
     public void SetGlobal(string name, object? value) => _globals[name] = value;
     public object? GetGlobal(string name) => _globals.TryGetValue(name, out var v) ? v : null;
 
+    public Task SetGlobalAsync(string name, object? value, CancellationToken ct = default)
+    {
+        _globals[name] = value;
+        return Task.CompletedTask;
+    }
+
+    public Task<object?> GetGlobalAsync(string name, CancellationToken ct = default)
+    {
+        var result = _globals.TryGetValue(name, out var v) ? v : null;
+        return Task.FromResult(result);
+    }
+
     public void Reset()
     {
         _globals.Clear();
         ExecuteCallCount = 0;
         LastExecutedCode = null;
         LastEvaluatedExpression = null;
+    }
+
+    public Task ResetAsync(CancellationToken ct = default)
+    {
+        Reset();
+        return Task.CompletedTask;
     }
 
     public LuaExecutionResult NextBreakpointCallbackResult { get; set; } = new(true, "true", null, []);

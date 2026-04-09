@@ -19,7 +19,7 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
         }
 
         await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         const string sql = """
             CREATE TABLE IF NOT EXISTS investigation_sessions (
@@ -36,7 +36,7 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
 
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task SaveAsync(InvestigationSession session, CancellationToken cancellationToken = default)
@@ -44,7 +44,7 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
         ArgumentNullException.ThrowIfNull(session);
 
         await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         const string sql = """
             INSERT INTO investigation_sessions (
@@ -87,19 +87,19 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
         command.Parameters.AddWithValue("$scan_session_count", session.ScanSessions.Count);
         command.Parameters.AddWithValue("$action_log_count", session.ActionLog.Count);
         command.Parameters.AddWithValue("$payload_json", JsonSerializer.Serialize(session, SerializerOptions));
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<InvestigationSession?> LoadAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
         command.CommandText = "SELECT payload_json FROM investigation_sessions WHERE id = $id;";
         command.Parameters.AddWithValue("$id", sessionId);
 
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        var result = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
         if (result is not string payload)
         {
             return null;
@@ -111,7 +111,7 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
     public async Task<IReadOnlyList<SavedInvestigationSession>> ListRecentAsync(int limit, CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
@@ -130,14 +130,14 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
         command.Parameters.AddWithValue("$limit", limit);
 
         var results = new List<SavedInvestigationSession>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             results.Add(
                 new SavedInvestigationSession(
                     reader.GetString(0),
                     reader.GetString(1),
-                    await reader.IsDBNullAsync(2, cancellationToken) ? null : reader.GetInt32(2),
+                    await reader.IsDBNullAsync(2, cancellationToken).ConfigureAwait(false) ? null : reader.GetInt32(2),
                     DateTimeOffset.Parse(reader.GetString(3), CultureInfo.InvariantCulture),
                     reader.GetInt32(4),
                     reader.GetInt32(5),
@@ -150,14 +150,14 @@ public sealed class SqliteInvestigationSessionRepository(string databasePath) : 
     public async Task DeleteAsync(string sessionId, CancellationToken cancellationToken = default)
     {
         await using var connection = CreateConnection();
-        await connection.OpenAsync(cancellationToken);
+        await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
 
         await using var command = connection.CreateCommand();
         command.CommandText = """
             DELETE FROM investigation_sessions WHERE id = $id;
             """;
         command.Parameters.AddWithValue("$id", sessionId);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private SqliteConnection CreateConnection() =>

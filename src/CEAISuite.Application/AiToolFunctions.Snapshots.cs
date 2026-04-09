@@ -24,7 +24,7 @@ public sealed partial class AiToolFunctions
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
-            var snap = await snapshotService.CaptureAsync(processId, addr, length, label);
+            var snap = await snapshotService.CaptureAsync(processId, addr, length, label).ConfigureAwait(false);
             return $"Snapshot '{snap.Label}' captured: {snap.Data.Length} bytes at 0x{snap.BaseAddress:X} (ID: {snap.Id})";
         }
         catch (Exception ex) { return $"CaptureSnapshot failed: {ex.Message}"; }
@@ -63,7 +63,7 @@ public sealed partial class AiToolFunctions
         if (snapshotService is null) return "Snapshot service not available.";
         try
         {
-            var diff = await snapshotService.CompareWithLiveAsync(snapshotId);
+            var diff = await snapshotService.CompareWithLiveAsync(snapshotId).ConfigureAwait(false);
             if (diff.Changes.Count == 0)
                 return $"Memory unchanged since snapshot ({diff.TotalBytesCompared} bytes compared).";
 
@@ -124,7 +124,7 @@ public sealed partial class AiToolFunctions
 
             var path = new PointerPath(moduleName, 0, modOffset, offsetList, 0);
             nuint? expected = expectedAddress is not null ? ParseAddress(expectedAddress) : null;
-            var result = await pointerRescanService.RescanPathAsync(processId, path, expected);
+            var result = await pointerRescanService.RescanPathAsync(processId, path, expected).ConfigureAwait(false);
 
             return $"Pointer path {path.Display}\n" +
                    $"  Status: {result.Status}\n" +
@@ -174,12 +174,12 @@ public sealed partial class AiToolFunctions
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
 
-            var attachment = await engineFacade.AttachAsync(processId);
+            var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
 
             // If threadId is 0, enumerate threads and pick main
             if (threadId == 0)
             {
-                var allStacks = await callStackEngine.WalkAllThreadsAsync(processId, attachment.Modules, maxFrames);
+                var allStacks = await callStackEngine.WalkAllThreadsAsync(processId, attachment.Modules, maxFrames).ConfigureAwait(false);
                 if (allStacks.Count == 0) return "No thread stacks could be captured.";
 
                 // Pick the thread with the most frames (likely main)
@@ -190,7 +190,7 @@ public sealed partial class AiToolFunctions
                 return FormatCallStack(threadId, frames);
             }
 
-            var stack = await callStackEngine.WalkStackAsync(processId, threadId, attachment.Modules, maxFrames);
+            var stack = await callStackEngine.WalkStackAsync(processId, threadId, attachment.Modules, maxFrames).ConfigureAwait(false);
             return FormatCallStack(threadId, stack);
         }
         catch (Exception ex) { return $"GetCallStack failed: {ex.Message}"; }
@@ -209,8 +209,8 @@ public sealed partial class AiToolFunctions
         {
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
 
-            var attachment = await engineFacade.AttachAsync(processId);
-            var allStacks = await callStackEngine.WalkAllThreadsAsync(processId, attachment.Modules, maxFrames);
+            var attachment = await engineFacade.AttachAsync(processId).ConfigureAwait(false);
+            var allStacks = await callStackEngine.WalkAllThreadsAsync(processId, attachment.Modules, maxFrames).ConfigureAwait(false);
 
             if (allStacks.Count == 0) return "No thread stacks could be captured.";
 

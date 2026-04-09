@@ -19,7 +19,7 @@ public sealed class MemorySnapshotService
         int processId, nuint address, int length, string? label = null,
         CancellationToken cancellationToken = default)
     {
-        var result = await _engine.ReadMemoryAsync(processId, address, length, cancellationToken);
+        var result = await _engine.ReadMemoryAsync(processId, address, length, cancellationToken).ConfigureAwait(false);
         var snapshot = new MemorySnapshot(
             Id: $"snap-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss-fff}",
             Label: label ?? $"Snapshot @ 0x{address:X}",
@@ -50,7 +50,7 @@ public sealed class MemorySnapshotService
         if (!_snapshots.TryGetValue(snapshotId, out var snap))
             throw new KeyNotFoundException($"Snapshot '{snapshotId}' not found.");
 
-        var live = await CaptureAsync(snap.ProcessId, snap.BaseAddress, snap.Data.Length, "Live", cancellationToken);
+        var live = await CaptureAsync(snap.ProcessId, snap.BaseAddress, snap.Data.Length, "Live", cancellationToken).ConfigureAwait(false);
         return ComputeDiff(snap, live);
     }
 

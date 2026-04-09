@@ -81,7 +81,7 @@ public sealed class PlanExecutor
                 Temperature = 0.2f,
                 MaxOutputTokens = 4096,
             },
-            ct);
+            ct).ConfigureAwait(false);
 
         var planText = response.Text ?? "";
         _log?.Invoke("PLAN", $"Plan response: {planText.Length} chars");
@@ -107,7 +107,7 @@ public sealed class PlanExecutor
             try
             {
                 await channel.Writer.WriteAsync(
-                    new PlanProgressEvent.PlanStarted(plan), ct);
+                    new PlanProgressEvent.PlanStarted(plan), ct).ConfigureAwait(false);
 
                 for (int i = 0; i < plan.Steps.Count; i++)
                 {
@@ -115,7 +115,7 @@ public sealed class PlanExecutor
                     var step = plan.Steps[i];
 
                     await channel.Writer.WriteAsync(
-                        new PlanProgressEvent.StepStarted(i, step), ct);
+                        new PlanProgressEvent.StepStarted(i, step), ct).ConfigureAwait(false);
 
                     _log?.Invoke("PLAN", $"Executing step {i + 1}/{plan.Steps.Count}: {step.Description}");
 
@@ -146,7 +146,7 @@ public sealed class PlanExecutor
 
                         // Forward raw events for UI display
                         await channel.Writer.WriteAsync(
-                            new PlanProgressEvent.StepStreamEvent(i, evt), ct);
+                            new PlanProgressEvent.StepStreamEvent(i, evt), ct).ConfigureAwait(false);
                     }
 
                     var stepResult = new StepResult
@@ -158,24 +158,24 @@ public sealed class PlanExecutor
                     };
 
                     await channel.Writer.WriteAsync(
-                        new PlanProgressEvent.StepCompleted(i, step, stepResult), ct);
+                        new PlanProgressEvent.StepCompleted(i, step, stepResult), ct).ConfigureAwait(false);
 
                     _log?.Invoke("PLAN", $"Step {i + 1} done: {toolCalls} tools, {stepText.Length} chars");
                 }
 
                 await channel.Writer.WriteAsync(
-                    new PlanProgressEvent.PlanCompleted(plan), ct);
+                    new PlanProgressEvent.PlanCompleted(plan), ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
                 await channel.Writer.WriteAsync(
-                    new PlanProgressEvent.PlanCancelled(), CancellationToken.None);
+                    new PlanProgressEvent.PlanCancelled(), CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _log?.Invoke("PLAN", $"Plan execution failed: {ex.Message}");
                 await channel.Writer.WriteAsync(
-                    new PlanProgressEvent.PlanFailed(ex.Message), CancellationToken.None);
+                    new PlanProgressEvent.PlanFailed(ex.Message), CancellationToken.None).ConfigureAwait(false);
             }
             finally
             {

@@ -47,7 +47,7 @@ public static class StreamingWatchdog
                 using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                 var timeoutTask = Task.Delay(idleTimeout, timeoutCts.Token);
 
-                var completed = await Task.WhenAny(moveNextTask, timeoutTask);
+                var completed = await Task.WhenAny(moveNextTask, timeoutTask).ConfigureAwait(false);
 
                 if (completed == timeoutTask && !moveNextTask.IsCompleted)
                 {
@@ -57,7 +57,7 @@ public static class StreamingWatchdog
                 }
 
                 // Cancel the timeout since we got data
-                await timeoutCts.CancelAsync();
+                await timeoutCts.CancelAsync().ConfigureAwait(false);
 
                 if (!await moveNextTask)
                     yield break;
@@ -67,7 +67,7 @@ public static class StreamingWatchdog
         }
         finally
         {
-            await enumerator.DisposeAsync();
+            await enumerator.DisposeAsync().ConfigureAwait(false);
         }
     }
 }

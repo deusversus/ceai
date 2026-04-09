@@ -105,7 +105,7 @@ public sealed class PluginHost : IAsyncDisposable
         {
             try
             {
-                var loaded = await LoadPluginAsync(dllPath, context, ct);
+                var loaded = await LoadPluginAsync(dllPath, context, ct).ConfigureAwait(false);
                 if (loaded is not null)
                 {
                     lock (_lock) _plugins.Add(loaded);
@@ -158,7 +158,7 @@ public sealed class PluginHost : IAsyncDisposable
 
         try
         {
-            await target.Plugin.ShutdownAsync();
+            await target.Plugin.ShutdownAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -215,7 +215,7 @@ public sealed class PluginHost : IAsyncDisposable
 
         var pluginContext = baseContext with { StorageDirectory = pluginStorageDir };
 
-        await plugin.InitializeAsync(pluginContext, ct);
+        await plugin.InitializeAsync(pluginContext, ct).ConfigureAwait(false);
 
         // Collect and prefix tools
         var rawTools = plugin.GetTools();
@@ -225,7 +225,7 @@ public sealed class PluginHost : IAsyncDisposable
             return AIFunctionFactory.Create(
                 async (IDictionary<string, object?> args) =>
                 {
-                    var result = await tool.InvokeAsync(new AIFunctionArguments(args));
+                    var result = await tool.InvokeAsync(new AIFunctionArguments(args)).ConfigureAwait(false);
                     return result?.ToString() ?? "(no output)";
                 },
                 prefixedName,
@@ -246,7 +246,7 @@ public sealed class PluginHost : IAsyncDisposable
 
         foreach (var loaded in snapshot)
         {
-            try { await loaded.Plugin.ShutdownAsync(); } catch (Exception ex) { _log?.Invoke("PLUGIN", $"Shutdown error for {loaded.Plugin.Name}: {ex.Message}"); }
+            try { await loaded.Plugin.ShutdownAsync().ConfigureAwait(false); } catch (Exception ex) { _log?.Invoke("PLUGIN", $"Shutdown error for {loaded.Plugin.Name}: {ex.Message}"); }
             loaded.LoadContext.Unload();
         }
     }

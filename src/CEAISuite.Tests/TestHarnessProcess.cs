@@ -80,6 +80,94 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
         }
     }
 
+    // ── Typed helper methods for new harness commands ──
+
+    /// <summary>Allocate RWX memory in the harness process, filled with 0xDE. Returns the address.</summary>
+    public async Task<nuint> AllocAsync(int size, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"ALLOC {size}", ct: ct);
+        if (resp is null || !resp.StartsWith("ALLOC_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"ALLOC failed: {resp}");
+        return nuint.Parse(resp.AsSpan(9), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>List all native OS thread IDs in the harness process.</summary>
+    public async Task<IReadOnlyList<int>> GetThreadsAsync(CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync("THREADS", ct: ct);
+        if (resp is null || !resp.StartsWith("THREADS:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"THREADS failed: {resp}");
+        return resp[8..].Split(',').Select(s => int.Parse(s, CultureInfo.InvariantCulture)).ToList();
+    }
+
+    /// <summary>Get the main module base address and size.</summary>
+    public async Task<(nuint BaseAddress, long Size)> GetModuleInfoAsync(CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync("MODULE_INFO", ct: ct);
+        if (resp is null || !resp.StartsWith("MODULE_INFO:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"MODULE_INFO failed: {resp}");
+        var colonIdx = resp.IndexOf(':', 12);
+        var baseAddr = nuint.Parse(resp.AsSpan(12, colonIdx - 12), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        var size = long.Parse(resp.AsSpan(colonIdx + 1), CultureInfo.InvariantCulture);
+        return (baseAddr, size);
+    }
+
+    /// <summary>Write arbitrary bytes at an address in the harness's own memory.</summary>
+    public async Task WriteAtAsync(nuint address, byte[] bytes, CancellationToken ct = default)
+    {
+        var hex = Convert.ToHexString(bytes);
+        var resp = await SendCommandAsync($"WRITE_AT {address:X} {hex}", ct: ct);
+        if (resp is not "WRITE_AT_OK")
+            throw new InvalidOperationException($"WRITE_AT failed: {resp}");
+    }
+
+    /// <summary>Start a background thread that writes to an address every N ms. Returns native thread ID.</summary>
+    public async Task<int> StartWriteLoopAsync(nuint address, int intervalMs, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"WRITE_LOOP {address:X} {intervalMs}", ct: ct);
+        if (resp is null || !resp.StartsWith("WRITE_LOOP_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"WRITE_LOOP failed: {resp}");
+        return int.Parse(resp.AsSpan(14), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Start a background thread that calls code at an address every N ms. Returns native thread ID.</summary>
+    public async Task<int> StartExecLoopAsync(nuint address, int intervalMs, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"EXEC_LOOP {address:X} {intervalMs}", ct: ct);
+        if (resp is null || !resp.StartsWith("EXEC_LOOP_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"EXEC_LOOP failed: {resp}");
+        return int.Parse(resp.AsSpan(13), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Call code at an address once on a new thread. Returns native thread ID after execution.</summary>
+    public async Task<int> CallFuncAsync(nuint address, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"CALL_FUNC {address:X}", TimeSpan.FromSeconds(10), ct);
+        if (resp is null || !resp.StartsWith("CALL_FUNC_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"CALL_FUNC failed: {resp}");
+        return int.Parse(resp.AsSpan(13), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Stop a previously started loop thread.</summary>
+    public async Task StopLoopAsync(int nativeThreadId, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"STOP_LOOP {nativeThreadId}", ct: ct);
+        if (resp is not "STOP_LOOP_OK")
+            throw new InvalidOperationException($"STOP_LOOP failed: {resp}");
+    }
+
+    /// <summary>Create a thread with N-deep call stack. Returns (threadId, baseAddress).</summary>
+    public async Task<(int ThreadId, nuint BaseAddress)> NestCallsAsync(int depth, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"NEST_CALLS {depth}", ct: ct);
+        if (resp is null || !resp.StartsWith("NEST_CALLS_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"NEST_CALLS failed: {resp}");
+        var colonIdx = resp.IndexOf(':', 14);
+        var tid = int.Parse(resp.AsSpan(14, colonIdx - 14), CultureInfo.InvariantCulture);
+        var addr = nuint.Parse(resp.AsSpan(colonIdx + 1), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        return (tid, addr);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;

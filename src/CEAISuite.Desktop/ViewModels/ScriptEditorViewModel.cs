@@ -110,8 +110,8 @@ public partial class ScriptEditorViewModel : ObservableObject
                 node.AssemblerScript = EditorText;
         }
         IsModified = false;
-        StatusText = "Script saved.";
         RefreshScriptList();
+        StatusText = "Script saved.";
     }
 
     [RelayCommand]
@@ -122,8 +122,8 @@ public partial class ScriptEditorViewModel : ObservableObject
         _loadedNodeId = null;
         EditorText = "";
         IsModified = false;
-        StatusText = "Script deleted.";
         RefreshScriptList();
+        StatusText = "Script deleted.";
     }
 
     [RelayCommand]
@@ -153,10 +153,10 @@ public partial class ScriptEditorViewModel : ObservableObject
         try
         {
             var result = await _autoAssemblerEngine.EnableAsync(pid.Value, EditorText);
-            StatusText = result.Success ? "Script enabled." : $"Enable failed: {result.Error}";
             var node = FindNode(_loadedNodeId);
             if (node is not null && result.Success) node.IsScriptEnabled = true;
             RefreshScriptList();
+            StatusText = result.Success ? "Script enabled." : $"Enable failed: {result.Error}";
         }
         catch (Exception ex) { StatusText = $"Error: {ex.Message}"; }
     }
@@ -171,10 +171,10 @@ public partial class ScriptEditorViewModel : ObservableObject
         try
         {
             var result = await _autoAssemblerEngine.DisableAsync(pid.Value, EditorText);
-            StatusText = result.Success ? "Script disabled." : $"Disable failed: {result.Error}";
             var node = FindNode(_loadedNodeId);
             if (node is not null && result.Success) node.IsScriptEnabled = false;
             RefreshScriptList();
+            StatusText = result.Success ? "Script disabled." : $"Disable failed: {result.Error}";
         }
         catch (Exception ex) { StatusText = $"Error: {ex.Message}"; }
     }

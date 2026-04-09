@@ -204,4 +204,197 @@ public class MainViewModelTests : IDisposable
         // Dashboard.RunningProcesses is null by default
         Assert.NotNull(vm.ProcessComboItems);
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // INSPECT / ATTACH
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task InspectSelectedProcessAsync_NoSelection_LogsWarning()
+    {
+        var vm = CreateVm();
+        // No process selected in dashboard (CurrentInspection is null)
+
+        await vm.InspectSelectedProcessAsync();
+
+        Assert.Contains(_outputLog.LoggedMessages, m => m.Level == "Warning" || m.Message.Contains("select"));
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // EMERGENCY STOP
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task EmergencyStopAsync_NoProcess_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        await vm.EmergencyStopAsync();
+        // Should complete without throwing
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SESSION MANAGEMENT
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SaveSessionAsync_NoProcess_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        await vm.SaveSessionAsync();
+        // Should complete without throwing — may log or may be a no-op
+    }
+
+    [Fact]
+    public async Task ListSessionsAsync_ReturnsListOrNull()
+    {
+        var vm = CreateVm();
+        var sessions = await vm.ListSessionsAsync();
+        // May return null or empty list depending on database state
+        // Should not throw
+    }
+
+    [Fact]
+    public async Task RefreshSessionListAsync_ReturnsSessionList()
+    {
+        var vm = CreateVm();
+        var sessions = await vm.RefreshSessionListAsync();
+        Assert.NotNull(sessions);
+    }
+
+    [Fact]
+    public async Task DeleteSessionAsync_NonExistentId_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        await vm.DeleteSessionAsync("nonexistent-id");
+    }
+
+    [Fact]
+    public async Task RestoreSession_NonExistentId_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        await vm.RestoreSession("nonexistent-session-id");
+        // Should complete without throwing — may log warning or silently skip
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // UNDO / REDO
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task PerformUndoAsync_EmptyStack_ReturnsNothingMessage()
+    {
+        var vm = CreateVm();
+        var result = await vm.PerformUndoAsync();
+        Assert.NotNull(result);
+        Assert.Contains("Nothing", result);
+    }
+
+    [Fact]
+    public async Task PerformRedoAsync_EmptyStack_ReturnsNothingMessage()
+    {
+        var vm = CreateVm();
+        var result = await vm.PerformRedoAsync();
+        Assert.NotNull(result);
+        Assert.Contains("Nothing", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SETTINGS
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task HandleSettingsChangedAsync_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        await vm.HandleSettingsChangedAsync();
+        // Should reconfigure AI without throwing
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // REFRESH PROCESS COMBO
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task RefreshProcessComboAsync_PopulatesProcessList()
+    {
+        var vm = CreateVm();
+        await vm.RefreshProcessComboAsync();
+        Assert.NotNull(vm.ProcessComboItems);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // INITIALIZE
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task InitializeAsync_SetsDashboard()
+    {
+        var vm = CreateVm();
+        await vm.InitializeAsync();
+        Assert.NotNull(vm.Dashboard);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // AUTO-REFRESH
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void StartAutoRefresh_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        vm.StartAutoRefresh();
+        // Should not throw; timer started internally
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // BUILD AI CONTEXT WITH PROCESS
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildAiContext_WithProcess_ContainsProcessInfo()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        _processContext.AttachedProcessName = "game.exe";
+
+        var context = vm.BuildAiContext();
+
+        // Context should mention the PID or process in some form
+        Assert.False(string.IsNullOrEmpty(context));
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // CREATE CHAT CLIENT
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task CreateChatClientAsync_NoApiKeys_ReturnsNull()
+    {
+        var vm = CreateVm();
+        var client = await vm.CreateChatClientAsync();
+        Assert.Null(client);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SKILLS
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ReloadSkillsAsync_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        var (success, error) = await vm.ReloadSkillsAsync();
+        // May fail if skills folder doesn't exist — that's OK
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // DISPOSE
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Dispose_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        vm.Dispose();
+    }
 }

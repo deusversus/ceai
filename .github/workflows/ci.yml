@@ -29,7 +29,7 @@ jobs:
         run: dotnet build CEAISuite.slnx -c Release --no-restore
 
       - name: Test (Debug)
-        run: dotnet test src/CEAISuite.Tests/CEAISuite.Tests.csproj -c Debug --no-build --verbosity normal --collect:"XPlat Code Coverage" --results-directory ./coverage
+        run: dotnet test src/CEAISuite.Tests/CEAISuite.Tests.csproj -c Debug --no-build --verbosity normal --settings src/CEAISuite.Tests/coverage.runsettings --results-directory ./coverage
 
       - name: Test (Release)
         if: always()

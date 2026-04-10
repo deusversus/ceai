@@ -89,12 +89,13 @@ public partial class ScannerViewModel : ObservableObject
             return;
         }
 
+        IsScanInProgress = true;
         var progress = new Progress<ScanProgress>(p =>
         {
+            if (!IsScanInProgress) return; // ignore late callbacks after scan completes
             ScanProgress = p.TotalRegions > 0 ? (double)p.RegionsCompleted / p.TotalRegions : 0;
             ScanProgressText = $"{ScanProgress:P0} \u2014 {p.ResultsSoFar:N0} results";
         });
-        IsScanInProgress = true;
         try
         {
             _scanService.ResetScan();
@@ -140,12 +141,13 @@ public partial class ScannerViewModel : ObservableObject
             return;
         }
 
+        IsScanInProgress = true;
         var progress = new Progress<ScanProgress>(p =>
         {
+            if (!IsScanInProgress) return; // ignore late callbacks after scan completes
             ScanProgress = p.TotalRegions > 0 ? (double)p.RegionsCompleted / p.TotalRegions : 0;
             ScanProgressText = $"{ScanProgress:P0} \u2014 {p.ResultsSoFar:N0} results";
         });
-        IsScanInProgress = true;
         try
         {
             ScanStatus = "Refining...";

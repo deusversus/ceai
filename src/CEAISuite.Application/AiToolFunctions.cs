@@ -485,13 +485,15 @@ public sealed partial class AiToolFunctions(
         [Description("Process ID to scan")] int processId,
         [Description("Target address (hex)")] string targetAddress,
         [Description("Maximum pointer chain depth (1-3, default 2)")] int maxDepth = 2,
-        [Description("Comma-separated module names to scan (e.g. 'game.dll,mono.dll'). Empty = all modules.")] string? moduleFilter = null)
+        [Description("Comma-separated module names to scan (e.g. 'game.dll,mono.dll'). Empty = all modules.")] string? moduleFilter = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var scanner = pointerScannerService ?? new PointerScannerService(engineFacade);
         var addr = AddressTableService.ParseAddress(targetAddress);
         IReadOnlyList<string>? filter = string.IsNullOrWhiteSpace(moduleFilter) ? null
             : moduleFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth, moduleFilter: filter).ConfigureAwait(false);
+        var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth, moduleFilter: filter, ct: cancellationToken).ConfigureAwait(false);
 
         // Cache results so SavePointerMap can use them without re-scanning
         _lastPointerScanResults = paths;

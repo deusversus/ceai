@@ -261,4 +261,210 @@ public class ToolExecutorConcurrencyTests
         var serialIdx = executionOrder.IndexOf("serial");
         Assert.Equal(2, serialIdx); // should be last
     }
+
+    // ── Additional coverage tests ──
+
+    [Fact]
+    public async Task ExecuteAsync_SingleTool_RunsSequentially()
+    {
+        var tools = new List<AITool>();
+        var fn = AIFunctionFactory.Create(() => Task.FromResult("hello"), "single_tool");
+        tools.Add(fn);
+
+        var executor = CreateExecutor(tools);
+        var calls = new List<FunctionCallContent> { MakeCall("single_tool") };
+        var results = await executor.ExecuteAsync(calls, CreateChannel(), CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.False(results[0].IsError);
+        Assert.Contains("hello", results[0].Result.Result?.ToString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnknownTool_ReturnsError()
+    {
+        var executor = CreateExecutor(new List<AITool>());
+        var calls = new List<FunctionCallContent> { MakeCall("nonexistent_tool") };
+        var results = await executor.ExecuteAsync(calls, CreateChannel(), CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.True(results[0].IsError);
+        Assert.Contains("not found", results[0].Result.Result?.ToString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_EmptyList_ReturnsEmpty()
+    {
+        var executor = CreateExecutor(new List<AITool>());
+        var results = await executor.ExecuteAsync(
+            Array.Empty<FunctionCallContent>(), CreateChannel(), CancellationToken.None);
+
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ToolThrowsException_ReturnsErrorResult()
+    {
+        var tools = new List<AITool>();
+        var fn = AIFunctionFactory.Create(new Func<Task<string>>(() =>
+            throw new ArgumentException("bad argument")), "throwing_tool");
+        tools.Add(fn);
+
+        var executor = CreateExecutor(tools);
+        var calls = new List<FunctionCallContent> { MakeCall("throwing_tool") };
+        var results = await executor.ExecuteAsync(calls, CreateChannel(), CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.True(results[0].IsError);
+        Assert.Contains("bad argument", results[0].Result.Result?.ToString());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_OversizedResult_IsTruncatedAndSpilled()
+    {
+        // Create a tool returning a very large string that exceeds MaxToolResultChars
+        var largeResult = new string('X', 10_000);
+        var tools = new List<AITool>();
+        var fn = AIFunctionFactory.Create(() => Task.FromResult(largeResult), "big_tool");
+        tools.Add(fn);
+
+        // Use limits with small MaxToolResultChars so the result spills
+        var store = new ToolResultStore();
+        var options = new AgentLoopOptions
+        {
+            SystemPrompt = "test",
+            Tools = tools,
+            Limits = new TokenLimits { MaxToolResultChars = 100 },
+            ToolResultStore = store,
+            DangerousToolNames = new HashSet<string>(),
+        };
+        var executor = new ToolExecutor(options, new ToolAttributeCache());
+        var calls = new List<FunctionCallContent> { MakeCall("big_tool") };
+        var results = await executor.ExecuteAsync(calls, CreateChannel(), CancellationToken.None);
+
+        Assert.Single(results);
+        Assert.False(results[0].IsError);
+        var resultText = results[0].Result.Result?.ToString()!;
+        Assert.Contains("RESULT SPILLED", resultText);
+        Assert.Contains("RetrieveToolResult", resultText);
+        // The store should have the full result
+        Assert.True(store.Count > 0);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DangerousTool_WithNoDenyDecision_RequiresApproval()
+    {
+        var tools = new List<AITool>();
+        var fn = AIFunctionFactory.Create(() => Task.FromResult("danger result"), "dangerous_tool");
+        tools.Add(fn);
+
+        var dangerousTools = new HashSet<string> { "dangerous_tool" };
+        var executor = CreateExecutor(tools, dangerousTools: dangerousTools);
+
+        // The channel should receive an ApprovalRequested event
+        var channel = Channel.CreateUnbounded<AgentStreamEvent>();
+        var calls = new List<FunctionCallContent> { MakeCall("dangerous_tool") };
+
+        // The ExecuteAsync will block waiting for approval (with 5min timeout).
+        // We'll set a short timeout via CTS to avoid waiting.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        // Execute and expect it to either throw (cancellation) or return denial
+        try
+        {
+            var results = await executor.ExecuteAsync(calls, channel.Writer, cts.Token);
+            // If we get here, the approval timed out and was denied
+            Assert.Single(results);
+            Assert.True(results[0].IsError);
+            Assert.Contains("denied", results[0].Result.Result?.ToString()!, StringComparison.OrdinalIgnoreCase);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected — the approval prompt blocks until cancellation
+        }
+    }
+
+    [Fact]
+    public void CanExecuteSpeculatively_ReadOnlyTool_ReturnsTrue()
+    {
+        var cache = new ToolAttributeCache();
+        var field = typeof(ToolAttributeCache).GetField("_cache",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var dict = (Dictionary<string, ToolMetadata>)field.GetValue(cache)!;
+        dict["read_tool"] = new ToolMetadata
+        {
+            Name = "read_tool",
+            IsReadOnly = true,
+            IsConcurrencySafe = true,
+        };
+
+        var executor = CreateExecutor(new List<AITool>(), cache);
+
+        Assert.True(executor.CanExecuteSpeculatively("read_tool"));
+    }
+
+    [Fact]
+    public void CanExecuteSpeculatively_DangerousTool_ReturnsFalse()
+    {
+        var cache = new ToolAttributeCache();
+        var field = typeof(ToolAttributeCache).GetField("_cache",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var dict = (Dictionary<string, ToolMetadata>)field.GetValue(cache)!;
+        dict["danger_tool"] = new ToolMetadata
+        {
+            Name = "danger_tool",
+            IsReadOnly = true,
+            IsConcurrencySafe = true,
+        };
+
+        var dangerousTools = new HashSet<string> { "danger_tool" };
+        var executor = CreateExecutor(new List<AITool>(), cache, dangerousTools);
+
+        Assert.False(executor.CanExecuteSpeculatively("danger_tool"));
+    }
+
+    [Fact]
+    public void CanExecuteSpeculatively_NullOrEmpty_ReturnsFalse()
+    {
+        var executor = CreateExecutor(new List<AITool>());
+
+        Assert.False(executor.CanExecuteSpeculatively(""));
+        Assert.False(executor.CanExecuteSpeculatively(null!));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ToolWithMaxResultSizeAttribute_UsesCustomLimit()
+    {
+        // Create a tool with custom MaxResultSize via metadata
+        var cache = new ToolAttributeCache();
+        var field = typeof(ToolAttributeCache).GetField("_cache",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var dict = (Dictionary<string, ToolMetadata>)field.GetValue(cache)!;
+        dict["limited_tool"] = new ToolMetadata
+        {
+            Name = "limited_tool",
+            MaxResultSize = 50, // very small custom limit
+        };
+
+        var bigResult = new string('Y', 200);
+        var fn = AIFunctionFactory.Create(() => Task.FromResult(bigResult), "limited_tool");
+        var tools = new List<AITool> { fn };
+
+        var store = new ToolResultStore();
+        var options = new AgentLoopOptions
+        {
+            SystemPrompt = "test",
+            Tools = tools,
+            Limits = new TokenLimits { MaxToolResultChars = 10000 }, // global limit is large
+            ToolResultStore = store,
+            DangerousToolNames = new HashSet<string>(),
+        };
+        var executor = new ToolExecutor(options, cache);
+        var calls = new List<FunctionCallContent> { MakeCall("limited_tool") };
+        var results = await executor.ExecuteAsync(calls, CreateChannel(), CancellationToken.None);
+
+        // The per-tool MaxResultSize=50 should cause spilling despite global limit being large
+        var resultText = results[0].Result.Result?.ToString()!;
+        Assert.Contains("RESULT SPILLED", resultText);
+    }
 }

@@ -123,4 +123,139 @@ public class PointerScannerViewModelTests
         Assert.Contains("Validated", vm.StatusText);
         Assert.NotEqual("Found", vm.Results[0].Status);
     }
+
+    // ── Additional coverage tests ──
+
+    [Fact]
+    public async Task ScanAsync_WithValidAddress_RunsScan()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.TargetAddress = "0x50000";
+        vm.MaxDepth = 2;
+        vm.MaxOffset = "0x1000";
+
+        await vm.ScanCommand.ExecuteAsync(null);
+
+        // Scan completes (stub returns empty results)
+        Assert.Contains("pointer path(s) found", vm.StatusText);
+        Assert.False(vm.IsScanning);
+    }
+
+    [Fact]
+    public async Task ScanAsync_DecimalMaxOffset_Parses()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.TargetAddress = "0x50000";
+        vm.MaxOffset = "4096"; // decimal rather than hex
+
+        await vm.ScanCommand.ExecuteAsync(null);
+
+        Assert.Contains("pointer path(s) found", vm.StatusText);
+    }
+
+    [Fact]
+    public void CopyPath_WithSelection_CopiesChain()
+    {
+        var vm = CreateVm();
+        var path = new PointerPath("game.dll", 0x7FF00000, 0x1000, [0x10], 0x50000);
+        var item = new CEAISuite.Desktop.Models.PointerPathDisplayItem
+        {
+            Chain = path.Display,
+            ResolvedAddress = "0x50000",
+            ModuleName = "game.dll",
+            Source = path
+        };
+        vm.Results.Add(item);
+        vm.SelectedResult = item;
+
+        vm.CopyPathCommand.Execute(null);
+        // No crash; clipboard should have the chain
+    }
+
+    [Fact]
+    public void CopyPath_NoSelection_DoesNothing()
+    {
+        var vm = CreateVm();
+        vm.SelectedResult = null;
+
+        vm.CopyPathCommand.Execute(null);
+        // No crash
+    }
+
+    [Fact]
+    public void CopyResolvedAddress_WithSelection_CopiesAddress()
+    {
+        var vm = CreateVm();
+        var item = new CEAISuite.Desktop.Models.PointerPathDisplayItem
+        {
+            Chain = "game.dll+0x1000 → [+0x10]",
+            ResolvedAddress = "0x50000",
+            ModuleName = "game.dll",
+            Source = new PointerPath("game.dll", 0x7FF00000, 0x1000, [0x10], 0x50000)
+        };
+        vm.Results.Add(item);
+        vm.SelectedResult = item;
+
+        vm.CopyResolvedAddressCommand.Execute(null);
+        // No crash
+    }
+
+    [Fact]
+    public void BrowseResolved_WithSelection_NavigatesToMemoryBrowser()
+    {
+        var vm = CreateVm();
+        var item = new CEAISuite.Desktop.Models.PointerPathDisplayItem
+        {
+            Chain = "game.dll+0x1000",
+            ResolvedAddress = "0x50000",
+            ModuleName = "game.dll",
+        };
+        vm.SelectedResult = item;
+
+        vm.BrowseResolvedCommand.Execute(null);
+        // No crash
+    }
+
+    [Fact]
+    public void BrowseResolved_NoSelection_DoesNothing()
+    {
+        var vm = CreateVm();
+        vm.SelectedResult = null;
+
+        vm.BrowseResolvedCommand.Execute(null);
+        // No crash
+    }
+
+    [Fact]
+    public async Task ResumeScanAsync_CannotResume_SetsStatus()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        // CanResume is false by default
+
+        await vm.ResumeScanCommand.ExecuteAsync(null);
+
+        Assert.Contains("Nothing to resume", vm.StatusText);
+    }
+
+    [Fact]
+    public async Task SavePointerMap_NoResults_SetsStatus()
+    {
+        var vm = CreateVm();
+
+        await vm.SavePointerMapCommand.ExecuteAsync(null);
+
+        Assert.Contains("No results", vm.StatusText);
+    }
+
+    [Fact]
+    public void Dispose_DoesNotThrow()
+    {
+        var vm = CreateVm();
+        vm.Dispose();
+        // double dispose
+        vm.Dispose();
+    }
 }

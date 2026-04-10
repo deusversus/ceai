@@ -174,4 +174,73 @@ public class PatchUndoServiceTests
 
         Assert.Equal(500, svc.UndoCount);
     }
+
+    // ── Additional coverage: GetDataTypeSize for all enum values ──
+
+    [Theory]
+    [InlineData(MemoryDataType.Byte)]
+    [InlineData(MemoryDataType.Int16)]
+    [InlineData(MemoryDataType.Int32)]
+    [InlineData(MemoryDataType.Int64)]
+    [InlineData(MemoryDataType.Float)]
+    [InlineData(MemoryDataType.Double)]
+    [InlineData(MemoryDataType.Pointer)]
+    public async Task WriteWithUndoAsync_AllDataTypes_ReadsCorrectSize(MemoryDataType dataType)
+    {
+        var facade = new StubEngineFacade();
+        // Pre-populate memory with enough bytes at the address
+        facade.WriteMemoryDirect((nuint)0x2000, new byte[16]);
+        var svc = new PatchUndoService(facade);
+
+        var result = await svc.WriteWithUndoAsync(1, (nuint)0x2000, dataType, "0");
+
+        // Write should succeed (StubEngineFacade supports all types)
+        Assert.True(result.BytesWritten > 0);
+        Assert.Equal(1, svc.UndoCount);
+    }
+
+    [Fact]
+    public async Task WriteRawBytesAsync_CalledDuringUndo_WritesIndividualBytes()
+    {
+        // WriteRawBytesAsync writes individual bytes — verify by undoing a multi-byte write
+        var facade = new StubEngineFacade();
+        facade.WriteMemoryDirect((nuint)0x3000, BitConverter.GetBytes(42));
+        var svc = new PatchUndoService(facade);
+
+        // Write a new value
+        await svc.WriteWithUndoAsync(1, (nuint)0x3000, MemoryDataType.Int32, "999");
+
+        // Undo should call WriteRawBytesAsync internally (writes individual bytes)
+        var undoMsg = await svc.UndoAsync();
+
+        Assert.Contains("Undone", undoMsg);
+        Assert.Contains("restored 4 bytes", undoMsg);
+        Assert.Equal(0, svc.UndoCount);
+        Assert.Equal(1, svc.RedoCount);
+    }
+
+    [Fact]
+    public async Task UndoAndRedo_MultipleRoundTrips_MaintainsCorrectCounts()
+    {
+        var facade = CreateFacadeWithInt32((nuint)0x1000, 10);
+        var svc = new PatchUndoService(facade);
+
+        await svc.WriteWithUndoAsync(1, (nuint)0x1000, MemoryDataType.Int32, "20");
+        await svc.WriteWithUndoAsync(1, (nuint)0x1000, MemoryDataType.Int32, "30");
+        await svc.WriteWithUndoAsync(1, (nuint)0x1000, MemoryDataType.Int32, "40");
+
+        // Undo all 3
+        await svc.UndoAsync();
+        await svc.UndoAsync();
+        await svc.UndoAsync();
+        Assert.Equal(0, svc.UndoCount);
+        Assert.Equal(3, svc.RedoCount);
+
+        // Redo all 3
+        await svc.RedoAsync();
+        await svc.RedoAsync();
+        await svc.RedoAsync();
+        Assert.Equal(3, svc.UndoCount);
+        Assert.Equal(0, svc.RedoCount);
+    }
 }

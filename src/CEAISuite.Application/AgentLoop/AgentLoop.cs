@@ -398,8 +398,10 @@ public sealed class AgentLoop
             var watchedStream = StreamingWatchdog.WithIdleTimeout(
                 rawStream, _options.StreamingIdleTimeout, _log, retryCt);
 
+            int chunkCount = 0;
             await foreach (var update in watchedStream.ConfigureAwait(false))
             {
+                chunkCount++;
                 // Process streaming chunks
                 foreach (var content in update.Contents)
                 {
@@ -443,6 +445,11 @@ public sealed class AgentLoop
                 if (update.FinishReason is ChatFinishReason fr)
                     finishReason = fr.Value;
             }
+
+            // Detect non-streaming responses: if the provider sent everything in ≤2 chunks
+            // the user saw no incremental text. Log it so we can diagnose provider-side issues.
+            if (chunkCount <= 2 && assistantText.Length > 0)
+                _log?.Invoke("STREAM", $"Response arrived in {chunkCount} chunk(s) ({assistantText.Length} chars) — provider may not support streaming for this model.");
 
             return (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks);
         },

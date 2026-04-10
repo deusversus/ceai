@@ -298,7 +298,16 @@ public sealed partial class AiToolFunctions(
             return new { n.Id, n.Label, type = "group", childCount = n.Children.Count };
         if (n.IsScriptEntry)
             return new { n.Id, n.Label, type = "script", enabled = n.IsScriptEnabled };
-        return new { n.Id, n.Label, n.Address, n.DisplayValue, n.DataType, n.IsLocked };
+        return new
+        {
+            n.Id,
+            n.Label,
+            address = n.ResolvedAddress.HasValue ? $"0x{n.ResolvedAddress.Value:X}" : n.Address,
+            symbolicAddress = n.IsOffset ? n.Address : null,
+            n.DisplayValue,
+            n.DataType,
+            n.IsLocked
+        };
     }
 
     [ConcurrencySafe]

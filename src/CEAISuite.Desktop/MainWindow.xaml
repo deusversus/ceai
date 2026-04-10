@@ -2124,68 +2124,9 @@
                                     </Border>
                                 </DockPanel>
 
-                                <!-- Chat messages — DockPanel lets each ListBox own its own ScrollViewer for virtualization -->
+                                <!-- Chat area: streaming blocks docked Bottom (declared first), chat history fills rest (last child) -->
                                 <DockPanel x:Name="AiChatContainer" Margin="8,0,8,0" LastChildFill="True">
-                                        <!-- 3A: ListBox with virtualization — now owns its own ScrollViewer (no outer wrapper) -->
-                                        <ListBox x:Name="AiChatList" ItemsSource="{Binding ChatMessages}"
-                                                 VirtualizingStackPanel.IsVirtualizing="True"
-                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
-                                                 ScrollViewer.CanContentScroll="True"
-                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                                 Background="Transparent"
-                                                 BorderThickness="0"
-                                                 HorizontalContentAlignment="Stretch"
-                                                 SelectionMode="Single">
-                                            <ListBox.ItemContainerStyle>
-                                                <Style TargetType="ListBoxItem">
-                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                                    <Setter Property="Padding" Value="0"/>
-                                                    <Setter Property="Margin" Value="0"/>
-                                                    <Setter Property="Template">
-                                                        <Setter.Value>
-                                                            <ControlTemplate TargetType="ListBoxItem">
-                                                                <ContentPresenter/>
-                                                            </ControlTemplate>
-                                                        </Setter.Value>
-                                                    </Setter>
-                                                </Style>
-                                            </ListBox.ItemContainerStyle>
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
-                                                            Background="{Binding Background}">
-                                                        <Border.ContextMenu>
-                                                            <ContextMenu>
-                                                                <MenuItem Header="Copy Message" Click="CopyAiMessage" />
-                                                            </ContextMenu>
-                                                        </Border.ContextMenu>
-                                                        <StackPanel>
-                                                            <Grid>
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="*" />
-                                                                    <ColumnDefinition Width="Auto" />
-                                                                </Grid.ColumnDefinitions>
-                                                                <TextBlock Grid.Column="0" FontWeight="SemiBold" FontSize="10"
-                                                                           Foreground="{DynamicResource SecondaryForeground}" Text="{Binding RoleLabel}" />
-                                                                <TextBlock Grid.Column="1" FontSize="9" Foreground="{DynamicResource TertiaryForeground}"
-                                                                           Text="{Binding Timestamp}" VerticalAlignment="Center" />
-                                                            </Grid>
-                                                            <!-- Image attachment (shown above text when present) -->
-                                                            <Image Source="{Binding ImageSource}" MaxHeight="200" MaxWidth="400"
-                                                                   HorizontalAlignment="Left" Margin="0,4,0,4"
-                                                                   Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}"
-                                                                   ToolTip="Attached image" />
-                                                            <!-- 3C: TextBlock replaces read-only TextBox for chat message content -->
-                                                            <TextBlock Text="{Binding Content, Mode=OneWay}" FontSize="12"
-                                                                       TextWrapping="Wrap"
-                                                                       Foreground="{DynamicResource PrimaryForeground}"/>
-                                                        </StackPanel>
-                                                    </Border>
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
-
-                                        <!-- Live streaming content blocks — docked to bottom so chat list fills remaining space -->
+                                        <!-- Live streaming blocks — docked Bottom, declared first so DockPanel reserves space before fill -->
                                         <ListBox x:Name="StreamingBlocksList" DockPanel.Dock="Bottom"
                                                  ItemsSource="{Binding StreamingBlocks}"
                                                  Visibility="{Binding IsStreamingBlocksVisible, Converter={StaticResource BoolToVisibility}}"
@@ -2282,6 +2223,64 @@
                                                     </Border>
                                                 </DataTemplate>
                                             </ListBox.Resources>
+                                        </ListBox>
+
+                                        <!-- Chat history — last child, fills remaining space above streaming blocks -->
+                                        <ListBox x:Name="AiChatList" ItemsSource="{Binding ChatMessages}"
+                                                 VirtualizingStackPanel.IsVirtualizing="True"
+                                                 VirtualizingStackPanel.VirtualizationMode="Recycling"
+                                                 ScrollViewer.CanContentScroll="True"
+                                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                 Background="Transparent"
+                                                 BorderThickness="0"
+                                                 HorizontalContentAlignment="Stretch"
+                                                 SelectionMode="Single">
+                                            <ListBox.ItemContainerStyle>
+                                                <Style TargetType="ListBoxItem">
+                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    <Setter Property="Padding" Value="0"/>
+                                                    <Setter Property="Margin" Value="0"/>
+                                                    <Setter Property="Template">
+                                                        <Setter.Value>
+                                                            <ControlTemplate TargetType="ListBoxItem">
+                                                                <ContentPresenter/>
+                                                            </ControlTemplate>
+                                                        </Setter.Value>
+                                                    </Setter>
+                                                </Style>
+                                            </ListBox.ItemContainerStyle>
+                                            <ListBox.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Border Padding="8,6" Margin="0,0,0,4" CornerRadius="4"
+                                                            Background="{Binding Background}">
+                                                        <Border.ContextMenu>
+                                                            <ContextMenu>
+                                                                <MenuItem Header="Copy Message" Click="CopyAiMessage" />
+                                                            </ContextMenu>
+                                                        </Border.ContextMenu>
+                                                        <StackPanel>
+                                                            <Grid>
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="*" />
+                                                                    <ColumnDefinition Width="Auto" />
+                                                                </Grid.ColumnDefinitions>
+                                                                <TextBlock Grid.Column="0" FontWeight="SemiBold" FontSize="10"
+                                                                           Foreground="{DynamicResource SecondaryForeground}" Text="{Binding RoleLabel}" />
+                                                                <TextBlock Grid.Column="1" FontSize="9" Foreground="{DynamicResource TertiaryForeground}"
+                                                                           Text="{Binding Timestamp}" VerticalAlignment="Center" />
+                                                            </Grid>
+                                                            <!-- Image attachment (shown above text when present) -->
+                                                            <Image Source="{Binding ImageSource}" MaxHeight="200" MaxWidth="400"
+                                                                   HorizontalAlignment="Left" Margin="0,4,0,4"
+                                                                   Visibility="{Binding HasImage, Converter={StaticResource BoolToVisibility}}"
+                                                                   ToolTip="Attached image" />
+                                                            <TextBlock Text="{Binding Content, Mode=OneWay}" FontSize="12"
+                                                                       TextWrapping="Wrap"
+                                                                       Foreground="{DynamicResource PrimaryForeground}"/>
+                                                        </StackPanel>
+                                                    </Border>
+                                                </DataTemplate>
+                                            </ListBox.ItemTemplate>
                                         </ListBox>
                                 </DockPanel>
                             </DockPanel>

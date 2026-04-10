@@ -97,6 +97,7 @@ internal static class DangerousTools
         "RegisterBreakpointLuaCallback",
         "ExecuteAutoAssemblerScript",
         "DisableAutoAssemblerScript",
+        "ExecuteLuaScript",
     };
 }
 
@@ -141,7 +142,8 @@ internal static class ToolCategories
     public static readonly Dictionary<string, string[]> Categories = new(StringComparer.OrdinalIgnoreCase)
     {
         ["sessions"] = [
-            "SummarizeInvestigation", "SaveSession", "ListSessions", "LoadSession", "SearchChatHistory" ],
+            "SummarizeInvestigation", "SaveSession", "ListSessions", "LoadSession", "SearchChatHistory",
+            "DeleteSession" ],
         ["memory_advanced"] = [
             "HexDump", "ListMemoryRegions", "DissectStructure",
             "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection" ],
@@ -149,22 +151,29 @@ internal static class ToolCategories
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
             "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript" ],
         ["scanning_advanced"] = [
-            "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths" ],
+            "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths",
+            "UndoScan", "GroupedScan", "ResumePointerScan", "RescanAllPointerPaths",
+            "SavePointerMap", "LoadPointerMap", "ComparePointerMaps" ],
         ["breakpoints"] = [
             "SetBreakpoint", "RemoveBreakpoint", "ListBreakpoints",
             "GetBreakpointHitLog", "GetBreakpointHealth", "GetBreakpointModeCapabilities",
-            "ProbeTargetRisk", "EmergencyRestorePageProtection", "ForceDetachAndCleanup" ],
+            "ProbeTargetRisk", "EmergencyRestorePageProtection", "ForceDetachAndCleanup",
+            "SetConditionalBreakpoint", "TraceFromAddress",
+            "RegisterBreakpointLuaCallback", "UnregisterBreakpointLuaCallback" ],
         ["disassembly"] = [
             "Disassemble", "FindWritersToOffset", "FindFunctionBoundaries", "GetCallerGraph",
             "SearchInstructionPattern", "FindByMemoryOperand",
-            "GetCallStack", "GetAllThreadStacks", "ResolveSymbol" ],
+            "GetCallStack", "GetAllThreadStacks", "ResolveSymbol",
+            "TraceFieldWriters", "LoadSymbolsForModule", "ResolveAddressToSymbol" ],
         ["hooks"] = [
             "InstallCodeCaveHook", "RemoveCodeCaveHook", "ListCodeCaveHooks",
             "GetCodeCaveHookHits", "DryRunHookInstall" ],
         ["scripts"] = [
             "ListScripts", "ViewScript", "ValidateScript", "ValidateScriptDeep",
             "EditScript", "CreateScriptEntry",
-            "GenerateAutoAssemblerScript", "GenerateLuaScript", "GenerateTrainerScript" ],
+            "GenerateAutoAssemblerScript", "GenerateLuaScript", "GenerateTrainerScript",
+            "ExecuteAutoAssemblerScript", "DisableAutoAssemblerScript",
+            "ListRegisteredSymbols", "ResolveRegisteredSymbol" ],
         ["snapshots"] = [
             "CaptureSnapshot", "CompareSnapshots", "CompareSnapshotWithLive",
             "ListSnapshots", "DeleteSnapshot" ],
@@ -183,6 +192,8 @@ internal static class ToolCategories
             "LoadCheatTable", "SaveCheatTable" ],
         ["vision"] = [
             "CaptureProcessWindow" ],
+        ["lua"] = [
+            "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression" ],
         ["utility"] = [
             "IdentifyArtifact" ],
     };
@@ -196,6 +207,7 @@ internal static class ToolCategories
     [
         ("breakpoints", "disassembly"),
         ("hooks", "disassembly"),
+        ("lua", "scripts"),
     ];
 }
 

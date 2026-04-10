@@ -60,6 +60,10 @@ public sealed partial class AiToolFunctions(
     private int _sessionGeneration;
     private int _lastAttachedPid;
 
+    // WP1.5: Cache last pointer scan results so SavePointerMap doesn't re-scan
+    private IReadOnlyList<PointerPath>? _lastPointerScanResults;
+    private nuint _lastPointerScanTarget;
+
     // Phase 5A: short-TTL cache for process list
     private IReadOnlyList<ProcessDescriptor>? _processListCache;
     private DateTime _processListCacheExpiry;
@@ -198,7 +202,7 @@ public sealed partial class AiToolFunctions(
         }
     }
 
-    [ReadOnlyTool]
+    [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Undo the last scan refinement, restoring the previous result set.")]
     public Task<string> UndoScan()
@@ -393,7 +397,7 @@ public sealed partial class AiToolFunctions(
         return summary;
     }
 
-    [ReadOnlyTool]
+    [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Attach to a process by PID for memory operations.")]
     public async Task<string> AttachProcess([Description("Process ID")] int processId)
@@ -430,7 +434,7 @@ public sealed partial class AiToolFunctions(
             (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : ""));
     }
 
-    [ReadOnlyTool]
+    [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Save the current address table as a Cheat Engine .CT file.")]
     public Task<string> SaveCheatTable([Description("File path to save to")] string filePath)
@@ -483,11 +487,15 @@ public sealed partial class AiToolFunctions(
         [Description("Maximum pointer chain depth (1-3, default 2)")] int maxDepth = 2,
         [Description("Comma-separated module names to scan (e.g. 'game.dll,mono.dll'). Empty = all modules.")] string? moduleFilter = null)
     {
-        var scanner = new PointerScannerService(engineFacade);
+        var scanner = pointerScannerService ?? new PointerScannerService(engineFacade);
         var addr = AddressTableService.ParseAddress(targetAddress);
         IReadOnlyList<string>? filter = string.IsNullOrWhiteSpace(moduleFilter) ? null
             : moduleFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         var paths = await scanner.ScanForPointersAsync(processId, addr, maxDepth, moduleFilter: filter).ConfigureAwait(false);
+
+        // Cache results so SavePointerMap can use them without re-scanning
+        _lastPointerScanResults = paths;
+        _lastPointerScanTarget = addr;
 
         if (paths.Count == 0) return "No pointer paths found to the target address.";
 
@@ -497,7 +505,7 @@ public sealed partial class AiToolFunctions(
 
     // ── Phase 7E: Pointer Map I/O ──
 
-    [ReadOnlyTool]
+    [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Save the last pointer scan results to a .PTR file for offline analysis.")]
     public async Task<string> SavePointerMap(
@@ -507,12 +515,15 @@ public sealed partial class AiToolFunctions(
     {
         try
         {
-            var scanner = new PointerScannerService(engineFacade);
             var addr = AddressTableService.ParseAddress(targetAddress);
 
-            // Re-scan to get fresh paths (the service doesn't persist scan state)
-            var paths = await scanner.ScanForPointersAsync(processId, addr, 2).ConfigureAwait(false);
-            if (paths.Count == 0) return "No pointer paths found. Run ScanForPointers first.";
+            // Use cached results from the most recent ScanForPointers call
+            var paths = (_lastPointerScanResults is not null && _lastPointerScanTarget == addr)
+                ? _lastPointerScanResults
+                : null;
+
+            if (paths is null || paths.Count == 0)
+                return "No pointer paths cached. Run ScanForPointers first, then SavePointerMap.";
 
             var map = new PointerMapFile(
                 $"process-{processId}", addr, DateTimeOffset.UtcNow, 2, 0x2000, paths);
@@ -782,10 +793,15 @@ public sealed partial class AiToolFunctions(
                         {
                             _ = autoAssemblerEngine.DisableAsync(pid, node.AssemblerScript!).ContinueWith(t =>
                             {
-                                if (t.IsFaulted) logger?.LogWarning(t.Exception, "Hotkey script disable failed for {Label}", node.Label);
+                                if (t.IsFaulted)
+                                {
+                                    logger?.LogWarning(t.Exception, "Hotkey script disable failed for {Label}", node.Label);
+                                    node.ScriptStatus = $"FAILED: {t.Exception?.InnerException?.Message ?? "unknown"}";
+                                    return;
+                                }
+                                node.IsScriptEnabled = false;
+                                node.ScriptStatus = "Disabled (hotkey)";
                             }, TaskScheduler.Default);
-                            node.IsScriptEnabled = false;
-                            node.ScriptStatus = "Disabled (hotkey)";
                         }
                         else
                         {

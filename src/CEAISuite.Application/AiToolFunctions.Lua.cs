@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using CEAISuite.Application.AgentLoop;
 using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
@@ -9,6 +10,7 @@ public partial class AiToolFunctions
     /// Execute a Lua script and return its output. Supports CE API functions
     /// (readInteger, writeFloat, getAddress, etc.) when a process is attached.
     /// </summary>
+    [Destructive]
     [Description("Execute a Lua script. Use for complex automation, CE table scripts, or multi-step memory operations.")]
     public async Task<string> ExecuteLuaScript(
         [Description("Lua script code to execute")] string code,

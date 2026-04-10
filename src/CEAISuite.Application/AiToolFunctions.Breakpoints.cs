@@ -555,6 +555,7 @@ public sealed partial class AiToolFunctions
         return $"Lua callback '{luaFunctionName}' registered for breakpoint {breakpointId}.";
     }
 
+    [ConcurrencySafe]
     [Description("Remove a previously registered Lua callback from a breakpoint.")]
     public string UnregisterBreakpointLuaCallback(
         [Description("Breakpoint ID")] string breakpointId)

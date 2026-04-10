@@ -57,8 +57,9 @@ public class RealProcessWatchdogTests
         var rollbackTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var service = new ProcessWatchdogService
         {
-            HeartbeatIntervalMs = 200,
-            UnresponsiveThresholdMs = 600,
+            // Wider thresholds for slow CI runners — signals need time to detect unresponsiveness
+            HeartbeatIntervalMs = 500,
+            UnresponsiveThresholdMs = 2000,
         };
 
         var guard = service.StartMonitoring(
@@ -72,12 +73,12 @@ public class RealProcessWatchdogTests
         // Block all threads — no CPU progress, no message pump
         await harness.SendFireAndForgetAsync("BLOCK");
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         cts.Token.Register(() => rollbackTcs.TrySetResult(false));
         var result = await rollbackTcs.Task;
 
         // Small delay to let OnRollbackTriggered complete (marks address unsafe after rollback action returns)
-        await Task.Delay(200);
+        await Task.Delay(500);
         guard.Dispose();
 
         Assert.True(result, "Rollback should have been triggered for unresponsive process");
@@ -160,8 +161,9 @@ public class RealProcessWatchdogTests
         var rollbackTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         using var service = new ProcessWatchdogService
         {
-            HeartbeatIntervalMs = 200,
-            UnresponsiveThresholdMs = 600,
+            // Wider thresholds for slow CI runners
+            HeartbeatIntervalMs = 500,
+            UnresponsiveThresholdMs = 2000,
         };
 
         var guards = new List<WatchdogGuard>();

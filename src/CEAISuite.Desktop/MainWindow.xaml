@@ -605,6 +605,7 @@
                                                 <MenuItem Header="Browse Memory Region" Command="{Binding BrowseMemoryCommand}" />
                                                 <MenuItem Header="Disassemble Here" Command="{Binding DisassembleCommand}" />
                                                 <MenuItem Header="Find What Writes" Command="{Binding FindWhatWritesCommand}" />
+                                                <MenuItem Header="Trace Field Writers (AI)" Command="{Binding TraceFieldWritersCommand}" ToolTip="Ask the AI to analyze code that writes to this field" />
                                                 <MenuItem Header="View Write Log" Command="{Binding ViewWriteLogCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="Create Group" Command="{Binding CreateGroupCommand}" />
@@ -871,6 +872,7 @@
                                             <ContextMenu Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}">
                                                 <MenuItem Header="Set Breakpoint" Command="{Binding SetBreakpointAtSelectedCommand}" />
                                                 <MenuItem Header="Find What Writes" Command="{Binding FindWhatWritesCommand}" />
+                                                <MenuItem Header="Trace Field Writers (AI)" Command="{Binding TraceFieldWritersCommand}" ToolTip="Ask the AI to analyze code that writes to this field" />
                                                 <MenuItem Header="Generate Signature" Command="{Binding GenerateSignatureCommand}" />
                                                 <Separator />
                                                 <MenuItem Header="Follow Jump/Call" Command="{Binding FollowJumpCallCommand}" />

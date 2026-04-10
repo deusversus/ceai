@@ -258,6 +258,13 @@ public partial class MainWindow : Window, IDisposable
                 _mainVm.PopulateFindResults(items, desc);
                 ActivateAnchorable("findResults");
             });
+        _subs.Subscribe<string, string>(
+            h => _addressTableVm.TraceFieldWritersRequested += h, h => _addressTableVm.TraceFieldWritersRequested -= h,
+            (nodeId, label) =>
+            {
+                _aiOperatorVm.SendMessageFromUI($"Use TraceFieldWriters to analyze what code writes to the '{label}' field (entry {nodeId}) in the attached process.");
+                ActivateAnchorable("aiOperator");
+            });
         _subs.Subscribe<IReadOnlyList<FindResultDisplayItem>, string>(
             h => disassemblerVm.PopulateFindResults += h, h => disassemblerVm.PopulateFindResults -= h,
             (items, desc) =>

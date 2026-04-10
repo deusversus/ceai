@@ -161,6 +161,13 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
 
     // ── Commands ──
 
+    /// <summary>Send a message to the AI from another UI component (e.g., context menu action).</summary>
+    public void SendMessageFromUI(string message)
+    {
+        InputText = message;
+        SendMessageCommand.Execute(null);
+    }
+
     [RelayCommand]
     private async Task SendMessageAsync()
     {

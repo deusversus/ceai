@@ -44,6 +44,9 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
     }
     public event Action<IReadOnlyList<FindResultDisplayItem>, string>? PopulateFindResults;
 
+    /// <summary>Raised when user requests AI-powered field writer tracing for an entry.</summary>
+    public event Action<string, string>? TraceFieldWritersRequested; // (nodeId, label)
+
     [ObservableProperty]
     private ObservableCollection<AddressTableNode>? _roots;
 
@@ -690,6 +693,13 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         }
 
         NavigateToDisassembly?.Invoke($"0x{addr:X}");
+    }
+
+    [RelayCommand]
+    private void TraceFieldWriters()
+    {
+        if (SelectedNode is null || SelectedNode.IsGroup || SelectedNode.IsScriptEntry) return;
+        TraceFieldWritersRequested?.Invoke(SelectedNode.Id, SelectedNode.Label);
     }
 
     [RelayCommand]

@@ -742,12 +742,15 @@ public partial class MainViewModel : ObservableObject, IDisposable
 
     private void OnWatchdogRollback(WatchdogRollbackEvent evt)
     {
-        _dispatcher.Invoke(() => StatusBarWatchdogText = $"⚠ Rollback 0x{evt.Address:X}");
-        // Auto-clear after 5 seconds
+        var unsafeCount = _watchdog.GetUnsafeAddresses().Count;
+        var suffix = unsafeCount > 0 ? $" | {unsafeCount} unsafe" : "";
+        _dispatcher.Invoke(() => StatusBarWatchdogText = $"⚠ Rollback 0x{evt.Address:X}{suffix}");
+        // Auto-clear after 5 seconds (but keep unsafe count if any)
         _ = Task.Run(async () =>
         {
             await Task.Delay(5000);
-            _dispatcher.Invoke(() => StatusBarWatchdogText = "");
+            var count = _watchdog.GetUnsafeAddresses().Count;
+            _dispatcher.Invoke(() => StatusBarWatchdogText = count > 0 ? $"⚠ {count} unsafe addr" : "");
         });
     }
 

@@ -128,6 +128,16 @@ public partial class BreakpointsViewModel : ObservableObject
             var addr = text.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
                 ? nuint.Parse(text[2..], NumberStyles.HexNumber, CultureInfo.InvariantCulture)
                 : nuint.Parse(text, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            // Pre-flight conflict check: warn if an existing hook is at the same address
+            var existingHooks = await _codeCaveEngine.ListHooksAsync(pid).ConfigureAwait(false);
+            var conflict = existingHooks.FirstOrDefault(h => h.OriginalAddress == addr);
+            if (conflict is not null)
+            {
+                _outputLog.Append("System", "Warn",
+                    $"Conflict: hook already exists at 0x{addr:X} (cave at 0x{conflict.CaveAddress:X}). Skipping.");
+                return;
+            }
+
             var result = await _codeCaveEngine.InstallHookAsync(pid, addr);
             _outputLog.Append("System", "Info", $"Hook installed at 0x{addr:X} → cave 0x{result.Hook?.CaveAddress:X}");
             await RefreshHooksAsync();

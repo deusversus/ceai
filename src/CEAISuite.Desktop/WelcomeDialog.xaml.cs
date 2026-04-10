@@ -38,6 +38,7 @@ public partial class WelcomeDialog : Window
         ProviderAnthropic.IsChecked == true ? "anthropic"
         : ProviderGemini.IsChecked == true ? "gemini"
         : ProviderCopilot.IsChecked == true ? "copilot"
+        : ProviderOpenRouter.IsChecked == true ? "openrouter"
         : ProviderCompatible.IsChecked == true ? "openai-compatible"
         : "openai";
 
@@ -119,6 +120,7 @@ public partial class WelcomeDialog : Window
         {
             "anthropic" => "Get yours at console.anthropic.com",
             "gemini" => "Get yours at aistudio.google.com",
+            "openrouter" => "Get yours at openrouter.ai/keys",
             "openai-compatible" => "Enter the API key for your provider",
             _ => "Get yours at platform.openai.com",
         };

@@ -777,6 +777,45 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
             }
         }
 
+        // OpenRouter
+        if (!string.IsNullOrWhiteSpace(settings.OpenRouterApiKey))
+        {
+            models.Add(new ModelOption("openrouter", "", "\u2500\u2500 OpenRouter \u2500\u2500", IsHeader: true));
+            try
+            {
+                using var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, "https://openrouter.ai/api/v1/models");
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", settings.OpenRouterApiKey);
+                using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                using var res = await http.SendAsync(req);
+                if (res.IsSuccessStatusCode)
+                {
+                    var json = await res.Content.ReadAsStringAsync();
+                    using var doc = System.Text.Json.JsonDocument.Parse(json);
+                    var data = doc.RootElement.GetProperty("data");
+                    var orModels = new List<(string id, string name, bool free)>();
+                    foreach (var m in data.EnumerateArray())
+                    {
+                        var id = m.GetProperty("id").GetString() ?? "";
+                        var name = m.TryGetProperty("name", out var n) ? n.GetString() ?? id : id;
+                        orModels.Add((id, name, id.EndsWith(":free", StringComparison.OrdinalIgnoreCase)));
+                    }
+                    // Free models first
+                    foreach (var m in orModels.Where(x => x.free).OrderBy(x => x.name))
+                        models.Add(new ModelOption("openrouter", m.id, $"{m.name} [FREE]"));
+                    foreach (var m in orModels.Where(x => !x.free).OrderBy(x => x.name).Take(50))
+                        models.Add(new ModelOption("openrouter", m.id, m.name));
+                }
+            }
+            catch (Exception ex)
+            {
+                _outputLog.Append("AiOperator", "Debug", $"Failed to fetch OpenRouter models: {ex.Message}");
+                // Fallback — show configured model
+                var currentOr = settings.GetModelForProvider("openrouter");
+                if (!string.IsNullOrWhiteSpace(currentOr))
+                    models.Add(new ModelOption("openrouter", currentOr, currentOr));
+            }
+        }
+
         // OpenAI-Compatible
         if (!string.IsNullOrWhiteSpace(settings.CompatibleApiKey ?? settings.OpenAiApiKey) && !string.IsNullOrWhiteSpace(settings.CustomEndpoint))
         {

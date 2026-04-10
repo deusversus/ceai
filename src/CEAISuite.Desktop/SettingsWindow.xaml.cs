@@ -66,6 +66,7 @@ public partial class SettingsWindow : Window, IDisposable
             "anthropic" => ProviderAnthropic,
             "copilot" => ProviderCopilot,
             "gemini" => ProviderGemini,
+            "openrouter" => ProviderOpenRouter,
             "openai-compatible" => ProviderCompatible,
             _ => ProviderOpenAI,
         };
@@ -80,6 +81,7 @@ public partial class SettingsWindow : Window, IDisposable
         {
             "anthropic" => s.AnthropicApiKey,
             "gemini" => s.GeminiApiKey,
+            "openrouter" => s.OpenRouterApiKey,
             "openai-compatible" => s.CompatibleApiKey,
             _ => s.OpenAiApiKey,
         };
@@ -238,6 +240,7 @@ public partial class SettingsWindow : Window, IDisposable
         if (ProviderAnthropic.IsChecked == true) return "anthropic";
         if (ProviderCopilot.IsChecked == true) return "copilot";
         if (ProviderGemini.IsChecked == true) return "gemini";
+        if (ProviderOpenRouter.IsChecked == true) return "openrouter";
         if (ProviderCompatible.IsChecked == true) return "openai-compatible";
         return "openai";
     }
@@ -266,6 +269,7 @@ public partial class SettingsWindow : Window, IDisposable
             {
                 "anthropic" => "Get yours at console.anthropic.com",
                 "gemini" => "Get yours at ai.google.dev",
+                "openrouter" => "Get yours at openrouter.ai/keys",
                 "openai-compatible" => "API key for the compatible endpoint",
                 _ => "Get yours at platform.openai.com",
             };
@@ -277,6 +281,7 @@ public partial class SettingsWindow : Window, IDisposable
         {
             "anthropic" => s.AnthropicApiKey,
             "gemini" => s.GeminiApiKey,
+            "openrouter" => s.OpenRouterApiKey,
             "openai-compatible" => s.CompatibleApiKey,
             "openai" => s.OpenAiApiKey,
             _ => null,
@@ -357,13 +362,13 @@ public partial class SettingsWindow : Window, IDisposable
         _suppressModelListChange = true;
         ModelList.Items.Clear();
 
-        if (provider == "copilot")
+        if (provider is "copilot" or "openrouter")
         {
             // Async fetch from API — show loading placeholder
             var currentModel = _settingsService.Settings.GetModelForProvider(provider);
             var loadingItem = new ListBoxItem
             {
-                Content = new TextBlock { Text = "Loading models from Copilot API…", FontStyle = FontStyles.Italic },
+                Content = new TextBlock { Text = $"Loading models from {(provider == "copilot" ? "Copilot" : "OpenRouter")} API…", FontStyle = FontStyles.Italic },
                 IsEnabled = false,
             };
             loadingItem.SetResourceReference(ListBoxItem.ForegroundProperty, "TertiaryForeground");
@@ -374,7 +379,10 @@ public partial class SettingsWindow : Window, IDisposable
             if (CustomModelBox is not null && !string.IsNullOrWhiteSpace(currentModel))
                 CustomModelBox.Text = currentModel;
 
-            _ = FetchAndPopulateCopilotModelsAsync(currentModel);
+            if (provider == "copilot")
+                _ = FetchAndPopulateCopilotModelsAsync(currentModel);
+            else
+                _ = FetchAndPopulateOpenRouterModelsAsync(currentModel);
             return;
         }
 
@@ -450,6 +458,92 @@ public partial class SettingsWindow : Window, IDisposable
         finally
         {
             _copilotModelsLoading = false;
+        }
+    }
+
+    private bool _openRouterModelsLoading;
+    private static readonly System.Net.Http.HttpClient _openRouterHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
+
+    private async Task FetchAndPopulateOpenRouterModelsAsync(string currentModel)
+    {
+        if (_openRouterModelsLoading) return;
+        _openRouterModelsLoading = true;
+
+        try
+        {
+            var apiKey = Dispatcher.Invoke(() => _keyVisible ? ApiKeyTextBox.Text : ApiKeyBox.Password);
+            if (string.IsNullOrWhiteSpace(apiKey))
+                apiKey = _settingsService.Settings.OpenRouterApiKey;
+            if (string.IsNullOrWhiteSpace(apiKey))
+            {
+                Dispatcher.Invoke(() =>
+                {
+                    ModelList.Items.Clear();
+                    var noKey = new ListBoxItem
+                    {
+                        Content = new TextBlock { Text = "Enter an OpenRouter API key first", FontStyle = FontStyles.Italic },
+                        IsEnabled = false,
+                    };
+                    noKey.SetResourceReference(ListBoxItem.ForegroundProperty, "WarningForeground");
+                    ModelList.Items.Add(noKey);
+                });
+                return;
+            }
+
+            using var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Get, "https://openrouter.ai/api/v1/models");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiKey);
+            using var res = await _openRouterHttp.SendAsync(req).ConfigureAwait(false);
+            res.EnsureSuccessStatusCode();
+
+            var json = await res.Content.ReadAsStringAsync().ConfigureAwait(false);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var data = doc.RootElement.GetProperty("data");
+
+            var modelInfos = new List<ModelInfo>();
+            foreach (var m in data.EnumerateArray())
+            {
+                var id = m.GetProperty("id").GetString() ?? "";
+                var name = m.TryGetProperty("name", out var n) ? n.GetString() ?? id : id;
+                var isFree = id.EndsWith(":free", StringComparison.OrdinalIgnoreCase);
+                var desc = isFree ? "FREE" : "";
+                modelInfos.Add(new ModelInfo(id, name, desc));
+            }
+
+            // Sort: free models first, then alphabetical
+            modelInfos.Sort((a, b) =>
+            {
+                bool aFree = a.Id.EndsWith(":free", StringComparison.OrdinalIgnoreCase);
+                bool bFree = b.Id.EndsWith(":free", StringComparison.OrdinalIgnoreCase);
+                if (aFree != bFree) return aFree ? -1 : 1;
+                return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+            });
+
+            Dispatcher.Invoke(() =>
+            {
+                ModelList.Items.Clear();
+                PopulateModelListItems([.. modelInfos], currentModel);
+            });
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                ModelList.Items.Clear();
+                var errItem = new ListBoxItem
+                {
+                    Content = new TextBlock { Text = $"Failed to load: {ex.Message}", FontStyle = FontStyles.Italic, TextWrapping = TextWrapping.Wrap },
+                    IsEnabled = false,
+                };
+                errItem.SetResourceReference(ListBoxItem.ForegroundProperty, "ErrorForeground");
+                ModelList.Items.Add(errItem);
+
+                if (CustomModelBox is not null && !string.IsNullOrWhiteSpace(currentModel))
+                    CustomModelBox.Text = currentModel;
+            });
+        }
+        finally
+        {
+            _openRouterModelsLoading = false;
         }
     }
 
@@ -660,6 +754,7 @@ public partial class SettingsWindow : Window, IDisposable
             case "openai": s.OpenAiApiKey = apiKeyValue; break;
             case "anthropic": s.AnthropicApiKey = apiKeyValue; break;
             case "gemini": s.GeminiApiKey = apiKeyValue; break;
+            case "openrouter": s.OpenRouterApiKey = apiKeyValue; break;
             case "openai-compatible": s.CompatibleApiKey = apiKeyValue; break;
             // Copilot uses GitHubToken (handled below)
         }

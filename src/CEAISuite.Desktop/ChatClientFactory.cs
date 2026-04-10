@@ -49,6 +49,7 @@ internal static class ChatClientFactory
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, model, settings.CustomEndpoint)),
+            "openrouter" => CreateIfKey(settings.OpenRouterApiKey, k => CreateOpenRouter(k, model)),
             "gemini" => await CreateGeminiAutoAsync(settings, model).ConfigureAwait(false),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, model)),
         };
@@ -61,6 +62,7 @@ internal static class ChatClientFactory
             "copilot" => CreateIfKey(settings.GitHubToken, t => CreateCopilot(t, settings.Model)),
             "anthropic" => CreateIfKey(settings.AnthropicApiKey ?? settings.OpenAiApiKey, k => CreateAnthropic(k, settings.Model)),
             "openai-compatible" => CreateIfKey(settings.CompatibleApiKey ?? settings.OpenAiApiKey, k => CreateOpenAICompatible(k, settings.Model, settings.CustomEndpoint)),
+            "openrouter" => CreateIfKey(settings.OpenRouterApiKey, k => CreateOpenRouter(k, settings.Model)),
             "gemini" => await CreateGeminiAutoAsync(settings, settings.Model).ConfigureAwait(false),
             _ => CreateIfKey(settings.OpenAiApiKey, k => CreateOpenAI(k, settings.Model)),
         };
@@ -115,6 +117,14 @@ internal static class ChatClientFactory
             throw new InvalidOperationException("Custom endpoint is required for openai-compatible provider.");
 
         var options = new OpenAIClientOptions { Endpoint = new Uri(endpoint) };
+        return new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey), options)
+            .GetChatClient(model)
+            .AsIChatClient();
+    }
+
+    private static IChatClient CreateOpenRouter(string apiKey, string model)
+    {
+        var options = new OpenAIClientOptions { Endpoint = new Uri("https://openrouter.ai/api/v1") };
         return new OpenAIClient(new System.ClientModel.ApiKeyCredential(apiKey), options)
             .GetChatClient(model)
             .AsIChatClient();

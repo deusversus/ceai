@@ -20,6 +20,7 @@ public sealed class AppSettings : IDisposable
     private SensitiveString? _sensitiveGeminiOAuthToken;
     private SensitiveString? _sensitiveGeminiRefreshToken;
     private SensitiveString? _sensitiveCompatibleKey;
+    private SensitiveString? _sensitiveOpenRouterKey;
     private SensitiveString? _sensitiveGitHubToken;
 
     /// <summary>Runtime-only plaintext key (not serialized).</summary>
@@ -76,6 +77,9 @@ public sealed class AppSettings : IDisposable
     /// <summary>UTC timestamp when the Compatible API key was last set/rotated.</summary>
     public DateTimeOffset? CompatibleKeyIssuedUtc { get; set; }
 
+    /// <summary>UTC timestamp when the OpenRouter API key was last set/rotated.</summary>
+    public DateTimeOffset? OpenRouterKeyIssuedUtc { get; set; }
+
     /// <summary>UTC timestamp when the GitHub token was last set/rotated.</summary>
     public DateTimeOffset? GitHubTokenIssuedUtc { get; set; }
 
@@ -94,10 +98,15 @@ public sealed class AppSettings : IDisposable
     public string? CompatibleApiKey { get; set; }
     public string? EncryptedCompatibleApiKey { get; set; }
 
+    /// <summary>Runtime-only plaintext OpenRouter key (not serialized).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? OpenRouterApiKey { get; set; }
+    public string? EncryptedOpenRouterApiKey { get; set; }
+
     /// <summary>Settings schema version for migrations.</summary>
     public int SettingsVersion { get; set; }
 
-    /// <summary>AI provider: "openai", "anthropic", "gemini", "openai-compatible", "copilot".</summary>
+    /// <summary>AI provider: "openai", "anthropic", "gemini", "openai-compatible", "openrouter", "copilot".</summary>
     public string Provider { get; set; } = "openai";
 
     /// <summary>For OpenAI-compatible endpoints (e.g., local LLMs, Azure, etc.).</summary>
@@ -118,6 +127,7 @@ public sealed class AppSettings : IDisposable
     public string GeminiModel { get; set; } = "gemini-3.1-flash-lite-preview";
     public string CopilotModel { get; set; } = "gpt-4o";
     public string CompatibleModel { get; set; } = "";
+    public string OpenRouterModel { get; set; } = "nvidia/nemotron-3-super-120b-a12b:free";
 
     public int RefreshIntervalMs { get; set; } = 500;
     public bool ShowUnresolvedAsQuestionMarks { get; set; } = true;
@@ -240,6 +250,7 @@ public sealed class AppSettings : IDisposable
         "anthropic" => AnthropicApiKey,
         "gemini" => GeminiApiKey,
         "openai-compatible" => CompatibleApiKey,
+        "openrouter" => OpenRouterApiKey,
         "copilot" => GitHubToken,
         _ => OpenAiApiKey,
     };
@@ -251,6 +262,7 @@ public sealed class AppSettings : IDisposable
         "gemini" => GeminiModel,
         "copilot" => CopilotModel,
         "openai-compatible" => CompatibleModel,
+        "openrouter" => OpenRouterModel,
         _ => Model,
     };
 
@@ -263,6 +275,7 @@ public sealed class AppSettings : IDisposable
             case "gemini": GeminiModel = model; break;
             case "copilot": CopilotModel = model; break;
             case "openai-compatible": CompatibleModel = model; break;
+            case "openrouter": OpenRouterModel = model; break;
         }
         Model = model; // Also update the active model
     }
@@ -287,6 +300,7 @@ public sealed class AppSettings : IDisposable
         "anthropic" => _sensitiveAnthropicKey,
         "gemini" => _sensitiveGeminiKey,
         "openai-compatible" => _sensitiveCompatibleKey,
+        "openrouter" => _sensitiveOpenRouterKey,
         "copilot" => _sensitiveGitHubToken,
         _ => _sensitiveOpenAiKey,
     };
@@ -306,6 +320,8 @@ public sealed class AppSettings : IDisposable
         _sensitiveGeminiRefreshToken = GeminiRefreshToken is not null ? SensitiveString.FromPlaintext(GeminiRefreshToken) : null;
         _sensitiveCompatibleKey?.Dispose();
         _sensitiveCompatibleKey = CompatibleApiKey is not null ? SensitiveString.FromPlaintext(CompatibleApiKey) : null;
+        _sensitiveOpenRouterKey?.Dispose();
+        _sensitiveOpenRouterKey = OpenRouterApiKey is not null ? SensitiveString.FromPlaintext(OpenRouterApiKey) : null;
         _sensitiveGitHubToken?.Dispose();
         _sensitiveGitHubToken = GitHubToken is not null ? SensitiveString.FromPlaintext(GitHubToken) : null;
     }
@@ -321,6 +337,8 @@ public sealed class AppSettings : IDisposable
             AnthropicKeyIssuedUtc = now;
         if (CompatibleApiKey != previous.CompatibleApiKey && !string.IsNullOrWhiteSpace(CompatibleApiKey))
             CompatibleKeyIssuedUtc = now;
+        if (OpenRouterApiKey != previous.OpenRouterApiKey && !string.IsNullOrWhiteSpace(OpenRouterApiKey))
+            OpenRouterKeyIssuedUtc = now;
         if (GitHubToken != previous.GitHubToken && !string.IsNullOrWhiteSpace(GitHubToken))
             GitHubTokenIssuedUtc = now;
         if (GeminiRefreshToken != previous.GeminiRefreshToken && !string.IsNullOrWhiteSpace(GeminiRefreshToken))
@@ -344,6 +362,7 @@ public sealed class AppSettings : IDisposable
         Check("anthropic", AnthropicApiKey, AnthropicKeyIssuedUtc);
         Check("gemini", GeminiApiKey, GeminiRefreshTokenIssuedUtc);
         Check("openai-compatible", CompatibleApiKey, CompatibleKeyIssuedUtc);
+        Check("openrouter", OpenRouterApiKey, OpenRouterKeyIssuedUtc);
         Check("copilot", GitHubToken, GitHubTokenIssuedUtc);
 
         return new KeyHealthReport(entries);
@@ -357,6 +376,7 @@ public sealed class AppSettings : IDisposable
         _sensitiveGeminiOAuthToken?.Dispose();
         _sensitiveGeminiRefreshToken?.Dispose();
         _sensitiveCompatibleKey?.Dispose();
+        _sensitiveOpenRouterKey?.Dispose();
         _sensitiveGitHubToken?.Dispose();
     }
 }
@@ -449,6 +469,7 @@ public sealed class AppSettingsService : IDisposable
         _settings.GeminiOAuthClientId = TryDecryptField(_settings.EncryptedGeminiOAuthClientId, _logger, "Gemini OAuth client ID");
         _settings.GeminiOAuthClientSecret = TryDecryptField(_settings.EncryptedGeminiOAuthClientSecret, _logger, "Gemini OAuth client secret");
         _settings.CompatibleApiKey = TryDecryptField(_settings.EncryptedCompatibleApiKey, _logger, "Compatible API key");
+        _settings.OpenRouterApiKey = TryDecryptField(_settings.EncryptedOpenRouterApiKey, _logger, "OpenRouter API key");
 
         // Decrypt MCP server environment variables
         foreach (var mcp in _settings.McpServers)
@@ -499,6 +520,10 @@ public sealed class AppSettingsService : IDisposable
         if (!string.IsNullOrWhiteSpace(envGeminiKey) && string.IsNullOrWhiteSpace(_settings.GeminiApiKey))
             _settings.GeminiApiKey = envGeminiKey;
 
+        var envOpenRouterKey = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+        if (!string.IsNullOrWhiteSpace(envOpenRouterKey) && string.IsNullOrWhiteSpace(_settings.OpenRouterApiKey))
+            _settings.OpenRouterApiKey = envOpenRouterKey;
+
         var envGeminiClientId = Environment.GetEnvironmentVariable("GEMINI_OAUTH_CLIENT_ID");
         if (!string.IsNullOrWhiteSpace(envGeminiClientId) && string.IsNullOrWhiteSpace(_settings.GeminiOAuthClientId))
             _settings.GeminiOAuthClientId = envGeminiClientId;
@@ -534,6 +559,7 @@ public sealed class AppSettingsService : IDisposable
         ["openai"] = _settings.OpenAiApiKey,
         ["anthropic"] = _settings.AnthropicApiKey,
         ["compatible"] = _settings.CompatibleApiKey,
+        ["openrouter"] = _settings.OpenRouterApiKey,
         ["github"] = _settings.GitHubToken,
         ["gemini_refresh"] = _settings.GeminiRefreshToken,
     };
@@ -554,6 +580,7 @@ public sealed class AppSettingsService : IDisposable
                     case "openai": _settings.OpenAiKeyIssuedUtc = now; break;
                     case "anthropic": _settings.AnthropicKeyIssuedUtc = now; break;
                     case "compatible": _settings.CompatibleKeyIssuedUtc = now; break;
+                    case "openrouter": _settings.OpenRouterKeyIssuedUtc = now; break;
                     case "github": _settings.GitHubTokenIssuedUtc = now; break;
                     case "gemini_refresh": _settings.GeminiRefreshTokenIssuedUtc = now; break;
                 }
@@ -573,6 +600,7 @@ public sealed class AppSettingsService : IDisposable
         _settings.EncryptedGeminiOAuthClientId = EncryptField(_settings.GeminiOAuthClientId);
         _settings.EncryptedGeminiOAuthClientSecret = EncryptField(_settings.GeminiOAuthClientSecret);
         _settings.EncryptedCompatibleApiKey = EncryptField(_settings.CompatibleApiKey);
+        _settings.EncryptedOpenRouterApiKey = EncryptField(_settings.OpenRouterApiKey);
 
         // Encrypt MCP server environment variables before writing
         foreach (var mcp in _settings.McpServers)

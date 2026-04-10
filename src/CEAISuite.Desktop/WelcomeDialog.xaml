@@ -56,7 +56,7 @@
                 <TextBlock Text="Choose your AI backend"
                            FontSize="12" Margin="0,2,0,10"
                            Foreground="{DynamicResource SecondaryForeground}" />
-                <UniformGrid Columns="5" Margin="0,0,0,4">
+                <UniformGrid Columns="3" Rows="2" Margin="0,0,0,4">
                     <RadioButton x:Name="ProviderOpenAI" GroupName="Provider" Tag="openai"
                                  IsChecked="True" Checked="Provider_Checked"
                                  Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
@@ -79,6 +79,12 @@
                                  Checked="Provider_Checked"
                                  Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
                         <TextBlock Text="Copilot" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryForeground}" />
+                    </RadioButton>
+                    <RadioButton x:Name="ProviderOpenRouter" GroupName="Provider" Tag="openrouter"
+                                 Checked="Provider_Checked"
+                                 Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
+                        <TextBlock Text="OpenRouter" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
                                    Foreground="{DynamicResource PrimaryForeground}" />
                     </RadioButton>
                     <RadioButton x:Name="ProviderCompatible" GroupName="Provider" Tag="openai-compatible"

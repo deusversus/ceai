@@ -88,6 +88,7 @@ public partial class App : System.Windows.Application
                         case "openai": settingsService.Settings.OpenAiApiKey = welcome.ApiKey; break;
                         case "anthropic": settingsService.Settings.AnthropicApiKey = welcome.ApiKey; break;
                         case "gemini": settingsService.Settings.GeminiApiKey = welcome.ApiKey; break;
+                        case "openrouter": settingsService.Settings.OpenRouterApiKey = welcome.ApiKey; break;
                         case "openai-compatible": settingsService.Settings.CompatibleApiKey = welcome.ApiKey; break;
                     }
                 }

@@ -24,6 +24,7 @@ public static class ApiKeyValidator
                 "anthropic" => await ValidateAnthropic(apiKey, ct).ConfigureAwait(false),
                 "gemini" => await ValidateGemini(apiKey, ct).ConfigureAwait(false),
                 "openai-compatible" => await ValidateCompatible(apiKey, endpoint, ct).ConfigureAwait(false),
+                "openrouter" => await ValidateOpenRouter(apiKey, ct).ConfigureAwait(false),
                 "copilot" => await ValidateCopilot(apiKey, ct).ConfigureAwait(false),
                 _ => (false, $"Unknown provider: {provider}"),
             };
@@ -81,6 +82,14 @@ public static class ApiKeyValidator
         // Some compatible endpoints don't support /models -- accept any 2xx or 404
         return res.IsSuccessStatusCode || res.StatusCode == System.Net.HttpStatusCode.NotFound
             ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Connection failed.");
+    }
+
+    private static async Task<(bool, string?)> ValidateOpenRouter(string apiKey, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, "https://openrouter.ai/api/v1/models");
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+        using var res = await Http.SendAsync(req, ct).ConfigureAwait(false);
+        return res.IsSuccessStatusCode ? (true, null) : (false, $"HTTP {(int)res.StatusCode}: Invalid OpenRouter API key.");
     }
 
     private static async Task<(bool, string?)> ValidateCopilot(string token, CancellationToken ct)

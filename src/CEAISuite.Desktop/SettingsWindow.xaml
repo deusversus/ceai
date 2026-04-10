@@ -44,9 +44,9 @@
                             <TextBlock Text="Choose your AI backend"
                                        Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
 
-                            <UniformGrid Columns="5" x:Name="ProviderCards" Margin="0,0,0,4">
+                            <UniformGrid Columns="3" Rows="2" x:Name="ProviderCards" Margin="0,0,0,4">
                                 <RadioButton x:Name="ProviderOpenAI" GroupName="Provider" Tag="openai"
-                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,6">
                                     <StackPanel>
                                         <TextBlock Text="OpenAI" FontWeight="SemiBold" FontSize="13"
                                                    Foreground="{DynamicResource PrimaryForeground}" />
@@ -56,7 +56,7 @@
                                 </RadioButton>
 
                                 <RadioButton x:Name="ProviderAnthropic" GroupName="Provider" Tag="anthropic"
-                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,6">
                                     <StackPanel>
                                         <TextBlock Text="Anthropic" FontWeight="SemiBold" FontSize="13"
                                                    Foreground="{DynamicResource PrimaryForeground}" />
@@ -66,11 +66,11 @@
                                 </RadioButton>
 
                                 <RadioButton x:Name="ProviderCopilot" GroupName="Provider" Tag="copilot"
-                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,0,6">
                                     <StackPanel>
                                         <TextBlock Text="GitHub Copilot" FontWeight="SemiBold" FontSize="13"
                                                    Foreground="{DynamicResource PrimaryForeground}" />
-                                        <TextBlock Text="Uses your Copilot subscription" FontSize="11"
+                                        <TextBlock Text="Uses your Copilot sub" FontSize="11"
                                                    Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
                                     </StackPanel>
                                 </RadioButton>
@@ -81,6 +81,16 @@
                                         <TextBlock Text="Google Gemini" FontWeight="SemiBold" FontSize="13"
                                                    Foreground="{DynamicResource PrimaryForeground}" />
                                         <TextBlock Text="Gemini 2.5, 3.0" FontSize="11"
+                                                   Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
+                                    </StackPanel>
+                                </RadioButton>
+
+                                <RadioButton x:Name="ProviderOpenRouter" GroupName="Provider" Tag="openrouter"
+                                             Checked="ProviderCard_Checked" Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,6,0">
+                                    <StackPanel>
+                                        <TextBlock Text="OpenRouter" FontWeight="SemiBold" FontSize="13"
+                                                   Foreground="{DynamicResource PrimaryForeground}" />
+                                        <TextBlock Text="100s of models, free tier" FontSize="11"
                                                    Foreground="{DynamicResource TertiaryForeground}" Margin="0,2,0,0" />
                                     </StackPanel>
                                 </RadioButton>

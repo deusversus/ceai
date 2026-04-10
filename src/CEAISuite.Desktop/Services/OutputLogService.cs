@@ -10,6 +10,11 @@ public sealed class OutputLogService : IOutputLog
 
     public void Append(string source, string level, string message)
     {
+        // Filter out Debug-level noise from the user-facing Output panel.
+        // Debug messages still go to the Serilog file sink for diagnostics.
+        if (level.Equals("Debug", StringComparison.OrdinalIgnoreCase))
+            return;
+
         Entries.Add(new OutputLogEntry
         {
             Timestamp = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture),

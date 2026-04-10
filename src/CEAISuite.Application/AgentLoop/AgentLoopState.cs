@@ -10,9 +10,6 @@ public enum AgentTransition
     /// <summary>Normal progression — execute next LLM turn.</summary>
     NextTurn,
 
-    /// <summary>Context was compacted; retry the current turn with smaller history.</summary>
-    CompactionRetry,
-
     /// <summary>Max output tokens hit; retry with escalated token limit.</summary>
     TokenEscalation,
 
@@ -24,9 +21,6 @@ public enum AgentTransition
 
     /// <summary>User cancelled via CancellationToken.</summary>
     Aborted,
-
-    /// <summary>Unrecoverable error after all retries exhausted.</summary>
-    Failed,
 }
 
 /// <summary>Describes why the agent loop was aborted.</summary>

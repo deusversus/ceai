@@ -147,7 +147,6 @@ public sealed class AgentLoop
         var state = new AgentLoopState();
 
         while (state.Transition == AgentTransition.NextTurn
-            || state.Transition == AgentTransition.CompactionRetry
             || state.Transition == AgentTransition.TokenEscalation)
         {
             if (ct.IsCancellationRequested)
@@ -206,6 +205,17 @@ public sealed class AgentLoop
             // Call LLM with retry
             var (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks) =
                 await CallLlmWithRetry(history, chatOptions, channel, state, ct).ConfigureAwait(false);
+
+            // Post-LLM hooks
+            if (_options.Hooks is { } postLlmHooks)
+            {
+                await postLlmHooks.RunPostLlmHooksAsync(new PostLlmContext
+                {
+                    ResponseText = assistantText,
+                    TurnNumber = state.TurnCount,
+                    ToolCallCount = toolCalls.Count,
+                }, ct).ConfigureAwait(false);
+            }
 
             // Handle max output tokens recovery
             if (ErrorClassifier.IsMaxOutputTokens(finishReason) && toolCalls.Count == 0)
@@ -330,6 +340,25 @@ public sealed class AgentLoop
             if (_compactionPipeline.ShouldCompact(history) && !backoffActive && cooldownExpired)
             {
                 _log?.Invoke("LOOP", "Compaction triggered");
+
+                // Pre-compaction hooks — can block compaction
+                var msgCountBefore = history.GetMessages().Count;
+                if (_options.Hooks is { } preCompHooks)
+                {
+                    var preCompResult = await preCompHooks.RunPreCompactionHooksAsync(new CompactionHookContext
+                    {
+                        MessageCountBefore = msgCountBefore,
+                        MessageCountAfter = 0,
+                        EstimatedTokensBefore = history.EstimateTokens(),
+                        EstimatedTokensAfter = 0,
+                    }, ct).ConfigureAwait(false);
+                    if (preCompResult.Outcome == HookOutcome.Block)
+                    {
+                        _log?.Invoke("HOOK", $"Pre-compaction hook blocked: {preCompResult.Message}");
+                        continue;
+                    }
+                }
+
                 var snapshot = PostCompactionRestorer.CaptureSnapshot(
                     history, activeCategories ?? new HashSet<string>(), contextProvider);
 
@@ -354,6 +383,18 @@ public sealed class AgentLoop
                     await channel.WriteAsync(new AgentStreamEvent.Tombstone("compacted"), ct).ConfigureAwait(false);
                     await channel.WriteAsync(new AgentStreamEvent.ContentReplace(
                         "compacted", "[Context compacted — earlier messages summarized]"), ct).ConfigureAwait(false);
+
+                    // Post-compaction hooks
+                    if (_options.Hooks is { } postCompHooks)
+                    {
+                        await postCompHooks.RunPostCompactionHooksAsync(new CompactionHookContext
+                        {
+                            MessageCountBefore = msgCountBefore,
+                            MessageCountAfter = history.GetMessages().Count,
+                            EstimatedTokensBefore = 0,
+                            EstimatedTokensAfter = history.EstimateTokens(),
+                        }, ct).ConfigureAwait(false);
+                    }
                 }
                 else
                 {

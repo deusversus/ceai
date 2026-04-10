@@ -324,10 +324,10 @@ public sealed class AgentLoop
             if (_options.MicroCompaction is { } mc)
                 mc.Prune(history);
 
-            // Check if compaction is needed (circuit breaker pattern)
-            bool circuitBreakerOpen = state.ConsecutiveCompactionFailures >= AgentLoopState.MaxConsecutiveCompactionFailures;
+            // Check if compaction is needed (exponential backoff on failure)
+            bool backoffActive = state.CompactionSkipUntilTurn > state.TurnCount;
             bool cooldownExpired = state.TurnCount - state.LastCompactionTurn >= 2; // Don't compact on consecutive turns
-            if (_compactionPipeline.ShouldCompact(history) && !circuitBreakerOpen && cooldownExpired)
+            if (_compactionPipeline.ShouldCompact(history) && !backoffActive && cooldownExpired)
             {
                 _log?.Invoke("LOOP", "Compaction triggered");
                 var snapshot = PostCompactionRestorer.CaptureSnapshot(
@@ -357,13 +357,18 @@ public sealed class AgentLoop
                 }
                 else
                 {
+                    var failures = state.ConsecutiveCompactionFailures + 1;
+                    // Exponential backoff: skip 5, 10, 20 turns (capped)
+                    var skipTurns = Math.Min(
+                        5 * (1 << Math.Min(failures - 1, 4)),
+                        AgentLoopState.MaxCompactionBackoffTurns);
                     state = state with
                     {
-                        ConsecutiveCompactionFailures = state.ConsecutiveCompactionFailures + 1,
+                        ConsecutiveCompactionFailures = failures,
                         LastCompactionTurn = state.TurnCount,
+                        CompactionSkipUntilTurn = state.TurnCount + skipTurns,
                     };
-                    if (state.ConsecutiveCompactionFailures >= AgentLoopState.MaxConsecutiveCompactionFailures)
-                        _log?.Invoke("COMPACT", $"Circuit breaker tripped after {state.ConsecutiveCompactionFailures} consecutive failures — skipping future compaction attempts");
+                    _log?.Invoke("COMPACT", $"Compaction failed ({failures} consecutive) — backing off for {skipTurns} turns (retry at turn {state.CompactionSkipUntilTurn})");
                 }
             }
         }

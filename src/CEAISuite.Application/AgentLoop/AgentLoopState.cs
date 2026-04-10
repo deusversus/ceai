@@ -76,8 +76,14 @@ public sealed record AgentLoopState
     /// <summary>Turn number of the last successful compaction (to avoid compacting every turn).</summary>
     public int LastCompactionTurn { get; init; } = -1;
 
-    /// <summary>Maximum consecutive compaction failures before the circuit breaker trips.</summary>
+    /// <summary>Turn number until which compaction is skipped (exponential backoff).</summary>
+    public int CompactionSkipUntilTurn { get; init; }
+
+    /// <summary>Maximum consecutive compaction failures before backoff kicks in.</summary>
     public const int MaxConsecutiveCompactionFailures = 3;
+
+    /// <summary>Maximum turns to skip between compaction retries (cap for exponential backoff).</summary>
+    public const int MaxCompactionBackoffTurns = 20;
 
     /// <summary>
     /// Consecutive turns where the LLM produced fewer than 500 output tokens.

@@ -225,6 +225,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
     private IChatClient _baseChatClient;
     private readonly List<AiChatMessage> _displayHistory = new();
     private readonly List<AiActionLogEntry> _actionLog = new();
+    private Timer? _autoSaveTimer;
     private Func<string>? _contextProvider;
     private readonly AiToolFunctions? _toolFunctions;
     private readonly AiChatStore _chatStore;
@@ -660,6 +661,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
     public void AddUserMessageToHistory(string userMessage)
     {
         _displayHistory.Add(new AiChatMessage("user", userMessage, DateTimeOffset.UtcNow));
+        ScheduleAutoSave();
     }
 
     /// <summary>
@@ -675,6 +677,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         {
             ImageDataList = images.Select(i => i.Data).ToList()
         });
+        ScheduleAutoSave();
 
         // Build mixed-content message for the LLM
         var contents = new List<Microsoft.Extensions.AI.AIContent>();
@@ -897,6 +900,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
                 Log("ERROR", $"New loop error: {ex.GetType().Name}: {ex}\n{ex.StackTrace}");
                 UpdateStatus("Error");
                 _displayHistory.Add(new AiChatMessage("assistant", errorMsg, DateTimeOffset.UtcNow));
+                SaveCurrentChat();
                 await outerChannel.Writer.WriteAsync(
                     new AgentStreamEvent.Error(errorMsg), CancellationToken.None).ConfigureAwait(false);
             }
@@ -1516,6 +1520,17 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         _lastContextSuffix = null;
     }
 
+    /// <summary>Schedule a debounced auto-save. Resets the 10-second timer on each call.</summary>
+    private void ScheduleAutoSave()
+    {
+        _autoSaveTimer?.Dispose();
+        _autoSaveTimer = new Timer(_ =>
+        {
+            try { SaveCurrentChat(); }
+            catch { /* Swallow — best-effort crash protection */ }
+        }, null, TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
+    }
+
     /// <summary>Save the current chat to disk.</summary>
     public void SaveCurrentChat()
     {
@@ -1622,6 +1637,19 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
 
             // Rebuild agent session history from saved messages
             _historyManager?.ReplayFromSaved(chatSession.Messages, Limits.MaxReplayMessages, Limits, _toolResultStore);
+
+            // Inject a system-level orientation so the AI knows this is a resumed session
+            if (_historyManager is not null && chatSession.Messages.Count > 0)
+            {
+                var userMsgCount = chatSession.Messages.Count(m => m.Role == "user");
+                var lastTopics = chatSession.Messages
+                    .Where(m => m.Role == "user")
+                    .TakeLast(3)
+                    .Select(m => m.Content.Length > 60 ? m.Content[..60] + "…" : m.Content);
+                var resumeContext = $"[Session resumed] Chat: \"{chatSession.Title}\" " +
+                    $"({userMsgCount} user messages). Recent topics: {string.Join(" | ", lastTopics)}";
+                _historyManager.AddSystemMessage(resumeContext);
+            }
 
             // Restore the chat's permission mode to the live engine
             SetPermissionMode(CurrentPermissionMode);

@@ -827,6 +827,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
                     _sessionMetadata.CumulativeCost = _tokenBudget.EstimatedCostUsd;
 
                 var assistantText = assistantTextSb.ToString();
+                Log("INFO", $"Done, {_historyManager!.Count} msgs in context, text={assistantText.Length} chars, tools={toolCallCount}");
 
                 // Store the real text (empty for tool-only responses) so chat resume
                 // doesn't feed placeholder text to the model. DisplayContent provides

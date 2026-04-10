@@ -700,6 +700,7 @@ public sealed partial class AiToolFunctions(
         [Description("Start address (hex, decimal, or symbolic like 'GameAssembly.dll+9A18E8')")] string address,
         [Description("Number of bytes to read")] int length = 128)
     {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
         length = Math.Clamp(length, 1, _limits.MaxBrowseMemoryBytes);
         var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
         var addr = AddressTableService.ParseAddress(resolvedAddress);
@@ -1141,6 +1142,7 @@ public sealed partial class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex string)")] string address)
     {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
         var addr = ParseAddress(address);
         var bytes = await engineFacade.ReadMemoryAsync(processId, addr, 8).ConfigureAwait(false);
         var raw = bytes.Bytes.ToArray();
@@ -1276,6 +1278,7 @@ public sealed partial class AiToolFunctions(
         [Description("Start address (hex, decimal, or symbolic like 'module.dll+offset')")] string address,
         [Description("Number of bytes to read (default 64)")] int length = 64)
     {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
         length = Math.Clamp(length, 1, _limits.MaxHexDumpBytes);
         var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
         var addr = ParseAddress(resolvedAddress);

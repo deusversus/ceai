@@ -129,6 +129,7 @@ public sealed partial class AiToolFunctions
         [Description("Process ID")] int processId,
         [Description("Start address (hex or symbolic like module+offset)")] string address)
     {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
         // Resolve symbolic address (module+offset or bare module name) to raw hex
         var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
 

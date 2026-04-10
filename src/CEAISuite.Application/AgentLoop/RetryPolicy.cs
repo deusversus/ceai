@@ -88,7 +88,7 @@ public sealed class RetryPolicy
             try
             {
                 var result = await operation(cancellationToken).ConfigureAwait(false);
-                _consecutiveOverloadCount = 0; // Reset on success
+                Interlocked.Exchange(ref _consecutiveOverloadCount, 0); // Reset on success
                 return RetryResult<T>.Ok(result);
             }
             catch (StreamingTimeoutException stex)
@@ -136,7 +136,7 @@ public sealed class RetryPolicy
                 // Track consecutive overloaded errors → model fallback (differentiated by retry-after)
                 if (ErrorClassifier.IsOverloaded(ex))
                 {
-                    _consecutiveOverloadCount++;
+                    Interlocked.Increment(ref _consecutiveOverloadCount);
                     var retryAfterForFallback = ErrorClassifier.ParseRetryAfter(ex);
 
                     // Long delay: signal immediate model fallback instead of waiting
@@ -159,7 +159,7 @@ public sealed class RetryPolicy
                 }
                 else
                 {
-                    _consecutiveOverloadCount = 0; // Reset on non-overload error
+                    Interlocked.Exchange(ref _consecutiveOverloadCount, 0); // Reset on non-overload error
                 }
 
                 // Non-retriable errors → fail immediately

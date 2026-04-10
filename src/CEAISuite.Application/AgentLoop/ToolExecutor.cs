@@ -386,7 +386,7 @@ public sealed class ToolExecutor
         var (resultStr, isError) = await InvokeToolAsync(call, cancellationToken).ConfigureAwait(false);
 
         // 6. Track tool call count
-        _totalToolCalls++;
+        Interlocked.Increment(ref _totalToolCalls);
 
         // 7. Post-tool hooks: failure hooks for errors, success hooks for success
         if (isError && _options.Hooks is { } failureHooks)

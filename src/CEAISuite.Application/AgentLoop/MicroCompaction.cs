@@ -86,10 +86,13 @@ public sealed class MicroCompaction
                     if (actualToolName is not null && !CompactableTools.Contains(actualToolName))
                         continue;
 
-                    // Prune: keep a preview + summary
+                    // Prune: keep a preview + summary (use ChatHistoryManager's lock)
                     var previewLen = Math.Min(100, resultStr.Length);
                     var summary = $"[Pruned tool result ({resultStr.Length:#,0} chars). Preview: {resultStr[..previewLen]}...]";
-                    msg.Contents[j] = new FunctionResultContent(frc.CallId ?? "", summary);
+                    if (frc.CallId is not null)
+                        history.ReplaceToolResult(frc.CallId, summary);
+                    else
+                        msg.Contents[j] = new FunctionResultContent(frc.CallId ?? "", summary);
                     pruned++;
                 }
             }

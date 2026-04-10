@@ -26,9 +26,10 @@ public sealed record AiChatMessage(string Role, string Content, DateTimeOffset T
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string DisplayContent =>
-        string.IsNullOrWhiteSpace(Content) && ToolCalls is { Count: > 0 }
-            ? "(Tool calls executed — see action log for details)"
-            : Content;
+        !string.IsNullOrWhiteSpace(Content) ? Content
+        : ToolCalls is { Count: > 0 } ? "(Tool calls executed — see action log for details)"
+        : Role == "assistant" ? "(Empty response from model)"
+        : Content;
 }
 
 public sealed record AiToolCallInfo(string CallId, string Name, string? ArgumentsJson);

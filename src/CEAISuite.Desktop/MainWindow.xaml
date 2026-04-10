@@ -2081,13 +2081,13 @@
                                                 <!-- Send / Stop button (circular, accent color) -->
                                                 <Button x:Name="SendStopButton" Grid.Column="4" Click="SendAiMessage"
                                                         ToolTip="{Binding IsStreaming, Converter={StaticResource BoolToStringConverter}, ConverterParameter='Stop (Esc)|Send message (Enter)'}"
-                                                        Width="32" Height="32" Cursor="Hand" Padding="0">
+                                                        Width="32" Height="32" Cursor="Hand" Padding="0"
+                                                        Content="{Binding IsStreaming, Converter={StaticResource BoolToStringConverter}, ConverterParameter='■|↑'}">
                                                     <Button.Template>
                                                         <ControlTemplate TargetType="Button">
                                                             <Border x:Name="SendBorder" Background="{DynamicResource ButtonBackground}"
                                                                     CornerRadius="16" Width="32" Height="32">
-                                                                <TextBlock x:Name="SendButtonIcon"
-                                                                           Text="{Binding IsStreaming, Converter={StaticResource BoolToStringConverter}, ConverterParameter='■|↑'}"
+                                                                <TextBlock Text="{TemplateBinding Content}"
                                                                            FontSize="16" FontWeight="Bold"
                                                                            Foreground="{DynamicResource ButtonForeground}"
                                                                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />

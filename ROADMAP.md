@@ -420,19 +420,319 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ## Phase 10: Advanced Features & Ecosystem
 
-**Goal:** Long-term features that bring CE AI Suite toward full CE parity and beyond.
+**Goal:** Long-term features that bring CE AI Suite toward full CE parity and beyond. Organized into 9 sub-phases ordered by feasibility and impact.
 
-| Item | Review Source | Details |
-|------|-------------|---------|
-| Trainer generation GUI | §2.7 gap, §8 #15 | Build standalone .exe trainers from address table |
-| Speed hack | §2.7 gap | Game clock manipulation (kernel timer hooking) |
-| D3D/OpenGL overlay | §2.7 gap | In-game value display |
-| Kernel-mode debugging | §2.2 gap | Kernel driver for anti-debug bypass |
-| VEH debugging | §2.2 gap | Vectored Exception Handler debugging mode |
-| Plugin system | §5 Ecosystem (5%) | Community-contributed extensions |
-| AI co-pilot mode | Phase 2 discussion | AI controls interface elements (fill forms, navigate tabs, stage actions for user review). Whitelisted actions only — not a general UI automation. Requires Phase 2.5 MVVM for clean command routing. |
-| Multi-platform exploration | §1 | Investigate macOS/Linux via cross-platform engine abstractions |
-| Community distribution | §5 Ecosystem | Package management, update channel, website |
+**Complexity key:** Low · Medium · Medium-High · High · Very High
+
+---
+
+### Phase 10A — Plugin System UI
+
+**Goal:** Surface the already-built `PluginHost`/`ICeaiPlugin` backend (in `AgentLoop/PluginSystem.cs`) with a first-class management UI so users can install, browse, and unload community plugins.
+
+**Why:** The engine is 100% done. This sub-phase costs minimal work and immediately unlocks the community ecosystem.
+
+**Complexity:** Low
+
+| Item | Details |
+|------|---------|
+| `PluginManagerService` | Thin observable wrapper around `PluginHost`; exposes `LoadedPlugins`, `InstallFromFileAsync`, `UnloadAsync` |
+| `PluginManagerViewModel` | `ObservableCollection<PluginDisplayItem>` with `InstallCommand`, `UnloadCommand`, `OpenPluginDirectoryCommand`, `RefreshCommand` |
+| `PluginManagerPanel.xaml` | New left-sidebar anchorable panel (alongside Modules/Threads/Memory Map/Workspace); shows name, version, description, tool count, status |
+| `LayoutVersion` bump | `19` → `20` |
+| AI tools (`AiToolFunctions.Plugins.cs`) | `ListPlugins()` `[ReadOnly]`, `GetPluginTools(pluginName)` `[ReadOnly]` |
+| DI | `AddSingleton<PluginManagerService>()`, `AddSingleton<PluginManagerViewModel>()` — promote `PluginHost` to DI singleton |
+| Tests | `PluginManagerViewModelTests.cs` — load/unload/error states with mock `PluginHost` |
+
+---
+
+### Phase 10B — Trainer Generation GUI
+
+**Goal:** Build a dialog that takes selected address table entries and emits a standalone `.exe` trainer that locks values in the target process while running — CE's most visible "killer app" feature.
+
+**Approach:** Roslyn `CSharpCompilation` generates a self-contained C# source using P/Invoke `WriteProcessMemory` in a loop, compiled in-process to a `.exe`. No dotnet SDK required on end-user machines.
+
+**Complexity:** Medium
+
+| Item | Details |
+|------|---------|
+| `TrainerContracts.cs` (Abstractions) | `TrainerEntry`, `TrainerConfig`, `TrainerBuildResult` records; `ITrainerGeneratorService` interface |
+| `RoslynTrainerGeneratorService` (Application) | Generates + compiles C# trainer source via Roslyn; `PreviewSource()` for "View Source" button |
+| `TrainerGeneratorDialog.xaml` | Entry checklist (pre-populated from selection), target process, title, refresh interval slider (50–1000ms), Preview Source button, Build Trainer button with progress bar |
+| Tools menu entry | `Tools` menu → "Generate Trainer…" |
+| `AiToolFunctions.Trainer.cs` | `GenerateTrainer(title, entryIds[], outputPath)` `[Destructive]`, `PreviewTrainerSource(entryIds[])` `[ReadOnly]` |
+| NuGet | `Microsoft.CodeAnalysis.CSharp` added to `CEAISuite.Application.csproj` |
+| DI | `AddSingleton<ITrainerGeneratorService, RoslynTrainerGeneratorService>()` |
+| Tests | `TrainerGeneratorServiceTests.cs` — verify generated source compiles cleanly via `CSharpCompilation.Emit`; no runtime execution in unit tests |
+
+---
+
+### Phase 10C — AI Co-Pilot Mode
+
+**Goal:** Allow the AI to issue whitelisted UI commands — navigate to a panel, populate scan forms, set address entry values, attach a process — as staged actions shown to the user before execution. Strictly MVVM command invocation through a defined whitelist; not general UI automation.
+
+**Why now:** Phase 2.5 built MVVM specifically for this. `PermissionEngine`, `HookRegistry`, `SkillSystem`, and `AgentStreamEvent.ApprovalRequested` all exist and are waiting for this wiring.
+
+**Complexity:** Medium
+
+| Item | Details |
+|------|---------|
+| `IUiCommandBus` + command records (Application) | `NavigatePanelCommand`, `PopulateScanFormCommand`, `AddEntryToTableCommand`, `SetEntryValueCommand`, `AttachProcessCommand`; `UiCommandWhitelist` static set |
+| `UiCommandBus` implementation | `Dispatch(UiCommand)` + `CommandReceived` event; ViewModels subscribe in constructor |
+| ViewModel subscriptions | `ScannerViewModel`, `AddressTableViewModel`, `INavigationService` handle their respective commands |
+| `AiToolFunctions.CoPilot.cs` | `GetUiCommandWhitelist()` `[ReadOnly]`, `ExecuteUiCommand(commandType, parametersJson)` `[Destructive]` → routes through `PermissionEngine` → triggers `ApprovalRequested`, `GetCurrentUiState()` `[ReadOnly]` |
+| Settings page | "AI Co-Pilot" section: enable/disable toggle, per-command-type whitelist checkboxes, "Require approval for all co-pilot actions" toggle |
+| AI panel badge | "Co-Pilot" mode indicator in AI Operator panel when active |
+| DI | `AddSingleton<IUiCommandBus, UiCommandBus>()` |
+| Tests | `UiCommandBusTests.cs` — dispatch, whitelist enforcement, unknown command rejection; `AiToolFunctionsCopilotTests.cs` — verify approval flow triggered |
+
+---
+
+### Phase 10D — Speed Hack
+
+**Goal:** Intercept and scale `timeGetTime`, `QueryPerformanceCounter`, `GetTickCount`, and optionally `Sleep` via IAT patching + code cave injection to slow or accelerate game timers. No kernel required.
+
+**Approach:** User-space IAT patching using existing `ICodeCaveEngine` for trampoline allocation. The `loadlibrary`/`createthread` injection path from Phase 7 (`WindowsAutoAssemblerEngine`) provides the injection primitive.
+
+**Complexity:** Medium-High
+
+| Item | Details |
+|------|---------|
+| `SpeedHackContracts.cs` (Abstractions) | `SpeedHackConfig` (multiplier, per-function toggles), `SpeedHackState`, `ISpeedHackEngine` |
+| `WindowsSpeedHackEngine` (Engine.Windows) | IAT patching + trampoline code cave via `ICodeCaveEngine`; patches `timeGetTime`, `QueryPerformanceCounter`, `GetTickCount` |
+| `SpeedHackService` (Application) | Rate-limit guards, state tracking, safe apply/remove |
+| `SpeedHackViewModel` (Desktop) | Speed slider (0.1×–8.0×), multiplier readout, per-function toggles, Apply/Remove buttons, anti-cheat warning label |
+| UI placement | New bottom panel tab or toolbar popout |
+| `AiToolFunctions.SpeedHack.cs` | `GetSpeedHackState(processId)` `[ReadOnly]`, `SetSpeedMultiplier(processId, multiplier)` `[Destructive]`, `RemoveSpeedHack(processId)` `[Destructive]` |
+| DI | `AddSingleton<ISpeedHackEngine, WindowsSpeedHackEngine>()`, `AddSingleton<SpeedHackService>()`, `AddSingleton<SpeedHackViewModel>()` |
+| Tests | `SpeedHackServiceTests.cs` — unit tests with mock engine; integration test against `TestHarnessProcess` measuring tick delta before/after 0.5× |
+
+---
+
+### Phase 10E — VEH Debugging
+
+**Goal:** Add a Vectored Exception Handler-based debugger mode that intercepts hardware breakpoints (`EXCEPTION_SINGLE_STEP` via Trap Flag, `EXCEPTION_BREAKPOINT` via INT3) without `DebugActiveProcess` attachment — bypassing common anti-debug checks (`IsDebuggerPresent`, `NtQueryInformationProcess(ProcessDebugPort)`).
+
+**Approach:** Inject a small VEH agent (native-AOT C# shim bundled as a resource) via existing `loadlibrary`/`createthread` infrastructure. Communicate via shared memory. `BreakpointMode` enum gains a `VEH` option.
+
+**Complexity:** High
+
+| Item | Details |
+|------|---------|
+| `VehContracts.cs` (Abstractions) | `IVehDebugger`, `VehBreakpoint`, `VehHitEvent` records |
+| `VehAgent/` (Engine.Windows) | Native-AOT C# shim: calls `AddVectoredExceptionHandler`, communicates via `MemoryMappedFile` IPC |
+| `WindowsVehDebugger` (Engine.Windows) | Injects agent, manages breakpoint set/remove, exposes `IObservable<VehHitEvent> HitStream` |
+| `VehDebugService` (Application) | High-level service; `BreakpointService` delegates to `IVehDebugger` when `BreakpointMode.VEH` selected |
+| `AiToolFunctions.VehDebug.cs` | `SetVehBreakpoint(processId, address, type)` `[Destructive]`, `GetVehStatus(processId)` `[ReadOnly]` |
+| UI | `BreakpointMode` dropdown in Breakpoints panel gains `VEH` option; dedicated section in Debugger tab |
+| DI | `AddSingleton<IVehDebugger, WindowsVehDebugger>()`, `AddSingleton<VehDebugService>()` |
+| Tests | `VehDebugServiceTests.cs` — unit tests with mock; integration test against `TestHarnessProcess` with known trap address |
+| Dependencies | Shares injection infrastructure pattern with 10E (overlay); do after 10D |
+
+---
+
+### ~~Phase 10F — D3D/OpenGL Overlay~~ → Demoted to Phase 11 / Community Plugin
+
+**Original goal:** In-game value overlay via `IDXGISwapChain::Present` vtable hooking.
+
+**Why demoted:** Very High complexity (vtable hooks, native DLL, IPC) with the highest crash risk of any feature, and the use case is largely obsoleted by multi-monitor setups. CE AI Suite on a second monitor provides the same information with zero injection risk and zero anti-cheat exposure. If a user needs an overlay, the plugin system (10A) provides the extension point for a community-contributed implementation.
+
+**Status:** Deferred to Phase 11 or community plugin. Design spec preserved above for reference.
+
+---
+
+### Phase 10G — Community Distribution
+
+**Goal:** Complete the ecosystem story: versioned releases with a hosted update manifest, a `ceai://install-plugin?url=...` URI scheme for community catalog installs, and a GitHub Pages portal.
+
+**Complexity:** Low *(almost entirely DevOps + web)*
+
+| Item | Details |
+|------|---------|
+| `.github/workflows/update-manifest.yml` | On release, publish `update.json` to GitHub Pages |
+| `scripts/publish-manifest.ps1` | Generates `update.json` from release assets (version, download URL, SHA256) |
+| `PluginCatalogService` (Application) | Fetches community catalog JSON from GitHub Pages; `FetchCatalogAsync()`, `DownloadAndVerifyAsync()` |
+| `PluginCatalogViewModel` (Desktop) | Extends `PluginManagerViewModel` (10A) with "Online Catalog" tab: community plugins with Install button |
+| `ceai://` protocol handler | `.reg` script in `scripts/`; `App.xaml.cs` startup args parsing triggers catalog install |
+| DI | `AddSingleton<PluginCatalogService>()` |
+| Tests | Mock `HttpClient` in `PluginCatalogServiceTests.cs`; extend `UpdateServiceTests.cs` for manifest schema validation; no live network calls in CI |
+| Dependencies | Requires 10A (Plugin Manager UI) |
+
+---
+
+### ~~Phase 10H — Multi-Platform Exploration~~ → Demoted to Phase 11
+
+**Original goal:** Audit abstraction layer portability and build a `CEAISuite.Engine.Linux` stub.
+
+**Why demoted:** The target audience debugs Windows game processes. Linux/macOS users running games through Wine/Proton are a tiny niche with fundamentally different process model challenges. Being Windows-only is not a limitation for this product category. Multi-platform is a "cherry on top" after the core product is complete, not a prerequisite.
+
+**Portability assessment (preserved for future reference):**
+
+| Layer | Portability | Notes |
+|-------|-------------|-------|
+| `Engine.Abstractions` | 100% portable | No OS-specific types |
+| `Engine.Lua` | 100% portable | MoonSharp is pure C# |
+| `Application` | ~90% portable | Only `IScreenCaptureEngine` + `GlobalHotkeyService` use Windows APIs |
+| `Engine.Windows` | 0% portable | All P/Invoke |
+| `Desktop` (WPF) | 0% portable | Would need Avalonia or MAUI replacement |
+
+---
+
+### Phase 10I — Kernel-Mode Debugging *(Phase 11 candidate)*
+
+**Goal:** A signed Windows kernel driver (`CEAISuiteKm.sys`) providing ring-0 capabilities: bypass `ObRegisterCallbacks`-based access restrictions, bypass anti-debug checks at the kernel level, optional SSDT interception.
+
+**This item is listed for completeness but is recommended as Phase 11.** Prerequisites beyond the current team's scope:
+- EV code signing certificate (~$500/year + token)
+- Dedicated kernel developer familiar with WDK and Windows internals
+- Per-Windows-version offset tables for SSDT/`DbgkpXxx` structures
+- CI/CD pipeline for kernel binary signing and release
+- Compliance review (many anti-cheats blacklist known driver names/hashes)
+
+**Complexity:** Very High
+
+| Item | Details |
+|------|---------|
+| `CEAISuite.KernelDriver/` | WDK C project (not C#); three IOCTLs: `OPEN_PROTECTED_PROCESS`, `READ_MEMORY`, `WRITE_MEMORY` |
+| `KernelContracts.cs` (Abstractions) | `IKernelDebugger` interface |
+| `WindowsKernelBridge` (Engine.Windows) | User-mode bridge communicating with driver via `DeviceIoControl` |
+| `KernelDebugService` (Application) | Extends `BreakpointService` with kernel-mode path |
+| **Recommendation** | Do not begin until 10A–10H are complete and a kernel engineer is available |
+
+---
+
+### Phase 10J — Adversarial Robustness & Battle Testing
+
+**Goal:** Systematically harden every engine interface against real-world hostile conditions — processes that exit mid-operation, memory protection changes, malformed inputs, concurrent access, and edge-case Win32 error codes. Transform the test suite from "validates happy paths with mocks" to "proves the engine survives anything a real target throws at it."
+
+**Why this is critical:** Phases 1–9 were built at high velocity with AI assistance. The code is structurally correct and compiles, but the mock-based test suite cannot catch failures that only occur in live adversarial conditions. This phase bridges that gap before Tier 2/3 features (speed hack, VEH) add more injection surface area.
+
+**Complexity:** Medium
+
+| Item | Details |
+|------|---------|
+| **Adversarial test harness process** | New `CEAISuite.Tests.AdversaryHarness` project — a purpose-built .exe that deliberately exhibits hostile behavior: rapidly changing values (1ms timer), pointer chains that re-allocate periodically, regions alternating `PAGE_READWRITE`/`PAGE_NOACCESS`, threads triggering `EXCEPTION_SINGLE_STEP`, AOB signatures that relocate every 5s |
+| **Engine fault injection tests** | For each `I*Engine` method: enumerate every Win32 error code the underlying P/Invoke can return (`ERROR_PARTIAL_COPY`, `ERROR_ACCESS_DENIED`, `STATUS_PROCESS_IS_TERMINATING`, etc.) and write a test for each. Verify graceful degradation, not crashes. |
+| **Process-disappears-mid-scan** | Start a scan, kill the harness process mid-way, verify `ScanService` returns partial results + error status (no `AccessViolationException` escaping to UI) |
+| **Memory protection race** | `QueryMemoryProtection` returns RW, harness flips to `PAGE_GUARD` before `ReadMemory`, verify engine catches `STATUS_GUARD_PAGE_VIOLATION` |
+| **Breakpoint flood test** | Set BP on a hot-path function (10K+ calls/sec), verify hit log rate-limits and does not OOM or deadlock the UI thread |
+| **Malformed CT corpus** | Collect 50+ real-world `.CT` files from CE forums; parse all, verify no unhandled exceptions (encoding issues, missing tags, Lua syntax errors, references to nonexistent modules) |
+| **Concurrent AI tool stress** | Dispatch `ScanForPointers` + `WriteMemory` + `DissectStructure` simultaneously against the harness; verify no data races or deadlocks |
+| **CI integration** | Harness .exe built as a second project; CI launches it, runs adversarial test suite, kills it on completion. Separate GitHub Actions job with `continue-on-error: false` |
+
+**AI workflow for ongoing robustness:**
+1. For each new engine feature, AI generates adversarial test cases alongside implementation
+2. CI runs adversarial suite on every push (not just unit tests)
+3. Periodic "chaos audit" — AI reviews each `I*Engine` interface for uncovered failure modes and extends the harness
+
+---
+
+### Phase 10K — Security Review Checkpoint
+
+**Goal:** Audit the supply-chain and injection attack surfaces introduced by the plugin system (10A), community catalog downloads (10G), and DLL injection infrastructure (10D/10E) before community distribution goes live.
+
+**Why:** The combination of "download DLLs from a catalog" + "load them into the app process" + "inject code into target processes" is a textbook supply-chain attack vector. This checkpoint ensures the architecture is secure before external users depend on it.
+
+**Complexity:** Low-Medium *(audit + targeted hardening, not a rewrite)*
+
+| Item | Details |
+|------|---------|
+| Plugin DLL signing | Plugins must be signed (or at minimum SHA256-verified against the catalog manifest) before `PluginHost.LoadAsync` accepts them |
+| Catalog HTTPS + pinning | `PluginCatalogService` must enforce HTTPS and optionally pin the GitHub Pages TLS certificate |
+| Sandbox audit | Verify `ICeaiPlugin` interface does not expose raw `IServiceProvider` or allow plugins to resolve security-sensitive services (process handles, file system access beyond plugin directory) |
+| Lua sandbox escape review | Re-audit MoonSharp `Preset_HardSandbox` — verify no `os`, `io`, `loadfile`, `dofile`, `debug` library access. Extend `LuaSandboxEscapeTests.cs` with latest known escape vectors |
+| Injection code audit | Review all `CreateRemoteThread` + `LoadLibrary` call sites for injection into unintended processes. Verify `SpeedHackEngine` and `VehDebugger` validate `processId` against attached process only |
+| CT Lua execution | Review `CheatTableFile.LuaScript` auto-execution — should it prompt the user before running Lua from an imported CT file? (Currently auto-runs; this may need a consent gate) |
+| Report | Produce `SECURITY.md` documenting the threat model, trust boundaries, and mitigations |
+
+**Timing:** Run after 10A + 10G are built, before community catalog goes live.
+
+---
+
+### Phase 10L — Stabilization Pass
+
+**Goal:** Regression benchmark and stability verification gate between Tier 2 and Tier 3 features. After speed hack (10D) adds IAT patching and before VEH debugging (10E) adds exception handler injection, verify the engine hasn't regressed.
+
+**Complexity:** Low
+
+| Item | Details |
+|------|---------|
+| Benchmark regression | Run `ScanBenchmarkTests.cs` thresholds against the adversarial harness (10J) with speed hack active — verify scan performance doesn't regress >10% |
+| Memory leak check | Attach/detach cycle 100× against harness; verify no handle leaks (`Process.HandleCount` delta ≤ 2) |
+| Crash recovery stress | Force-kill the app 10× during active scans/breakpoints; verify crash recovery (`recovery.json`) restores address table every time |
+| CI gate | Stabilization tests must pass before 10E/10F branches can merge |
+
+---
+
+## Phase 11: Full Debugger & Kernel Access
+
+**Goal:** Complete the last two major parity gaps — interactive debugger stepping and kernel-mode access for anti-debug bypass.
+
+### Phase 11A — Debugger Stepping *(first priority)*
+
+**Goal:** Wire the stubbed Step In/Over/Out/Continue buttons in the Debugger tab to a real stepping engine. This is the last major CE parity gap that affects every user.
+
+**Why first:** Stepping is universal — every CE user expects it. VEH debugging (10E) ships the `EXCEPTION_SINGLE_STEP` exception infrastructure; this phase wires it into the Debugger UI. Without stepping, the Debugger tab is a read-only register viewer. With stepping, it becomes a real debugger.
+
+**Complexity:** High
+
+| Item | Details |
+|------|---------|
+| `ISteppingEngine` (Abstractions) | `StepInAsync`, `StepOverAsync`, `StepOutAsync`, `ContinueAsync`; `StepCompleted` event with register snapshot |
+| `WindowsSteppingEngine` (Engine.Windows) | Sets Trap Flag (TF) in EFLAGS via `SetThreadContext` for step-in; temporary breakpoint at next instruction for step-over; stack frame return address breakpoint for step-out |
+| VEH integration | When `BreakpointMode.VEH` is active, stepping uses the VEH handler (10E) for `EXCEPTION_SINGLE_STEP` dispatch instead of `WaitForDebugEvent` |
+| `DebuggerViewModel` updates | Enable Step In/Over/Out/Continue buttons; bind to `ISteppingEngine` commands; update register view on each step completion |
+| Watch expressions | Evaluate user-defined expressions against current register/memory state at each step |
+| Trace window | Record instruction history during step sequences; display as scrollable trace log |
+| AI tools | `StepIn(processId)`, `StepOver(processId)`, `StepOut(processId)`, `Continue(processId)` — all `[Destructive]` |
+| Tests | Stepping tests against adversarial harness (10J); verify TF is cleared after single step; verify step-over doesn't step into calls |
+
+### Phase 11B — Kernel-Mode Debugging
+
+**Goal:** A signed Windows kernel driver (`CEAISuiteKm.sys`) providing ring-0 capabilities: bypass `ObRegisterCallbacks`-based process access restrictions and anti-debug checks at the kernel level.
+
+**Why second:** Kernel access is powerful but niche. Most games CE users target don't have kernel-level anti-debug. Games protected by EAC/BattlEye/Vanguard are a subset of the user base, and those users already know they need kernel tools. Stepping helps *everyone*; kernel helps the advanced minority.
+
+**Complexity:** Very High
+
+**Prerequisites:**
+- EV code signing certificate (~$500/year + hardware token)
+- Dedicated kernel developer familiar with WDK and Windows internals
+- Per-Windows-version offset tables for SSDT/`DbgkpXxx` structures
+- CI/CD pipeline for kernel binary signing and release
+- Compliance review (many anti-cheats blacklist known driver names/hashes)
+
+| Item | Details |
+|------|---------|
+| `CEAISuite.KernelDriver/` | WDK C project (not C#); three IOCTLs: `OPEN_PROTECTED_PROCESS`, `READ_MEMORY`, `WRITE_MEMORY` |
+| `KernelContracts.cs` (Abstractions) | `IKernelDebugger` interface |
+| `WindowsKernelBridge` (Engine.Windows) | User-mode bridge communicating with driver via `DeviceIoControl` |
+| `KernelDebugService` (Application) | Extends `BreakpointService` with kernel-mode path |
+
+### Phase 11 — Additional Deferred Items
+
+| Item | Original Phase | Why Deferred |
+|------|---------------|--------------|
+| **D3D/OpenGL overlay** (10F) | Phase 10 | Very High complexity, highest crash risk, obsoleted by multi-monitor setups. Better suited as a community plugin via the 10A plugin system. |
+| **Multi-platform port** (10H) | Phase 10 | Target audience debugs Windows game processes. Linux/macOS via Wine/Proton is a tiny niche with fundamentally different process model challenges. Cherry on top after the core product is finished, not a prerequisite. |
+
+---
+
+## Phase 10 Priority Order
+
+| Tier | Sub-Phase | Rationale |
+|------|-----------|-----------|
+| **Tier 1** (near-term) | **10A** Plugin System UI | Backend done; pure UI wiring; unlocks ecosystem immediately |
+| | **10C** AI Co-Pilot Mode | All plumbing exists; MVVM + `PermissionEngine` are waiting for this |
+| | **10B** Trainer Generation | Highest-visibility user feature; self-contained Roslyn addition |
+| | **10G** Community Distribution | Low complexity DevOps; must immediately follow 10A to make plugins useful |
+| **Gate 1** | **10J** Adversarial Robustness | Battle-test the engine before adding injection features; adversarial harness + fault injection + malformed CT corpus |
+| | **10K** Security Review | Audit plugin loading, catalog downloads, and injection code paths before community distribution goes live |
+| **Tier 2** (medium-term) | **10D** Speed Hack | Uses existing `ICodeCaveEngine`; high user demand; no kernel required |
+| **Gate 2** | **10L** Stabilization Pass | Regression benchmarks + memory leak checks + crash recovery stress before VEH injection |
+| **Tier 3** (long-term) | **10E** VEH Debugging | High complexity; requires injection agent DLL + shared memory IPC |
+| **Phase 11A** | Debugger stepping | Last universal parity gap; builds on VEH from 10E; every user needs this |
+| **Phase 11B** | Kernel driver | Niche but powerful; requires EV cert + dedicated kernel engineer |
 
 ---
 
@@ -492,7 +792,29 @@ Phase 1 ✅ (Foundation)
     │
     Phase 9 ✅ (Infrastructure) ← CI/CD, Serilog, telemetry, benchmarks, progress bars, wizard; 579 tests
     │
-    └── Phase 10 (Advanced) ← long-term; includes AI co-pilot mode
+    └── Phase 10 (Advanced)
+            ├── Tier 1: Near-term
+            │   ├── 10A Plugin System UI (backend exists; pure UI)
+            │   ├── 10C AI Co-Pilot Mode (PermissionEngine + MVVM ready)
+            │   ├── 10B Trainer Generation (Roslyn .exe emit)
+            │   └── 10G Community Distribution (catalog + ceai:// protocol)
+            │
+            ├── Gate 1: Robustness
+            │   ├── 10J Adversarial Harness + Battle Testing
+            │   └── 10K Security Review (plugin/injection audit)
+            │
+            ├── Tier 2: Medium-term
+            │   └── 10D Speed Hack (IAT patching + ICodeCaveEngine)
+            │
+            ├── Gate 2: Stabilization
+            │   └── 10L Regression Benchmarks + Leak/Crash Stress
+            │
+            ├── Tier 3: Long-term
+            │   └── 10E VEH Debugging (VEH agent DLL + IPC)
+            │
+    Phase 11 (Full Debugger & Kernel)
+            ├── 11A Debugger Stepping (builds on 10E VEH; last universal parity gap)
+            └── 11B Kernel Driver (EV cert + WDK; niche anti-debug bypass)
 ```
 
 **Highest-impact order (updated):**
@@ -523,4 +845,5 @@ Phase 1 ✅ (Foundation)
 | **7** | Engine Gaps | ✅ Complete | Multi-threaded scan, bit-level scan, conditional/thread BPs, break-and-trace, AA directives (aobscanmodule, registersymbol, createthread, readmem/writemem, loadlibrary), address table hex/signed/dropdown/groups, pointer map save/load/compare; 385 tests |
 | **8** | Lua | ✅ Complete | MoonSharp Lua 5.2 engine: CE API bindings (20+ functions), {$luacode}/LuaCall AA integration, REPL console, CT Lua execution, form designer, breakpoint scripting, 3 AI tools; 489 tests |
 | **9** | Infrastructure | ✅ Complete | CI/CD (GitHub Actions + Codecov), Serilog structured logging (file + Output panel), crash telemetry opt-in, breakpoint/snapshot progress indicators, first-run wizard (3-page onboarding), UI lifecycle smoke tests, benchmark hardening; 579 tests |
-| **10** | Advanced | Long-term | Trainers, overlays, kernel debugging, plugins, AI co-pilot mode |
+| **10** | Advanced | Planned | Tier 1: 10A Plugin UI + 10C Co-Pilot + 10B Trainers + 10G Distribution → Gate 1: 10J Battle Testing + 10K Security → Tier 2: 10D Speed Hack → Gate 2: 10L Stabilization → Tier 3: 10E VEH Debug |
+| **11** | Debugger & Kernel | Future | 11A Debugger Stepping (last universal parity gap) → 11B Kernel Driver (niche anti-debug bypass) |

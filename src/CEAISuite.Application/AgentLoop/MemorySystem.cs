@@ -252,10 +252,15 @@ public sealed class MemorySystem
     private static bool IsSimilar(string a, string b)
     {
         if (a.Length == 0 || b.Length == 0) return false;
-        // Simple similarity: check if one contains 80% of the other's words
-        var wordsA = a.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var wordsB = new HashSet<string>(b.Split(' ', StringSplitOptions.RemoveEmptyEntries),
+        // Simple similarity: check if one contains 80% of the other's words.
+        // Exempt hex addresses (0x...) from comparison — they're often unique per-run.
+        var wordsA = a.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => !w.StartsWith("0x", StringComparison.OrdinalIgnoreCase)).ToArray();
+        var wordsB = new HashSet<string>(
+            b.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Where(w => !w.StartsWith("0x", StringComparison.OrdinalIgnoreCase)),
             StringComparer.OrdinalIgnoreCase);
+        if (wordsA.Length == 0) return false;
         var overlap = wordsA.Count(w => wordsB.Contains(w));
         return overlap > wordsA.Length * 0.8;
     }

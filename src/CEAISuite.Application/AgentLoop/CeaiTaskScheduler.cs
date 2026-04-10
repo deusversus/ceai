@@ -258,7 +258,25 @@ public static partial class CronExpression
     public static bool IsValid(string expression)
     {
         var parts = expression.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length == 5 && parts.All(p => FieldPattern().IsMatch(p));
+        if (parts.Length != 5 || !parts.All(p => FieldPattern().IsMatch(p)))
+            return false;
+
+        // Semantic range checks for each field
+        int[][] ranges = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 6]];
+        for (int i = 0; i < 5; i++)
+        {
+            if (parts[i] == "*") continue;
+            foreach (var seg in parts[i].Split(','))
+            {
+                var s = seg.Contains('/') ? seg.Split('/')[0] : seg;
+                if (s == "*") continue;
+                var nums = s.Split('-');
+                foreach (var n in nums)
+                    if (int.TryParse(n, out var v) && (v < ranges[i][0] || v > ranges[i][1]))
+                        return false;
+            }
+        }
+        return true;
     }
 
     /// <summary>Check if a cron expression matches a given time.</summary>

@@ -166,8 +166,8 @@ public sealed class SkillSystem
                 foreach (var (key, value) in arguments)
                     instructions = instructions.Replace($"{{{key}}}", value, StringComparison.OrdinalIgnoreCase);
 
-                // Replace the skill with substituted instructions
-                _catalog[name] = skill with { Instructions = instructions };
+                // Use a per-activation copy so the original template is preserved
+                skill = skill with { Instructions = instructions };
                 _log?.Invoke("SKILL", $"Applied {arguments.Count} argument substitutions to {name}");
             }
 

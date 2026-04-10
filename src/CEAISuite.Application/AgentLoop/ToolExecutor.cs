@@ -564,16 +564,23 @@ public sealed class ToolExecutor
 
     // ── Private helpers ──
 
+    private Dictionary<string, AIFunction>? _toolLookup;
+    private int _toolLookupVersion;
+
     private AIFunction? ResolveFunction(string name)
     {
-        // Snapshot to avoid races with progressive tool loading on another thread
-        var tools = _options.Tools.ToList();
-        foreach (var tool in tools)
+        var tools = _options.Tools;
+        // Rebuild lookup when tool count changes (progressive loading adds tools)
+        if (_toolLookup is null || tools.Count != _toolLookupVersion)
         {
-            if (tool is AIFunction fn && string.Equals(fn.Name, name, StringComparison.OrdinalIgnoreCase))
-                return fn;
+            var lookup = new Dictionary<string, AIFunction>(StringComparer.OrdinalIgnoreCase);
+            foreach (var tool in tools)
+                if (tool is AIFunction fn)
+                    lookup[fn.Name] = fn;
+            _toolLookup = lookup;
+            _toolLookupVersion = tools.Count;
         }
-        return null;
+        return _toolLookup.TryGetValue(name, out var result) ? result : null;
     }
 
     private async Task<bool> RequestApproval(

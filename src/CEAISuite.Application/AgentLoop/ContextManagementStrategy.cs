@@ -84,10 +84,16 @@ public static class ContextManagementSerializer
     public static object Serialize(IReadOnlyList<ContextManagementStrategy> strategies)
     {
         // The API expects an array of strategy objects
-        return strategies.Select(s => new Dictionary<string, object>
+        return strategies.Select(s =>
         {
-            ["name"] = s.Name,
-            ["type"] = s.Type,
+            var d = new Dictionary<string, object>
+            {
+                ["name"] = s.Name,
+                ["type"] = s.Type,
+            };
+            if (s.TriggerThreshold > 0) d["trigger_threshold"] = s.TriggerThreshold;
+            if (s.RetentionTarget > 0) d["retention_target"] = s.RetentionTarget;
+            return d;
         }).ToList();
     }
 }

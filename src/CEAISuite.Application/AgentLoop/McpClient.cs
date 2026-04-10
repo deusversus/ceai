@@ -56,7 +56,7 @@ public sealed class StdioMcpTransport : IMcpTransport
 
     public bool IsConnected => _process is { HasExited: false };
 
-    public async Task ConnectAsync(CancellationToken ct)
+    public Task ConnectAsync(CancellationToken ct)
     {
         _log?.Invoke("MCP", $"[stdio] Connecting to {_config.Name} ({_config.Command})");
 
@@ -84,6 +84,7 @@ public sealed class StdioMcpTransport : IMcpTransport
         _stdout = _process.StandardOutput;
 
         _log?.Invoke("MCP", $"[stdio] Process started for {_config.Name} (PID {_process.Id})");
+        return Task.CompletedTask;
     }
 
     public async Task<JsonElement> SendRequestAsync(string method, object? parameters, int requestId, CancellationToken ct)

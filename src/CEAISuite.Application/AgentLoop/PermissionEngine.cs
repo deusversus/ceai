@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
 
 namespace CEAISuite.Application.AgentLoop;
@@ -362,14 +363,19 @@ public sealed record PermissionRule
     /// Simple glob-style pattern matching: * matches any sequence, ? matches one char.
     /// Case-insensitive.
     /// </summary>
+    private static readonly ConcurrentDictionary<string, Regex> s_globCache = new();
+
     internal static bool GlobMatch(string input, string pattern)
     {
-        // Convert glob pattern to regex
-        var regexPattern = "^" +
-            Regex.Escape(pattern)
-                .Replace(@"\*", ".*")
-                .Replace(@"\?", ".") +
-            "$";
-        return Regex.IsMatch(input, regexPattern, RegexOptions.IgnoreCase);
+        var regex = s_globCache.GetOrAdd(pattern, p =>
+        {
+            var regexPattern = "^" +
+                Regex.Escape(p)
+                    .Replace(@"\*", ".*")
+                    .Replace(@"\?", ".") +
+                "$";
+            return new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
+        });
+        return regex.IsMatch(input);
     }
 }

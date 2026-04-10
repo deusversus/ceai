@@ -186,6 +186,17 @@ internal static class ToolCategories
         ["utility"] = [
             "IdentifyArtifact" ],
     };
+
+    /// <summary>
+    /// Categories that are automatically co-loaded when a trigger category is requested.
+    /// Breakpoint workflows frequently reference disassembly tools (FindWritersToOffset,
+    /// TraceFieldWriters) in rejection/suggestion messages, so load them together.
+    /// </summary>
+    public static readonly (string Trigger, string CoLoad)[] CoLoadCategories =
+    [
+        ("breakpoints", "disassembly"),
+        ("hooks", "disassembly"),
+    ];
 }
 
 [SupportedOSPlatform("windows")]
@@ -956,6 +967,29 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
             }
             _loadedCategories.Add(cat);
             _categoryLastUsedTurn[cat] = _currentTurn;
+        }
+
+        // Co-load tightly coupled categories: breakpoint workflows reference disassembly tools
+        // (FindWritersToOffset, TraceFieldWriters, Disassemble) in their rejection/suggestion messages.
+        foreach (var (trigger, coload) in ToolCategories.CoLoadCategories)
+        {
+            if (_loadedCategories.Contains(trigger) && !_loadedCategories.Contains(coload) &&
+                ToolCategories.Categories.TryGetValue(coload, out var coloadTools))
+            {
+                foreach (var name in coloadTools)
+                {
+                    if (activeNames.Contains(name)) continue;
+                    if (_allToolsByName.TryGetValue(name, out var tool))
+                    {
+                        _tools.Add(tool);
+                        activeNames.Add(name);
+                        loaded.Add(name);
+                    }
+                }
+                _loadedCategories.Add(coload);
+                _categoryLastUsedTurn[coload] = _currentTurn;
+                Log("TOOLS", $"Co-loaded '{coload}' (triggered by '{trigger}')");
+            }
         }
 
         Log("TOOLS", $"Loaded categories: [{categories}] → {loaded.Count} new tools " +

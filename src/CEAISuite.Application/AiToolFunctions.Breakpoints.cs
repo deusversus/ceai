@@ -114,8 +114,12 @@ public sealed partial class AiToolFunctions
                 }
             }
 
-            // For risky modes (PageGuard, Hardware), use transactional install with rollback
-            if (watchdogService is not null && bpMode is BreakpointMode.PageGuard or BreakpointMode.Hardware)
+            // For PageGuard mode, use transactional install with rollback (guard storms can wedge the target).
+            // Hardware mode uses CPU debug registers — safe at OS level, no memory/page modifications.
+            // Hardware BPs generate frequent debug events on hot addresses which can make the process
+            // *appear* unresponsive to the watchdog (WM_NULL timeouts, stalled CPU time samples)
+            // even though it's running fine. So we skip the transactional verify for Hardware mode.
+            if (watchdogService is not null && bpMode is BreakpointMode.PageGuard)
             {
                 BreakpointOverview? txBp = null;
                 var txResult = await watchdogService.InstallWithTransactionAsync(
@@ -127,7 +131,16 @@ public sealed partial class AiToolFunctions
                     rollbackAction: async () => txBp is not null && await breakpointService.RemoveBreakpointAsync(processId, txBp.Id).ConfigureAwait(false)).ConfigureAwait(false);
 
                 if (!txResult.Success)
+                {
+                    // If rollback failed, the debug session may still be attached — force-detach
+                    // so future breakpoint attempts don't fail with "Unable to attach debugger".
+                    if (txResult.Message.Contains("FAILED", StringComparison.Ordinal))
+                    {
+                        try { await breakpointService.ForceDetachAndCleanupAsync(processId).ConfigureAwait(false); }
+                        catch (Exception detachEx) { logger?.LogWarning(detachEx, "Force-detach after failed rollback also failed for PID {ProcessId}", processId); }
+                    }
                     return $"⚠️ Transactional install failed at {txResult.Phase}: {txResult.Message}";
+                }
 
                 var msg = $"Breakpoint {txBp!.Id} set at {txBp.Address} (type: {txBp.Type}, mode: {bpMode}, action: {txBp.HitAction})";
                 if (singleHit) msg += " [SINGLE-HIT: will auto-remove after first trigger]";

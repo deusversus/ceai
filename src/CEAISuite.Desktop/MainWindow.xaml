@@ -1998,7 +1998,7 @@
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="Auto" MaxWidth="140" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
 
@@ -2052,7 +2052,8 @@
                                                             Background="Transparent" BorderThickness="0" Cursor="Hand" Padding="6,2">
                                                         <StackPanel Orientation="Horizontal">
                                                             <TextBlock x:Name="ModelSelectorText" Text="{Binding SelectedModel}" FontSize="12"
-                                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" />
+                                                                       Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center"
+                                                                       MaxWidth="100" TextTrimming="CharacterEllipsis" />
                                                             <TextBlock Text=" ▾" FontSize="10" Foreground="{DynamicResource TertiaryForeground}" VerticalAlignment="Center" />
                                                         </StackPanel>
                                                     </Button>

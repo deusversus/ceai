@@ -98,6 +98,8 @@ internal static class DangerousTools
         "ExecuteAutoAssemblerScript",
         "DisableAutoAssemblerScript",
         "ExecuteLuaScript",
+        "AssembleInstruction",
+        "NopRegion",
     };
 }
 
@@ -115,7 +117,7 @@ internal static class ToolCategories
         // Basic memory
         "ReadMemory", "WriteMemory", "ProbeAddress", "BrowseMemory",
         // Basic scanning
-        "StartScan", "RefineScan", "GetScanResults",
+        "StartScan", "RefineScan", "GetScanResults", "ResetScan",
         // Address table essentials
         "ListAddressTable", "AddToAddressTable", "RemoveFromAddressTable", "RefreshAddressTable",
         "FreezeAddress",
@@ -149,13 +151,14 @@ internal static class ToolCategories
             "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection" ],
         ["address_table"] = [
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
-            "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript" ],
+            "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript",
+            "ModifyAddressTableEntry", "AdjustValue" ],
         ["scanning_advanced"] = [
             "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths",
             "UndoScan", "GroupedScan", "ResumePointerScan", "RescanAllPointerPaths",
             "SavePointerMap", "LoadPointerMap", "ComparePointerMaps" ],
         ["breakpoints"] = [
-            "SetBreakpoint", "RemoveBreakpoint", "ListBreakpoints",
+            "SetBreakpoint", "RemoveBreakpoint", "ListBreakpoints", "RemoveAllBreakpoints",
             "GetBreakpointHitLog", "GetBreakpointHealth", "GetBreakpointModeCapabilities",
             "ProbeTargetRisk", "EmergencyRestorePageProtection", "ForceDetachAndCleanup",
             "SetConditionalBreakpoint", "TraceFromAddress",
@@ -164,7 +167,8 @@ internal static class ToolCategories
             "Disassemble", "FindWritersToOffset", "FindFunctionBoundaries", "GetCallerGraph",
             "SearchInstructionPattern", "FindByMemoryOperand",
             "GetCallStack", "GetAllThreadStacks", "ResolveSymbol",
-            "TraceFieldWriters", "LoadSymbolsForModule", "ResolveAddressToSymbol" ],
+            "TraceFieldWriters", "LoadSymbolsForModule", "ResolveAddressToSymbol",
+            "AssembleInstruction", "NopRegion" ],
         ["hooks"] = [
             "InstallCodeCaveHook", "RemoveCodeCaveHook", "ListCodeCaveHooks",
             "GetCodeCaveHookHits", "DryRunHookInstall" ],
@@ -193,7 +197,7 @@ internal static class ToolCategories
         ["vision"] = [
             "CaptureProcessWindow" ],
         ["lua"] = [
-            "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression" ],
+            "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression", "ResetLuaEngine" ],
         ["utility"] = [
             "IdentifyArtifact" ],
     };

@@ -2231,4 +2231,168 @@ public sealed partial class AiToolFunctions(
             return $"ResolveAddressToSymbol failed: {ex.Message}";
         }
     }
+
+    // ── WP10: New AI Tools for UI Parity ──
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Modify an existing address table entry's address, data type, value, or display flags.")]
+    public Task<string> ModifyAddressTableEntry(
+        [Description("Node ID or label")] string nodeId,
+        [Description("New address (hex). Leave null to keep current.")] string? newAddress = null,
+        [Description("New data type (Int32, Float, Int64, Double, Byte, Int16, String). Leave null to keep current.")] string? newType = null,
+        [Description("New value to write. Leave null to keep current.")] string? newValue = null,
+        [Description("Show value as hex (true/false). Leave null to keep current.")] bool? showAsHex = null,
+        [Description("Show value as signed (true/false). Leave null to keep current.")] bool? showAsSigned = null)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+
+        var changes = new List<string>();
+        if (newAddress is not null) { node.Address = newAddress; changes.Add($"address→{newAddress}"); }
+        if (newType is not null && Enum.TryParse<MemoryDataType>(newType, true, out var dt))
+        {
+            node.DataType = dt; changes.Add($"type→{dt}");
+        }
+        else if (newType is not null) return Task.FromResult($"Unknown data type '{newType}'. Use: Int32, Float, Int64, Double, Byte, Int16, String.");
+        if (newValue is not null) { node.CurrentValue = newValue; changes.Add($"value→{newValue}"); }
+        if (showAsHex.HasValue) { node.ShowAsHex = showAsHex.Value; changes.Add($"hex→{showAsHex.Value}"); }
+        if (showAsSigned.HasValue) { node.ShowAsSigned = showAsSigned.Value; changes.Add($"signed→{showAsSigned.Value}"); }
+
+        return Task.FromResult(changes.Count > 0
+            ? $"Modified '{node.Label}': {string.Join(", ", changes)}"
+            : "No changes specified.");
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [Description("Assemble an instruction and write the bytes at the given address. Uses Keystone assembler.")]
+    public async Task<string> AssembleInstruction(
+        [Description("Process ID")] int processId,
+        [Description("Address to write the instruction at (hex)")] string address,
+        [Description("Assembly instruction in MASM/Intel syntax (e.g., 'mov eax, 1' or 'nop')")] string instruction)
+    {
+        if (autoAssemblerEngine is null) return "Auto assembler engine not available.";
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+        var script = $"[ENABLE]\n{address}:\n{instruction}\n[DISABLE]\n";
+        var result = await autoAssemblerEngine.EnableAsync(processId, script).ConfigureAwait(false);
+        return result.Success
+            ? $"Assembled and wrote at {address}: {instruction} ({result.Patches.Count} patch(es))"
+            : $"Assembly failed: {result.Error}";
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Remove all active breakpoints at once.")]
+    public async Task<string> RemoveAllBreakpoints(
+        [Description("Process ID")] int processId)
+    {
+        if (breakpointService is null) return "Breakpoint service not available.";
+
+        var bps = await breakpointService.ListBreakpointsAsync(processId).ConfigureAwait(false);
+        if (bps.Count == 0) return "No active breakpoints to remove.";
+
+        int removed = 0;
+        foreach (var bp in bps)
+        {
+            if (await breakpointService.RemoveBreakpointAsync(processId, bp.Id).ConfigureAwait(false))
+                removed++;
+        }
+        return $"Removed {removed}/{bps.Count} breakpoints.";
+    }
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Reset scan state, clearing all results and the undo stack. Use before starting a completely new scan.")]
+    public Task<string> ResetScan()
+    {
+        scanService.ResetScan();
+        return Task.FromResult("Scan state reset. Ready for a new scan.");
+    }
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Reset the Lua script engine, clearing all global state and registered functions.")]
+    public Task<string> ResetLuaEngine()
+    {
+        if (luaEngine is null) return Task.FromResult("Lua engine is not available.");
+        luaEngine.Reset();
+        return Task.FromResult("Lua engine reset. All global state cleared.");
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [Description("Fill a memory region with NOP (0x90) bytes. Useful for patching out instructions.")]
+    public async Task<string> NopRegion(
+        [Description("Process ID")] int processId,
+        [Description("Start address (hex)")] string address,
+        [Description("Number of bytes to NOP (1-64)")] int length)
+    {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+        length = Math.Clamp(length, 1, 64);
+
+        var addr = ParseAddress(address);
+        var nops = new byte[length];
+        Array.Fill(nops, (byte)0x90);
+        var written = await engineFacade.WriteBytesAsync(processId, addr, nops).ConfigureAwait(false);
+        return written > 0
+            ? $"Wrote {written} NOP bytes at 0x{addr:X}."
+            : $"Failed to write NOP bytes at 0x{addr:X}.";
+    }
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Increment or decrement an address table entry's numeric value by a delta. Reads current value, adds delta, writes back.")]
+    public async Task<string> AdjustValue(
+        [Description("Process ID")] int processId,
+        [Description("Node ID or label")] string nodeId,
+        [Description("Amount to add (positive) or subtract (negative)")] double delta)
+    {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+        var node = ResolveNode(nodeId);
+        if (node is null) return $"Node '{nodeId}' not found.";
+
+        var addr = ParseAddress(node.Address);
+        var mem = await engineFacade.ReadMemoryAsync(processId, addr, 8).ConfigureAwait(false);
+        var raw = mem.Bytes is byte[] arr ? arr : mem.Bytes.ToArray();
+        if (raw.Length < 4) return "Could not read current value.";
+
+        byte[] newBytes;
+        string displayOld, displayNew;
+        switch (node.DataType)
+        {
+            case MemoryDataType.Float:
+                var fVal = BitConverter.ToSingle(raw, 0);
+                var fNew = fVal + (float)delta;
+                displayOld = fVal.ToString("F2", CultureInfo.InvariantCulture); displayNew = fNew.ToString("F2", CultureInfo.InvariantCulture);
+                newBytes = BitConverter.GetBytes(fNew);
+                break;
+            case MemoryDataType.Double:
+                var dVal = BitConverter.ToDouble(raw, 0);
+                var dNew = dVal + delta;
+                displayOld = dVal.ToString("F2", CultureInfo.InvariantCulture); displayNew = dNew.ToString("F2", CultureInfo.InvariantCulture);
+                newBytes = BitConverter.GetBytes(dNew);
+                break;
+            case MemoryDataType.Int64:
+                var lVal = BitConverter.ToInt64(raw, 0);
+                var lNew = lVal + (long)delta;
+                displayOld = lVal.ToString(CultureInfo.InvariantCulture); displayNew = lNew.ToString(CultureInfo.InvariantCulture);
+                newBytes = BitConverter.GetBytes(lNew);
+                break;
+            default: // Int32, Byte, Int16 — treat as Int32
+                var iVal = BitConverter.ToInt32(raw, 0);
+                var iNew = iVal + (int)delta;
+                displayOld = iVal.ToString(CultureInfo.InvariantCulture); displayNew = iNew.ToString(CultureInfo.InvariantCulture);
+                newBytes = BitConverter.GetBytes(iNew);
+                break;
+        }
+
+        var written = await engineFacade.WriteBytesAsync(processId, addr, newBytes).ConfigureAwait(false);
+        return written > 0
+            ? $"Adjusted '{node.Label}': {displayOld} → {displayNew} (delta: {delta:+0;-0})"
+            : $"Failed to write adjusted value at 0x{addr:X}.";
+    }
 }

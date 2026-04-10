@@ -167,3 +167,38 @@ public sealed record ModelConfig
     /// <summary>Optional display name for UI.</summary>
     public string? DisplayName { get; init; }
 }
+
+/// <summary>
+/// Model capability tier for tool schema sizing.
+/// Determines how many core tools are loaded and whether descriptions are compressed.
+/// </summary>
+public enum ModelTier
+{
+    /// <summary>Weak models (Nemotron, Llama, Gemma, small open models). Minimal tool set.</summary>
+    Minimal,
+
+    /// <summary>Mid-range models (Mixtral, GPT-3.5, default). Standard tool set.</summary>
+    Standard,
+
+    /// <summary>Strong models (Claude, GPT-4, o1). Full tool set with skills/planning/sessions.</summary>
+    Full,
+}
+
+/// <summary>Classify a model ID into a capability tier.</summary>
+public static class ModelTierClassifier
+{
+    public static ModelTier Classify(string? modelId)
+    {
+        if (string.IsNullOrEmpty(modelId)) return ModelTier.Standard;
+        var id = modelId.ToLowerInvariant();
+        // Minimal: small/weak open models
+        if (id.Contains("nemotron") || id.Contains("llama") || id.Contains("gemma")
+            || id.Contains("phi-") || id.Contains("mistral-7b") || id.Contains("qwen-7b"))
+            return ModelTier.Minimal;
+        // Full: frontier models
+        if (id.Contains("claude") || id.Contains("gpt-4") || id.Contains("o1-")
+            || id.Contains("o3-") || id.Contains("gemini-pro") || id.Contains("gemini-2"))
+            return ModelTier.Full;
+        return ModelTier.Standard;
+    }
+}

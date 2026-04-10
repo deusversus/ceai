@@ -216,6 +216,21 @@ internal static class ToolCategories
             "get_session_info", "search_sessions" ],
     };
 
+    /// <summary>Extra tools added to core for Full-tier models (Claude, GPT-4, etc.).</summary>
+    public static readonly string[] FullTierExtras =
+    [
+        "list_tool_categories", "ListStoredResults",
+        "load_skill", "list_skills",
+        "remember", "recall_memory",
+        "spawn_subagent", "get_budget_status",
+    ];
+
+    /// <summary>Tools to REMOVE from core for Minimal-tier models (Nemotron, Llama, etc.).</summary>
+    public static readonly string[] MinimalTierRemove =
+    [
+        "GetCurrentContext", "RetrieveToolResult",
+    ];
+
     /// <summary>
     /// Categories that are automatically co-loaded when a trigger category is requested.
     /// Breakpoint workflows frequently reference disassembly tools (FindWritersToOffset,
@@ -439,7 +454,8 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
 
         // Start with only core tools — agent requests more via request_tools()
         _tools = [];
-        LoadCoreTools();
+        var modelTier = ModelTierClassifier.Classify(_modelSwitcher?.CurrentModel.ModelId);
+        LoadCoreTools(modelTier);
 
         Log("INFO", $"Progressive tools: {_tools.Count} core loaded, {_allToolsByName.Count} total available");
 
@@ -938,16 +954,33 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
 
     // ─── Progressive Tool Loading ───────────────────────────────────────
 
-    /// <summary>Load core tools into the active tool list.</summary>
-    private void LoadCoreTools()
+    /// <summary>Load core tools into the active tool list, adjusted by model tier.</summary>
+    private void LoadCoreTools(ModelTier tier = ModelTier.Standard)
     {
         _tools.Clear();
         _loadedCategories.Clear();
-        foreach (var name in ToolCategories.Core)
+
+        // Build tier-adjusted core set
+        var coreNames = new HashSet<string>(ToolCategories.Core, StringComparer.OrdinalIgnoreCase);
+
+        if (tier == ModelTier.Full)
+        {
+            foreach (var name in ToolCategories.FullTierExtras)
+                coreNames.Add(name);
+        }
+        else if (tier == ModelTier.Minimal)
+        {
+            foreach (var name in ToolCategories.MinimalTierRemove)
+                coreNames.Remove(name);
+        }
+
+        foreach (var name in coreNames)
         {
             if (_allToolsByName.TryGetValue(name, out var tool))
                 _tools.Add(tool);
         }
+
+        Log("TOOLS", $"Loaded {_tools.Count} core tools (tier: {tier})");
     }
 
     /// <summary>
@@ -1091,7 +1124,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         if (string.Equals(categories.Trim(), "all", StringComparison.OrdinalIgnoreCase))
         {
             var removedCount = _tools.Count;
-            LoadCoreTools();
+            LoadCoreTools(ModelTierClassifier.Classify(_modelSwitcher?.CurrentModel.ModelId));
             Log("TOOLS", $"Unloaded all categories, reset to {_tools.Count} core tools");
             return $"Reset to core tools. Removed {removedCount - _tools.Count} tools. Active: {_tools.Count}.";
         }
@@ -1617,7 +1650,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         ClearHistory();
         _toolResultStore.Clear(); // Discard spilled results from previous chat
         _tokenBudget.Reset(); // Reset cost tracking for new session
-        LoadCoreTools(); // Reset to core tools for fresh conversation
+        LoadCoreTools(ModelTierClassifier.Classify(_modelSwitcher?.CurrentModel.ModelId));
 
         // Apply the default permission mode from settings to the live engine
         SetPermissionMode(CurrentPermissionMode);

@@ -181,7 +181,13 @@ public sealed class AgentLoop
             _log?.Invoke("LOOP", $"Turn {state.TurnCount} (transition: {state.Transition})");
 
             // Build ChatOptions for this turn
+            // §4: On the first turn, skip tools entirely for trivial messages (greetings, "ok", etc.)
             var chatOptions = BuildChatOptions(state, history);
+            if (state.TurnCount == 0 && _options.EnableTrivialMessageBypass && IsTrivialMessage(userMessage))
+            {
+                _log?.Invoke("LOOP", "Trivial message detected — sending without tools");
+                chatOptions.Tools = [];
+            }
 
             // Pre-LLM hooks
             if (_options.Hooks is { } preLlmHooks)
@@ -272,6 +278,13 @@ public sealed class AgentLoop
 
                 state = state with { Transition = AgentTransition.Completed };
                 break;
+            }
+
+            // §5: Per-turn tool call cap — prevent runaway tool loops
+            if (toolCalls.Count > _options.MaxToolCallsPerTurn)
+            {
+                _log?.Invoke("LOOP", $"Tool call cap: {toolCalls.Count} calls → capping at {_options.MaxToolCallsPerTurn}");
+                toolCalls = toolCalls.Take(_options.MaxToolCallsPerTurn).ToList();
             }
 
             // Add assistant message with tool calls to history
@@ -812,5 +825,27 @@ public sealed class AgentLoop
                 $"[ABORTED] Tool '{call.Name ?? "unknown"}' was not executed because the operation was cancelled by the user."),
             IsError: true
         )).ToList();
+    }
+
+    /// <summary>
+    /// Check if a user message is trivial (greeting, acknowledgment, etc.)
+    /// and doesn't need tools. Used on the first turn to skip tool schema overhead.
+    /// </summary>
+    private static bool IsTrivialMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message) || message.Length > 80) return false;
+        var lower = message.ToLowerInvariant();
+        ReadOnlySpan<string> keywords =
+        [
+            "scan", "memory", "address", "hack", "attach", "process",
+            "breakpoint", "script", "freeze", "find", "search", "read",
+            "write", "hook", "disassemble", "pointer", "0x", "cheat",
+            "table", "module", "thread", "region", "dump", "lua",
+            "inject", "nop", "patch", "offset", "struct", "trace",
+        ];
+        foreach (var kw in keywords)
+            if (lower.Contains(kw, StringComparison.Ordinal))
+                return false;
+        return true;
     }
 }

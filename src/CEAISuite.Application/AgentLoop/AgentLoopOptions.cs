@@ -56,6 +56,12 @@ public sealed class AgentLoopOptions
     /// <summary>Maximum LLM round-trips before the loop stops.</summary>
     public int MaxTurns { get; init; } = 25;
 
+    /// <summary>Maximum tool calls the model may make in a single response. Excess calls are deferred with a message.</summary>
+    public int MaxToolCallsPerTurn { get; init; } = 8;
+
+    /// <summary>When true, trivial first-turn messages (greetings, "ok", etc.) are sent with no tools to avoid schema overhead.</summary>
+    public bool EnableTrivialMessageBypass { get; init; } = true;
+
     /// <summary>
     /// Additional properties merged into ChatOptions (e.g., Anthropic cache_control).
     /// </summary>

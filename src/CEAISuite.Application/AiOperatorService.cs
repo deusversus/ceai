@@ -112,35 +112,27 @@ internal static class DangerousTools
 /// </summary>
 internal static class ToolCategories
 {
-    /// <summary>Tools loaded at session start — always available.</summary>
+    /// <summary>
+    /// Slim core tool set — only tools needed for first-turn workflows.
+    /// Everything else is loaded on-demand via request_tools(category).
+    /// Reduced from 39 to 18 tools to cut ~2,000 tokens/turn in schema overhead.
+    /// </summary>
     public static readonly HashSet<string> Core = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Process management
-        "ListProcesses", "FindProcess", "AttachProcess", "InspectProcess", "CheckProcessLiveness",
-        // Basic memory
-        "ReadMemory", "WriteMemory", "ProbeAddress", "BrowseMemory",
-        // Basic scanning
-        "StartScan", "RefineScan", "GetScanResults", "ResetScan",
-        // Address table essentials
-        "ListAddressTable", "AddToAddressTable", "RemoveFromAddressTable", "RefreshAddressTable",
-        "FreezeAddress",
-        // Context
+        // Process management (3)
+        "ListProcesses", "AttachProcess", "InspectProcess",
+        // Basic memory (3)
+        "ReadMemory", "WriteMemory", "ProbeAddress",
+        // Basic scanning (3)
+        "StartScan", "RefineScan", "GetScanResults",
+        // Address table essentials (3)
+        "ListAddressTable", "AddToAddressTable", "FreezeAddress",
+        // Context (1)
         "GetCurrentContext",
-        // Spilled-result retrieval (always available)
-        "RetrieveToolResult", "ListStoredResults",
-        // Meta-tools (always available)
-        "request_tools", "list_tool_categories", "unload_tools",
-        // Skill meta-tools (always available)
-        "load_skill", "list_skills", "unload_skill", "confirm_load_skill", "view_skill_reference",
-        // Memory meta-tools (always available when enabled)
-        "remember", "recall_memory", "forget_memory",
-        // Budget meta-tool
-        "get_budget_status",
-        // Subagent & plan meta-tools
-        "spawn_subagent", "plan_task", "execute_plan",
-        // Phase 5 meta-tools
-        "switch_model", "schedule_task", "list_tasks", "cancel_task",
-        "get_session_info", "search_sessions",
+        // Spilled-result retrieval (1)
+        "RetrieveToolResult",
+        // Meta — only request_tools; category list is in system prompt (1)
+        "request_tools",
     };
 
     /// <summary>Category name → tool names. Agent calls request_tools(category) to load these.</summary>
@@ -151,15 +143,18 @@ internal static class ToolCategories
             "DeleteSession" ],
         ["memory_advanced"] = [
             "HexDump", "ListMemoryRegions", "DissectStructure", "ExportStructDefinition",
-            "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection" ],
+            "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection",
+            "BrowseMemory" ],
         ["address_table"] = [
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
             "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript",
-            "ModifyAddressTableEntry", "AdjustValue" ],
+            "ModifyAddressTableEntry", "AdjustValue",
+            "RemoveFromAddressTable", "RefreshAddressTable" ],
         ["scanning_advanced"] = [
             "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths",
             "UndoScan", "GroupedScan", "ResumePointerScan", "RescanAllPointerPaths",
-            "SavePointerMap", "LoadPointerMap", "ComparePointerMaps" ],
+            "SavePointerMap", "LoadPointerMap", "ComparePointerMaps",
+            "ResetScan" ],
         ["breakpoints"] = [
             "SetBreakpoint", "RemoveBreakpoint", "ListBreakpoints", "RemoveAllBreakpoints",
             "GetBreakpointHitLog", "GetBreakpointHealth", "GetBreakpointModeCapabilities",
@@ -205,6 +200,20 @@ internal static class ToolCategories
             "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression", "ResetLuaEngine" ],
         ["utility"] = [
             "IdentifyArtifact" ],
+        // Demoted from core — loaded on-demand
+        ["process_advanced"] = [
+            "FindProcess", "CheckProcessLiveness" ],
+        ["meta"] = [
+            "list_tool_categories", "unload_tools", "ListStoredResults", "get_budget_status" ],
+        ["skills"] = [
+            "load_skill", "list_skills", "unload_skill", "confirm_load_skill", "view_skill_reference" ],
+        ["memory_ai"] = [
+            "remember", "recall_memory", "forget_memory" ],
+        ["planning"] = [
+            "spawn_subagent", "plan_task", "execute_plan" ],
+        ["session_management"] = [
+            "switch_model", "schedule_task", "list_tasks", "cancel_task",
+            "get_session_info", "search_sessions" ],
     };
 
     /// <summary>
@@ -515,7 +524,11 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
 
     private AgentLoop.AgentLoop BuildNewAgentLoop(IChatClient client)
     {
-        var effectiveSystemPrompt = SystemPrompt;
+        // Build dynamic category index to inject into system prompt
+        var categoryIndex = string.Join(", ",
+            ToolCategories.Categories.Select(kv => $"{kv.Key} ({kv.Value.Length})"));
+        var effectiveSystemPrompt = SystemPrompt.Replace("{{CATEGORY_INDEX}}",
+            $"Available categories: {categoryIndex}");
         if (_appSettings?.RequirePlanForDestructive == true)
         {
             effectiveSystemPrompt += "\n\n" +
@@ -1760,9 +1773,9 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
           compaction preserve important data when conversation gets long.
 
         ═══ TOOLS (PROGRESSIVE) ═══
-        Core tools are always loaded. For specialized ops, call request_tools(category).
-        Use list_tool_categories to see what's available and loaded.
-        Key categories: sessions (save/load/search), scripts, breakpoints, disassembly, hooks.
+        Core tools (process, memory, scan, address table, request_tools) are always loaded.
+        For specialized ops, call request_tools("category_name"). Do NOT call list_tool_categories.
+        {{CATEGORY_INDEX}}
 
         ═══ ARTIFACT IDS ═══
         hook-* bp-* script-* addr-* group-* scan-* — use IdentifyArtifact(id) if unsure.

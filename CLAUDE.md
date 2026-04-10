@@ -40,18 +40,22 @@ After completing any implementation, do a self-audit: re-read the changed files,
 Always address issues the moment they are noticed. Never defer fixes with the assumption that someone else will catch them later. Presume the next person to encounter the issue may not recognize it or may lack the context to fix it correctly — we are always the best people for the job right now.
 
 ## Search Strategy
-Before grepping or exploring, check the wiki first. The code map has the exact file for every class, interface, and tool in the codebase. Wiki and memory files live in the Claude project memory directory (NOT in the repo): `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/`
+Before grepping or exploring, check the wiki first. The code map has the exact file for every class, interface, and tool in the codebase.
 
-- **Know what you're looking for?** Check `memory/wiki/code-map.md` → Read the source file directly. Zero wasted tokens.
+IMPORTANT: Wiki and memory files are in the Claude project memory directory, NOT inside the repo.
+The base path is: `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/`
+Use that full path (or glob `~/.claude/**/memory/wiki/*.md`) when reading wiki files.
+
+- **Know what you're looking for?** Read `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/wiki/code-map.md` → then go directly to the source file it points to. Zero wasted tokens.
 - **Know the filename but not the path?** Glob for it: `**/*FileName*`
 - **Searching for a string in code?** Grep with a targeted path, not the whole repo. Use the code map to narrow to the right project directory.
-- **Exploring an unfamiliar area?** Read `memory/wiki/architecture.md` and `memory/wiki/code-map.md` first. Then read files directly. Do not grep broadly hoping to stumble into the answer.
+- **Exploring an unfamiliar area?** Read the architecture and code-map wiki pages first (same directory as above). Then read source files directly. Do not grep broadly hoping to stumble into the answer.
 - **Delegating to sub-agents?** Always pass relevant context from the wiki in the agent prompt. Sub-agents have no memory access — they'll waste tokens exploring from scratch unless you brief them.
 
 ## Wiki & Memory
-All memory and wiki files are in `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/` (the Claude project memory directory, NOT inside the repo).
-- Wiki pages: `memory/wiki/` — synthesized knowledge that grows over time
-- **Code map: `memory/wiki/code-map.md`** — file-level index of every class and tool. Check this FIRST.
+IMPORTANT: All memory and wiki files live at `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/` — NOT inside the repo. Do not look for them in the working directory.
+- Wiki pages are under `wiki/` in that directory — synthesized knowledge that grows over time
+- **Code map: `wiki/code-map.md`** — file-level index of every class and tool. Check this FIRST.
 - When you learn something significant, update existing wiki/memory pages first
 - Only create new files for genuinely new topics
 - Note contradictions between new information and existing wiki content

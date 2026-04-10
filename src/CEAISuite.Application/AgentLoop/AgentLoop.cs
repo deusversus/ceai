@@ -830,22 +830,50 @@ public sealed class AgentLoop
     /// <summary>
     /// Check if a user message is trivial (greeting, acknowledgment, etc.)
     /// and doesn't need tools. Used on the first turn to skip tool schema overhead.
+    ///
+    /// DESIGN: Allowlist of known-trivial patterns, NOT a keyword blocklist.
+    /// A blocklist is inherently leaky — "what's my health?" has no keywords but
+    /// needs tools. An allowlist is conservative: only messages we're CERTAIN are
+    /// conversational get the bypass. Unknown messages always get tools (safe default).
     /// </summary>
-    private static bool IsTrivialMessage(string? message)
+    internal static bool IsTrivialMessage(string? message)
     {
-        if (string.IsNullOrWhiteSpace(message) || message.Length > 80) return false;
-        var lower = message.ToLowerInvariant();
-        ReadOnlySpan<string> keywords =
+        if (string.IsNullOrWhiteSpace(message)) return false;
+        var trimmed = message.Trim();
+
+        // Too long to be a greeting — probably a real request
+        if (trimmed.Length > 40) return false;
+
+        // Normalize: lowercase, strip trailing punctuation
+        var normalized = trimmed.ToLowerInvariant().TrimEnd('.', '!', '?', ',', ' ');
+
+        // Must match a known trivial pattern — everything else gets tools
+        ReadOnlySpan<string> trivialExact =
         [
-            "scan", "memory", "address", "hack", "attach", "process",
-            "breakpoint", "script", "freeze", "find", "search", "read",
-            "write", "hook", "disassemble", "pointer", "0x", "cheat",
-            "table", "module", "thread", "region", "dump", "lua",
-            "inject", "nop", "patch", "offset", "struct", "trace",
+            // Greetings
+            "hi", "hey", "hello", "howdy", "yo", "sup",
+            "good morning", "good afternoon", "good evening",
+            // Acknowledgments
+            "ok", "okay", "k", "sure", "thanks", "thank you", "thx", "ty",
+            "got it", "understood", "cool", "nice", "great", "awesome",
+            "sounds good", "perfect", "alright", "right",
+            // Farewells
+            "bye", "goodbye", "see you", "later", "cya",
+            // Meta
+            "yes", "no", "yep", "nope", "yeah", "nah",
+            "what can you do", "who are you", "help",
         ];
-        foreach (var kw in keywords)
-            if (lower.Contains(kw, StringComparison.Ordinal))
-                return false;
-        return true;
+
+        foreach (var pattern in trivialExact)
+            if (normalized == pattern)
+                return true;
+
+        // Short greeting with name: "hi claude", "hey there", "hello!"
+        if (normalized.StartsWith("hi ", StringComparison.Ordinal)
+            || normalized.StartsWith("hey ", StringComparison.Ordinal)
+            || normalized.StartsWith("hello ", StringComparison.Ordinal))
+            return normalized.Length < 20 && !normalized.Any(char.IsDigit);
+
+        return false;
     }
 }

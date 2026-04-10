@@ -33,7 +33,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
 
     private static readonly string[] GeminiModels = ["gemini-3.1-flash-lite-preview", "gemini-3-flash-preview", "gemini-3.1-pro-preview"];
     private static readonly string[] AnthropicModels = ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"];
-    private static readonly string[] OpenAiModels = ["gpt-5.4", "gpt-4.1", "o3", "o4-mini", "gpt-4o", "gpt-4o-mini"];
+    private static readonly string[] OpenAiModels = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.3-codex", "gpt-5-mini", "gpt-4.1", "o3", "o4-mini"];
 
     private CancellationTokenSource? _streamingCts;
     private bool _suppressChatSwitch;

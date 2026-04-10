@@ -196,8 +196,9 @@ public static class ModelTierClassifier
             || id.Contains("phi-") || id.Contains("mistral-7b") || id.Contains("qwen-7b"))
             return ModelTier.Minimal;
         // Full: frontier models
-        if (id.Contains("claude") || id.Contains("gpt-4") || id.Contains("o1-")
-            || id.Contains("o3-") || id.Contains("gemini-pro") || id.Contains("gemini-2"))
+        if (id.Contains("claude") || id.Contains("gpt-4") || id.Contains("gpt-5")
+            || id.Contains("o1-") || id.Contains("o3") || id.Contains("o4-")
+            || id.Contains("gemini-pro") || id.Contains("gemini-2") || id.Contains("gemini-3"))
             return ModelTier.Full;
         return ModelTier.Standard;
     }

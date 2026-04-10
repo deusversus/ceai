@@ -107,7 +107,6 @@ public sealed class WindowsEngineFacade : IEngineFacade
             () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                Trace($"AttachAsync called for PID {processId}. Current state: _attachedProcessId={_attachedProcessId}, handleValid={_cachedProcessHandle != IntPtr.Zero}, hasCachedAttachment={_cachedAttachment is not null}");
 
                 // Return cached attachment if we already successfully attached to this PID.
                 // This avoids redundant module enumeration when AttachAsync is called
@@ -115,10 +114,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 lock (_attachLock)
                 {
                     if (_cachedAttachment is not null && _cachedAttachment.ProcessId == processId)
-                    {
-                        Trace($"AttachAsync: returning cached attachment for PID {processId} ({_cachedAttachment.Modules.Count} modules).");
                         return _cachedAttachment;
-                    }
                     if (_cachedAttachment is not null)
                         Trace($"AttachAsync: cached attachment is for different PID {_cachedAttachment.ProcessId}, re-attaching to {processId}.");
                 }

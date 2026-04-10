@@ -312,6 +312,7 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
     }
 
     private readonly ObservableCollection<AddressTableNode> _roots = new();
+    private readonly HashSet<string> _lastReadErrors = new();
     private IReadOnlyList<ModuleDescriptor> _processModules = Array.Empty<ModuleDescriptor>();
     private bool _is32Bit;
 
@@ -559,6 +560,8 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                     displayValue = $"{displayValue} : {lookupName}";
 
                 node.CurrentValue = displayValue;
+                // Clear any previous read-error dedup entry so future failures will log again
+                _lastReadErrors.RemoveWhere(k => k.StartsWith(node.Id + ":", StringComparison.Ordinal));
 
                 if (node.IsLocked && node.LockedValue is not null)
                 {
@@ -568,8 +571,11 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
             catch (Exception ex)
             {
                 node.CurrentValue = "???";
-                // Only log occasionally to avoid flooding — read failures are common when process exits
-                Log("Debug", $"Read failed for \"{node.Label}\" at {node.Address}: {ex.GetType().Name}: {ex.Message}");
+                // Only log on first failure per node to avoid flooding the output log.
+                // Reset when the node succeeds again (CurrentValue != "???").
+                var errorKey = $"{node.Id}:{ex.GetType().Name}";
+                if (_lastReadErrors.Add(errorKey))
+                    Log("Debug", $"Read failed for \"{node.Label}\" at {node.Address}: {ex.GetType().Name}: {ex.Message}");
             }
             // Also recurse into any children of this entry
             if (node.Children.Count > 0)

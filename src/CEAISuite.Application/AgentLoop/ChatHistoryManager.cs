@@ -90,11 +90,22 @@ public sealed class ChatHistoryManager
     }
 
     /// <summary>
-    /// Rough token estimate based on character count / 4.
-    /// Used for compaction trigger decisions — not billing-accurate.
+    /// Last known input token count from the API response. Set by AgentLoop after each
+    /// LLM call. Used to improve compaction trigger accuracy over the chars/4 estimate.
+    /// </summary>
+    public int LastKnownInputTokens { get; set; }
+
+    /// <summary>
+    /// Token estimate for compaction trigger decisions. Prefers the actual API-reported
+    /// input token count when available (set after each LLM call), falling back to
+    /// the rough character-based estimate (chars/4) for the initial call.
     /// </summary>
     public int EstimateTokens()
     {
+        // Prefer actual API-reported tokens if available and recent
+        var actual = LastKnownInputTokens;
+        if (actual > 0) return actual;
+
         lock (_lock)
         {
             int chars = 0;

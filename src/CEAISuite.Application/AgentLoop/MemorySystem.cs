@@ -174,9 +174,34 @@ public sealed class MemorySystem
     /// Build a context block of relevant memories for injection into the system prompt.
     /// Filters by process name and limits total size.
     /// </summary>
-    public string? BuildMemoryContext(string? processName = null, int maxChars = 3000)
+    public string? BuildMemoryContext(string? processName = null, int maxChars = 3000, string? queryHint = null)
     {
-        var relevant = Recall(processName: processName, maxResults: 30);
+        var candidates = Recall(processName: processName, maxResults: 50);
+        if (candidates.Count == 0) return null;
+
+        // Relevance scoring: if a query hint is provided, score memories by keyword overlap
+        // and take the top entries. This avoids injecting irrelevant memories into context.
+        List<MemoryEntry> relevant;
+        if (!string.IsNullOrWhiteSpace(queryHint) && candidates.Count > 10)
+        {
+            var queryWords = new HashSet<string>(
+                queryHint.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                    .Where(w => w.Length > 2)
+                    .Select(w => w.ToLowerInvariant()));
+
+            relevant = candidates
+                .Select(e => (Entry: e, Score: ScoreRelevance(e, queryWords)))
+                .OrderByDescending(x => x.Score)
+                .ThenByDescending(x => x.Entry.UpdatedAt)
+                .Take(20)
+                .Select(x => x.Entry)
+                .ToList();
+        }
+        else
+        {
+            relevant = candidates.Take(30).ToList();
+        }
+
         if (relevant.Count == 0) return null;
 
         var sb = new System.Text.StringBuilder();
@@ -263,6 +288,20 @@ public sealed class MemorySystem
         if (wordsA.Length == 0) return false;
         var overlap = wordsA.Count(w => wordsB.Contains(w));
         return overlap > wordsA.Length * 0.8;
+    }
+
+    /// <summary>Score a memory entry's relevance to a set of query keywords.</summary>
+    private static int ScoreRelevance(MemoryEntry entry, HashSet<string> queryWords)
+    {
+        if (queryWords.Count == 0) return 0;
+        var contentWords = entry.Content
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => w.ToLowerInvariant().TrimEnd('.', ',', ':', ';', '!', '?'));
+        int score = contentWords.Count(w => queryWords.Contains(w));
+        // Boost by category relevance
+        if (entry.Category == MemoryCategory.ProcessKnowledge) score += 2;
+        if (entry.Category == MemoryCategory.LearnedPattern) score += 1;
+        return score;
     }
 
     private static readonly JsonSerializerOptions JsonOpts = new()

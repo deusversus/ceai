@@ -194,6 +194,8 @@ public sealed class ToolExecutor
         _log?.Invoke("PARALLEL", $"Executing {batch.Count} concurrent-safe tools in parallel");
 
         using var semaphore = new SemaphoreSlim(MaxParallelTools);
+        using var batchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var batchCt = batchCts.Token;
 
         // Emit all "started" events immediately so the UI shows them as in-flight
         foreach (var (_, call) in batch)
@@ -208,7 +210,7 @@ public sealed class ToolExecutor
         // but without the serial-only event emission for "started" — those were emitted above).
         var tasks = batch.Select(async item =>
         {
-            await semaphore.WaitAsync(ct).ConfigureAwait(false);
+            await semaphore.WaitAsync(batchCt).ConfigureAwait(false);
             try
             {
                 var call = item.Call;
@@ -225,7 +227,7 @@ public sealed class ToolExecutor
                         TurnNumber = TurnNumber,
                         TotalToolCalls = _totalToolCalls,
                     };
-                    var hookResult = await hooks.RunPreToolHooksAsync(hookCtx, ct).ConfigureAwait(false);
+                    var hookResult = await hooks.RunPreToolHooksAsync(hookCtx, batchCt).ConfigureAwait(false);
                     if (hookResult.Outcome == HookOutcome.Block)
                     {
                         var msg = hookResult.Message ?? $"Tool '{toolName}' blocked by hook";
@@ -238,7 +240,7 @@ public sealed class ToolExecutor
                 // Permission check (skip Ask if hook granted, but still enforce Deny)
                 if (!hookGrantedPermission)
                 {
-                    var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, ct).ConfigureAwait(false);
+                    var permResult = await CheckPermissionAsync(call, toolName, FormatArguments(call), channel, batchCt).ConfigureAwait(false);
                     if (permResult is not null)
                         return (item.Index, (permResult.Result.Result?.ToString() ?? "denied", true));
                 }
@@ -253,8 +255,15 @@ public sealed class ToolExecutor
                 }
 
                 // Invoke tool
-                var result = await InvokeToolAsync(call, ct).ConfigureAwait(false);
+                var result = await InvokeToolAsync(call, batchCt).ConfigureAwait(false);
                 Interlocked.Increment(ref _totalToolCalls);
+
+                // Cancel siblings on critical tool error
+                if (result.IsError)
+                {
+                    _log?.Invoke("PARALLEL", $"Tool '{toolName}' failed — cancelling sibling tools");
+                    try { batchCts.Cancel(); } catch { /* already cancelled */ }
+                }
 
                 // Post-tool hooks: failure hooks for errors, success hooks for success
                 if (result.IsError && _options.Hooks is { } failHooks)
@@ -267,7 +276,7 @@ public sealed class ToolExecutor
                         TotalToolCalls = _totalToolCalls,
                     };
                     var failureAction = await failHooks.RunPostToolFailureHooksAsync(
-                        hookCtx, result.Result, wasInterrupted: false, ct).ConfigureAwait(false);
+                        hookCtx, result.Result, wasInterrupted: false, CancellationToken.None).ConfigureAwait(false);
                     if (failureAction is not null)
                     {
                         var modifiedResult = result.Result;
@@ -287,7 +296,7 @@ public sealed class ToolExecutor
                         TurnNumber = TurnNumber,
                         TotalToolCalls = _totalToolCalls,
                     };
-                    await postHooks.RunPostToolHooksAsync(hookCtx, result.Result, result.IsError, ct).ConfigureAwait(false);
+                    await postHooks.RunPostToolHooksAsync(hookCtx, result.Result, result.IsError, CancellationToken.None).ConfigureAwait(false);
                 }
 
                 return (item.Index, result);
@@ -298,7 +307,33 @@ public sealed class ToolExecutor
             }
         }).ToList();
 
-        var completedTasks = await Task.WhenAll(tasks).ConfigureAwait(false);
+        // Wait for all tasks, catching cancellation from sibling error propagation
+        (int Index, (string Result, bool IsError))[] completedTasks;
+        try
+        {
+            completedTasks = await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (batchCts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            // Sibling cancellation — collect completed results and mark cancelled ones
+            completedTasks = tasks
+                .Where(t => t.IsCompletedSuccessfully)
+                .Select(t => t.Result)
+                .ToArray();
+
+            // Fill cancelled slots with error results
+            var completedIndices = new HashSet<int>(completedTasks.Select(t => t.Index));
+            foreach (var (index, call) in batch)
+            {
+                if (!completedIndices.Contains(index))
+                {
+                    var name = call.Name ?? "unknown";
+                    results[index] = new ToolCallResult(call,
+                        CreateResult(call, $"Tool '{name}' cancelled — a sibling tool failed."), IsError: true);
+                    _log?.Invoke("PARALLEL", $"Tool '{name}' cancelled by sibling failure");
+                }
+            }
+        }
 
         // Write results in original order and emit completed events
         foreach (var (index, (resultStr, isError)) in completedTasks)

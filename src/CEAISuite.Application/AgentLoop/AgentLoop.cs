@@ -180,7 +180,7 @@ public sealed class AgentLoop
             _log?.Invoke("LOOP", $"Turn {state.TurnCount} (transition: {state.Transition})");
 
             // Build ChatOptions for this turn
-            var chatOptions = BuildChatOptions(state);
+            var chatOptions = BuildChatOptions(state, history);
 
             // Pre-LLM hooks
             if (_options.Hooks is { } preLlmHooks)
@@ -476,10 +476,14 @@ public sealed class AgentLoop
                     {
                         outputTokens += (int)(usage.Details?.OutputTokenCount ?? 0);
 
+                        // Update actual token count for accurate compaction triggers
+                        var inputToks = (int)(usage.Details?.InputTokenCount ?? 0);
+                        if (inputToks > 0)
+                            history.LastKnownInputTokens = inputToks;
+
                         // Record usage in budget tracker
                         if (_options.Budget is { } budget)
                         {
-                            var inputToks = usage.Details?.InputTokenCount ?? 0;
                             var outputToks = usage.Details?.OutputTokenCount ?? 0;
                             var cachedToks = usage.Details?.CachedInputTokenCount ?? 0;
                             budget.RecordUsage(inputToks, outputToks, cachedToks);
@@ -511,11 +515,20 @@ public sealed class AgentLoop
         if (retryResult.NeedsCompaction
             && state.ConsecutiveCompactionFailures < AgentLoopState.MaxConsecutiveCompactionFailures)
         {
-            _log?.Invoke("LOOP", "Prompt too long — triggering compaction and retry");
+            _log?.Invoke("LOOP", "Prompt too long — triggering reactive compaction and retry");
+            var snapshot = PostCompactionRestorer.CaptureSnapshot(
+                history, new HashSet<string>(), null);
             var compactionResult = await _compactionPipeline.CompactAsync(history, ct).ConfigureAwait(false);
-            var compactedState = compactionResult.Success
-                ? state with { ConsecutiveCompactionFailures = 0, LastCompactionTurn = state.TurnCount }
-                : state with { ConsecutiveCompactionFailures = state.ConsecutiveCompactionFailures + 1, LastCompactionTurn = state.TurnCount };
+            AgentLoopState compactedState;
+            if (compactionResult.Success)
+            {
+                PostCompactionRestorer.Restore(history, snapshot);
+                compactedState = state with { ConsecutiveCompactionFailures = 0, LastCompactionTurn = state.TurnCount };
+            }
+            else
+            {
+                compactedState = state with { ConsecutiveCompactionFailures = state.ConsecutiveCompactionFailures + 1, LastCompactionTurn = state.TurnCount };
+            }
             return await CallLlmWithRetry(history, BuildChatOptions(compactedState), channel,
                 compactedState, ct).ConfigureAwait(false);
         }
@@ -601,7 +614,7 @@ public sealed class AgentLoop
         };
     }
 
-    private ChatOptions BuildChatOptions(AgentLoopState state)
+    private ChatOptions BuildChatOptions(AgentLoopState state, ChatHistoryManager? historyForMemory = null)
     {
         var maxTokens = state.MaxOutputTokensOverride ?? _options.Limits.MaxOutputTokens;
 
@@ -626,7 +639,21 @@ public sealed class AgentLoop
 
             if (_options.Memory is { } mem)
             {
-                var memText = mem.BuildMemoryContext();
+                // Extract last user message as a relevance hint for memory filtering
+                string? queryHint = null;
+                if (historyForMemory is not null)
+                {
+                    var msgs = historyForMemory.GetMessages();
+                    for (int i = msgs.Count - 1; i >= 0; i--)
+                    {
+                        if (msgs[i].Role == ChatRole.User)
+                        {
+                            queryHint = msgs[i].Text;
+                            break;
+                        }
+                    }
+                }
+                var memText = mem.BuildMemoryContext(queryHint: queryHint);
                 if (memText is not null)
                     sections.Add(new PromptSection { Name = "memory", Content = memText, CacheScope = PromptCacheScope.Session });
             }

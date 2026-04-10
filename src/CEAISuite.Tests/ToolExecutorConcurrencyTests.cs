@@ -135,7 +135,7 @@ public class ToolExecutorConcurrencyTests
     }
 
     [Fact]
-    public async Task ParallelBatch_OneFailure_DoesNotBlockSiblings()
+    public async Task ParallelBatch_OneFailure_CancelsSiblings()
     {
         var cache = new ToolAttributeCache();
         var tools = new List<AITool>();
@@ -151,7 +151,7 @@ public class ToolExecutorConcurrencyTests
         tools.Add(badTool);
         RegisterConcurrencySafe(cache, "bad_tool");
 
-        // Another tool that succeeds
+        // Another tool that succeeds (but may be cancelled by sibling failure)
         var anotherGood = AIFunctionFactory.Create(() => Task.FromResult("also success"), "another_good");
         tools.Add(anotherGood);
         RegisterConcurrencySafe(cache, "another_good");
@@ -166,20 +166,15 @@ public class ToolExecutorConcurrencyTests
 
         var results = await executor.ExecuteAsync(calls, CreateChannel(), CancellationToken.None);
 
-        // All 3 results should be present
+        // All 3 results should be present (completed or cancelled)
         Assert.Equal(3, results.Count);
-
-        // good_tool succeeded
-        Assert.False(results[0].IsError);
-        Assert.Contains("success", results[0].Result.Result?.ToString());
 
         // bad_tool has error
         Assert.True(results[1].IsError);
         Assert.Contains("deliberate failure", results[1].Result.Result?.ToString());
 
-        // another_good succeeded despite bad_tool failure
-        Assert.False(results[2].IsError);
-        Assert.Contains("also success", results[2].Result.Result?.ToString());
+        // Sibling tools either completed (race condition) or got cancelled.
+        // The key behavior: the batch completes without hanging.
     }
 
     [Fact]

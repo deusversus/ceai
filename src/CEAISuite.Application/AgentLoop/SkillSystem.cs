@@ -22,6 +22,7 @@ namespace CEAISuite.Application.AgentLoop;
 public sealed class SkillSystem
 {
     private readonly Dictionary<string, SkillDefinition> _catalog = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, SkillDefinition> _skillOverrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _activeSkills = new(StringComparer.OrdinalIgnoreCase);
     private readonly HashSet<string> _pendingApproval = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
@@ -130,6 +131,7 @@ public sealed class SkillSystem
         {
             if (!_activeSkills.Remove(name))
                 return $"Skill '{name}' is not loaded.";
+            _skillOverrides.Remove(name);
         }
 
         _log?.Invoke("SKILL", $"Unloaded: {name}");
@@ -166,8 +168,8 @@ public sealed class SkillSystem
                 foreach (var (key, value) in arguments)
                     instructions = instructions.Replace($"{{{key}}}", value, StringComparison.OrdinalIgnoreCase);
 
-                // Use a per-activation copy so the original template is preserved
-                skill = skill with { Instructions = instructions };
+                // Store the substituted copy so BuildActiveSkillInstructions uses it
+                _skillOverrides[name] = skill with { Instructions = instructions };
                 _log?.Invoke("SKILL", $"Applied {arguments.Count} argument substitutions to {name}");
             }
 
@@ -222,7 +224,8 @@ public sealed class SkillSystem
 
             foreach (var name in _activeSkills)
             {
-                if (_catalog.TryGetValue(name, out var skill))
+                // Prefer overridden (argument-substituted) version, fall back to catalog
+                if ((_skillOverrides.TryGetValue(name, out var skill) || _catalog.TryGetValue(name, out skill)))
                 {
                     sb.AppendLine(CultureInfo.InvariantCulture, $"\n## Skill: {skill.Name}");
 

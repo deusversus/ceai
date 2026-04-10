@@ -343,13 +343,14 @@ public sealed class AgentLoop
 
                 // Pre-compaction hooks — can block compaction
                 var msgCountBefore = history.GetMessages().Count;
+                var estimatedTokensBefore = history.EstimateTokens();
                 if (_options.Hooks is { } preCompHooks)
                 {
                     var preCompResult = await preCompHooks.RunPreCompactionHooksAsync(new CompactionHookContext
                     {
                         MessageCountBefore = msgCountBefore,
                         MessageCountAfter = 0,
-                        EstimatedTokensBefore = history.EstimateTokens(),
+                        EstimatedTokensBefore = estimatedTokensBefore,
                         EstimatedTokensAfter = 0,
                     }, ct).ConfigureAwait(false);
                     if (preCompResult.Outcome == HookOutcome.Block)
@@ -391,7 +392,7 @@ public sealed class AgentLoop
                         {
                             MessageCountBefore = msgCountBefore,
                             MessageCountAfter = history.GetMessages().Count,
-                            EstimatedTokensBefore = 0,
+                            EstimatedTokensBefore = estimatedTokensBefore,
                             EstimatedTokensAfter = history.EstimateTokens(),
                         }, ct).ConfigureAwait(false);
                     }

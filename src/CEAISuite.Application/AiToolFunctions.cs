@@ -2343,7 +2343,7 @@ public sealed partial class AiToolFunctions(
             : $"Failed to write NOP bytes at 0x{addr:X}.";
     }
 
-    [ConcurrencySafe]
+    [Destructive]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Increment or decrement an address table entry's numeric value by a delta. Reads current value, adds delta, writes back.")]
     public async Task<string> AdjustValue(

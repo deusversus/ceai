@@ -100,6 +100,9 @@ internal static class DangerousTools
         "ExecuteLuaScript",
         "AssembleInstruction",
         "NopRegion",
+        "AdjustValue",
+        "RemoveAllBreakpoints",
+        "SetConditionalBreakpoint",
     };
 }
 

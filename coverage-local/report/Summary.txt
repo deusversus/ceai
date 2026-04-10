@@ -1,0 +1,232 @@
+Summary
+  Generated on: 4/9/2026 - 8:25:33 PM
+  Coverage date: 4/9/2026 - 8:25:24 PM
+  Parser: Cobertura
+  Assemblies: 8
+  Classes: 196
+  Files: 143
+  Line coverage: 51.6%
+  Covered lines: 9919
+  Uncovered lines: 9284
+  Coverable lines: 19203
+  Total lines: 45614
+  Branch coverage: 40.7% (3174 of 7787)
+  Covered branches: 3174
+  Total branches: 7787
+  Method coverage: 63.4% (1001 of 1578)
+  Full method coverage: 51.1% (807 of 1578)
+  Covered methods: 1001
+  Fully covered methods: 807
+  Total methods: 1578
+
+CEAISuite.AI.Contracts                                                 100%
+  CEAISuite.AI.Contracts.ToolCatalog                                   100%
+
+CEAISuite.Application                                                 70.8%
+  CEAISuite.Application.AddressTableExportService                      100%
+  CEAISuite.Application.AddressTableNode                              77.7%
+  CEAISuite.Application.AddressTableService                           69.4%
+  CEAISuite.Application.AgentLoop.AgentDefinitionLoader               91.9%
+  CEAISuite.Application.AgentLoop.AgentLoop                           52.1%
+  CEAISuite.Application.AgentLoop.CeaiTaskScheduler                   88.6%
+  CEAISuite.Application.AgentLoop.ChatHistoryManager                  94.7%
+  CEAISuite.Application.AgentLoop.CommandHook                          100%
+  CEAISuite.Application.AgentLoop.CompactionPipeline                  96.6%
+  CEAISuite.Application.AgentLoop.CompactionResult                     100%
+  CEAISuite.Application.AgentLoop.ContextManagementSerializer          100%
+  CEAISuite.Application.AgentLoop.ContextManagementStrategy            100%
+  CEAISuite.Application.AgentLoop.CronExpression                      90.7%
+  CEAISuite.Application.AgentLoop.DelegatePostToolHook                 100%
+  CEAISuite.Application.AgentLoop.DelegatePreToolHook                  100%
+  CEAISuite.Application.AgentLoop.ErrorClassifier                     95.4%
+  CEAISuite.Application.AgentLoop.HookCondition                        100%
+  CEAISuite.Application.AgentLoop.HookRegistry                        89.1%
+  CEAISuite.Application.AgentLoop.HookResult                           100%
+  CEAISuite.Application.AgentLoop.ICeaiPlugin                          100%
+  CEAISuite.Application.AgentLoop.InterruptBehaviorAttribute           100%
+  CEAISuite.Application.AgentLoop.MaxResultSizeAttribute               100%
+  CEAISuite.Application.AgentLoop.MaxToolCallsHook                     100%
+  CEAISuite.Application.AgentLoop.McpClient                           45.4%
+  CEAISuite.Application.AgentLoop.McpManager                            75%
+  CEAISuite.Application.AgentLoop.MemorySystem                        97.5%
+  CEAISuite.Application.AgentLoop.MicroCompaction                        7%
+  CEAISuite.Application.AgentLoop.ModelSwitcher                        100%
+  CEAISuite.Application.AgentLoop.PermissionEngine                    80.2%
+  CEAISuite.Application.AgentLoop.PermissionRule                      94.1%
+  CEAISuite.Application.AgentLoop.PlanExecutor                         3.4%
+  CEAISuite.Application.AgentLoop.PlanModeState                          0%
+  CEAISuite.Application.AgentLoop.PlanProgressEvent                      0%
+  CEAISuite.Application.AgentLoop.PluginAssemblyLoadContext             50%
+  CEAISuite.Application.AgentLoop.PluginHost                          89.2%
+  CEAISuite.Application.AgentLoop.PostCompactionRestorer              92.1%
+  CEAISuite.Application.AgentLoop.PostToolFailureHook                   75%
+  CEAISuite.Application.AgentLoop.PostToolHook                         100%
+  CEAISuite.Application.AgentLoop.PreToolHook                          100%
+  CEAISuite.Application.AgentLoop.PromptCacheOptimizer                 6.5%
+  CEAISuite.Application.AgentLoop.RetryPolicy                          100%
+  CEAISuite.Application.AgentLoop.SearchHintAttribute                    0%
+  CEAISuite.Application.AgentLoop.SessionIndex                         100%
+  CEAISuite.Application.AgentLoop.SessionMetadata                      100%
+  CEAISuite.Application.AgentLoop.SkillDefinition                      100%
+  CEAISuite.Application.AgentLoop.SkillLoader                         78.4%
+  CEAISuite.Application.AgentLoop.SkillSystem                         85.2%
+  CEAISuite.Application.AgentLoop.SseMcpTransport                        0%
+  CEAISuite.Application.AgentLoop.StdioMcpTransport                     50%
+  CEAISuite.Application.AgentLoop.StreamingTimeoutException             50%
+  CEAISuite.Application.AgentLoop.SubagentDefinition                   100%
+  CEAISuite.Application.AgentLoop.SubagentHandle                       100%
+  CEAISuite.Application.AgentLoop.SubagentManager                     87.3%
+  CEAISuite.Application.AgentLoop.SubagentPresets                      100%
+  CEAISuite.Application.AgentLoop.TokenBudget                         82.2%
+  CEAISuite.Application.AgentLoop.ToolAttributeCache                  96.6%
+  CEAISuite.Application.AgentLoop.ToolAuditHook                        100%
+  CEAISuite.Application.AgentLoop.ToolBlocklistHook                    100%
+  CEAISuite.Application.AgentLoop.ToolExecutor                        78.8%
+  CEAISuite.Application.AgentLoop.ToolMetadata                         100%
+  CEAISuite.Application.AgentLoop.ToolSearchScorer                       0%
+  CEAISuite.Application.AgentLoop.ValidateInputAttribute                 0%
+  CEAISuite.Application.AgentStreamEvent                              71.4%
+  CEAISuite.Application.AiChatStore                                   94.6%
+  CEAISuite.Application.AiOperatorService                             61.9%
+  CEAISuite.Application.AiToolFunctions                               21.6%
+  CEAISuite.Application.ApiKeyValidator                                100%
+  CEAISuite.Application.AppSettings                                   86.8%
+  CEAISuite.Application.AppSettingsService                            63.6%
+  CEAISuite.Application.BreakpointService                             89.5%
+  CEAISuite.Application.CheatTableExporter                            86.4%
+  CEAISuite.Application.CheatTableParser                              96.6%
+  CEAISuite.Application.DangerousTools                                 100%
+  CEAISuite.Application.DeadlockDetector                              72.2%
+  CEAISuite.Application.DisassemblyService                             100%
+  CEAISuite.Application.GlobalHotkeyService                           18.1%
+  CEAISuite.Application.KeyHealthReport                                100%
+  CEAISuite.Application.MemorySnapshotService                         73.4%
+  CEAISuite.Application.MemoryUtils                                    100%
+  CEAISuite.Application.NuintJsonConverter                             100%
+  CEAISuite.Application.OperationJournal                              81.5%
+  CEAISuite.Application.PatchUndoService                              93.7%
+  CEAISuite.Application.PointerPath                                    100%
+  CEAISuite.Application.PointerScannerService                         92.3%
+  CEAISuite.Application.ProcessWatchdogService                          73%
+  CEAISuite.Application.ScanService                                     75%
+  CEAISuite.Application.ScriptGenerationService                       87.7%
+  CEAISuite.Application.SessionService                                 100%
+  CEAISuite.Application.SignatureGeneratorService                     86.6%
+  CEAISuite.Application.StructureDissectorService                     86.8%
+  CEAISuite.Application.TokenLimits                                   99.2%
+  CEAISuite.Application.ToolCategories                                 100%
+  CEAISuite.Application.ToolResultStore                                100%
+  CEAISuite.Application.UpdateService                                   49%
+  CEAISuite.Application.WatchdogGuard                                  100%
+  CEAISuite.Application.WatchdogMonitor                               94.1%
+  CEAISuite.Application.WorkspaceBootstrap                             100%
+  CEAISuite.Application.WorkspaceDashboard                             100%
+  CEAISuite.Application.WorkspaceDashboardService                      100%
+
+CEAISuite.Desktop                                                     35.4%
+  CEAISuite.Desktop.App                                                  0%
+  CEAISuite.Desktop.ChatClientFactory                                 13.3%
+  CEAISuite.Desktop.Controls.ByteEditedEventArgs                       100%
+  CEAISuite.Desktop.Controls.DataInspectorPanel                          0%
+  CEAISuite.Desktop.Controls.DocumentTabScrollHelper                     0%
+  CEAISuite.Desktop.Controls.HexEditorControl                          9.1%
+  CEAISuite.Desktop.CopilotModelInfo                                   100%
+  CEAISuite.Desktop.CopilotTokenService                               61.2%
+  CEAISuite.Desktop.GeminiOAuthService                                  73%
+  CEAISuite.Desktop.LoadSessionWindow                                    0%
+  CEAISuite.Desktop.MainWindow                                           0%
+  CEAISuite.Desktop.McpManagerWindow                                     0%
+  CEAISuite.Desktop.MemoryBrowserControl                                 0%
+  CEAISuite.Desktop.Models.AiChatDisplayItem                          81.2%
+  CEAISuite.Desktop.Models.ApprovalBlock                               100%
+  CEAISuite.Desktop.Models.AttachmentChip                             82.3%
+  CEAISuite.Desktop.Models.ByteSelection                               100%
+  CEAISuite.Desktop.Models.DisassemblyLineDisplayItem                  100%
+  CEAISuite.Desktop.Models.PointerPathDisplayItem                      100%
+  CEAISuite.Desktop.Models.ProcessComboItem                            100%
+  CEAISuite.Desktop.Models.StructureFieldDisplayItem                   100%
+  CEAISuite.Desktop.Models.StructureSpiderNode                           0%
+  CEAISuite.Desktop.Models.TextContentBlock                            100%
+  CEAISuite.Desktop.Models.ToolCallBlock                               100%
+  CEAISuite.Desktop.NewSkillDialog                                       0%
+  CEAISuite.Desktop.NullToCollapsedConverter                           100%
+  CEAISuite.Desktop.Services.AddressExpressionParser                    97%
+  CEAISuite.Desktop.Services.AiContextService                            0%
+  CEAISuite.Desktop.Services.ClipboardService                            0%
+  CEAISuite.Desktop.Services.CodeInjectionTemplateService              100%
+  CEAISuite.Desktop.Services.DialogService                               0%
+  CEAISuite.Desktop.Services.DispatcherService                           0%
+  CEAISuite.Desktop.Services.EventSubscriptions                        100%
+  CEAISuite.Desktop.Services.HexEditUndoService                        100%
+  CEAISuite.Desktop.Services.LuaFormHostService                          0%
+  CEAISuite.Desktop.Services.NavigationService                           0%
+  CEAISuite.Desktop.Services.OutputLogSerilogSink                        0%
+  CEAISuite.Desktop.Services.OutputLogService                            0%
+  CEAISuite.Desktop.Services.ProcessContext                             90%
+  CEAISuite.Desktop.Services.ThemeService                                0%
+  CEAISuite.Desktop.SettingsWindow                                       0%
+  CEAISuite.Desktop.SkillsManagerWindow                                  0%
+  CEAISuite.Desktop.StringToBrushConverter                             100%
+  CEAISuite.Desktop.ThemeManager                                      23.5%
+  CEAISuite.Desktop.ViewModels.AddressTableViewModel                  82.4%
+  CEAISuite.Desktop.ViewModels.AiOperatorViewModel                    60.7%
+  CEAISuite.Desktop.ViewModels.BreakpointsViewModel                    100%
+  CEAISuite.Desktop.ViewModels.DataInspectorViewModel                  100%
+  CEAISuite.Desktop.ViewModels.DebuggerViewModel                      83.3%
+  CEAISuite.Desktop.ViewModels.DisassemblerViewModel                  92.2%
+  CEAISuite.Desktop.ViewModels.FindResultsViewModel                    100%
+  CEAISuite.Desktop.ViewModels.HotkeysViewModel                       89.4%
+  CEAISuite.Desktop.ViewModels.InspectionViewModel                    91.6%
+  CEAISuite.Desktop.ViewModels.JournalViewModel                        100%
+  CEAISuite.Desktop.ViewModels.LuaConsoleViewModel                    64.2%
+  CEAISuite.Desktop.ViewModels.MainViewModel                          66.9%
+  CEAISuite.Desktop.ViewModels.MemoryBrowserViewModel                 79.8%
+  CEAISuite.Desktop.ViewModels.MemoryRegionsViewModel                 93.1%
+  CEAISuite.Desktop.ViewModels.ModuleListViewModel                    84.2%
+  CEAISuite.Desktop.ViewModels.OutputLogViewModel                      100%
+  CEAISuite.Desktop.ViewModels.PointerScannerViewModel                84.2%
+  CEAISuite.Desktop.ViewModels.ProcessListViewModel                    100%
+  CEAISuite.Desktop.ViewModels.ScannerViewModel                        100%
+  CEAISuite.Desktop.ViewModels.ScriptEditorViewModel                  85.6%
+  CEAISuite.Desktop.ViewModels.ScriptsViewModel                        100%
+  CEAISuite.Desktop.ViewModels.SnapshotsViewModel                       98%
+  CEAISuite.Desktop.ViewModels.StructureDissectorViewModel            94.3%
+  CEAISuite.Desktop.ViewModels.ThreadListViewModel                     100%
+  CEAISuite.Desktop.ViewModels.WorkspaceViewModel                     83.3%
+  CEAISuite.Desktop.WelcomeDialog                                        0%
+  CEAISuite.Desktop.WindowChromeHelper                                   0%
+
+CEAISuite.Domain                                                        81%
+  CEAISuite.Domain.SensitiveString                                      81%
+
+CEAISuite.Engine.Abstractions                                         44.4%
+  CEAISuite.Engine.Abstractions.LuaButtonElement                         0%
+  CEAISuite.Engine.Abstractions.LuaCheckBoxElement                       0%
+  CEAISuite.Engine.Abstractions.LuaEditElement                           0%
+  CEAISuite.Engine.Abstractions.LuaLabelElement                          0%
+  CEAISuite.Engine.Abstractions.LuaTimerElement                          0%
+  CEAISuite.Engine.Abstractions.OpcodeValidationResult                 100%
+  CEAISuite.Engine.Abstractions.SymbolInfo                             100%
+
+CEAISuite.Engine.Lua                                                  65.8%
+  CEAISuite.Engine.Lua.CeApiBindings                                  99.1%
+  CEAISuite.Engine.Lua.CeFormBindings                                    0%
+  CEAISuite.Engine.Lua.InstructionLimitDebugger                         76%
+  CEAISuite.Engine.Lua.LuaAddressResolver                              100%
+  CEAISuite.Engine.Lua.MoonSharpLuaEngine                               89%
+
+CEAISuite.Engine.Windows                                              40.1%
+  CEAISuite.Engine.Windows.OpcodeValidator                             100%
+  CEAISuite.Engine.Windows.WindowsAutoAssemblerEngine                 12.8%
+  CEAISuite.Engine.Windows.WindowsBreakpointEngine                    51.6%
+  CEAISuite.Engine.Windows.WindowsCallStackEngine                     47.3%
+  CEAISuite.Engine.Windows.WindowsCodeCaveEngine                      13.5%
+  CEAISuite.Engine.Windows.WindowsDisassemblyEngine                   97.8%
+  CEAISuite.Engine.Windows.WindowsEngineFacade                        83.8%
+  CEAISuite.Engine.Windows.WindowsMemoryProtectionEngine               100%
+  CEAISuite.Engine.Windows.WindowsScanEngine                          25.1%
+  CEAISuite.Engine.Windows.WindowsScreenCaptureEngine                    0%
+  CEAISuite.Engine.Windows.WindowsSymbolEngine                        69.8%
+
+CEAISuite.Persistence.Sqlite                                           100%
+  CEAISuite.Persistence.Sqlite.SqliteInvestigationSessionRepository    100%

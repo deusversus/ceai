@@ -14,6 +14,7 @@ public sealed class RetryPolicy
     private readonly double _jitterPercent;
     private readonly Action<string, string>? _log;
     private int _consecutiveOverloadCount;
+    private readonly Func<Task>? _authRefreshCallback;
 
     /// <summary>If retry-after exceeds this, switch to fallback model immediately instead of waiting.</summary>
     private const int FastFallbackRetryAfterSeconds = 30;
@@ -26,13 +27,15 @@ public sealed class RetryPolicy
         TimeSpan? baseDelay = null,
         TimeSpan? maxDelay = null,
         double jitterPercent = 0.25,
-        Action<string, string>? log = null)
+        Action<string, string>? log = null,
+        Func<Task>? authRefreshCallback = null)
     {
         _maxRetries = maxRetries;
         _baseDelay = baseDelay ?? TimeSpan.FromMilliseconds(500);
         _maxDelay = maxDelay ?? TimeSpan.FromSeconds(32);
         _jitterPercent = jitterPercent;
         _log = log;
+        _authRefreshCallback = authRefreshCallback;
     }
 
     /// <summary>
@@ -160,6 +163,14 @@ public sealed class RetryPolicy
                 else
                 {
                     Interlocked.Exchange(ref _consecutiveOverloadCount, 0); // Reset on non-overload error
+                }
+
+                // Auth errors → try refresh callback before retrying
+                if (ErrorClassifier.IsAuthError(ex) && _authRefreshCallback is not null)
+                {
+                    _log?.Invoke("RETRY", "Auth error detected — invoking auth refresh callback");
+                    try { await _authRefreshCallback().ConfigureAwait(false); }
+                    catch (Exception authEx) { _log?.Invoke("RETRY", $"Auth refresh failed: {authEx.Message}"); }
                 }
 
                 // Non-retriable errors → fail immediately

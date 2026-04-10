@@ -120,7 +120,9 @@ public static class PostCompactionRestorer
         {
             RecentToolResults = recentResults,
             ProcessContext = processContext,
-            AddressTableSummary = null, // Will be populated by the context provider in future
+            // Address table state is included in ProcessContext from the context provider,
+            // so a separate AddressTableSummary is not needed.
+            AddressTableSummary = null,
             ActiveCategories = activeCategories,
         };
     }

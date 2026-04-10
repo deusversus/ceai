@@ -37,7 +37,7 @@ public sealed class AgentLoop
         _chatClient = chatClient;
         _options = options;
         _toolExecutor = new ToolExecutor(options, attributeCache ?? new ToolAttributeCache());
-        _retryPolicy = new RetryPolicy(log: options.Log);
+        _retryPolicy = new RetryPolicy(log: options.Log, authRefreshCallback: options.AuthRefreshCallback);
         _compactionPipeline = new CompactionPipeline(chatClient, options.Limits, options.Log);
         _log = options.Log;
         _logger = logger;

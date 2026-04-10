@@ -116,6 +116,19 @@ public sealed class SubagentManager
                         case AgentStreamEvent.ToolCallCompleted:
                             toolCalls++;
                             break;
+                        case AgentStreamEvent.ApprovalRequested approval:
+                            // Bubble to parent or auto-deny
+                            if (request.ApprovalBubbleCallback is { } bubble)
+                            {
+                                var approved = await bubble(approval.ToolName, approval.Arguments).ConfigureAwait(false);
+                                approval.Resolve(approved);
+                            }
+                            else
+                            {
+                                _log?.Invoke("SUBAGENT", $"[{id}] Auto-denying destructive tool: {approval.ToolName}");
+                                approval.Resolve(false);
+                            }
+                            break;
                         case AgentStreamEvent.Completed done:
                             break;
                     }

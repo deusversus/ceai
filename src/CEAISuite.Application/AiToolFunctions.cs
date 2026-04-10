@@ -1695,6 +1695,53 @@ public sealed partial class AiToolFunctions(
             or Mnemonic.Vaddss or Mnemonic.Vaddsd or Mnemonic.Vmulss or Mnemonic.Vmulsd;
     }
 
+    /// <summary>
+    /// Returns true for modules that are OS/runtime/driver DLLs unlikely to contain game logic.
+    /// Used to deprioritize system modules in code search results.
+    /// </summary>
+    private static bool IsSystemModule(string moduleName)
+    {
+        var name = moduleName.ToLowerInvariant();
+        // Windows system directories
+        if (name.StartsWith("ntdll", StringComparison.Ordinal) ||
+            name.StartsWith("kernel32", StringComparison.Ordinal) ||
+            name.StartsWith("kernelbase", StringComparison.Ordinal) ||
+            name.StartsWith("user32", StringComparison.Ordinal) ||
+            name.StartsWith("advapi32", StringComparison.Ordinal) ||
+            name.StartsWith("msvcrt", StringComparison.Ordinal) ||
+            name.StartsWith("ucrtbase", StringComparison.Ordinal) ||
+            name.StartsWith("ws2_32", StringComparison.Ordinal) ||
+            name.StartsWith("combase", StringComparison.Ordinal) ||
+            name.StartsWith("rpcrt4", StringComparison.Ordinal) ||
+            name.StartsWith("sechost", StringComparison.Ordinal) ||
+            name.StartsWith("bcrypt", StringComparison.Ordinal) ||
+            name.StartsWith("crypt32", StringComparison.Ordinal) ||
+            name.StartsWith("ole32", StringComparison.Ordinal) ||
+            name.StartsWith("gdi32", StringComparison.Ordinal) ||
+            name.StartsWith("shell32", StringComparison.Ordinal) ||
+            name.StartsWith("mswsock", StringComparison.Ordinal) ||
+            name.StartsWith("clr", StringComparison.Ordinal))
+            return true;
+        // GPU drivers
+        if (name.StartsWith("nvwgf", StringComparison.Ordinal) ||
+            name.StartsWith("nvapi", StringComparison.Ordinal) ||
+            name.StartsWith("nvgpu", StringComparison.Ordinal) ||
+            name.StartsWith("amdxc", StringComparison.Ordinal) ||
+            name.StartsWith("atiuxp", StringComparison.Ordinal) ||
+            name.StartsWith("d3d", StringComparison.Ordinal) ||
+            name.StartsWith("dxgi", StringComparison.Ordinal) ||
+            name.StartsWith("vulkan", StringComparison.Ordinal))
+            return true;
+        // .NET runtime
+        if (name.StartsWith("coreclr", StringComparison.Ordinal) ||
+            name.StartsWith("hostfxr", StringComparison.Ordinal) ||
+            name.StartsWith("hostpolicy", StringComparison.Ordinal) ||
+            name.StartsWith("system.private", StringComparison.Ordinal) ||
+            name.StartsWith("system.runtime", StringComparison.Ordinal))
+            return true;
+        return false;
+    }
+
     /// <summary>Resolve a node by ID first, then by label (case-insensitive).</summary>
     private AddressTableNode? ResolveNode(string idOrLabel) =>
         addressTableService.FindNode(idOrLabel) ?? addressTableService.FindNodeByLabel(idOrLabel);

@@ -35,6 +35,11 @@ public sealed partial class AiToolFunctions
 
         if (targetModules.Count == 0) return $"Module '{moduleName}' not found.";
 
+        // Prioritize game modules over system/driver DLLs for better signal-to-noise.
+        // System modules rarely contain game logic and clutter results when scanning "all".
+        if (moduleName.Equals("all", StringComparison.OrdinalIgnoreCase))
+            targetModules = [.. targetModules.OrderBy(m => IsSystemModule(m.Name) ? 1 : 0)];
+
         var results = new List<string>();
         var formatter = new MasmFormatter();
         var output = new StringOutput();
@@ -86,7 +91,8 @@ public sealed partial class AiToolFunctions
                             if (!isWrite && !isLea && !includeReads) continue;
 
                             formatter.Format(instr, output);
-                            results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | {classification} | base={instr.MemoryBase} | in {mod.Name}");
+                            var tag = IsSystemModule(mod.Name) ? " [system]" : "";
+                            results.Add($"  0x{instr.IP:X} | {output.ToStringAndReset()} | {classification} | base={instr.MemoryBase} | in {mod.Name}{tag}");
                             if (results.Count >= maxResults) break;
                         }
                     }

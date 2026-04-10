@@ -574,6 +574,35 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
             };
         }
 
+        // §3/§8: Model-tier-aware options — weaker models get fewer tools and a shorter prompt
+        var modelTier = ModelTierClassifier.Classify(_modelSwitcher?.CurrentModel.ModelId);
+        var maxToolCallsPerTurn = modelTier switch
+        {
+            ModelTier.Minimal => 3,
+            ModelTier.Full => 12,
+            _ => 8,
+        };
+
+        // §8: For Minimal-tier models, strip reference sections from the system prompt
+        // to save ~500 tokens of context that weak models can't effectively use
+        if (modelTier == ModelTier.Minimal)
+        {
+            // Remove the QUICK REFERENCE, SKILLS, and ARTIFACT IDS sections
+            foreach (var marker in new[] { "═══ QUICK REFERENCE ═══", "═══ SKILLS ═══", "═══ ARTIFACT IDS ═══" })
+            {
+                var idx = effectiveSystemPrompt.IndexOf(marker, StringComparison.Ordinal);
+                if (idx >= 0)
+                {
+                    var nextSection = effectiveSystemPrompt.IndexOf("═══", idx + marker.Length, StringComparison.Ordinal);
+                    if (nextSection > idx)
+                        effectiveSystemPrompt = effectiveSystemPrompt[..idx] + effectiveSystemPrompt[nextSection..];
+                    else
+                        effectiveSystemPrompt = effectiveSystemPrompt[..idx].TrimEnd();
+                }
+            }
+            Log("TOOLS", $"Minimal tier: stripped reference sections from system prompt ({effectiveSystemPrompt.Length} chars)");
+        }
+
         var loop = new AgentLoop.AgentLoop(client, new AgentLoopOptions
         {
             SystemPrompt = effectiveSystemPrompt,
@@ -584,6 +613,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
             ToolResultStore = _toolResultStore,
             DangerousToolNames = DangerousTools.Names,
             MaxTurns = 25,
+            MaxToolCallsPerTurn = maxToolCallsPerTurn,
             AdditionalProperties = additionalProps,
             ContextManagementStrategies = providerKind == ProviderKind.Anthropic
                 ? ContextManagementStrategy.AnthropicDefaults

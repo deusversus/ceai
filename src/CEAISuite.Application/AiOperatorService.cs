@@ -150,7 +150,7 @@ internal static class ToolCategories
             "SummarizeInvestigation", "SaveSession", "ListSessions", "LoadSession", "SearchChatHistory",
             "DeleteSession" ],
         ["memory_advanced"] = [
-            "HexDump", "ListMemoryRegions", "DissectStructure",
+            "HexDump", "ListMemoryRegions", "DissectStructure", "ExportStructDefinition",
             "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection" ],
         ["address_table"] = [
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
@@ -170,8 +170,10 @@ internal static class ToolCategories
             "Disassemble", "FindWritersToOffset", "FindFunctionBoundaries", "GetCallerGraph",
             "SearchInstructionPattern", "FindByMemoryOperand",
             "GetCallStack", "GetAllThreadStacks", "ResolveSymbol",
-            "TraceFieldWriters", "LoadSymbolsForModule", "ResolveAddressToSymbol",
+            "TraceFieldWriters",
             "AssembleInstruction", "NopRegion" ],
+        ["symbols"] = [
+            "LoadSymbolsForModule", "ResolveAddressToSymbol" ],
         ["hooks"] = [
             "InstallCodeCaveHook", "RemoveCodeCaveHook", "ListCodeCaveHooks",
             "GetCodeCaveHookHits", "DryRunHookInstall" ],
@@ -214,6 +216,7 @@ internal static class ToolCategories
     [
         ("breakpoints", "disassembly"),
         ("hooks", "disassembly"),
+        ("disassembly", "symbols"),
         ("lua", "scripts"),
     ];
 }

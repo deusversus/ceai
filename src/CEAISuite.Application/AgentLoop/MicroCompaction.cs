@@ -92,7 +92,11 @@ public sealed class MicroCompaction
                     if (frc.CallId is not null)
                         history.ReplaceToolResult(frc.CallId, summary);
                     else
-                        msg.Contents[j] = new FunctionResultContent(frc.CallId ?? "", summary);
+                    {
+                        // CallId is null — can't use ReplaceToolResult, but this is rare.
+                        // Create a replacement content item via the history manager's lock.
+                        history.MutateFunctionResult(msg, j, new FunctionResultContent(frc.CallId ?? "", summary));
+                    }
                     pruned++;
                 }
             }

@@ -802,4 +802,93 @@ public sealed partial class AiToolFunctions
         return sb.ToString();
     }
 
+    [ReadOnlyTool]
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Export a dissected memory structure as a C struct definition or CE XML format. " +
+        "First call DissectStructure to analyze a region, then use this to export the results " +
+        "in a format suitable for code or CE table import.")]
+    public async Task<string> ExportStructDefinition(
+        [Description("Process ID")] int processId,
+        [Description("Base address (hex, decimal, or symbolic)")] string address,
+        [Description("Region size in bytes (default 256)")] int regionSize = 256,
+        [Description("Type hint for dissection: auto, int32, float, or pointers")] string typeHint = "auto",
+        [Description("Export format: 'c' for C struct, 'ce' for CE XML structure definition")] string format = "c",
+        [Description("Name for the struct (default: 'GameStruct')")] string structName = "GameStruct")
+    {
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+        var dissector = new StructureDissectorService(engineFacade);
+        var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
+        var addr = AddressTableService.ParseAddress(resolvedAddress);
+        var (fields, _) = await dissector.DissectAsync(processId, addr, regionSize, typeHint).ConfigureAwait(false);
+
+        if (fields.Count == 0) return "No identifiable fields found — cannot export empty structure.";
+
+        var sb = new System.Text.StringBuilder();
+
+        if (format.Equals("ce", StringComparison.OrdinalIgnoreCase))
+        {
+            // CE XML structure definition format
+            sb.AppendLine("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"<Structure Name=\"{structName}\">");
+            foreach (var f in fields)
+            {
+                var (ceType, ceSize) = MapToCeType(f.ProbableType);
+                sb.AppendLine(CultureInfo.InvariantCulture,
+                    $"  <Element Offset=\"{f.Offset}\" Vartype=\"{ceType}\" Bytesize=\"{ceSize}\" " +
+                    $"Description=\"field_{f.Offset:X4}\" />");
+            }
+            sb.AppendLine("</Structure>");
+        }
+        else
+        {
+            // C struct format
+            sb.AppendLine(CultureInfo.InvariantCulture, $"// Structure at 0x{addr:X} ({fields.Count} fields)");
+            sb.AppendLine(CultureInfo.InvariantCulture, $"typedef struct _{structName} {{");
+            int lastEnd = 0;
+            foreach (var f in fields)
+            {
+                // Add padding if there's a gap
+                if (f.Offset > lastEnd)
+                {
+                    var padSize = f.Offset - lastEnd;
+                    sb.AppendLine(CultureInfo.InvariantCulture,
+                        $"    uint8_t _pad_{lastEnd:X4}[{padSize}];  // +0x{lastEnd:X4}");
+                }
+                var (cType, size) = MapToCType(f.ProbableType);
+                sb.AppendLine(CultureInfo.InvariantCulture,
+                    $"    {cType} field_{f.Offset:X4};  // +0x{f.Offset:X4}  {f.ProbableType} = {f.DisplayValue}");
+                lastEnd = f.Offset + size;
+            }
+            sb.AppendLine(CultureInfo.InvariantCulture, $"}} {structName};");
+        }
+
+        return sb.ToString();
+    }
+
+    private static (string CType, int Size) MapToCType(string probableType) => probableType switch
+    {
+        "Int32" => ("int32_t", 4),
+        "Float" => ("float", 4),
+        "Pointer" => ("uintptr_t", 8),
+        "Int64" => ("int64_t", 8),
+        "Double" => ("double", 8),
+        "Int16" => ("int16_t", 2),
+        "Byte" => ("uint8_t", 1),
+        _ => ("uint32_t", 4),
+    };
+
+    private static (string CeType, int Size) MapToCeType(string probableType) => probableType switch
+    {
+        "Int32" => ("4 Bytes", 4),
+        "Float" => ("Float", 4),
+        "Pointer" => ("8 Bytes", 8),
+        "Int64" => ("8 Bytes", 8),
+        "Double" => ("Double", 8),
+        "Int16" => ("2 Bytes", 2),
+        "Byte" => ("Byte", 1),
+        _ => ("4 Bytes", 4),
+    };
+
 }

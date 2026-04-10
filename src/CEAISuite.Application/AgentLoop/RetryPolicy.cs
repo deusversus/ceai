@@ -15,6 +15,8 @@ public sealed class RetryPolicy
     private readonly Action<string, string>? _log;
     private int _consecutiveOverloadCount;
     private readonly Func<Task>? _authRefreshCallback;
+    private readonly bool _allowNonStreamingFallback;
+    private int _consecutiveStreamingTimeouts;
 
     /// <summary>If retry-after exceeds this, switch to fallback model immediately instead of waiting.</summary>
     private const int FastFallbackRetryAfterSeconds = 30;
@@ -22,13 +24,17 @@ public sealed class RetryPolicy
     /// <summary>Duration to stay on the fallback model after a fast-mode trigger.</summary>
     public static readonly TimeSpan FastModeCooldownDuration = TimeSpan.FromMinutes(5);
 
+    /// <summary>Consecutive streaming timeouts before triggering non-streaming fallback.</summary>
+    private const int NonStreamingFallbackThreshold = 2;
+
     public RetryPolicy(
         int maxRetries = 10,
         TimeSpan? baseDelay = null,
         TimeSpan? maxDelay = null,
         double jitterPercent = 0.25,
         Action<string, string>? log = null,
-        Func<Task>? authRefreshCallback = null)
+        Func<Task>? authRefreshCallback = null,
+        bool allowNonStreamingFallback = false)
     {
         _maxRetries = maxRetries;
         _baseDelay = baseDelay ?? TimeSpan.FromMilliseconds(500);
@@ -36,6 +42,7 @@ public sealed class RetryPolicy
         _jitterPercent = jitterPercent;
         _log = log;
         _authRefreshCallback = authRefreshCallback;
+        _allowNonStreamingFallback = allowNonStreamingFallback;
     }
 
     /// <summary>
@@ -56,6 +63,9 @@ public sealed class RetryPolicy
         /// <summary>The final exception if all retries exhausted.</summary>
         public Exception? Exception { get; init; }
 
+        /// <summary>True if streaming timed out and a non-streaming fallback should be attempted.</summary>
+        public bool NeedsNonStreamingFallback { get; init; }
+
         public static RetryResult<T> Ok(T value) => new() { Value = value, Success = true };
         public static RetryResult<T> CompactionNeeded() => new() { NeedsCompaction = true };
         public static RetryResult<T> TokenOverflow(int adjustedMax) => new() { AdjustedMaxTokens = adjustedMax };
@@ -70,6 +80,7 @@ public sealed class RetryPolicy
         public static RetryResult<T> Failure(Exception ex) => new() { Exception = ex };
         public static RetryResult<T> ModelFallback() => new() { NeedsModelFallback = true };
         public static RetryResult<T> ModelFallbackWithCooldown() => new() { NeedsModelFallback = true, NeedsFastModeCooldown = true };
+        public static RetryResult<T> NonStreamingFallback() => new() { NeedsNonStreamingFallback = true };
     }
 
     /// <summary>
@@ -92,13 +103,23 @@ public sealed class RetryPolicy
             {
                 var result = await operation(cancellationToken).ConfigureAwait(false);
                 Interlocked.Exchange(ref _consecutiveOverloadCount, 0); // Reset on success
+                Interlocked.Exchange(ref _consecutiveStreamingTimeouts, 0);
                 return RetryResult<T>.Ok(result);
             }
             catch (StreamingTimeoutException stex)
             {
                 // Streaming stall — retriable (connection-level issue), don't propagate as cancellation
                 lastException = stex;
-                _log?.Invoke("RETRY", $"Streaming idle timeout: {stex.Message}");
+                Interlocked.Increment(ref _consecutiveStreamingTimeouts);
+                _log?.Invoke("RETRY", $"Streaming idle timeout ({_consecutiveStreamingTimeouts} consecutive): {stex.Message}");
+
+                // After repeated streaming timeouts, fall back to non-streaming if allowed
+                if (_allowNonStreamingFallback && _consecutiveStreamingTimeouts >= NonStreamingFallbackThreshold)
+                {
+                    _log?.Invoke("RETRY", "Repeated streaming timeouts — signaling non-streaming fallback");
+                    return RetryResult<T>.NonStreamingFallback();
+                }
+
                 if (attempt > _maxRetries) break;
                 var stDelay = CalculateDelay(attempt, null);
                 _log?.Invoke("RETRY", $"Retrying in {stDelay.TotalSeconds:F1}s (attempt {attempt + 1})");

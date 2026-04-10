@@ -831,7 +831,11 @@ public sealed partial class AiToolFunctions(
                 }
                 else
                 {
+                    // No AA engine available — toggle is a simple flag flip.
+                    // This is a no-op toggle (no actual script execution) so the
+                    // state change is safe without async verification.
                     node.IsScriptEnabled = !node.IsScriptEnabled;
+                    node.ScriptStatus = node.IsScriptEnabled ? "Enabled (hotkey, no AA engine)" : "Disabled (hotkey)";
                 }
             }
             else

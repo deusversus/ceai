@@ -209,6 +209,18 @@ public sealed class ChatHistoryManager
     }
 
     /// <summary>
+    /// Replace a specific content item at the given index in a message, under the history lock.
+    /// Used by microcompaction when a FunctionResultContent has no CallId.
+    /// </summary>
+    public void MutateFunctionResult(ChatMessage msg, int index, AIContent replacement)
+    {
+        lock (_lock)
+        {
+            msg.Contents[index] = replacement;
+        }
+    }
+
+    /// <summary>
     /// Replay saved chat messages into the history for session restoration.
     /// Reconstructs FunctionCallContent and FunctionResultContent from metadata,
     /// spilling large results to the store.

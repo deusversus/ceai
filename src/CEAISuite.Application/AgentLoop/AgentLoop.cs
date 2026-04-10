@@ -37,7 +37,8 @@ public sealed class AgentLoop
         _chatClient = chatClient;
         _options = options;
         _toolExecutor = new ToolExecutor(options, attributeCache ?? new ToolAttributeCache());
-        _retryPolicy = new RetryPolicy(log: options.Log, authRefreshCallback: options.AuthRefreshCallback);
+        _retryPolicy = new RetryPolicy(log: options.Log, authRefreshCallback: options.AuthRefreshCallback,
+            allowNonStreamingFallback: options.AllowNonStreamingFallback);
         _compactionPipeline = new CompactionPipeline(chatClient, options.Limits, options.Log);
         _log = options.Log;
         _logger = logger;
@@ -504,14 +505,23 @@ public sealed class AgentLoop
 
             return (assistantText, toolCalls, outputTokens, finishReason, speculativeTasks);
         },
-        onHeartbeat: msg => channel.TryWrite(new AgentStreamEvent.TextDelta($"\n[{msg}]\n")),
+        onHeartbeat: msg =>
+        {
+            // Buffer retry heartbeat messages — only emit if recovery ultimately fails.
+            // This prevents confusing UI flicker when retries succeed.
+            _log?.Invoke("HEARTBEAT", msg);
+        },
         cancellationToken: ct).ConfigureAwait(false);
 
         if (retryResult.Success)
         {
+            // Recovery succeeded — discard buffered heartbeat/error messages (not shown to user)
             var val = retryResult.Value!;
             return (val.assistantText, val.toolCalls, val.outputTokens, val.finishReason, val.speculativeTasks);
         }
+
+        // Recovery failed — emit a single summary error instead of individual retry messages
+        _log?.Invoke("LOOP", "LLM call failed after retries — emitting error to UI");
 
         if (retryResult.NeedsCompaction
             && state.ConsecutiveCompactionFailures < AgentLoopState.MaxConsecutiveCompactionFailures)
@@ -532,6 +542,45 @@ public sealed class AgentLoop
             }
             return await CallLlmWithRetry(history, BuildChatOptions(compactedState), channel,
                 compactedState, ct).ConfigureAwait(false);
+        }
+
+        if (retryResult.NeedsNonStreamingFallback)
+        {
+            _log?.Invoke("LOOP", "Streaming fallback: retrying as non-streaming request");
+            await channel.WriteAsync(
+                new AgentStreamEvent.TextDelta("\n[Streaming timed out — retrying without streaming…]\n"), ct).ConfigureAwait(false);
+
+            // Use GetResponseAsync instead of GetStreamingResponseAsync
+            var nonStreamResponse = await _chatClient.GetResponseAsync(
+                history.GetMessages(), BuildChatOptions(state), ct).ConfigureAwait(false);
+
+            var respText = nonStreamResponse.Text ?? "";
+            var respToolCalls = nonStreamResponse.Messages
+                .SelectMany(m => m.Contents.OfType<FunctionCallContent>())
+                .ToList();
+            var respTokens = 0;
+            string? respFinish = null;
+
+            // Extract usage and finish reason
+            foreach (var msg in nonStreamResponse.Messages)
+            {
+                foreach (var c in msg.Contents)
+                {
+                    if (c is UsageContent uc)
+                    {
+                        respTokens += (int)(uc.Details?.OutputTokenCount ?? 0);
+                        var inputToks = (int)(uc.Details?.InputTokenCount ?? 0);
+                        if (inputToks > 0) history.LastKnownInputTokens = inputToks;
+                        if (_options.Budget is { } budget)
+                            budget.RecordUsage(inputToks, uc.Details?.OutputTokenCount ?? 0, uc.Details?.CachedInputTokenCount ?? 0);
+                    }
+                }
+            }
+
+            if (!string.IsNullOrEmpty(respText))
+                await channel.WriteAsync(new AgentStreamEvent.TextDelta(respText), ct).ConfigureAwait(false);
+
+            return (respText, respToolCalls, respTokens, respFinish, null);
         }
 
         if (retryResult.NeedsModelFallback)

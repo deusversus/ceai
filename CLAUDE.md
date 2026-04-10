@@ -39,10 +39,21 @@ After completing any implementation, do a self-audit: re-read the changed files,
 ## Fix Issues As They Arise
 Always address issues the moment they are noticed. Never defer fixes with the assumption that someone else will catch them later. Presume the next person to encounter the issue may not recognize it or may lack the context to fix it correctly — we are always the best people for the job right now.
 
+## Search Strategy
+Before grepping or exploring, check the wiki first. The code map (`memory/wiki/code-map.md`) has the exact file for every class, interface, and tool in the codebase.
+
+- **Know what you're looking for?** Check the code map → Read the file directly. Zero wasted tokens.
+- **Know the filename but not the path?** Glob for it: `**/*FileName*`
+- **Searching for a string in code?** Grep with a targeted path, not the whole repo. Use the code map to narrow to the right project directory.
+- **Exploring an unfamiliar area?** Read `wiki/architecture.md` and `wiki/code-map.md` first. Then read files directly. Do not grep broadly hoping to stumble into the answer.
+- **Delegating to sub-agents?** Always pass relevant context from the wiki in the agent prompt. Sub-agents have no memory access — they'll waste tokens exploring from scratch unless you brief them.
+
 ## Wiki & Memory
 - Memory files: `~/.claude/projects/.../memory/`
 - Wiki pages: `memory/wiki/` — synthesized knowledge that grows over time
+- **Code map: `memory/wiki/code-map.md`** — file-level index of every class and tool. Check this FIRST.
 - When you learn something significant, update existing wiki/memory pages first
 - Only create new files for genuinely new topics
 - Note contradictions between new information and existing wiki content
 - Add `updated:` date to any memory/wiki file you modify
+- If you discover the code map is outdated (file moved/renamed/deleted), update it immediately

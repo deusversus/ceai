@@ -322,6 +322,11 @@ public class ScannerViewModelTests
 
         await vm.StartNewScanCommand.ExecuteAsync(null);
 
+        // Let any pending Progress<T> thread-pool callbacks drain before asserting.
+        // Without a SynchronizationContext, Progress<T> posts to ThreadPool which can
+        // race with the finally block that resets IsScanInProgress.
+        await Task.Delay(50);
+
         // After completion, IsScanInProgress should be reset
         Assert.False(vm.IsScanInProgress);
         Assert.Equal(0, vm.ScanProgress);

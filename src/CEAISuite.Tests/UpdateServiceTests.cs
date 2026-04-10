@@ -141,14 +141,20 @@ public class UpdateServiceTests
     {
         // Use the real UpdateService against the real GitHub API.
         // In CI or offline environments this will fail gracefully.
-        // The key assertion is that no exception escapes.
+        // The key assertion is that no *unexpected* exception escapes.
         using var svc = new UpdateService();
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-        // Even if network is down, should not throw
-        var result = await svc.CheckForUpdateAsync(cts.Token);
-        // result can be null (no update / offline) or an UpdateInfo — both are valid
-        // The important thing is no exception
+        try
+        {
+            var result = await svc.CheckForUpdateAsync(cts.Token);
+            // result can be null (no update / offline) or an UpdateInfo — both are valid
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+            // CTS timeout on slow CI runners is acceptable — the service correctly
+            // lets cancellation propagate rather than swallowing it.
+        }
     }
 
     [Fact]

@@ -2120,10 +2120,9 @@
                                     </Border>
                                 </DockPanel>
 
-                                <!-- Chat messages -->
-                                <ScrollViewer x:Name="AiChatScrollViewer" VerticalScrollBarVisibility="Auto" Margin="8,0,8,0">
-                                    <StackPanel x:Name="AiChatContainer">
-                                        <!-- 3A: ListBox with virtualization replaces ItemsControl for ChatMessages -->
+                                <!-- Chat messages — DockPanel lets each ListBox own its own ScrollViewer for virtualization -->
+                                <DockPanel x:Name="AiChatContainer" Margin="8,0,8,0" LastChildFill="True">
+                                        <!-- 3A: ListBox with virtualization — now owns its own ScrollViewer (no outer wrapper) -->
                                         <ListBox x:Name="AiChatList" ItemsSource="{Binding ChatMessages}"
                                                  VirtualizingStackPanel.IsVirtualizing="True"
                                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
@@ -2182,9 +2181,9 @@
                                             </ListBox.ItemTemplate>
                                         </ListBox>
 
-                                        <!-- Live streaming content blocks (OpenCode-style structured output) -->
-                                        <!-- 3A: ListBox with virtualization replaces ItemsControl for StreamingBlocks -->
-                                        <ListBox x:Name="StreamingBlocksList" ItemsSource="{Binding StreamingBlocks}"
+                                        <!-- Live streaming content blocks — docked to bottom so chat list fills remaining space -->
+                                        <ListBox x:Name="StreamingBlocksList" DockPanel.Dock="Bottom"
+                                                 ItemsSource="{Binding StreamingBlocks}"
                                                  Visibility="{Binding IsStreamingBlocksVisible, Converter={StaticResource BoolToVisibility}}"
                                                  VirtualizingStackPanel.IsVirtualizing="True"
                                                  VirtualizingStackPanel.VirtualizationMode="Recycling"
@@ -2280,8 +2279,7 @@
                                                 </DataTemplate>
                                             </ListBox.Resources>
                                         </ListBox>
-                                    </StackPanel>
-                                </ScrollViewer>
+                                </DockPanel>
                             </DockPanel>
                         </avalonDock:LayoutAnchorable>
                     </avalonDock:LayoutAnchorablePane>

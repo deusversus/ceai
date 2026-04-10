@@ -166,7 +166,7 @@ public sealed class AgentLoop
                 _log?.Invoke("LOOP", $"Max turns ({_options.MaxTurns}) reached");
                 await channel.WriteAsync(
                     new AgentStreamEvent.TextDelta($"\n[Max turns ({_options.MaxTurns}) reached — stopping.]"),
-                    ct);
+                    ct).ConfigureAwait(false);
                 state = state with
                 {
                     Transition = AgentTransition.BudgetExhausted,
@@ -398,7 +398,7 @@ public sealed class AgentLoop
             var watchedStream = StreamingWatchdog.WithIdleTimeout(
                 rawStream, _options.StreamingIdleTimeout, _log, retryCt);
 
-            await foreach (var update in watchedStream)
+            await foreach (var update in watchedStream.ConfigureAwait(false))
             {
                 // Process streaming chunks
                 foreach (var content in update.Contents)

@@ -164,6 +164,14 @@ dotnet run --project src/CEAISuite.Desktop/CEAISuite.Desktop.csproj
 dotnet test
 ```
 
+### Uninstall & Cleanup
+
+To fully remove CE AI Suite:
+
+1. Delete the cloned repository folder
+2. Remove stored data: `%LOCALAPPDATA%\CEAISuite\` (sessions, skills, settings)
+3. API keys are stored via DPAPI in the settings file above — deleting the folder removes them
+
 ---
 
 ## AI Operator

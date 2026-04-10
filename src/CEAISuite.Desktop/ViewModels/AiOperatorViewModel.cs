@@ -80,10 +80,10 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     // ── Observable Properties ──
 
     [ObservableProperty]
-    private ObservableCollection<AiChatDisplayItem> _chatMessages = new();
+    private RangeObservableCollection<AiChatDisplayItem> _chatMessages = new();
 
     [ObservableProperty]
-    private ObservableCollection<ChatHistoryDisplayItem> _chatHistory = new();
+    private RangeObservableCollection<ChatHistoryDisplayItem> _chatHistory = new();
 
     [ObservableProperty]
     private ObservableCollection<AttachmentChip> _attachments = new();
@@ -634,9 +634,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
             ImageData = msg.ImageDataList?.FirstOrDefault()
         }).ToList();
 
-        ChatMessages.Clear();
-        foreach (var item in items)
-            ChatMessages.Add(item);
+        ChatMessages.ReplaceAll(items);
 
         ChatTitle = _aiOperatorService.CurrentChatTitle;
         ChatDisplayRefreshed?.Invoke();
@@ -676,9 +674,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
             });
         }
 
-        ChatHistory.Clear();
-        foreach (var item in _allChatItems)
-            ChatHistory.Add(item);
+        ChatHistory.ReplaceAll(_allChatItems);
 
         _suppressChatSwitch = false;
     }
@@ -709,9 +705,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
     {
         if (string.IsNullOrEmpty(query))
         {
-            ChatHistory.Clear();
-            foreach (var item in _allChatItems)
-                ChatHistory.Add(item);
+            ChatHistory.ReplaceAll(_allChatItems);
             return;
         }
 
@@ -720,9 +714,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
                         c.Preview.Contains(query, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
-        ChatHistory.Clear();
-        foreach (var item in filtered)
-            ChatHistory.Add(item);
+        ChatHistory.ReplaceAll(filtered);
     }
 
     [RelayCommand]

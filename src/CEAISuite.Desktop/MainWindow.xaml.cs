@@ -213,12 +213,12 @@ public partial class MainWindow : Window, IDisposable
         // Wire AI Operator ViewModel
         AiOperatorContent.DataContext = aiOperatorVm;
         _subs.Subscribe(h => _aiOperatorVm.ScrollToBottomRequested += h, h => _aiOperatorVm.ScrollToBottomRequested -= h,
-            () => Dispatcher.BeginInvoke(() => AiChatScrollViewer.ScrollToEnd()));
+            () => Dispatcher.BeginInvoke(() => ScrollChatToBottom()));
         _subs.Subscribe(h => _aiOperatorVm.StreamingBlocksUpdated += h, h => _aiOperatorVm.StreamingBlocksUpdated -= h,
             () => Dispatcher.BeginInvoke(() =>
             {
                 StreamingBlocksList.Items.Refresh();
-                AiChatScrollViewer.ScrollToEnd();
+                ScrollChatToBottom();
             }));
         _subs.Subscribe(h => _aiOperatorVm.ChatDisplayRefreshed += h, h => _aiOperatorVm.ChatDisplayRefreshed -= h,
             () => Dispatcher.BeginInvoke(() =>
@@ -582,6 +582,13 @@ public partial class MainWindow : Window, IDisposable
     private void ClearAiChat(object sender, RoutedEventArgs e) =>
         _aiOperatorVm.ClearChatCommand.Execute(null);
 
+    /// <summary>Scroll the chat ListBox to its last item (replaces the old ScrollViewer.ScrollToEnd).</summary>
+    private void ScrollChatToBottom()
+    {
+        if (AiChatList.Items.Count > 0)
+            AiChatList.ScrollIntoView(AiChatList.Items[^1]);
+    }
+
     private void CopyAiMessage(object sender, RoutedEventArgs e)
     {
         if (sender is MenuItem mi
@@ -801,7 +808,7 @@ public partial class MainWindow : Window, IDisposable
         card.Child = stack;
 
         AiChatContainer.Children.Add(card);
-        AiChatScrollViewer.ScrollToEnd();
+        ScrollChatToBottom();
     }
 
     // ─── Address Table thin wrappers (logic in AddressTableViewModel) ────

@@ -32,6 +32,13 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     /// Zero means unlimited (default). When set, a debug hook counts each instruction
     /// and throws <see cref="ScriptRuntimeException"/> once the limit is exceeded.
     /// </summary>
+    /// <remarks>
+    /// Memory limits: MoonSharp has no per-script memory tracking API. Memory is managed
+    /// by .NET's GC, and true per-script quotas would require OS-level process isolation
+    /// (AppDomain is deprecated in .NET Core+). The current approach — execution timeout
+    /// plus instruction counting — is the standard mitigation for MoonSharp and effectively
+    /// bounds resource consumption for runaway scripts.
+    /// </remarks>
     public long MaxInstructions { get; set; }
 
     public MoonSharpLuaEngine(

@@ -184,6 +184,9 @@
                           IsExpanded="False" Margin="0,4,0,0">
                     <ListBox ItemsSource="{Binding Bookmarks}" Background="Transparent" BorderThickness="0"
                              Foreground="{DynamicResource PrimaryForeground}" MaxHeight="120"
+                             VirtualizingStackPanel.IsVirtualizing="True"
+                             VirtualizingStackPanel.VirtualizationMode="Recycling"
+                             ScrollViewer.CanContentScroll="True"
                              Tag="{Binding DataContext, RelativeSource={RelativeSource AncestorType=UserControl}}">
                         <ListBox.ItemTemplate>
                             <DataTemplate>

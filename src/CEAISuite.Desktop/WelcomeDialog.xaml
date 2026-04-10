@@ -50,14 +50,63 @@
         <!-- ═══════════════════════════════════════════ -->
         <ScrollViewer x:Name="Page0" Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel>
-                <!-- Section 1: API Key -->
-                <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14"
+                <!-- Section 1: AI Provider -->
+                <TextBlock Text="AI Provider" FontWeight="SemiBold" FontSize="14"
                            Foreground="{DynamicResource PrimaryForeground}" />
-                <TextBlock Text="Enter your AI provider API key"
-                           FontSize="12" Margin="0,2,0,8"
+                <TextBlock Text="Choose your AI backend"
+                           FontSize="12" Margin="0,2,0,10"
                            Foreground="{DynamicResource SecondaryForeground}" />
-                <PasswordBox x:Name="ApiKeyBox" FontFamily="Consolas" FontSize="13"
-                             Padding="8,6" />
+                <UniformGrid Columns="5" Margin="0,0,0,4">
+                    <RadioButton x:Name="ProviderOpenAI" GroupName="Provider" Tag="openai"
+                                 IsChecked="True" Checked="Provider_Checked"
+                                 Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
+                        <TextBlock Text="OpenAI" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryForeground}" />
+                    </RadioButton>
+                    <RadioButton x:Name="ProviderAnthropic" GroupName="Provider" Tag="anthropic"
+                                 Checked="Provider_Checked"
+                                 Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
+                        <TextBlock Text="Anthropic" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryForeground}" />
+                    </RadioButton>
+                    <RadioButton x:Name="ProviderGemini" GroupName="Provider" Tag="gemini"
+                                 Checked="Provider_Checked"
+                                 Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
+                        <TextBlock Text="Gemini" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryForeground}" />
+                    </RadioButton>
+                    <RadioButton x:Name="ProviderCopilot" GroupName="Provider" Tag="copilot"
+                                 Checked="Provider_Checked"
+                                 Style="{StaticResource ProviderCardRadioButton}" Margin="0,0,4,0">
+                        <TextBlock Text="Copilot" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryForeground}" />
+                    </RadioButton>
+                    <RadioButton x:Name="ProviderCompatible" GroupName="Provider" Tag="openai-compatible"
+                                 Checked="Provider_Checked"
+                                 Style="{StaticResource ProviderCardRadioButton}">
+                        <TextBlock Text="Compatible" FontSize="11" FontWeight="SemiBold" HorizontalAlignment="Center"
+                                   Foreground="{DynamicResource PrimaryForeground}" />
+                    </RadioButton>
+                </UniformGrid>
+
+                <Separator Margin="0,12,0,12" />
+
+                <!-- Section 2: API Key (hidden for Copilot) -->
+                <StackPanel x:Name="ApiKeySection">
+                    <TextBlock Text="API Key" FontWeight="SemiBold" FontSize="14"
+                               Foreground="{DynamicResource PrimaryForeground}" />
+                    <TextBlock x:Name="ApiKeySubtitle" Text="Get yours at platform.openai.com"
+                               FontSize="12" Margin="0,2,0,8"
+                               Foreground="{DynamicResource SecondaryForeground}" />
+                    <PasswordBox x:Name="ApiKeyBox" FontFamily="Consolas" FontSize="13"
+                                 Padding="8,6" />
+                </StackPanel>
+
+                <!-- Copilot note (shown only for Copilot) -->
+                <TextBlock x:Name="CopilotNote" Visibility="Collapsed"
+                           Text="GitHub Copilot uses device-flow authentication. Configure it in Settings after setup."
+                           FontSize="12" TextWrapping="Wrap" FontStyle="Italic"
+                           Foreground="{DynamicResource SecondaryForeground}" />
 
                 <Separator Margin="0,16,0,16" />
 

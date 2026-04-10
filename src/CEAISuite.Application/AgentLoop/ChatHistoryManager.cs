@@ -223,7 +223,12 @@ public sealed class ChatHistoryManager
                 }
                 else if (msg.Role == "assistant")
                 {
-                    var assistantMsg = new ChatMessage(ChatRole.Assistant, msg.Content);
+                    // Use empty list for tool-only messages so the model doesn't see
+                    // placeholder text as if it were its own reasoning.
+                    var contents = string.IsNullOrWhiteSpace(msg.Content)
+                        ? new List<AIContent>()
+                        : new List<AIContent> { new Microsoft.Extensions.AI.TextContent(msg.Content) };
+                    var assistantMsg = new ChatMessage(ChatRole.Assistant, contents);
 
                     // Reconstruct FunctionCallContent from metadata
                     if (msg.ToolCalls is { Count: > 0 })

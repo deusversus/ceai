@@ -33,6 +33,14 @@ public partial class WelcomeDialog : Window
     /// <summary>The API key entered by the user (plaintext).</summary>
     public string ApiKey => ApiKeyBox.Password;
 
+    /// <summary>The selected AI provider ("openai", "anthropic", "gemini", "copilot", "openai-compatible").</summary>
+    public string SelectedProvider =>
+        ProviderAnthropic.IsChecked == true ? "anthropic"
+        : ProviderGemini.IsChecked == true ? "gemini"
+        : ProviderCopilot.IsChecked == true ? "copilot"
+        : ProviderCompatible.IsChecked == true ? "openai-compatible"
+        : "openai";
+
     /// <summary>The selected theme: "Dark" or "Light".</summary>
     public string SelectedTheme =>
         ThemeLight.IsChecked == true ? "Light" : "Dark";
@@ -97,6 +105,23 @@ public partial class WelcomeDialog : Window
                 : (Brush)FindResource("SecondaryForeground");
             dots[i].Opacity = i == _currentPage ? 1.0 : 0.4;
         }
+    }
+
+    private void Provider_Checked(object sender, RoutedEventArgs e)
+    {
+        if (ApiKeySection is null) return; // designer guard
+
+        var isCopilot = ProviderCopilot.IsChecked == true;
+        ApiKeySection.Visibility = isCopilot ? Visibility.Collapsed : Visibility.Visible;
+        CopilotNote.Visibility = isCopilot ? Visibility.Visible : Visibility.Collapsed;
+
+        ApiKeySubtitle.Text = SelectedProvider switch
+        {
+            "anthropic" => "Get yours at console.anthropic.com",
+            "gemini" => "Get yours at aistudio.google.com",
+            "openai-compatible" => "Enter the API key for your provider",
+            _ => "Get yours at platform.openai.com",
+        };
     }
 
     private void ThemeRadio_Checked(object sender, RoutedEventArgs e)

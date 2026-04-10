@@ -628,7 +628,7 @@ public partial class AiOperatorViewModel : ObservableObject, IDisposable
         var items = _aiOperatorService.DisplayHistory.Select(msg => new AiChatDisplayItem
         {
             RoleLabel = msg.Role == "user" ? "You" : "AI Operator",
-            Content = msg.Content,
+            Content = msg.DisplayContent,
             Timestamp = msg.Timestamp.ToLocalTime().ToString("h:mm tt", CultureInfo.InvariantCulture),
             Background = msg.Role == "user" ? userBrush : aiBrush,
             ImageData = msg.ImageDataList?.FirstOrDefault()

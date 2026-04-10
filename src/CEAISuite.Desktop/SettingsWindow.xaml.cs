@@ -396,7 +396,11 @@ public partial class SettingsWindow : Window, IDisposable
 
         try
         {
-            var githubToken = _settingsService.Settings.GitHubToken;
+            // Read token from UI field (may not be saved to settings yet after device-flow sign-in)
+            var githubToken = Dispatcher.Invoke(() => _ghTokenVisible ? GitHubTokenTextBox.Text : GitHubTokenBox.Password);
+            // Fall back to persisted settings if UI field is empty (e.g., on initial load)
+            if (string.IsNullOrWhiteSpace(githubToken))
+                githubToken = _settingsService.Settings.GitHubToken;
             if (string.IsNullOrWhiteSpace(githubToken))
             {
                 Dispatcher.Invoke(() =>
@@ -404,7 +408,7 @@ public partial class SettingsWindow : Window, IDisposable
                     ModelList.Items.Clear();
                     var noToken = new ListBoxItem
                     {
-                        Content = new TextBlock { Text = "Enter a GitHub token first", FontStyle = FontStyles.Italic },
+                        Content = new TextBlock { Text = "Sign in with GitHub first", FontStyle = FontStyles.Italic },
                         IsEnabled = false,
                     };
                     noToken.SetResourceReference(ListBoxItem.ForegroundProperty, "WarningForeground");

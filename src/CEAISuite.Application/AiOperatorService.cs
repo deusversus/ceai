@@ -19,6 +19,16 @@ public sealed record AiChatMessage(string Role, string Content, DateTimeOffset T
     /// <summary>Image data attached to this message (for display purposes). Not serialized to chat store.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public List<byte[]>? ImageDataList { get; init; }
+
+    /// <summary>
+    /// Content suitable for display. Returns a placeholder for tool-only assistant messages
+    /// where <see cref="Content"/> is empty but tool calls were executed.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string DisplayContent =>
+        string.IsNullOrWhiteSpace(Content) && ToolCalls is { Count: > 0 }
+            ? "(Tool calls executed — see action log for details)"
+            : Content;
 }
 
 public sealed record AiToolCallInfo(string CallId, string Name, string? ArgumentsJson);
@@ -816,10 +826,10 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
                     _sessionMetadata.CumulativeCost = _tokenBudget.EstimatedCostUsd;
 
                 var assistantText = assistantTextSb.ToString();
-                if (string.IsNullOrWhiteSpace(assistantText))
-                    assistantText = "(Tool calls executed — see action log for details)";
 
-                // Update display history and persist
+                // Store the real text (empty for tool-only responses) so chat resume
+                // doesn't feed placeholder text to the model. DisplayContent provides
+                // a UI-friendly placeholder via the record property.
                 _displayHistory.Add(new AiChatMessage("assistant", assistantText, DateTimeOffset.UtcNow)
                 {
                     ToolCalls = toolCalls.Count > 0 ? toolCalls : null,

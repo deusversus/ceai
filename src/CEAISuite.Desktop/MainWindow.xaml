@@ -24,6 +24,7 @@
     <Window.Resources>
         <local:StringToBrushConverter x:Key="BrushConv" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+        <local:BoolToStringConverter x:Key="BoolToStringConverter" />
         <local:NullToCollapsedConverter x:Key="NullToCollapsed" />
         <!-- NOTE: All default control styles are now in Themes/SharedStyles.xaml (merged at App level).
              SystemColors are updated at runtime in UpdateSystemSelectionColors(). -->
@@ -2078,13 +2079,16 @@
                                                 </StackPanel>
 
                                                 <!-- Send / Stop button (circular, accent color) -->
-                                                <Button x:Name="SendStopButton" Grid.Column="4" Click="SendAiMessage" ToolTip="Send message (Enter)"
+                                                <Button x:Name="SendStopButton" Grid.Column="4" Click="SendAiMessage"
+                                                        ToolTip="{Binding IsStreaming, Converter={StaticResource BoolToStringConverter}, ConverterParameter='Stop (Esc)|Send message (Enter)'}"
                                                         Width="32" Height="32" Cursor="Hand" Padding="0">
                                                     <Button.Template>
                                                         <ControlTemplate TargetType="Button">
                                                             <Border x:Name="SendBorder" Background="{DynamicResource ButtonBackground}"
                                                                     CornerRadius="16" Width="32" Height="32">
-                                                                <TextBlock x:Name="SendButtonIcon" Text="↑" FontSize="16" FontWeight="Bold"
+                                                                <TextBlock x:Name="SendButtonIcon"
+                                                                           Text="{Binding IsStreaming, Converter={StaticResource BoolToStringConverter}, ConverterParameter='■|↑'}"
+                                                                           FontSize="16" FontWeight="Bold"
                                                                            Foreground="{DynamicResource ButtonForeground}"
                                                                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-2,0,0" />
                                                             </Border>

@@ -73,16 +73,31 @@ public partial class App : System.Windows.Application
         // ── First-run welcome dialog ──
         if (settingsService.IsFirstRun)
         {
+            // Prevent app shutdown when the dialog is closed — MainWindow hasn't been
+            // created yet, so WPF's default OnLastWindowClose would terminate the app.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
             var welcome = new WelcomeDialog();
             if (welcome.ShowDialog() == true)
             {
+                settingsService.Settings.Provider = welcome.SelectedProvider;
                 if (!string.IsNullOrWhiteSpace(welcome.ApiKey))
-                    settingsService.Settings.OpenAiApiKey = welcome.ApiKey;
+                {
+                    switch (welcome.SelectedProvider)
+                    {
+                        case "openai": settingsService.Settings.OpenAiApiKey = welcome.ApiKey; break;
+                        case "anthropic": settingsService.Settings.AnthropicApiKey = welcome.ApiKey; break;
+                        case "gemini": settingsService.Settings.GeminiApiKey = welcome.ApiKey; break;
+                        case "openai-compatible": settingsService.Settings.CompatibleApiKey = welcome.ApiKey; break;
+                    }
+                }
                 settingsService.Settings.Theme = welcome.SelectedTheme;
                 settingsService.Settings.DensityPreset = welcome.SelectedDensity;
             }
             settingsService.Settings.FirstRunCompleted = true;
             settingsService.Save();
+
+            ShutdownMode = ShutdownMode.OnLastWindowClose;
         }
 
         // ── Crash recovery: check for recovery file before showing main window ──

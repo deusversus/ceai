@@ -218,6 +218,8 @@ public partial class MainWindow : Window, IDisposable
             () => Dispatcher.BeginInvoke(() =>
             {
                 StreamingBlocksList.Items.Refresh();
+                if (StreamingBlocksList.Items.Count > 0)
+                    StreamingBlocksList.ScrollIntoView(StreamingBlocksList.Items[^1]);
                 ScrollChatToBottom();
             }));
         _subs.Subscribe(h => _aiOperatorVm.ChatDisplayRefreshed += h, h => _aiOperatorVm.ChatDisplayRefreshed -= h,

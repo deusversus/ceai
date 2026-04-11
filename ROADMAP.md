@@ -715,6 +715,7 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 |------|---------------|--------------|
 | **D3D/OpenGL overlay** (10F) | Phase 10 | Very High complexity, highest crash risk, obsoleted by multi-monitor setups. Better suited as a community plugin via the 10A plugin system. |
 | **Multi-platform port** (10H) | Phase 10 | Target audience debugs Windows game processes. Linux/macOS via Wine/Proton is a tiny niche with fundamentally different process model challenges. Cherry on top after the core product is finished, not a prerequisite. |
+| **PDB/.NET symbol loading** | Phase 3A | Currently module exports only. Full PDB/DWARF/.NET metadata symbol resolution would enrich disassembler labels, stack traces, and structure dissection. Medium complexity (DbgHelp P/Invoke or similar). Not blocking any workflow — addresses resolve by module+offset — but would significantly improve readability. |
 
 ---
 

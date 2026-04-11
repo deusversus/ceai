@@ -51,9 +51,11 @@ public sealed partial class AiToolFunctions
     }
 
     [ReadOnlyTool]
-    [MaxResultSize(MaxResultSizeAttribute.Large)]
-    [Description("View source code of a script entry by ID or label.")]
-    public Task<string> ViewScript([Description("Node ID or label of the script entry")] string nodeId)
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("View a script entry by ID or label. Returns a structural summary by default. Set fullSource=true to get the complete source code.")]
+    public Task<string> ViewScript(
+        [Description("Node ID or label of the script entry")] string nodeId,
+        [Description("If true, return full source code. Default false returns a structural summary.")] bool fullSource = false)
     {
         var node = ResolveNode(nodeId);
         if (node is null)
@@ -68,11 +70,69 @@ public sealed partial class AiToolFunctions
         }
         if (node.AssemblerScript is null) return Task.FromResult($"Node '{nodeId}' is not a script entry (it's a {(node.IsGroup ? "group" : "value entry")}).");
 
-        var type = node.AssemblerScript.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
-        var status = node.IsScriptEnabled ? "✅ Enabled" : "❌ Disabled";
-        return Task.FromResult(
-            $"Script: {node.Label}\nType: {type}\nStatus: {status}\n" +
-            $"──────────────────────\n{node.AssemblerScript}");
+        if (fullSource)
+        {
+            var type = node.AssemblerScript.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
+            var status = node.IsScriptEnabled ? "Enabled" : "Disabled";
+            return Task.FromResult(
+                $"Script: {node.Label}\nType: {type}\nStatus: {status}\n" +
+                $"──────────────────────\n{node.AssemblerScript}");
+        }
+
+        return Task.FromResult(SummarizeScript(node));
+    }
+
+    private static string SummarizeScript(AddressTableNode node)
+    {
+        var script = node.AssemblerScript!;
+        var ic = CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        var type = script.Contains("LuaCall") ? "LuaCall" : "Auto Assembler";
+        var status = node.IsScriptEnabled ? "Enabled" : "Disabled";
+        var lineCount = script.AsSpan().Count('\n') + 1;
+
+        sb.AppendLine(ic, $"Script: {node.Label}");
+        sb.AppendLine(ic, $"Type: {type} | Status: {status} | {script.Length:#,0} chars, {lineCount} lines");
+
+        // Sections
+        bool hasEnable = script.Contains("[ENABLE]", StringComparison.OrdinalIgnoreCase);
+        bool hasDisable = script.Contains("[DISABLE]", StringComparison.OrdinalIgnoreCase);
+        if (hasEnable || hasDisable)
+        {
+            var sections = $"Sections: {(hasEnable ? "[ENABLE] " : "")}{(hasDisable ? "[DISABLE]" : "")}".TrimEnd();
+            sb.AppendLine(sections);
+        }
+
+        // Key directives
+        var allocs = Regex.Matches(script, @"alloc\s*\(\s*(\w+)", RegexOptions.IgnoreCase);
+        if (allocs.Count > 0)
+            sb.AppendLine(ic, $"Allocs: {string.Join(", ", allocs.Take(5).Select(m => m.Groups[1].Value))}{(allocs.Count > 5 ? $" (+{allocs.Count - 5} more)" : "")}");
+
+        var symbols = Regex.Matches(script, @"registersymbol\s*\(\s*(\w+)", RegexOptions.IgnoreCase);
+        if (symbols.Count > 0)
+            sb.AppendLine(ic, $"Symbols: {string.Join(", ", symbols.Take(5).Select(m => m.Groups[1].Value))}");
+
+        var labels = Regex.Matches(script, @"label\s*\(\s*(\w+)", RegexOptions.IgnoreCase);
+        if (labels.Count > 0)
+            sb.AppendLine(ic, $"Labels: {string.Join(", ", labels.Take(5).Select(m => m.Groups[1].Value))}{(labels.Count > 5 ? $" (+{labels.Count - 5} more)" : "")}");
+
+        // Hook targets (module+offset: lines)
+        var hooks = Regex.Matches(script, @"^\s*(\w+\.dll\+[0-9A-Fa-f]+)\s*:", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+        if (hooks.Count > 0)
+            sb.AppendLine(ic, $"Hooks: {string.Join(", ", hooks.Take(3).Select(m => m.Groups[1].Value))}{(hooks.Count > 3 ? $" (+{hooks.Count - 3} more)" : "")}");
+
+        // AOB scans
+        var aobs = Regex.Matches(script, @"aobscan(?:module)?\s*\(\s*(\w+)", RegexOptions.IgnoreCase);
+        if (aobs.Count > 0)
+            sb.AppendLine(ic, $"AOB scans: {string.Join(", ", aobs.Take(3).Select(m => m.Groups[1].Value))}{(aobs.Count > 3 ? $" (+{aobs.Count - 3} more)" : "")}");
+
+        // Assert directives
+        var asserts = Regex.Matches(script, @"assert\s*\(", RegexOptions.IgnoreCase);
+        if (asserts.Count > 0)
+            sb.AppendLine(ic, $"Asserts: {asserts.Count}");
+
+        sb.Append("Use ViewScript(nodeId, fullSource: true) for complete source.");
+        return sb.ToString();
     }
 
     [ReadOnlyTool]

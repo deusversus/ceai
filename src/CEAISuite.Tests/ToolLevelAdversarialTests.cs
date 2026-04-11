@@ -345,10 +345,14 @@ public class ToolLevelAdversarialTests
         var maliciousScript = "[ENABLE]\n<script>document.cookie</script>\nalloc(mem,64)\n[DISABLE]\ndealloc(mem)";
         AddScriptNode(addressTable, "s-malicious", "View Test", maliciousScript);
 
-        var result = await tools.ViewScript("s-malicious");
+        // Summary mode should not expose raw script content
+        var summary = await tools.ViewScript("s-malicious");
+        Assert.NotNull(summary);
+        Assert.Contains("View Test", summary);
 
-        Assert.NotNull(result);
-        Assert.Contains("<script>document.cookie</script>", result);
-        Assert.Contains("View Test", result);
+        // Full source mode should display malicious content as plain text (not sanitized)
+        var full = await tools.ViewScript("s-malicious", fullSource: true);
+        Assert.Contains("<script>document.cookie</script>", full);
+        Assert.Contains("View Test", full);
     }
 }

@@ -23,6 +23,9 @@ public sealed class MicroCompaction
         // CEAI-specific tools with potentially large output
         "read_memory", "scan_memory", "disassemble", "list_modules",
         "list_regions", "read_stack", "get_threads",
+        // Address table & CT tools (can be very large with 200+ entries / 50+ scripts)
+        "ViewScript", "ListAddressTable", "RefreshAddressTable", "ListScripts",
+        "SummarizeCheatTable", "LoadCheatTable", "SaveCheatTable",
         // Generic large-output tools
         "execute_command", "read_file", "search_files", "glob_files",
     };

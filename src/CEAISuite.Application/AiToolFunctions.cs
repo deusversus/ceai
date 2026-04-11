@@ -260,17 +260,22 @@ public sealed partial class AiToolFunctions(
 
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
-    [Description("List address table entries with pagination.")]
+    [Description("List address table entries with pagination. Returns compact text by default; set compact=false for full JSON.")]
     public Task<string> ListAddressTable(
         [Description("Number of entries to skip (default 0). Use for pagination.")] int offset = 0,
-        [Description("Max entries to return (default 50, max 100).")] int limit = 50)
+        [Description("Max entries to return (default 50, max 100).")] int limit = 50,
+        [Description("If true (default), return compact one-line-per-entry format. If false, return full JSON.")] bool compact = true)
     {
         var roots = addressTableService.Roots;
         var totalCount = CountNodes(roots);
         if (totalCount == 0)
-            return Task.FromResult(ToJson(new { entries = Array.Empty<object>(), count = 0, total = 0 }));
+            return Task.FromResult("Address table is empty (0 entries).");
 
         limit = Math.Clamp(limit, 1, 100);
+
+        if (compact)
+            return Task.FromResult(FormatCompactTable(roots, offset, limit, totalCount));
+
         var allNodes = FlattenNodes(roots);
         var page = allNodes.Skip(offset).Take(limit);
 
@@ -283,6 +288,50 @@ public sealed partial class AiToolFunctions(
             hasMore = offset + limit < totalCount
         }));
     }
+
+    private static string FormatCompactTable(IReadOnlyList<AddressTableNode> roots, int offset, int limit, int total)
+    {
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        var endIdx = Math.Min(offset + limit, total);
+        sb.AppendLine(ic, $"Address Table ({total} entries, showing {offset + 1}-{endIdx}):");
+
+        int index = 0;
+        FormatCompactNodes(roots, sb, 0, offset, limit, ref index);
+
+        if (endIdx < total)
+            sb.Append(ic, $"... {total - endIdx} more (offset={endIdx} for next page)");
+        return sb.ToString();
+    }
+
+    private static void FormatCompactNodes(IEnumerable<AddressTableNode> nodes, System.Text.StringBuilder sb, int depth, int offset, int limit, ref int index)
+    {
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        var indent = new string(' ', depth * 2);
+        foreach (var n in nodes)
+        {
+            if (index >= offset + limit) return;
+            if (index >= offset)
+            {
+                if (n.IsGroup)
+                    sb.AppendLine(ic, $"{indent}[G] {Truncate(n.Label, 35)} ({n.Children.Count} children)");
+                else if (n.IsScriptEntry)
+                    sb.AppendLine(ic, $"{indent}[S] {Truncate(n.Label, 35)} {n.Id} {(n.IsScriptEnabled ? "ON" : "OFF")}");
+                else
+                {
+                    var addr = n.ResolvedAddress.HasValue ? $"0x{n.ResolvedAddress.Value:X}" : n.Address;
+                    var locked = n.IsLocked ? " LOCKED" : "";
+                    sb.AppendLine(ic, $"{indent}[V] {Truncate(n.Label, 25)} {addr} {n.DataType} {n.DisplayValue ?? "?"}{locked}");
+                }
+            }
+            index++;
+            if (n.IsGroup && n.Children.Count > 0)
+                FormatCompactNodes(n.Children, sb, depth + 1, offset, limit, ref index);
+        }
+    }
+
+    private static string Truncate(string s, int max)
+        => s.Length <= max ? s : s[..(max - 1)] + "…";
 
     private static List<object> FlattenNodes(IEnumerable<AddressTableNode> nodes)
     {
@@ -314,6 +363,60 @@ public sealed partial class AiToolFunctions(
         };
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Get a bird's-eye overview of the address table: group structure, entry counts by type, script status. Much cheaper than paging through ListAddressTable.")]
+    public Task<string> SummarizeCheatTable()
+    {
+        var roots = addressTableService.Roots;
+        if (roots.Count == 0) return Task.FromResult("Address table is empty.");
+
+        var totalEntries = CountNodes(roots);
+        var scriptCount = CountScriptsInNodes(roots);
+        var leafCount = addressTableService.Entries.Count;
+        var lockedCount = addressTableService.Entries.Count(e => e.IsLocked);
+
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(ic, $"Address Table: {totalEntries} entries ({leafCount} values, {scriptCount} scripts, {lockedCount} locked)");
+        sb.AppendLine();
+        sb.AppendLine("Structure:");
+        foreach (var root in roots)
+        {
+            if (root.IsGroup)
+            {
+                var cv = CountLeaves(root.Children);
+                var cs = CountScriptsInNodes(root.Children);
+                var cg = root.Children.Count(c => c.IsGroup);
+                sb.AppendLine(ic, $"  [{root.Label}] {root.Children.Count} children ({cv} values, {cs} scripts, {cg} subgroups)");
+            }
+            else if (root.IsScriptEntry)
+                sb.AppendLine(ic, $"  [Script] {root.Label} ({(root.IsScriptEnabled ? "ON" : "OFF")})");
+            else
+                sb.AppendLine(ic, $"  [Value] {root.Label} = {root.DisplayValue}");
+        }
+
+        // Data type distribution
+        var byType = addressTableService.Entries
+            .GroupBy(e => e.DataType)
+            .OrderByDescending(g => g.Count())
+            .Select(g => $"{g.Key}:{g.Count()}");
+        sb.AppendLine(ic, $"\nTypes: {string.Join(", ", byType)}");
+
+        return Task.FromResult(sb.ToString());
+    }
+
+    private static int CountLeaves(IEnumerable<AddressTableNode> nodes)
+    {
+        int count = 0;
+        foreach (var n in nodes)
+        {
+            if (!n.IsGroup && !n.IsScriptEntry) count++;
+            if (n.Children.Count > 0) count += CountLeaves(n.Children);
+        }
+        return count;
+    }
+
     [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Refresh address table values from process memory.")]
@@ -323,21 +426,25 @@ public sealed partial class AiToolFunctions(
         var entries = addressTableService.Entries;
         var total = entries.Count;
 
-        // Only report entries with non-zero values or that changed
         var changed = entries.Where(e =>
             e.CurrentValue != e.PreviousValue && e.PreviousValue is not null).ToList();
-        var nonZero = entries.Where(e =>
-            e.CurrentValue is not null && e.CurrentValue != "0" && e.CurrentValue != "0.0").ToList();
+        var nonZeroCount = entries.Count(e =>
+            e.CurrentValue is not null && e.CurrentValue != "0" && e.CurrentValue != "0.0");
 
-        var summary = new
+        const int maxChangedShown = 20;
+        var changedPreview = changed.Take(maxChangedShown)
+            .Select(e => $"  {e.Label}: {e.PreviousValue} -> {e.CurrentValue}");
+
+        var ic = System.Globalization.CultureInfo.InvariantCulture;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(ic, $"Refreshed {total} entries. {changed.Count} changed, {nonZeroCount} non-zero.");
+        if (changed.Count > 0)
         {
-            totalRefreshed = total,
-            changedCount = changed.Count,
-            nonZeroCount = nonZero.Count,
-            changed = changed.Select(e => new { e.Label, e.Address, current = e.CurrentValue, previous = e.PreviousValue }),
-        };
-
-        return ToJson(summary);
+            sb.AppendLine(string.Join('\n', changedPreview));
+            if (changed.Count > maxChangedShown)
+                sb.AppendLine(ic, $"  ... {changed.Count - maxChangedShown} more changes. Use ListAddressTable to see all values.");
+        }
+        return sb.ToString();
     }
 
     // ── Artifact generation tools ──
@@ -431,7 +538,8 @@ public sealed partial class AiToolFunctions(
             $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries imported with hierarchy. " +
             $"{leafCount} address entries, {scriptCount} scripts, {nodes.Count} top-level nodes. " +
             $"Table version: {ctFile.TableVersion}" +
-            (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : ""));
+            (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : "") +
+            ". Use SummarizeCheatTable for a structural overview.");
     }
 
     [ConcurrencySafe]

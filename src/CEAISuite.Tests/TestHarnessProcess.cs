@@ -178,6 +178,36 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
         return (tid, addr);
     }
 
+    /// <summary>Toggle page protection on an address. Returns the old protection value.</summary>
+    public async Task<uint> ProtectFlipAsync(nuint address, uint newProtection, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"PROTECT_FLIP {address:X} {newProtection:X}", ct: ct);
+        if (resp is null || !resp.StartsWith("PROTECT_FLIP_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"PROTECT_FLIP failed: {resp}");
+        return uint.Parse(resp.AsSpan(16), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Start a background thread writing random Int32 values at the address. Returns thread ID.</summary>
+    public async Task<int> StartValueChurnAsync(nuint address, int intervalMs, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"VALUE_CHURN {address:X} {intervalMs}", ct: ct);
+        if (resp is null || !resp.StartsWith("VALUE_CHURN_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"VALUE_CHURN failed: {resp}");
+        return int.Parse(resp.AsSpan(15), CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Allocate a pointer chain that re-allocates the final block periodically. Returns (baseAddress, threadId).</summary>
+    public async Task<(nuint BaseAddress, int ThreadId)> StartPointerChainAsync(int depth, int reallocIntervalMs, CancellationToken ct = default)
+    {
+        var resp = await SendCommandAsync($"POINTER_CHAIN {depth} {reallocIntervalMs}", ct: ct);
+        if (resp is null || !resp.StartsWith("POINTER_CHAIN_OK:", StringComparison.Ordinal))
+            throw new InvalidOperationException($"POINTER_CHAIN failed: {resp}");
+        var colonIdx = resp.IndexOf(':', 17);
+        var addr = nuint.Parse(resp.AsSpan(17, colonIdx - 17), NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+        var tid = int.Parse(resp.AsSpan(colonIdx + 1), CultureInfo.InvariantCulture);
+        return (addr, tid);
+    }
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed) return;

@@ -85,6 +85,19 @@ public sealed partial class AiToolFunctions(
         catch (Exception ex) { if (logger is not null && logger.IsEnabled(LogLevel.Debug)) logger.LogDebug(ex, "IsProcessAlive check failed for PID {ProcessId}", processId); return false; }
     }
 
+    /// <summary>
+    /// Validate that a destructive operation targets the currently attached process.
+    /// Returns an error string if mismatched, or null if valid.
+    /// </summary>
+    private string? ValidateDestructiveProcessId(int processId)
+    {
+        if (!engineFacade.IsAttached)
+            return "No process attached. Use AttachProcess first.";
+        if (engineFacade.AttachedProcessId != processId)
+            return $"Process ID mismatch: tool targets PID {processId} but attached to PID {engineFacade.AttachedProcessId}. Attach to the correct process first.";
+        return null;
+    }
+
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("List running processes. Returns PID, name, architecture.")]

@@ -320,6 +320,122 @@ static void ProcessCommand(
             break;
         }
 
+        case "PROTECT_FLIP":
+        {
+            // PROTECT_FLIP <address_hex> <new_protection_hex>
+            if (parts.Length < 3 || !TryParseHexAddress(parts[1], out var addr)
+                || !uint.TryParse(parts[2], NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var newProt))
+            {
+                Respond("PROTECT_FLIP_ERR:usage_PROTECT_FLIP_addr_prot");
+                break;
+            }
+
+            bool ok = NativeMethods.VirtualProtect((IntPtr)addr, (nuint)0x1000, newProt, out uint oldProt);
+            if (ok)
+                Respond($"PROTECT_FLIP_OK:{oldProt:X}");
+            else
+                Respond($"PROTECT_FLIP_ERR:{Marshal.GetLastWin32Error()}");
+            break;
+        }
+
+        case "VALUE_CHURN":
+        {
+            // VALUE_CHURN <address_hex> <interval_ms>
+            if (parts.Length < 3 || !TryParseHexAddress(parts[1], out var addr)
+                || !int.TryParse(parts[2], out var intervalMs))
+            {
+                Respond("VALUE_CHURN_ERR:usage_VALUE_CHURN_addr_interval");
+                break;
+            }
+
+            var cts = new CancellationTokenSource();
+            var tidReady = new ManualResetEventSlim(false);
+            int nativeTid = 0;
+
+            var thread = new Thread(() =>
+            {
+                nativeTid = (int)NativeMethods.GetCurrentThreadId();
+                tidReady.Set();
+                var rng = Random.Shared;
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    try { Marshal.WriteInt32((IntPtr)addr, rng.Next()); }
+                    catch { break; }
+                    Thread.Sleep(intervalMs);
+                }
+            }) { IsBackground = true, Name = $"ValueChurn-{addr:X}" };
+
+            thread.Start();
+            tidReady.Wait(TimeSpan.FromSeconds(3));
+            loopThreads[nativeTid] = (thread, cts);
+            Respond($"VALUE_CHURN_OK:{nativeTid}");
+            break;
+        }
+
+        case "POINTER_CHAIN":
+        {
+            // POINTER_CHAIN <depth> <reallocate_interval_ms>
+            if (parts.Length < 3 || !int.TryParse(parts[1], out var depth) || depth < 1 || depth > 20
+                || !int.TryParse(parts[2], out var intervalMs))
+            {
+                Respond("POINTER_CHAIN_ERR:usage_POINTER_CHAIN_depth_interval");
+                break;
+            }
+
+            // Allocate chain: block[0] → block[1] → ... → block[depth-1]
+            var blocks = new nint[depth];
+            for (int i = 0; i < depth; i++)
+            {
+                blocks[i] = NativeMethods.VirtualAlloc(IntPtr.Zero, (nuint)64,
+                    NativeMethods.MEM_COMMIT | NativeMethods.MEM_RESERVE,
+                    NativeMethods.PAGE_EXECUTE_READWRITE);
+                if (blocks[i] == IntPtr.Zero)
+                {
+                    Respond("POINTER_CHAIN_ERR:alloc_failed");
+                    break;
+                }
+            }
+            if (blocks[^1] == IntPtr.Zero) break;
+
+            // Write forward pointers
+            for (int i = 0; i < depth - 1; i++)
+                Marshal.WriteIntPtr(blocks[i], blocks[i + 1]);
+            // Final block: write a marker value
+            Marshal.WriteInt32(blocks[^1], 0xDEAD);
+
+            // Background thread re-allocates the final block periodically
+            var cts = new CancellationTokenSource();
+            var tidReady = new ManualResetEventSlim(false);
+            int nativeTid = 0;
+
+            var thread = new Thread(() =>
+            {
+                nativeTid = (int)NativeMethods.GetCurrentThreadId();
+                tidReady.Set();
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    Thread.Sleep(intervalMs);
+                    // Free and re-allocate the last block
+                    NativeMethods.VirtualFree(blocks[^1], 0, NativeMethods.MEM_RELEASE);
+                    blocks[^1] = NativeMethods.VirtualAlloc(IntPtr.Zero, (nuint)64,
+                        NativeMethods.MEM_COMMIT | NativeMethods.MEM_RESERVE,
+                        NativeMethods.PAGE_EXECUTE_READWRITE);
+                    if (blocks[^1] != IntPtr.Zero)
+                    {
+                        Marshal.WriteInt32(blocks[^1], 0xDEAD);
+                        if (depth > 1)
+                            Marshal.WriteIntPtr(blocks[^2], blocks[^1]);
+                    }
+                }
+            }) { IsBackground = true, Name = $"PointerChain-{depth}" };
+
+            thread.Start();
+            tidReady.Wait(TimeSpan.FromSeconds(3));
+            loopThreads[nativeTid] = (thread, cts);
+            Respond($"POINTER_CHAIN_OK:{blocks[0]:X}:{nativeTid}");
+            break;
+        }
+
         case "EXIT":
         {
             var code = parts.Length >= 2 && int.TryParse(parts[1], out var c) ? c : 0;
@@ -371,6 +487,7 @@ static class NativeMethods
 {
     public const uint MEM_COMMIT  = 0x1000;
     public const uint MEM_RESERVE = 0x2000;
+    public const uint MEM_RELEASE = 0x8000;
     public const uint PAGE_EXECUTE_READWRITE = 0x40;
 
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -379,6 +496,14 @@ static class NativeMethods
         nuint  dwSize,
         uint   flAllocationType,
         uint   flProtect);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool VirtualFree(IntPtr lpAddress, nuint dwSize, uint dwFreeType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool VirtualProtect(IntPtr lpAddress, nuint dwSize, uint flNewProtect, out uint lpflOldProtect);
 
     [DllImport("kernel32.dll")]
     public static extern uint GetCurrentThreadId();

@@ -98,14 +98,20 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
             {
                 if (cmd is AddEntryToTableCommand add)
                 {
-                    if (Enum.TryParse<CEAISuite.Engine.Abstractions.MemoryDataType>(add.DataType, true, out var dt))
-                        _addressTableService.AddEntry(add.Address, dt, add.Value ?? "0", add.Label);
+                    _dispatcher.Invoke(() =>
+                    {
+                        if (Enum.TryParse<CEAISuite.Engine.Abstractions.MemoryDataType>(add.DataType, true, out var dt))
+                            _addressTableService.AddEntry(add.Address, dt, add.Value ?? "0", add.Label);
+                    });
                 }
                 else if (cmd is SetEntryValueCommand set)
                 {
-                    var node = _addressTableService.FindNode(set.EntryId);
-                    if (node is not null)
-                        node.CurrentValue = set.NewValue;
+                    _dispatcher.Invoke(() =>
+                    {
+                        var node = _addressTableService.FindNode(set.EntryId);
+                        if (node is not null)
+                            node.CurrentValue = set.NewValue;
+                    });
                 }
             };
         }

@@ -63,7 +63,7 @@ public class MainViewModelTests : IDisposable
         var findResultsVm = new FindResultsViewModel();
         var scannerVm = new ScannerViewModel(
             scanService, addressTableService, _processContext, _outputLog,
-            _navigation, _clipboard, new StubAiContextService());
+            _navigation, _clipboard, new StubAiContextService(), _dispatcher);
 
         return new MainViewModel(
             dashboardService, addressTableService, sessionService,

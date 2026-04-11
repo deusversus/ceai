@@ -203,6 +203,7 @@ public partial class SettingsWindow : Window, IDisposable
 
         RequirePlanCheck.IsChecked = s.RequirePlanForDestructive;
         EarlyToolExecutionCheck.IsChecked = s.EnableEarlyToolExecution;
+        EnableCoPilotCheck.IsChecked = s.EnableCoPilot;
 
         // Additional General settings
         MaxConversationMessagesBox.Text = s.MaxConversationMessages.ToString(CultureInfo.InvariantCulture);
@@ -835,6 +836,7 @@ public partial class SettingsWindow : Window, IDisposable
 
         s.RequirePlanForDestructive = RequirePlanCheck.IsChecked == true;
         s.EnableEarlyToolExecution = EarlyToolExecutionCheck.IsChecked == true;
+        s.EnableCoPilot = EnableCoPilotCheck.IsChecked == true;
 
         // Additional General settings
         if (int.TryParse(MaxConversationMessagesBox.Text, out var maxMsg) && maxMsg >= 0)

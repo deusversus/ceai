@@ -214,6 +214,14 @@ public sealed class AppSettings : IDisposable
     /// </summary>
     public bool EnableEarlyToolExecution { get; set; }
 
+    /// <summary>
+    /// Enable the AI Co-Pilot mode, which allows the AI to issue UI commands
+    /// (navigate panels, populate forms, add entries, attach processes) via
+    /// a whitelisted command bus with approval flow.
+    /// Default: true (commands still require [Destructive] approval).
+    /// </summary>
+    public bool EnableCoPilot { get; set; } = true;
+
     // ── General ──
 
     /// <summary>Auto-save interval in minutes for address table and session data.</summary>

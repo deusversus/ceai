@@ -989,6 +989,18 @@
                                       FontSize="13" Margin="0,0,0,8" />
                             <TextBlock Text="Read-only tools start running during LLM stream for lower latency"
                                        Foreground="{DynamicResource TertiaryForeground}" FontSize="11" Margin="20,0,0,0" />
+
+                            <Separator Margin="0,16,0,16" />
+
+                            <!-- AI Co-Pilot -->
+                            <TextBlock Text="AI Co-Pilot" FontWeight="SemiBold" FontSize="14" />
+                            <TextBlock Text="Let the AI issue whitelisted UI commands (navigate, populate forms, add entries)"
+                                       Foreground="{DynamicResource SecondaryForeground}" Margin="0,2,0,10" />
+                            <CheckBox x:Name="EnableCoPilotCheck"
+                                      Content="Enable AI Co-Pilot mode"
+                                      FontSize="13" Margin="0,0,0,8" />
+                            <TextBlock Text="Commands are marked [Destructive] and require approval before executing"
+                                       Foreground="{DynamicResource TertiaryForeground}" FontSize="11" Margin="20,0,0,0" />
                         </StackPanel>
                     </ScrollViewer>
                 </Border>

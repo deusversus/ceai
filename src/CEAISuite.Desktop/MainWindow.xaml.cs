@@ -133,7 +133,18 @@ public partial class MainWindow : Window, IDisposable
             if (cmd is NavigatePanelCommand nav)
                 Dispatcher.Invoke(() => { try { ActivateAnchorable(nav.PanelId); } catch { /* panel not found */ } });
             else if (cmd is AttachProcessCommand attach)
-                _outputLog.Append("CoPilot", "Info", $"AttachProcess({attach.ProcessId}) received — use Process panel to attach.");
+                Dispatcher.Invoke(() =>
+                {
+                    var match = _processListVm.Processes.FirstOrDefault(p => p.Id == attach.ProcessId);
+                    if (match is not null)
+                    {
+                        _processListVm.SelectedProcess = match;
+                        InspectSelectedProcess(this, new RoutedEventArgs());
+                        _outputLog.Append("CoPilot", "Info", $"Attached to PID {attach.ProcessId} via Co-Pilot.");
+                    }
+                    else
+                        _outputLog.Append("CoPilot", "Warning", $"AttachProcess: PID {attach.ProcessId} not found in process list.");
+                });
         };
 
         // Apply saved theme

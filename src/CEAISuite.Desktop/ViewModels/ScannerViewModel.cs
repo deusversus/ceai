@@ -26,6 +26,7 @@ public partial class ScannerViewModel : ObservableObject
         INavigationService navigationService,
         IClipboardService clipboard,
         IAiContextService aiContext,
+        IDispatcherService dispatcher,
         IUiCommandBus? uiCommandBus = null)
     {
         _scanService = scanService;
@@ -43,11 +44,14 @@ public partial class ScannerViewModel : ObservableObject
             {
                 if (cmd is PopulateScanFormCommand scan)
                 {
-                    if (scan.ScanValue is not null) ScanValue = scan.ScanValue;
-                    if (scan.ScanType is not null && Enum.TryParse<ScanType>(scan.ScanType, true, out var st))
-                        SelectedScanType = st;
-                    if (scan.DataType is not null && Enum.TryParse<MemoryDataType>(scan.DataType, true, out var dt))
-                        SelectedDataType = dt;
+                    dispatcher.Invoke(() =>
+                    {
+                        if (scan.ScanValue is not null) ScanValue = scan.ScanValue;
+                        if (scan.ScanType is not null && Enum.TryParse<ScanType>(scan.ScanType, true, out var st))
+                            SelectedScanType = st;
+                        if (scan.DataType is not null && Enum.TryParse<MemoryDataType>(scan.DataType, true, out var dt))
+                            SelectedDataType = dt;
+                    });
                 }
             };
         }

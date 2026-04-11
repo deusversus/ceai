@@ -45,10 +45,22 @@ public sealed class UiCommandBus : IUiCommandBus
         "SetEntryValue", "AttachProcess"
     };
 
+    private readonly AppSettingsService? _settingsService;
+
+    public UiCommandBus(AppSettingsService? settingsService = null)
+    {
+        _settingsService = settingsService;
+    }
+
     public event Action<UiCommand>? CommandReceived;
 
     public bool Dispatch(UiCommand command)
     {
+#pragma warning disable CA1416 // AppSettingsService is Windows-only; safe because CEAI is Windows-only
+        if (_settingsService is not null && !_settingsService.Settings.EnableCoPilot)
+#pragma warning restore CA1416
+            return false;
+
         if (!Whitelist.Contains(command.CommandType))
             return false;
 

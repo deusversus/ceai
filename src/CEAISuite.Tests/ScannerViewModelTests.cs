@@ -12,13 +12,14 @@ public class ScannerViewModelTests
     private readonly StubEngineFacade _engineFacade = new();
     private readonly StubProcessContext _processContext = new();
     private readonly StubOutputLog _outputLog = new();
+    private readonly StubDispatcherService _dispatcher = new();
 
     private ScannerViewModel CreateVm()
     {
         var scanService = new ScanService(_scanEngine);
         var addressTableService = new AddressTableService(_engineFacade);
         return new ScannerViewModel(scanService, addressTableService, _processContext, _outputLog,
-            new StubNavigationService(), new StubClipboardService(), new StubAiContextService());
+            new StubNavigationService(), new StubClipboardService(), new StubAiContextService(), _dispatcher);
     }
 
     [Fact]
@@ -454,7 +455,7 @@ public class ScannerViewModelTests
         var scanService = new ScanService(_scanEngine);
         var addressTableService = new AddressTableService(new StubEngineFacade());
         return new ScannerViewModel(scanService, addressTableService, _processContext, _outputLog,
-            _navigation, _clipboard, _aiContext);
+            _navigation, _clipboard, _aiContext, _dispatcher);
     }
 
     // Since CreateVm() uses inline stubs, use reflection to get the services

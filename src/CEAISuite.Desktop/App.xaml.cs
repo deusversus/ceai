@@ -190,7 +190,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<AiChatStore>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<PluginHost>(sp => new PluginHost());
-        services.AddSingleton<UiCommandBus>();
+        services.AddSingleton<UiCommandBus>(sp => new UiCommandBus(sp.GetRequiredService<AppSettingsService>()));
         services.AddSingleton<IUiCommandBus>(sp => sp.GetRequiredService<UiCommandBus>());
 
 

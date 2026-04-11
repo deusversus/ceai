@@ -78,7 +78,7 @@ public class UILifecycleTests
         var scanService = new ScanService(new StubScanEngine());
         var addressTableService = new AddressTableService(_engine);
         return new ScannerViewModel(scanService, addressTableService,
-            _processContext, _outputLog, _navigation, _clipboard, _aiContext);
+            _processContext, _outputLog, _navigation, _clipboard, _aiContext, _dispatcher);
     }
 
     // ── PointerScannerViewModel ──

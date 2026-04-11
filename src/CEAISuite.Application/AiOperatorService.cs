@@ -1957,8 +1957,8 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         try
         {
             await _mcpManager.DisposeAsync().ConfigureAwait(false);
-            if (_pluginHost is not null)
-                await _pluginHost.DisposeAsync().ConfigureAwait(false);
+            // PluginHost is a DI singleton — its lifetime is owned by the container.
+            // Do NOT dispose it here; the ServiceProvider handles that.
         }
         catch (Exception ex)
         {
@@ -1979,8 +1979,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
                 try
                 {
                     await _mcpManager.DisposeAsync().ConfigureAwait(false);
-                    if (_pluginHost is not null)
-                        await _pluginHost.DisposeAsync().ConfigureAwait(false);
+                    // PluginHost disposed by DI container, not here.
                 }
                 catch (OperationCanceledException) { }
             });

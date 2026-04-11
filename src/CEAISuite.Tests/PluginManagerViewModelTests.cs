@@ -13,7 +13,8 @@ public class PluginManagerViewModelTests
         var dir = Path.Combine(Path.GetTempPath(), "ceai-test-plugins-" + Guid.NewGuid().ToString("N"));
         var host = new PluginHost(pluginDirectory: dir);
         var log = new StubOutputLog();
-        return (new PluginManagerViewModel(host, log), host, log);
+        var dispatcher = new StubDispatcherService();
+        return (new PluginManagerViewModel(host, log, dispatcher), host, log);
     }
 
     [Fact]

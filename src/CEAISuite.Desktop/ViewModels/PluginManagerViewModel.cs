@@ -16,6 +16,10 @@ public sealed partial class PluginManagerViewModel : ObservableObject
     private readonly PluginHost _pluginHost;
     private readonly IOutputLog _outputLog;
     private readonly PluginCatalogService? _catalogService;
+    private readonly IDispatcherService _dispatcher;
+
+    // Cached catalog entries from last refresh (avoids re-fetching on install)
+    private IReadOnlyList<PluginCatalogService.CatalogEntry> _cachedCatalogEntries = [];
 
     [ObservableProperty] private ObservableCollection<PluginDisplayItem> _plugins = [];
     [ObservableProperty] private PluginDisplayItem? _selectedPlugin;
@@ -28,10 +32,12 @@ public sealed partial class PluginManagerViewModel : ObservableObject
     [ObservableProperty] private string _catalogStatus = "Click Refresh to browse community plugins.";
     [ObservableProperty] private int _selectedTabIndex;
 
-    public PluginManagerViewModel(PluginHost pluginHost, IOutputLog outputLog, PluginCatalogService? catalogService = null)
+    public PluginManagerViewModel(PluginHost pluginHost, IOutputLog outputLog,
+        IDispatcherService dispatcher, PluginCatalogService? catalogService = null)
     {
         _pluginHost = pluginHost;
         _outputLog = outputLog;
+        _dispatcher = dispatcher;
         _catalogService = catalogService;
         Refresh();
     }
@@ -131,20 +137,25 @@ public sealed partial class PluginManagerViewModel : ObservableObject
         try
         {
             var entries = await _catalogService.FetchCatalogAsync().ConfigureAwait(false);
+            _cachedCatalogEntries = entries;
             var installedNames = _pluginHost.Plugins.Select(p => p.Plugin.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            CatalogPlugins = new ObservableCollection<CatalogPluginDisplayItem>(
-                entries.Select(e => new CatalogPluginDisplayItem
-                {
-                    Name = e.Name,
-                    Version = e.Version,
-                    Description = e.Description,
-                    Author = e.Author,
-                    Size = e.SizeBytes > 0 ? $"{e.SizeBytes / 1024.0:F0} KB" : "",
-                    IsInstalled = installedNames.Contains(e.Name)
-                }));
-            CatalogStatus = entries.Count > 0
-                ? $"{entries.Count} plugin(s) available"
-                : "No plugins in the community catalog.";
+
+            _dispatcher.Invoke(() =>
+            {
+                CatalogPlugins = new ObservableCollection<CatalogPluginDisplayItem>(
+                    entries.Select(e => new CatalogPluginDisplayItem
+                    {
+                        Name = e.Name,
+                        Version = e.Version,
+                        Description = e.Description,
+                        Author = e.Author,
+                        Size = e.SizeBytes > 0 ? $"{e.SizeBytes / 1024.0:F0} KB" : "",
+                        IsInstalled = installedNames.Contains(e.Name)
+                    }));
+                CatalogStatus = entries.Count > 0
+                    ? $"{entries.Count} plugin(s) available"
+                    : "No plugins in the community catalog.";
+            });
         }
         catch (Exception ex)
         {
@@ -167,12 +178,12 @@ public sealed partial class PluginManagerViewModel : ObservableObject
 
         try
         {
-            // Find the matching catalog entry
-            var entries = await _catalogService.FetchCatalogAsync().ConfigureAwait(false);
-            var entry = entries.FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+            // Use cached catalog entries instead of re-fetching
+            var entry = _cachedCatalogEntries.FirstOrDefault(e =>
+                string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
             if (entry is null)
             {
-                _outputLog.Append("Plugins", "Error", $"Plugin '{name}' not found in catalog.");
+                _outputLog.Append("Plugins", "Error", $"Plugin '{name}' not found in cached catalog. Try refreshing.");
                 return;
             }
 
@@ -180,7 +191,7 @@ public sealed partial class PluginManagerViewModel : ObservableObject
                 entry, _pluginHost.PluginDirectory).ConfigureAwait(false);
 
             _outputLog.Append("Plugins", "Info", $"Downloaded {name} to {destPath}. Restart to load, or use Refresh.");
-            Refresh();
+            _dispatcher.Invoke(() => Refresh());
             await RefreshCatalogAsync().ConfigureAwait(false); // Update installed status
         }
         catch (Exception ex)

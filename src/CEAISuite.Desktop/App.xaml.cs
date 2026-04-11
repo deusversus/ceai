@@ -158,37 +158,46 @@ public partial class App : System.Windows.Application
                 {
                     var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
                     var url = query["url"];
-                    if (!string.IsNullOrWhiteSpace(url))
+                    if (string.IsNullOrWhiteSpace(url)) continue;
+
+                    // Security: enforce HTTPS for plugin downloads
+                    if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
                     {
-                        var pluginHost = Services.GetRequiredService<PluginHost>();
-                        var outputLog = Services.GetRequiredService<IOutputLog>();
-                        outputLog.Append("Protocol", "Info", $"ceai:// install-plugin: {url}");
-
-                        // Fire and forget — download will happen in the background
-                        _ = Task.Run(async () =>
-                        {
-                            try
-                            {
-                                using var http = new HttpClient();
-                                var pluginDir = pluginHost.PluginDirectory;
-                                if (!Directory.Exists(pluginDir))
-                                    Directory.CreateDirectory(pluginDir);
-
-                                var fileName = Path.GetFileName(new Uri(url).LocalPath);
-                                if (string.IsNullOrWhiteSpace(fileName)) fileName = "plugin.dll";
-                                var destPath = Path.Combine(pluginDir, fileName);
-
-                                var bytes = await http.GetByteArrayAsync(url).ConfigureAwait(false);
-                                await File.WriteAllBytesAsync(destPath, bytes).ConfigureAwait(false);
-
-                                outputLog.Append("Protocol", "Info", $"Plugin downloaded to {destPath}. Restart to load.");
-                            }
-                            catch (Exception ex)
-                            {
-                                outputLog.Append("Protocol", "Error", $"Plugin install failed: {ex.Message}");
-                            }
-                        });
+                        System.Diagnostics.Trace.TraceWarning($"ceai:// install-plugin rejected non-HTTPS URL: {url}");
+                        continue;
                     }
+
+                    var pluginHost = Services.GetRequiredService<PluginHost>();
+                    var catalogService = Services.GetRequiredService<PluginCatalogService>();
+                    var outputLog = Services.GetRequiredService<IOutputLog>();
+                    outputLog.Append("Protocol", "Info", $"ceai:// install-plugin: {url}");
+
+                    // Use PluginCatalogService for SHA256-verified download
+                    var fileName = Path.GetFileName(new Uri(url).LocalPath);
+                    if (string.IsNullOrWhiteSpace(fileName)) fileName = "plugin.dll";
+
+                    var entry = new PluginCatalogService.CatalogEntry(
+                        Name: Path.GetFileNameWithoutExtension(fileName),
+                        Version: "unknown",
+                        Description: "Installed via ceai:// protocol",
+                        Author: "unknown",
+                        DownloadUrl: url,
+                        Checksum: query["checksum"],  // Optional: ceai://install-plugin?url=...&checksum=sha256hex
+                        SizeBytes: 0);
+
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var destPath = await catalogService.DownloadAndVerifyAsync(
+                                entry, pluginHost.PluginDirectory).ConfigureAwait(false);
+                            outputLog.Append("Protocol", "Info", $"Plugin downloaded to {destPath}. Restart to load.");
+                        }
+                        catch (Exception ex)
+                        {
+                            outputLog.Append("Protocol", "Error", $"Plugin install failed: {ex.Message}");
+                        }
+                    });
                 }
             }
             catch (Exception ex)

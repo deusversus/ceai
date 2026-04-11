@@ -125,4 +125,46 @@ public class UiCommandBusTests
         bus.Dispatch(new NavigatePanelCommand("scanner"));
         Assert.Equal(2, count);
     }
+
+    [Fact]
+    public void Dispatch_CoPilotDisabled_ReturnsFalse()
+    {
+        using var settings = new AppSettingsService();
+        settings.Settings.EnableCoPilot = false;
+        var bus = new UiCommandBus(settings);
+        UiCommand? received = null;
+        bus.CommandReceived += cmd => received = cmd;
+
+        var result = bus.Dispatch(new NavigatePanelCommand("scanner"));
+
+        Assert.False(result);
+        Assert.Null(received); // Event should not fire when disabled
+    }
+
+    [Fact]
+    public void Dispatch_CoPilotEnabled_Succeeds()
+    {
+        using var settings = new AppSettingsService();
+        settings.Settings.EnableCoPilot = true;
+        var bus = new UiCommandBus(settings);
+        UiCommand? received = null;
+        bus.CommandReceived += cmd => received = cmd;
+
+        var result = bus.Dispatch(new NavigatePanelCommand("scanner"));
+
+        Assert.True(result);
+        Assert.NotNull(received);
+    }
+
+    [Fact]
+    public void Dispatch_NonWhitelistedCommand_ReturnsFalse()
+    {
+        var bus = new UiCommandBus();
+        bus.CommandReceived += _ => { };
+
+        var result = bus.Dispatch(new FakeNonWhitelistedCommand());
+        Assert.False(result);
+    }
+
+    private sealed record FakeNonWhitelistedCommand() : UiCommand("DeleteEverything");
 }

@@ -124,13 +124,20 @@ public class PluginCatalogServiceTests : IDisposable
             "Test", "1.0", "desc", "author",
             "https://example.com/test.dll", null, content.Length);
 
+        // Use direct IProgress<T> to avoid Progress<T>'s async SynchronizationContext.Post
         var progressValues = new List<double>();
-        var progress = new Progress<double>(v => progressValues.Add(v));
+        var progress = new DirectProgress<double>(v => progressValues.Add(v));
 
         await svc.DownloadAndVerifyAsync(entry, _tempDir, progress);
 
         // Should have reported some progress
         Assert.True(progressValues.Count > 0);
+    }
+
+    /// <summary>Synchronous IProgress that invokes callback inline (no SynchronizationContext.Post).</summary>
+    private sealed class DirectProgress<T>(Action<T> handler) : IProgress<T>
+    {
+        public void Report(T value) => handler(value);
     }
 
     // ── Mock handlers ──

@@ -94,6 +94,7 @@ public partial class MainWindow : Window, IDisposable
         PluginManagerViewModel pluginManagerVm,
         MemoryBrowserViewModel memoryBrowserVm,
         IAiContextService aiContextService,
+        IUiCommandBus uiCommandBus,
         ILogger<MainWindow> logger)
     {
         InitializeComponent();
@@ -125,6 +126,15 @@ public partial class MainWindow : Window, IDisposable
                     RouteNavigationParameter(contentId, addrStr);
             },
             contentId => ActivateAnchorable(contentId));
+
+        // Co-Pilot: wire NavigatePanel and AttachProcess commands
+        uiCommandBus.CommandReceived += cmd =>
+        {
+            if (cmd is NavigatePanelCommand nav)
+                Dispatcher.Invoke(() => { try { ActivateAnchorable(nav.PanelId); } catch { /* panel not found */ } });
+            else if (cmd is AttachProcessCommand attach)
+                _outputLog.Append("CoPilot", "Info", $"AttachProcess({attach.ProcessId}) received — use Process panel to attach.");
+        };
 
         // Apply saved theme
         var savedTheme = Enum.TryParse<AppTheme>(_appSettingsService.Settings.Theme, true, out var theme)

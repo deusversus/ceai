@@ -45,6 +45,7 @@ public sealed partial class AiToolFunctions(
     ILuaScriptEngine? luaEngine = null,
     ISymbolEngine? symbolEngine = null,
     AgentLoop.PluginHost? pluginHost = null,
+    IUiCommandBus? uiCommandBus = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;

@@ -25,7 +25,8 @@ public partial class ScannerViewModel : ObservableObject
         IOutputLog outputLog,
         INavigationService navigationService,
         IClipboardService clipboard,
-        IAiContextService aiContext)
+        IAiContextService aiContext,
+        IUiCommandBus? uiCommandBus = null)
     {
         _scanService = scanService;
         _addressTableService = addressTableService;
@@ -34,6 +35,22 @@ public partial class ScannerViewModel : ObservableObject
         _navigationService = navigationService;
         _clipboard = clipboard;
         _aiContext = aiContext;
+
+        // Co-Pilot: allow AI to populate scan form fields
+        if (uiCommandBus is not null)
+        {
+            uiCommandBus.CommandReceived += cmd =>
+            {
+                if (cmd is PopulateScanFormCommand scan)
+                {
+                    if (scan.ScanValue is not null) ScanValue = scan.ScanValue;
+                    if (scan.ScanType is not null && Enum.TryParse<ScanType>(scan.ScanType, true, out var st))
+                        SelectedScanType = st;
+                    if (scan.DataType is not null && Enum.TryParse<MemoryDataType>(scan.DataType, true, out var dt))
+                        SelectedDataType = dt;
+                }
+            };
+        }
     }
 
     [ObservableProperty]

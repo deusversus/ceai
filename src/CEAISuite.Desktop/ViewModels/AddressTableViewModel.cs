@@ -72,7 +72,8 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         IDispatcherService dispatcher,
         INavigationService navigationService,
         ILuaScriptEngine? luaScriptEngine = null,
-        ILogger<AddressTableViewModel>? logger = null)
+        ILogger<AddressTableViewModel>? logger = null,
+        IUiCommandBus? uiCommandBus = null)
     {
         _addressTableService = addressTableService;
         _addressTableExportService = addressTableExportService;
@@ -89,6 +90,25 @@ public partial class AddressTableViewModel : ObservableObject, IDisposable
         _logger = logger;
 
         Roots = _addressTableService.Roots;
+
+        // Co-Pilot: allow AI to add entries and set values
+        if (uiCommandBus is not null)
+        {
+            uiCommandBus.CommandReceived += cmd =>
+            {
+                if (cmd is AddEntryToTableCommand add)
+                {
+                    if (Enum.TryParse<CEAISuite.Engine.Abstractions.MemoryDataType>(add.DataType, true, out var dt))
+                        _addressTableService.AddEntry(add.Address, dt, add.Value ?? "0", add.Label);
+                }
+                else if (cmd is SetEntryValueCommand set)
+                {
+                    var node = _addressTableService.FindNode(set.EntryId);
+                    if (node is not null)
+                        node.CurrentValue = set.NewValue;
+                }
+            };
+        }
     }
 
     // ── Color Coding (Phase 6) ──

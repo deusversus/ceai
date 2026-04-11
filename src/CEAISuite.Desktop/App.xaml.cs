@@ -190,6 +190,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<AiChatStore>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<PluginHost>(sp => new PluginHost());
+        services.AddSingleton<UiCommandBus>();
+        services.AddSingleton<IUiCommandBus>(sp => sp.GetRequiredService<UiCommandBus>());
 
 
         // ── Settings (needs .Load() called) ──
@@ -241,7 +243,8 @@ public partial class App : System.Windows.Application
                 tokenLimits: sp.GetRequiredService<TokenLimits>(),
                 toolResultStore: sp.GetRequiredService<ToolResultStore>(),
                 luaEngine: sp.GetService<ILuaScriptEngine>(),
-                pluginHost: sp.GetRequiredService<PluginHost>());
+                pluginHost: sp.GetRequiredService<PluginHost>(),
+                uiCommandBus: sp.GetRequiredService<IUiCommandBus>());
         });
 
         // ── AI operator service (starts with null IChatClient — MainWindow hot-swaps it) ──

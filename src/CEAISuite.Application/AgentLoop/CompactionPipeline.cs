@@ -152,9 +152,21 @@ public sealed class CompactionPipeline
         var messages = history.GetMessages();
         if (messages.Count < 6) return; // Too few to summarize
 
-        // Summarize the first 2/3 of messages, keep the last 1/3 intact
+        // Summarize the first 2/3 of messages, keep the last 1/3 intact.
+        // The split point must land on a valid boundary — never between an
+        // assistant(tool_calls) message and its tool(results) message, or the
+        // kept portion starts with an orphaned tool message that the API rejects.
         int keepCount = Math.Max(messages.Count / 3, 4);
         int summarizeCount = messages.Count - keepCount;
+
+        // Adjust split point: if toKeep would start with a tool-role message,
+        // pull the split earlier until we hit a user or standalone assistant message.
+        while (summarizeCount > 0 && summarizeCount < messages.Count
+            && messages[summarizeCount].Role == ChatRole.Tool)
+        {
+            summarizeCount--;
+            keepCount++;
+        }
 
         // Build text to summarize
         var toSummarize = messages.Take(summarizeCount).ToList();
@@ -269,6 +281,10 @@ public sealed class CompactionPipeline
             kept.Insert(0, messages[i]);
             tokenEstimate += msgTokens;
         }
+        // Drop orphaned tool messages from the front (no preceding assistant with tool_calls)
+        while (kept.Count > 0 && kept[0].Role == ChatRole.Tool)
+            kept.RemoveAt(0);
+
         _log?.Invoke("COMPACT", $"Truncation: dropped {messages.Count - kept.Count} messages, keeping {kept.Count} (~{tokenEstimate:#,0} tokens)");
         history.ReplaceAll(kept);
     }

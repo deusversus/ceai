@@ -248,6 +248,95 @@ public class CompactionPipelineTests
         Assert.True(result.TokensAfter < tokensBefore);
     }
 
+    // ── Orphaned tool message boundary safety ─────────────────────────
+
+    [Fact]
+    public async Task CompactAsync_Summarization_NeverOrphansToolMessages()
+    {
+        // Reproduce the exact crash scenario: many tool call/result pairs where
+        // the 2/3 split lands between an assistant(tool_calls) and tool(results).
+        var history = new ChatHistoryManager();
+
+        // Single user message followed by many assistant+tool pairs
+        history.AddUserMessage("Hey, let's analyze the EXP addresses.");
+
+        for (int i = 0; i < 5; i++)
+        {
+            var assistantMsg = new ChatMessage(ChatRole.Assistant, []);
+            assistantMsg.Contents.Add(new FunctionCallContent($"call_{i}", $"Tool_{i}"));
+            history.AddAssistantMessage(assistantMsg);
+
+            history.AddToolResults([new FunctionResultContent($"call_{i}",
+                $"Result data {i}: " + new string('D', 400))]);
+        }
+
+        // Force summarization with tight threshold
+        var limits = MakeLimits(
+            compactionToolResultMessages: 100,
+            compactionSummarizationTokens: 100,
+            compactionSlidingWindowTurns: 100,
+            compactionTruncationTokens: 100_000);
+
+        var pipeline = new CompactionPipeline(
+            new SummaryMockChatClient("Compacted summary."), limits);
+
+        await pipeline.CompactAsync(history, TestContext.Current.CancellationToken);
+
+        // Verify: no message in the history starts with a tool role
+        // unless the previous message is an assistant with matching tool_calls
+        var messages = history.GetMessages();
+        for (int i = 0; i < messages.Count; i++)
+        {
+            if (messages[i].Role == ChatRole.Tool)
+            {
+                Assert.True(i > 0, $"Tool message at index {i} has no preceding message");
+                Assert.Equal(ChatRole.Assistant, messages[i - 1].Role);
+
+                // The preceding assistant message must contain FunctionCallContent
+                var hasToolCalls = messages[i - 1].Contents
+                    .Any(c => c is FunctionCallContent);
+                Assert.True(hasToolCalls,
+                    $"Tool message at index {i} preceded by assistant without tool_calls");
+            }
+        }
+    }
+
+    [Fact]
+    public async Task CompactAsync_Truncation_NeverStartsWithToolMessage()
+    {
+        var history = new ChatHistoryManager();
+
+        // Build history: user, then pairs of assistant(tool_calls)+tool(results)
+        history.AddUserMessage("Start");
+
+        for (int i = 0; i < 10; i++)
+        {
+            var assistantMsg = new ChatMessage(ChatRole.Assistant, []);
+            assistantMsg.Contents.Add(new FunctionCallContent($"call_{i}", $"Tool_{i}"));
+            history.AddAssistantMessage(assistantMsg);
+
+            history.AddToolResults([new FunctionResultContent($"call_{i}",
+                new string('R', 2000))]);
+        }
+
+        // Tight truncation limit to force heavy trimming
+        var limits = MakeLimits(
+            compactionToolResultMessages: 100,
+            compactionSummarizationTokens: 100_000,
+            compactionSlidingWindowTurns: 100,
+            compactionTruncationTokens: 500);
+
+        var pipeline = new CompactionPipeline(
+            new SummaryMockChatClient("summary"), limits);
+
+        await pipeline.CompactAsync(history, TestContext.Current.CancellationToken);
+
+        var messages = history.GetMessages();
+        Assert.True(messages.Count > 0);
+        // First message must never be a tool message
+        Assert.NotEqual(ChatRole.Tool, messages[0].Role);
+    }
+
     // ── CompactionResult ─────────────────────────────────────────────
 
     [Fact]

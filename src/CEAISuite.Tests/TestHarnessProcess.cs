@@ -39,12 +39,22 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start harness");
 
-        // Send READY and parse PID response
-        await process.StandardInput.WriteLineAsync("READY");
-        await process.StandardInput.FlushAsync(CancellationToken.None);
-        var response = await ReadLineWithTimeoutAsync(process, TimeSpan.FromSeconds(5), ct);
+        // Send READY and parse PID response — retry on empty/unexpected lines
+        // (CI runners may emit blank lines or .NET runtime output before the harness is ready)
+        string? response = null;
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            await process.StandardInput.WriteLineAsync("READY");
+            await process.StandardInput.FlushAsync(CancellationToken.None);
+            response = await ReadLineWithTimeoutAsync(process, TimeSpan.FromSeconds(5), ct);
+            if (response is not null && response.StartsWith("PID:", StringComparison.Ordinal))
+                break;
+            // Drain unexpected line and retry
+            await Task.Delay(200, ct);
+        }
+
         if (response is null || !response.StartsWith("PID:", StringComparison.Ordinal))
-            throw new InvalidOperationException($"Unexpected READY response: {response}");
+            throw new InvalidOperationException($"Unexpected READY response after 3 attempts: {response}");
 
         var pid = int.Parse(response.AsSpan(4), provider: CultureInfo.InvariantCulture);
         return new TestHarnessProcess(process, pid);

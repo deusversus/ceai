@@ -130,6 +130,9 @@
                                           ToolTip="Capture the target process window (same as AI tool)" />
                                 <MenuItem Header="Export _Report…" Click="ExportReport"
                                           ToolTip="Generate an investigation summary report" />
+                                <Separator />
+                                <MenuItem Header="Generate _Trainer…" Click="OpenTrainerGenerator"
+                                          ToolTip="Generate a C# trainer from address table entries" />
                             </MenuItem>
                             <MenuItem Header="MCP _Servers">
                                 <MenuItem Header="_Manage Servers…" Click="OpenMcpManager" />

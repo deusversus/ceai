@@ -1048,6 +1048,12 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception ex) { _logger.LogError(ex, "Handler error"); }
     }
 
+    private void OpenTrainerGenerator(object sender, RoutedEventArgs e)
+    {
+        var dialog = new TrainerGeneratorDialog { Owner = this };
+        dialog.ShowDialog();
+    }
+
     private void OnPreviewKeyUp(object sender, KeyEventArgs e)
     {
         if (e.Key == Key.P && (Keyboard.Modifiers & ModifierKeys.Control) == ModifierKeys.Control)

@@ -577,4 +577,278 @@ public class AdversarialCheatTableTests
         // Parser should not crash on duplicate IDs
         Assert.Equal(2, result.Entries.Count);
     }
+
+    // ── G. Malformed CT Corpus (50+ edge cases) ──
+
+    public static IEnumerable<object[]> MalformedCtCorpus()
+    {
+        // ── Empty/Whitespace (5) ──
+        yield return new object[] { "", "Empty string" };
+        yield return new object[] { "   \t  ", "Whitespace only" };
+        yield return new object[] { "\n", "Single newline" };
+        yield return new object[] { "\uFEFF", "BOM only (UTF-8 BOM character)" };
+        yield return new object[] { "<?xml version=\"1.0\"?>", "XML declaration only" };
+
+        // ── Valid root but missing/broken children (5) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"></CheatTable>",
+            "CheatTable with no children"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries/></CheatTable>",
+            "CheatTable with empty CheatEntries"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><Description>\"NoID\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "CheatEntry with no ID element"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NoAddr\"</Description><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "CheatEntry with no Address element"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NoType\"</Description><Address>100</Address></CheatEntry></CheatEntries></CheatTable>",
+            "CheatEntry with no VariableType element"
+        };
+
+        // ── Invalid data types (5) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"BadType\"</Description><Address>100</Address><VariableType>NotAType</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "VariableType = NotAType"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"EmptyType\"</Description><Address>100</Address><VariableType></VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "VariableType = empty"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NumType\"</Description><Address>100</Address><VariableType>999999</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "VariableType = 999999"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NegType\"</Description><Address>100</Address><VariableType>-42</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "VariableType = negative number"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"EmojiType\"</Description><Address>100</Address><VariableType>\U0001F4A9</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "VariableType = emoji"
+        };
+
+        // ── Deep nesting (3) ──
+        yield return new object[] { BuildDeepNesting(50), "50-level nested CheatEntry groups" };
+        yield return new object[] { BuildDeepNesting(100), "100-level nested CheatEntry groups" };
+        yield return new object[] { BuildFlatChildren(1000), "Groups with 1000 flat children" };
+
+        // ── Extreme values (5) ──
+        yield return new object[] {
+            $"<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"{new string('X', 10_000)}\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "10K character description"
+        };
+        yield return new object[] {
+            $"<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"LongAddr\"</Description><Address>{new string('A', 1000)}</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "1K character address"
+        };
+        yield return new object[] {
+            $"<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"HugeHex\"</Description><Address>0x{new string('F', 200)}</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Address = 0x + 200 Fs"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NegAddr\"</Description><Address>-1</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Address = -1"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"BadOffset\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><Offsets><Offset>ZZZZ</Offset></Offsets></CheatEntry></CheatEntries></CheatTable>",
+            "Offset value = ZZZZ (not hex)"
+        };
+
+        // ── Unicode attacks (5) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"RTL\"</Description><Address>\u202E100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "RTL override U+202E in address field"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"\u200D\u200DZeroWidth\u200D\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Zero-width joiners in description"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>\U0001F600</ID><Description>\"EmojiID\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Emoji in ID field"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"\u4F60\u597D\"</Description><Address>\u5730\u5740</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Chinese characters in address"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"\u202Bright\u202Aleft\u202Bmixed\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Mixed RTL/LTR in description"
+        };
+
+        // ── Structural issues (7) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"Has&#x9;Tab\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Control character (tab) in element text"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><![CDATA[<CheatEntry><ID>1</ID></CheatEntry>]]></CheatEntries></CheatTable>",
+            "CDATA wrapping the entire CheatEntries content"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"MultiLua\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries><LuaScript>print('a')</LuaScript><LuaScript>print('b')</LuaScript></CheatTable>",
+            "Multiple LuaScript elements"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>42</ID><Description>\"Dup1\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry><CheatEntry><ID>42</ID><Description>\"Dup2\"</Description><Address>200</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries></CheatTable>",
+            "Duplicate entry IDs (same ID value)"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry/></CheatEntries></CheatTable>",
+            "Self-closing CheatEntry"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries></CheatEntries><CheatEntry><ID>1</ID><Description>\"Outside\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatTable>",
+            "Entry outside CheatEntries element"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries>Some text here<CheatEntry><ID>1</ID><Description>\"Interleaved\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry>More text</CheatEntries></CheatTable>",
+            "Interleaved text nodes between entries"
+        };
+
+        // ── Truncation (5) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntr",
+            "Truncated mid-tag"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\" Extra=\"trun",
+            "Truncated mid-attribute"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\">",
+            "Truncated after opening tag"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NoClose\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType></CheatEntry></CheatEntries>",
+            "Missing closing root tag"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"Half&amp</Description></CheatEntry></CheatEntries></CheatTable>",
+            "Half an entity reference"
+        };
+
+        // ── Script edge cases (5) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"EnableOnly\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><AssemblerScript>[ENABLE]\nnop</AssemblerScript></CheatEntry></CheatEntries></CheatTable>",
+            "Script with only [ENABLE], no [DISABLE]"
+        };
+        yield return new object[] {
+            $"<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"BinScript\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><AssemblerScript>&#x1;&#x2;&#x3;&#x4;&#x5;</AssemblerScript></CheatEntry></CheatEntries></CheatTable>",
+            "Script with binary content (0x01-0x05)"
+        };
+        yield return new object[] {
+            $"<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"BigScript\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><AssemblerScript>{string.Concat(Enumerable.Repeat("nop\n", 25_000))}</AssemblerScript></CheatEntry></CheatEntries></CheatTable>",
+            "Script with 100KB of NOPs"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NullScript\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><AssemblerScript>&#x9;</AssemblerScript></CheatEntry></CheatEntries></CheatTable>",
+            "Script = tab character (substitute for null byte)"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"EmptyScript\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><AssemblerScript></AssemblerScript></CheatEntry></CheatEntries></CheatTable>",
+            "Empty script element"
+        };
+
+        // ── Pointer edge cases (5) ──
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NoOffsetVal\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><Offsets><Offset></Offset></Offsets></CheatEntry></CheatEntries></CheatTable>",
+            "Offset with no value (empty element)"
+        };
+        yield return new object[] {
+            BuildDeepPointerChain(20),
+            "20 offset elements (deep chain)"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"NegOffset\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><Offsets><Offset>-FF</Offset><Offset>-10</Offset></Offsets></CheatEntry></CheatEntries></CheatTable>",
+            "Negative offset values"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"EmptyOff\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><Offsets><Offset/><Offset/></Offsets></CheatEntry></CheatEntries></CheatTable>",
+            "Offset = empty (self-closing)"
+        };
+        yield return new object[] {
+            "<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"MixedOff\"</Description><Address>100</Address><VariableType>4 Bytes</VariableType><Offsets><Offset>10</Offset><Offset>ZZZZ</Offset><Offset>20</Offset></Offsets></CheatEntry></CheatEntries></CheatTable>",
+            "Mixed valid/invalid offsets"
+        };
+    }
+
+    [Theory]
+    [MemberData(nameof(MalformedCtCorpus))]
+    public void ParseMalformedCt_DoesNotCrashOrCorrupt(string xml, string description)
+    {
+        try
+        {
+            var result = CheatTableParser.Parse(xml, "malformed.ct");
+            // If parsing succeeded, verify basic invariants
+            Assert.NotNull(result);
+            Assert.NotNull(result.Entries);
+        }
+        catch (Exception ex)
+        {
+            // Acceptable exception types for malformed input
+            Assert.True(
+                ex is System.Xml.XmlException or FormatException or ArgumentException
+                or InvalidOperationException or OverflowException,
+                $"Unexpected exception type {ex.GetType().Name} for '{description}': {ex.Message}");
+        }
+    }
+
+    // ── Helpers for corpus generation ──
+
+    private static string BuildDeepNesting(int depth)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<CheatTable CheatEngineTableVersion=\"46\">");
+        for (int i = 0; i < depth; i++)
+        {
+            sb.Append("<CheatEntries><CheatEntry>");
+            sb.Append(CultureInfo.InvariantCulture, $"<ID>{i}</ID>");
+            sb.Append(CultureInfo.InvariantCulture, $"<Description>\"Level {i}\"</Description>");
+            sb.Append("<GroupHeader>1</GroupHeader>");
+        }
+        // Innermost leaf
+        sb.Append("<CheatEntries><CheatEntry>");
+        sb.Append(CultureInfo.InvariantCulture, $"<ID>{depth}</ID>");
+        sb.Append("<Description>\"Leaf\"</Description>");
+        sb.Append("<VariableType>4 Bytes</VariableType>");
+        sb.Append("<Address>100</Address>");
+        sb.Append("</CheatEntry></CheatEntries>");
+        for (int i = 0; i < depth; i++)
+        {
+            sb.Append("</CheatEntry></CheatEntries>");
+        }
+        sb.Append("</CheatTable>");
+        return sb.ToString();
+    }
+
+    private static string BuildFlatChildren(int count)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries>");
+        for (int i = 0; i < count; i++)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"<CheatEntry><ID>{i}</ID><Description>\"Entry {i}\"</Description><Address>{i * 4:X}</Address><VariableType>4 Bytes</VariableType></CheatEntry>");
+        }
+        sb.Append("</CheatEntries></CheatTable>");
+        return sb.ToString();
+    }
+
+    private static string BuildDeepPointerChain(int offsetCount)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<CheatTable CheatEngineTableVersion=\"46\"><CheatEntries><CheatEntry><ID>1</ID><Description>\"DeepPtr\"</Description><Address>game.exe+100</Address><VariableType>4 Bytes</VariableType><Offsets>");
+        for (int i = 0; i < offsetCount; i++)
+        {
+            sb.Append(CultureInfo.InvariantCulture, $"<Offset>{i * 4:X}</Offset>");
+        }
+        sb.Append("</Offsets></CheatEntry></CheatEntries></CheatTable>");
+        return sb.ToString();
+    }
 }

@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.IO;
+using System.Net.Http;
 using System.Windows;
 using System.Windows.Threading;
 using CEAISuite.Application;
@@ -133,8 +134,68 @@ public partial class App : System.Windows.Application
             try { File.Delete(recoveryPath); } catch { /* best-effort */ }
         }
 
+        // ── Handle ceai:// protocol URLs from command line ──
+        HandleProtocolArgs(e.Args);
+
         var mainWindow = Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
+    }
+
+    /// <summary>
+    /// Handle ceai:// protocol URLs passed via command line args.
+    /// Supported: ceai://install-plugin?url=&lt;encoded-url&gt;
+    /// </summary>
+    private static void HandleProtocolArgs(string[] args)
+    {
+        foreach (var arg in args)
+        {
+            if (!arg.StartsWith("ceai://", StringComparison.OrdinalIgnoreCase)) continue;
+
+            try
+            {
+                var uri = new Uri(arg);
+                if (string.Equals(uri.Host, "install-plugin", StringComparison.OrdinalIgnoreCase))
+                {
+                    var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
+                    var url = query["url"];
+                    if (!string.IsNullOrWhiteSpace(url))
+                    {
+                        var pluginHost = Services.GetRequiredService<PluginHost>();
+                        var outputLog = Services.GetRequiredService<IOutputLog>();
+                        outputLog.Append("Protocol", "Info", $"ceai:// install-plugin: {url}");
+
+                        // Fire and forget — download will happen in the background
+                        _ = Task.Run(async () =>
+                        {
+                            try
+                            {
+                                using var http = new HttpClient();
+                                var pluginDir = pluginHost.PluginDirectory;
+                                if (!Directory.Exists(pluginDir))
+                                    Directory.CreateDirectory(pluginDir);
+
+                                var fileName = Path.GetFileName(new Uri(url).LocalPath);
+                                if (string.IsNullOrWhiteSpace(fileName)) fileName = "plugin.dll";
+                                var destPath = Path.Combine(pluginDir, fileName);
+
+                                var bytes = await http.GetByteArrayAsync(url).ConfigureAwait(false);
+                                await File.WriteAllBytesAsync(destPath, bytes).ConfigureAwait(false);
+
+                                outputLog.Append("Protocol", "Info", $"Plugin downloaded to {destPath}. Restart to load.");
+                            }
+                            catch (Exception ex)
+                            {
+                                outputLog.Append("Protocol", "Error", $"Plugin install failed: {ex.Message}");
+                            }
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Trace.TraceWarning($"Failed to parse ceai:// URI: {ex.Message}");
+            }
+        }
     }
 
     private static void ConfigureServices(IServiceCollection services)
@@ -190,6 +251,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<AiChatStore>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<PluginHost>(sp => new PluginHost());
+        services.AddSingleton<PluginCatalogService>();
         services.AddSingleton<UiCommandBus>(sp => new UiCommandBus(sp.GetRequiredService<AppSettingsService>()));
         services.AddSingleton<IUiCommandBus>(sp => sp.GetRequiredService<UiCommandBus>());
 

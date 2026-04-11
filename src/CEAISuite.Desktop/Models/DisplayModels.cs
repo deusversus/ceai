@@ -396,5 +396,15 @@ public sealed class PluginDisplayItem
     public string Status { get; init; } = "Loaded";
 }
 
+public sealed class CatalogPluginDisplayItem
+{
+    public string Name { get; init; } = "";
+    public string Version { get; init; } = "";
+    public string Description { get; init; } = "";
+    public string Author { get; init; } = "";
+    public string Size { get; init; } = "";
+    public bool IsInstalled { get; init; }
+}
+
 /// <summary>Display model for the grouped multi-provider model selector dropdown.</summary>
 public sealed record ModelOption(string Provider, string ModelId, string DisplayName, bool IsHeader = false);

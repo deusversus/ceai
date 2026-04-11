@@ -509,28 +509,56 @@
                         </avalonDock:LayoutAnchorable>
                         <!-- Phase 10A: Plugins -->
                         <avalonDock:LayoutAnchorable Title="Plugins" ContentId="plugins">
-                            <DockPanel x:Name="PluginsContent" Background="{DynamicResource SidebarBackground}">
-                                <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
-                                    <Button Content="Install…" Command="{Binding InstallCommand}" ToolTip="Install a plugin from a .dll file" />
-                                    <Button Content="Unload" Command="{Binding UnloadCommand}" ToolTip="Unload selected plugin" />
-                                    <Separator />
-                                    <Button Content="Refresh" Command="{Binding RefreshCommand}" ToolTip="Re-scan plugins directory" />
-                                    <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip="Open plugins directory in Explorer" />
-                                </ToolBar>
-                                <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
-                                           Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
-                                <ListView ItemsSource="{Binding Plugins}" SelectedItem="{Binding SelectedPlugin, Mode=TwoWay}"
-                                          Style="{StaticResource SidebarListView}" Margin="0,4,0,0">
-                                    <ListView.View>
-                                        <GridView>
-                                            <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="120" />
-                                            <GridViewColumn Header="Ver" DisplayMemberBinding="{Binding Version}" Width="50" />
-                                            <GridViewColumn Header="Tools" DisplayMemberBinding="{Binding ToolCount}" Width="45" />
-                                            <GridViewColumn Header="Description" DisplayMemberBinding="{Binding Description}" Width="200" />
-                                        </GridView>
-                                    </ListView.View>
-                                </ListView>
-                            </DockPanel>
+                            <TabControl x:Name="PluginsContent" SelectedIndex="{Binding SelectedTabIndex}" Background="{DynamicResource SidebarBackground}">
+                                <!-- Installed plugins tab -->
+                                <TabItem Header="Installed">
+                                    <DockPanel>
+                                        <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
+                                            <Button Content="Install…" Command="{Binding InstallCommand}" ToolTip="Install a plugin from a .dll file" />
+                                            <Button Content="Unload" Command="{Binding UnloadCommand}" ToolTip="Unload selected plugin" />
+                                            <Separator />
+                                            <Button Content="Refresh" Command="{Binding RefreshCommand}" ToolTip="Re-scan plugins directory" />
+                                            <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip="Open plugins directory in Explorer" />
+                                        </ToolBar>
+                                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
+                                        <ListView ItemsSource="{Binding Plugins}" SelectedItem="{Binding SelectedPlugin, Mode=TwoWay}"
+                                                  Style="{StaticResource SidebarListView}" Margin="0,4,0,0">
+                                            <ListView.View>
+                                                <GridView>
+                                                    <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="120" />
+                                                    <GridViewColumn Header="Ver" DisplayMemberBinding="{Binding Version}" Width="50" />
+                                                    <GridViewColumn Header="Tools" DisplayMemberBinding="{Binding ToolCount}" Width="45" />
+                                                    <GridViewColumn Header="Description" DisplayMemberBinding="{Binding Description}" Width="200" />
+                                                </GridView>
+                                            </ListView.View>
+                                        </ListView>
+                                    </DockPanel>
+                                </TabItem>
+                                <!-- Online catalog tab -->
+                                <TabItem Header="Online Catalog">
+                                    <DockPanel>
+                                        <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
+                                            <Button Content="Refresh Catalog" Command="{Binding RefreshCatalogCommand}" ToolTip="Fetch community plugin catalog" />
+                                            <Button Content="Install" Command="{Binding InstallFromCatalogCommand}" ToolTip="Download and install selected plugin" />
+                                        </ToolBar>
+                                        <TextBlock DockPanel.Dock="Bottom" Text="{Binding CatalogStatus}" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
+                                        <ListView ItemsSource="{Binding CatalogPlugins}" SelectedItem="{Binding SelectedCatalogPlugin, Mode=TwoWay}"
+                                                  Style="{StaticResource SidebarListView}" Margin="0,4,0,0">
+                                            <ListView.View>
+                                                <GridView>
+                                                    <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="100" />
+                                                    <GridViewColumn Header="Ver" DisplayMemberBinding="{Binding Version}" Width="45" />
+                                                    <GridViewColumn Header="Author" DisplayMemberBinding="{Binding Author}" Width="80" />
+                                                    <GridViewColumn Header="Size" DisplayMemberBinding="{Binding Size}" Width="50" />
+                                                    <GridViewColumn Header="Description" DisplayMemberBinding="{Binding Description}" Width="160" />
+                                                </GridView>
+                                            </ListView.View>
+                                        </ListView>
+                                    </DockPanel>
+                                </TabItem>
+                            </TabControl>
                         </avalonDock:LayoutAnchorable>
                     </avalonDock:LayoutAnchorablePane>
 

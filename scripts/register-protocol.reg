@@ -1,0 +1,21 @@
+Windows Registry Editor Version 5.00
+
+; Register ceai:// URL protocol handler
+; Usage: ceai://install-plugin?url=<encoded-url>
+;
+; To install, right-click this file → Merge, or run:
+;   reg import register-protocol.reg
+;
+; NOTE: Replace <APP_PATH> with the actual install path before importing.
+; Example: "C:\Program Files\CEAISuite\CEAISuite.Desktop.exe" "%1"
+
+[HKEY_CURRENT_USER\Software\Classes\ceai]
+@="URL:CE AI Suite Protocol"
+"URL Protocol"=""
+
+[HKEY_CURRENT_USER\Software\Classes\ceai\shell]
+
+[HKEY_CURRENT_USER\Software\Classes\ceai\shell\open]
+
+[HKEY_CURRENT_USER\Software\Classes\ceai\shell\open\command]
+@="\"<APP_PATH>\" \"%1\""

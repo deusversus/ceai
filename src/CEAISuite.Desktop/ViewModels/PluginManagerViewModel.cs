@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using CEAISuite.Application;
 using CEAISuite.Application.AgentLoop;
 using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
@@ -14,15 +15,24 @@ public sealed partial class PluginManagerViewModel : ObservableObject
 {
     private readonly PluginHost _pluginHost;
     private readonly IOutputLog _outputLog;
+    private readonly PluginCatalogService? _catalogService;
 
     [ObservableProperty] private ObservableCollection<PluginDisplayItem> _plugins = [];
     [ObservableProperty] private PluginDisplayItem? _selectedPlugin;
     [ObservableProperty] private string _statusText = "No plugins loaded.";
 
-    public PluginManagerViewModel(PluginHost pluginHost, IOutputLog outputLog)
+    // Catalog tab
+    [ObservableProperty] private ObservableCollection<CatalogPluginDisplayItem> _catalogPlugins = [];
+    [ObservableProperty] private CatalogPluginDisplayItem? _selectedCatalogPlugin;
+    [ObservableProperty] private bool _isLoadingCatalog;
+    [ObservableProperty] private string _catalogStatus = "Click Refresh to browse community plugins.";
+    [ObservableProperty] private int _selectedTabIndex;
+
+    public PluginManagerViewModel(PluginHost pluginHost, IOutputLog outputLog, PluginCatalogService? catalogService = null)
     {
         _pluginHost = pluginHost;
         _outputLog = outputLog;
+        _catalogService = catalogService;
         Refresh();
     }
 
@@ -103,5 +113,79 @@ public sealed partial class PluginManagerViewModel : ObservableObject
             Directory.CreateDirectory(dir);
         Process.Start("explorer.exe", dir);
         _outputLog.Append("Plugins", "Info", $"Opened: {dir}");
+    }
+
+    // ── Online Catalog ──
+
+    [RelayCommand]
+    private async Task RefreshCatalogAsync()
+    {
+        if (_catalogService is null)
+        {
+            CatalogStatus = "Catalog service not available.";
+            return;
+        }
+
+        IsLoadingCatalog = true;
+        CatalogStatus = "Fetching catalog...";
+        try
+        {
+            var entries = await _catalogService.FetchCatalogAsync().ConfigureAwait(false);
+            var installedNames = _pluginHost.Plugins.Select(p => p.Plugin.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            CatalogPlugins = new ObservableCollection<CatalogPluginDisplayItem>(
+                entries.Select(e => new CatalogPluginDisplayItem
+                {
+                    Name = e.Name,
+                    Version = e.Version,
+                    Description = e.Description,
+                    Author = e.Author,
+                    Size = e.SizeBytes > 0 ? $"{e.SizeBytes / 1024.0:F0} KB" : "",
+                    IsInstalled = installedNames.Contains(e.Name)
+                }));
+            CatalogStatus = entries.Count > 0
+                ? $"{entries.Count} plugin(s) available"
+                : "No plugins in the community catalog.";
+        }
+        catch (Exception ex)
+        {
+            CatalogStatus = $"Failed to fetch catalog: {ex.Message}";
+            _outputLog.Append("Plugins", "Error", $"Catalog fetch failed: {ex.Message}");
+        }
+        finally
+        {
+            IsLoadingCatalog = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task InstallFromCatalogAsync()
+    {
+        if (_catalogService is null || SelectedCatalogPlugin is null) return;
+
+        var name = SelectedCatalogPlugin.Name;
+        _outputLog.Append("Plugins", "Info", $"Installing {name} from catalog...");
+
+        try
+        {
+            // Find the matching catalog entry
+            var entries = await _catalogService.FetchCatalogAsync().ConfigureAwait(false);
+            var entry = entries.FirstOrDefault(e => string.Equals(e.Name, name, StringComparison.OrdinalIgnoreCase));
+            if (entry is null)
+            {
+                _outputLog.Append("Plugins", "Error", $"Plugin '{name}' not found in catalog.");
+                return;
+            }
+
+            var destPath = await _catalogService.DownloadAndVerifyAsync(
+                entry, _pluginHost.PluginDirectory).ConfigureAwait(false);
+
+            _outputLog.Append("Plugins", "Info", $"Downloaded {name} to {destPath}. Restart to load, or use Refresh.");
+            Refresh();
+            await RefreshCatalogAsync().ConfigureAwait(false); // Update installed status
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Append("Plugins", "Error", $"Catalog install failed for {name}: {ex.Message}");
+        }
     }
 }

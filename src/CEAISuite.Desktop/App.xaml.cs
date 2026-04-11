@@ -3,6 +3,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Threading;
 using CEAISuite.Application;
+using CEAISuite.Application.AgentLoop;
 using CEAISuite.Desktop.Services;
 using CEAISuite.Desktop.ViewModels;
 using CEAISuite.Domain;
@@ -188,6 +189,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<OperationJournal>();
         services.AddSingleton<AiChatStore>();
         services.AddSingleton<UpdateService>();
+        services.AddSingleton<PluginHost>(sp => new PluginHost());
+
 
         // ── Settings (needs .Load() called) ──
         services.AddSingleton<AppSettingsService>(sp =>
@@ -237,7 +240,8 @@ public partial class App : System.Windows.Application
                 currentChatProvider: () => lazyOperator.Value.DisplayHistory ?? Array.Empty<AiChatMessage>(),
                 tokenLimits: sp.GetRequiredService<TokenLimits>(),
                 toolResultStore: sp.GetRequiredService<ToolResultStore>(),
-                luaEngine: sp.GetService<ILuaScriptEngine>());
+                luaEngine: sp.GetService<ILuaScriptEngine>(),
+                pluginHost: sp.GetRequiredService<PluginHost>());
         });
 
         // ── AI operator service (starts with null IChatClient — MainWindow hot-swaps it) ──
@@ -248,7 +252,8 @@ public partial class App : System.Windows.Application
                 sp.GetRequiredService<AiToolFunctions>(),
                 contextProvider: null,
                 sp.GetRequiredService<AiChatStore>(),
-                sp.GetRequiredService<AppSettingsService>()));
+                sp.GetRequiredService<AppSettingsService>(),
+                sp.GetRequiredService<PluginHost>()));
 
         // ── Desktop shared services ──
         services.AddSingleton<IProcessContext, ProcessContext>();
@@ -322,6 +327,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ThreadListViewModel>();
         services.AddSingleton<MemoryRegionsViewModel>();
         services.AddSingleton<WorkspaceViewModel>();
+        services.AddSingleton<PluginManagerViewModel>();
 
         // ── Logging ──
         services.AddLogging();

@@ -348,7 +348,8 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
 
     public AiOperatorService(IChatClient? chatClient, AiToolFunctions toolFunctions,
         Func<string>? contextProvider = null, AiChatStore? chatStore = null,
-        AppSettingsService? settingsService = null)
+        AppSettingsService? settingsService = null,
+        AgentLoop.PluginHost? pluginHost = null)
     {
         IsConfigured = chatClient is not null;
         _contextProvider = contextProvider;
@@ -522,8 +523,8 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         // ── Prompt Cache Optimizer ──
         _promptCacheOptimizer = new PromptCacheOptimizer(Log);
 
-        // ── Plugin Host ──
-        _pluginHost = new PluginHost(log: Log);
+        // ── Plugin Host (DI-provided singleton, shared with PluginManagerViewModel) ──
+        _pluginHost = pluginHost ?? new PluginHost(log: Log);
         _ = LoadPluginsAsync().ContinueWith(
             t => { if (t.IsFaulted) Log("ERROR", $"Plugin loading failed: {t.Exception?.InnerException?.Message}"); },
             TaskScheduler.Default);

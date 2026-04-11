@@ -96,6 +96,7 @@
                                 <MenuItem Header="_Threads" Click="ShowPanel" Tag="threads" />
                                 <MenuItem Header="Memory _Map" Click="ShowPanel" Tag="memoryRegions" />
                                 <MenuItem Header="_Workspace" Click="ShowPanel" Tag="workspace" />
+                                <MenuItem Header="_Plugins" Click="ShowPanel" Tag="plugins" />
                                 <Separator />
                                 <MenuItem Header="_Scanner" Click="ShowPanel" Tag="scanner" />
                                 <MenuItem Header="_Output" Click="ShowPanel" Tag="output" />
@@ -500,6 +501,29 @@
                                             </StackPanel>
                                         </DataTemplate>
                                     </ListView.ItemTemplate>
+                                </ListView>
+                            </DockPanel>
+                        </avalonDock:LayoutAnchorable>
+                        <!-- Phase 10A: Plugins -->
+                        <avalonDock:LayoutAnchorable Title="Plugins" ContentId="plugins">
+                            <DockPanel x:Name="PluginsContent" Background="{DynamicResource SidebarBackground}">
+                                <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
+                                    <Button Content="Refresh" Command="{Binding RefreshCommand}" ToolTip="Re-scan plugins directory" />
+                                    <Button Content="Unload" Command="{Binding UnloadCommand}" ToolTip="Unload selected plugin" />
+                                    <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip="Open plugins directory in Explorer" />
+                                </ToolBar>
+                                <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
+                                           Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
+                                <ListView ItemsSource="{Binding Plugins}" SelectedItem="{Binding SelectedPlugin, Mode=TwoWay}"
+                                          Style="{StaticResource SidebarListView}" Margin="0,4,0,0">
+                                    <ListView.View>
+                                        <GridView>
+                                            <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="120" />
+                                            <GridViewColumn Header="Ver" DisplayMemberBinding="{Binding Version}" Width="50" />
+                                            <GridViewColumn Header="Tools" DisplayMemberBinding="{Binding ToolCount}" Width="45" />
+                                            <GridViewColumn Header="Description" DisplayMemberBinding="{Binding Description}" Width="200" />
+                                        </GridView>
+                                    </ListView.View>
                                 </ListView>
                             </DockPanel>
                         </avalonDock:LayoutAnchorable>

@@ -387,5 +387,14 @@ public sealed class SessionDisplayItem
     public int ActionCount { get; init; }
 }
 
+public sealed class PluginDisplayItem
+{
+    public string Name { get; init; } = "";
+    public string Version { get; init; } = "";
+    public string Description { get; init; } = "";
+    public int ToolCount { get; init; }
+    public string Status { get; init; } = "Loaded";
+}
+
 /// <summary>Display model for the grouped multi-provider model selector dropdown.</summary>
 public sealed record ModelOption(string Provider, string ModelId, string DisplayName, bool IsHeader = false);

@@ -52,7 +52,7 @@ public partial class MainWindow : Window, IDisposable
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 19; // v19 = add Lua Console center document tab
+    private const int LayoutVersion = 20; // v20 = add Plugin Manager sidebar panel
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -91,6 +91,7 @@ public partial class MainWindow : Window, IDisposable
         ThreadListViewModel threadListVm,
         MemoryRegionsViewModel memoryRegionsVm,
         WorkspaceViewModel workspaceVm,
+        PluginManagerViewModel pluginManagerVm,
         MemoryBrowserViewModel memoryBrowserVm,
         IAiContextService aiContextService,
         ILogger<MainWindow> logger)
@@ -197,6 +198,7 @@ public partial class MainWindow : Window, IDisposable
         ThreadsContent.DataContext = threadListVm;
         MemoryRegionsContent.DataContext = memoryRegionsVm;
         WorkspaceContent.DataContext = workspaceVm;
+        PluginsContent.DataContext = pluginManagerVm;
 
         // Wire Phase 5 Memory Browser ViewModel
         MemoryBrowserTab.SetViewModel(memoryBrowserVm);
@@ -1591,6 +1593,7 @@ public partial class MainWindow : Window, IDisposable
         "threads" => "Threads",
         "memoryRegions" => "Memory Map",
         "workspace" => "Workspace",
+        "plugins" => "Plugins",
         _ => contentId
     };
 
@@ -1719,7 +1722,7 @@ public partial class MainWindow : Window, IDisposable
         var siblingId = contentId switch
         {
             // Left sidebar
-            "processes" or "modules" or "threads" or "memoryRegions" or "workspace" => "processes",
+            "processes" or "modules" or "threads" or "memoryRegions" or "workspace" or "plugins" => "processes",
             // Right sidebar
             "aiOperator" => "aiOperator",
             // Bottom panels

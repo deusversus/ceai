@@ -58,6 +58,9 @@ public sealed class PluginCatalogService : IDisposable
         IProgress<double>? progress = null,
         CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(entry.Checksum))
+            throw new InvalidOperationException($"Plugin '{entry.Name}' has no checksum. Refusing to download unverified plugin.");
+
         if (!Directory.Exists(targetDirectory))
             Directory.CreateDirectory(targetDirectory);
 

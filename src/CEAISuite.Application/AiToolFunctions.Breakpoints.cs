@@ -26,6 +26,8 @@ public sealed partial class AiToolFunctions
     {
         try
         {
+            var pidError = ValidateDestructiveProcessId(processId);
+            if (pidError is not null) return pidError;
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             if (breakpointService is null) return "Breakpoint engine not available.";
             var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
@@ -185,6 +187,8 @@ public sealed partial class AiToolFunctions
         [Description("Process ID")] int processId,
         [Description("Breakpoint ID to remove")] string breakpointId)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (breakpointService is null) return "Breakpoint engine not available.";
         var removed = await breakpointService.RemoveBreakpointAsync(processId, breakpointId).ConfigureAwait(false);
         return removed ? $"Breakpoint {breakpointId} removed." : $"Breakpoint {breakpointId} not found.";
@@ -195,6 +199,8 @@ public sealed partial class AiToolFunctions
     public async Task<string> EmergencyRestorePageProtection(
         [Description("Process ID of the hung process")] int processId)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (breakpointService is null) return "Breakpoint engine not available.";
         var restored = await breakpointService.EmergencyRestorePageProtectionAsync(processId).ConfigureAwait(false);
         return restored > 0
@@ -207,6 +213,8 @@ public sealed partial class AiToolFunctions
     public async Task<string> ForceDetachAndCleanup(
         [Description("Process ID of the hung process")] int processId)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (breakpointService is null) return "Breakpoint engine not available.";
         await breakpointService.ForceDetachAndCleanupAsync(processId).ConfigureAwait(false);
         return $"✅ Force detach complete for process {processId}. Page guards restored, debugger detached, session torn down.";
@@ -482,6 +490,8 @@ public sealed partial class AiToolFunctions
     {
         try
         {
+            var pidError = ValidateDestructiveProcessId(processId);
+            if (pidError is not null) return pidError;
             if (breakpointService is null) return "Breakpoint engine not available.";
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
 

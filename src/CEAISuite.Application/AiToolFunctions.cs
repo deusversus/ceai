@@ -162,6 +162,8 @@ public sealed partial class AiToolFunctions(
     {
         try
         {
+            var pidError = ValidateDestructiveProcessId(processId);
+            if (pidError is not null) return pidError;
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
             var dt = Enum.Parse<MemoryDataType>(dataType, ignoreCase: true);
@@ -549,11 +551,15 @@ public sealed partial class AiToolFunctions(
 
         var scriptCount = CountScriptsInNodes(nodes);
         var leafCount = addressTableService.Entries.Count;
+
+        if (ctFile.LuaScript is not null)
+            logger?.LogWarning("CT file {FileName} contains embedded Lua script ({Length} chars)", ctFile.FileName, ctFile.LuaScript.Length);
+
         return Task.FromResult(
             $"Loaded {ctFile.FileName}: {ctFile.TotalEntryCount} CT entries imported with hierarchy. " +
             $"{leafCount} address entries, {scriptCount} scripts, {nodes.Count} top-level nodes. " +
             $"Table version: {ctFile.TableVersion}" +
-            (ctFile.LuaScript is not null ? ". Contains embedded Lua script." : "") +
+            (ctFile.LuaScript is not null ? $". \u26a0\ufe0f WARNING: Contains embedded Lua script ({ctFile.LuaScript.Length:#,0} chars). Review with ViewScript before executing." : "") +
             ". Use SummarizeCheatTable for a structural overview.");
     }
 
@@ -1725,6 +1731,8 @@ public sealed partial class AiToolFunctions(
         [Description("Region size in bytes")] int size,
         [Description("Protection: ReadWrite, ExecuteReadWrite, ReadOnly, etc.")] string protection)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (memoryProtectionEngine is null) return "Memory protection engine not available.";
         try
         {
@@ -1746,6 +1754,8 @@ public sealed partial class AiToolFunctions(
         [Description("Protection: ExecuteReadWrite (default), ReadWrite, etc.")] string protection = "ExecuteReadWrite",
         [Description("Preferred address as hex, or 0 for any")] string preferredAddress = "0")
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (memoryProtectionEngine is null) return "Memory protection engine not available.";
         try
         {
@@ -1764,6 +1774,8 @@ public sealed partial class AiToolFunctions(
         [Description("Process ID")] int processId,
         [Description("Address of allocated block as hex")] string address)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (memoryProtectionEngine is null) return "Memory protection engine not available.";
         try
         {
@@ -2400,6 +2412,8 @@ public sealed partial class AiToolFunctions(
         [Description("Address to write the instruction at (hex)")] string address,
         [Description("Assembly instruction in MASM/Intel syntax (e.g., 'mov eax, 1' or 'nop')")] string instruction)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (autoAssemblerEngine is null) return "Auto assembler engine not available.";
         if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
 
@@ -2416,6 +2430,8 @@ public sealed partial class AiToolFunctions(
     public async Task<string> RemoveAllBreakpoints(
         [Description("Process ID")] int processId)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (breakpointService is null) return "Breakpoint service not available.";
 
         var bps = await breakpointService.ListBreakpointsAsync(processId).ConfigureAwait(false);
@@ -2458,6 +2474,8 @@ public sealed partial class AiToolFunctions(
         [Description("Start address (hex)")] string address,
         [Description("Number of bytes to NOP (1-64)")] int length)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
         length = Math.Clamp(length, 1, 64);
 
@@ -2478,6 +2496,8 @@ public sealed partial class AiToolFunctions(
         [Description("Node ID or label")] string nodeId,
         [Description("Amount to add (positive) or subtract (negative)")] double delta)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
         var node = ResolveNode(nodeId);
         if (node is null) return $"Node '{nodeId}' not found.";

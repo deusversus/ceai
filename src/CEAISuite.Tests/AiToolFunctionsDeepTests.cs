@@ -25,8 +25,13 @@ public class AiToolFunctionsDeepTests
         IMemoryProtectionEngine? memProtEngine = null,
         ILuaScriptEngine? luaEngine = null,
         IAutoAssemblerEngine? aaEngine = null,
-        MemorySnapshotService? snapshotService = null)
+        MemorySnapshotService? snapshotService = null,
+        bool attach = true)
     {
+        // Pre-attach so ValidateDestructiveProcessId passes for tests using Pid
+        if (attach && !_engineFacade.IsAttached)
+            _engineFacade.AttachAsync(Pid).GetAwaiter().GetResult();
+
         var dashboard = new WorkspaceDashboardService(_engineFacade, new StubSessionRepository());
         var scan = new ScanService(new StubScanEngine());
         var addressTable = new AddressTableService(_engineFacade);

@@ -65,7 +65,7 @@ public class PluginCatalogServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task DownloadAndVerify_NullChecksum_SkipsVerification()
+    public async Task DownloadAndVerify_NullChecksum_ThrowsRefusingUnverified()
     {
         var content = "fake dll content"u8.ToArray();
         var handler = new MockDownloadHandler(content);
@@ -75,10 +75,9 @@ public class PluginCatalogServiceTests : IDisposable
             "Test", "1.0", "desc", "author",
             "https://example.com/test.dll", null, content.Length);
 
-        var path = await svc.DownloadAndVerifyAsync(entry, _tempDir);
-
-        Assert.True(File.Exists(path));
-        Assert.Equal(content, File.ReadAllBytes(path));
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.DownloadAndVerifyAsync(entry, _tempDir));
+        Assert.Contains("no checksum", ex.Message);
     }
 
     [Fact]
@@ -117,12 +116,13 @@ public class PluginCatalogServiceTests : IDisposable
     {
         var content = new byte[10000];
         Array.Fill<byte>(content, 0xDE);
+        var checksum = Convert.ToHexStringLower(SHA256.HashData(content));
         var handler = new MockDownloadHandler(content);
         using var svc = new PluginCatalogService(new HttpClient(handler));
 
         var entry = new PluginCatalogService.CatalogEntry(
             "Test", "1.0", "desc", "author",
-            "https://example.com/test.dll", null, content.Length);
+            "https://example.com/test.dll", checksum, content.Length);
 
         // Use direct IProgress<T> to avoid Progress<T>'s async SynchronizationContext.Post
         var progressValues = new List<double>();

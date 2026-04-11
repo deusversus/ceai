@@ -12,6 +12,10 @@ public class AutoAssemblerToolTests
 
     private AiToolFunctions CreateToolFunctions(IAutoAssemblerEngine? aaEngine = null)
     {
+        // Pre-attach so ValidateDestructiveProcessId passes for tests using Environment.ProcessId
+        if (!_engineFacade.IsAttached)
+            _engineFacade.AttachAsync(Environment.ProcessId).GetAwaiter().GetResult();
+
         var dashboardService = new WorkspaceDashboardService(_engineFacade, new StubSessionRepository());
         var scanService = new ScanService(new StubScanEngine());
         var addressTableService = new AddressTableService(_engineFacade);

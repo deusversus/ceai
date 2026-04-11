@@ -21,6 +21,8 @@ public sealed partial class AiToolFunctions
     {
         try
         {
+            var pidError = ValidateDestructiveProcessId(processId);
+            if (pidError is not null) return pidError;
             if (codeCaveEngine is null) return "Code cave engine not available.";
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
             var addr = ParseAddress(address);
@@ -70,6 +72,8 @@ public sealed partial class AiToolFunctions
         [Description("Process ID")] int processId,
         [Description("Hook ID to remove")] string hookId)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (codeCaveEngine is null) return "Code cave engine not available.";
         var removed = await codeCaveEngine.RemoveHookAsync(processId, hookId).ConfigureAwait(false);
         return removed ? $"Hook {hookId} removed, original bytes restored." : $"Hook {hookId} not found.";

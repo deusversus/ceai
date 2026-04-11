@@ -405,6 +405,8 @@ public sealed partial class AiToolFunctions
         [Description("Process ID to execute the script against")] int processId,
         [Description("Full Auto Assembler script text")] string script)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (autoAssemblerEngine is null)
             return "Auto Assembler engine not available.";
         if (!IsProcessAlive(processId))
@@ -435,6 +437,8 @@ public sealed partial class AiToolFunctions
         [Description("Process ID to execute the script against")] int processId,
         [Description("Full Auto Assembler script text (must match the previously enabled script)")] string script)
     {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         if (autoAssemblerEngine is null)
             return "Auto Assembler engine not available.";
         if (!IsProcessAlive(processId))

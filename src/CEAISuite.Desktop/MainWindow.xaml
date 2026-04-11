@@ -511,8 +511,10 @@
                         <avalonDock:LayoutAnchorable Title="Plugins" ContentId="plugins">
                             <DockPanel x:Name="PluginsContent" Background="{DynamicResource SidebarBackground}">
                                 <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
-                                    <Button Content="Refresh" Command="{Binding RefreshCommand}" ToolTip="Re-scan plugins directory" />
+                                    <Button Content="Install…" Command="{Binding InstallCommand}" ToolTip="Install a plugin from a .dll file" />
                                     <Button Content="Unload" Command="{Binding UnloadCommand}" ToolTip="Unload selected plugin" />
+                                    <Separator />
+                                    <Button Content="Refresh" Command="{Binding RefreshCommand}" ToolTip="Re-scan plugins directory" />
                                     <Button Content="Open Folder" Command="{Binding OpenFolderCommand}" ToolTip="Open plugins directory in Explorer" />
                                 </ToolBar>
                                 <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"

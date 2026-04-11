@@ -6,6 +6,7 @@ using CEAISuite.Desktop.Models;
 using CEAISuite.Desktop.Services;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Win32;
 
 namespace CEAISuite.Desktop.ViewModels;
 
@@ -44,6 +45,40 @@ public sealed partial class PluginManagerViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task InstallAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Select Plugin DLL",
+            Filter = "Plugin DLLs (*.dll)|*.dll",
+            Multiselect = false
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        var sourcePath = dialog.FileName;
+        var pluginDir = _pluginHost.PluginDirectory;
+
+        try
+        {
+            if (!Directory.Exists(pluginDir))
+                Directory.CreateDirectory(pluginDir);
+
+            var destPath = Path.Combine(pluginDir, Path.GetFileName(sourcePath));
+            File.Copy(sourcePath, destPath, overwrite: true);
+            _outputLog.Append("Plugins", "Info", $"Copied {Path.GetFileName(sourcePath)} to plugins folder");
+
+            // Reload all plugins to pick up the new one
+            Refresh();
+            _outputLog.Append("Plugins", "Info", "Plugin installed. Restart to load new plugins, or use Refresh after manual load.");
+        }
+        catch (Exception ex)
+        {
+            _outputLog.Append("Plugins", "Error", $"Install failed: {ex.Message}");
+        }
+    }
+
+    [RelayCommand]
     private async Task UnloadAsync()
     {
         if (SelectedPlugin is null) return;
@@ -63,9 +98,7 @@ public sealed partial class PluginManagerViewModel : ObservableObject
     [RelayCommand]
     private void OpenFolder()
     {
-        var dir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "CEAISuite", "plugins");
+        var dir = _pluginHost.PluginDirectory;
         if (!Directory.Exists(dir))
             Directory.CreateDirectory(dir);
         Process.Start("explorer.exe", dir);

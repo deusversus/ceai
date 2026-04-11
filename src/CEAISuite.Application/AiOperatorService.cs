@@ -524,7 +524,7 @@ public sealed class AiOperatorService : IDisposable, IAsyncDisposable
         _promptCacheOptimizer = new PromptCacheOptimizer(Log);
 
         // ── Plugin Host (DI-provided singleton, shared with PluginManagerViewModel) ──
-        _pluginHost = pluginHost ?? new PluginHost(log: Log);
+        _pluginHost = pluginHost;
         _ = LoadPluginsAsync().ContinueWith(
             t => { if (t.IsFaulted) Log("ERROR", $"Plugin loading failed: {t.Exception?.InnerException?.Message}"); },
             TaskScheduler.Default);

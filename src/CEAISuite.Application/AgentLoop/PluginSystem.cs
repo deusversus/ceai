@@ -81,6 +81,9 @@ public sealed class PluginHost : IAsyncDisposable
         _log = log;
     }
 
+    /// <summary>The directory where plugins are stored.</summary>
+    public string PluginDirectory => _pluginDirectory;
+
     /// <summary>All loaded plugins (snapshot).</summary>
     public IReadOnlyList<LoadedPlugin> Plugins
     {

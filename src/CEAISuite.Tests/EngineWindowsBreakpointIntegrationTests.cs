@@ -5,6 +5,14 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace CEAISuite.Tests;
 
 /// <summary>
+/// Non-parallel collection for tests that use native debug APIs (DebugActiveProcess,
+/// SetThreadContext, etc.). Concurrent debug attachment from the same process causes
+/// access violations (0xC0000005) in the native layer.
+/// </summary>
+[CollectionDefinition("DebuggerTests", DisableParallelization = true)]
+public class DebuggerTestsDefinition;
+
+/// <summary>
 /// Integration tests for <see cref="WindowsBreakpointEngine"/> using the test harness process.
 /// Tests cover software/hardware/page-guard breakpoints, tracing, conditional breakpoints,
 /// and breakpoint lifecycle (list, remove, restore).
@@ -17,6 +25,7 @@ namespace CEAISuite.Tests;
 /// fast enough in CI. These tests skip when no hits are detected after a generous wait.
 /// </summary>
 [Trait("Category", "Integration")]
+[Collection("DebuggerTests")]
 public class EngineWindowsBreakpointIntegrationTests
 {
     /// <summary>Helper: try to skip when debug attach fails.</summary>

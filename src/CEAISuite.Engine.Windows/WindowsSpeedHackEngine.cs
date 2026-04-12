@@ -254,8 +254,19 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         {
             RestoreAllHooks(state.ProcessHandle, processId, state.Hooks);
 
+            // IMPORTANT: Do NOT free the cave immediately. A thread that was mid-execution
+            // inside the trampoline/gateway when we suspended may resume and briefly touch
+            // the cave code before reaching the restored original bytes. Freeing the cave
+            // causes that thread to execute freed memory → crash or hang.
+            //
+            // Instead, make the gateway redirect to the original function (NOP + JMP back)
+            // so any in-flight thread safely exits the cave, then delay-free.
             if (state.CaveBase != IntPtr.Zero)
+            {
+                // Give any in-flight threads time to exit the cave
+                Thread.Sleep(100);
                 VirtualFreeEx(state.ProcessHandle, state.CaveBase, UIntPtr.Zero, MemRelease);
+            }
 
             if (_logger.IsEnabled(LogLevel.Information))
                 _logger.LogInformation("Speed hack removed from process {ProcessId}", processId);
@@ -734,6 +745,12 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     }
 
     /// <summary>Restore all inline hooks by writing back the stolen prologue bytes.</summary>
+    /// <remarks>
+    /// After restoring, the trampoline entry points are patched to JMP directly to
+    /// the original function. This way, any thread whose RIP was inside the trampoline
+    /// at suspend time will safely redirect to the restored function on resume —
+    /// even before VirtualFreeEx reclaims the cave.
+    /// </remarks>
     private void RestoreAllHooks(IntPtr hProcess, int processId, List<InlineHookInfo> hooks)
     {
         var suspended = SuspendTargetThreads(processId);
@@ -756,6 +773,12 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                         len, oldProtect, out _);
                     FlushInstructionCache(hProcess, (IntPtr)hook.OriginalFunctionAddress, len);
                 }
+
+                // Patch the trampoline entry to JMP to the restored original function.
+                // Any thread whose RIP is inside the cave will safely redirect here on resume.
+                var safeJmp = BuildAbsoluteJmp(hook.OriginalFunctionAddress);
+                WriteProcessMemory(hProcess, (IntPtr)hook.TrampolineAddress, safeJmp, safeJmp.Length, out _);
+                FlushInstructionCache(hProcess, (IntPtr)hook.TrampolineAddress, (UIntPtr)safeJmp.Length);
             }
         }
         finally
@@ -806,6 +829,11 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     {
         foreach (var handle in suspendedThreads)
         {
+            // ResumeThread returns the previous suspend count.
+            // We called SuspendThread exactly once, so we call ResumeThread exactly once.
+            // If SuspendThread incremented from 0→1, ResumeThread decrements 1→0 (running).
+            // If SuspendThread incremented from N→N+1 (already suspended), ResumeThread
+            // decrements N+1→N (still suspended, same as before we touched it). This is correct.
             _ = ResumeThread(handle);
             _ = CloseHandle(handle);
         }

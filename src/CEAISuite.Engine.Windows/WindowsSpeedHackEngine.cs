@@ -340,6 +340,11 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             return null;
         }
 
+        // Follow forwarding stubs: many kernel32 functions are just `jmp [rip+disp32]`
+        // pointing to the real implementation in kernelbase or ntdll.
+        // We must hook the actual function body, not the stub.
+        realFuncAddr = FollowForwardingStubs(hProcess, realFuncAddr, target.FunctionName);
+
         // Read enough bytes to decode instruction boundaries (32 bytes is generous for 14-byte minimum)
         const int readSize = 32;
         var prologueBuffer = new byte[readSize];
@@ -612,6 +617,65 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Follow forwarding stubs (jmp [rip+disp32]) to the real function body.
+    /// Many kernel32 functions are just one-instruction stubs that forward to
+    /// kernelbase.dll or ntdll.dll. We need to hook the actual implementation,
+    /// not the forwarding stub.
+    ///
+    /// Patterns detected:
+    ///   48 FF 25 XX XX XX XX  = REX.W jmp qword [rip + disp32]  (7 bytes)
+    ///   FF 25 XX XX XX XX     = jmp qword [rip + disp32]         (6 bytes)
+    /// </summary>
+    private nuint FollowForwardingStubs(IntPtr hProcess, nuint funcAddr, string funcName)
+    {
+        // Read first 7 bytes to check for forwarding stub
+        var buf = new byte[7];
+        if (!ReadProcessMemory(hProcess, (IntPtr)funcAddr, buf, buf.Length, out _))
+            return funcAddr;
+
+        nuint targetPtrAddr;
+        int instrLen;
+
+        if (buf[0] == 0x48 && buf[1] == 0xFF && buf[2] == 0x25)
+        {
+            // REX.W jmp qword [rip + disp32] — 7 bytes
+            int disp32 = BitConverter.ToInt32(buf, 3);
+            instrLen = 7;
+            targetPtrAddr = (nuint)((long)funcAddr + instrLen + disp32);
+        }
+        else if (buf[0] == 0xFF && buf[1] == 0x25)
+        {
+            // jmp qword [rip + disp32] — 6 bytes
+            int disp32 = BitConverter.ToInt32(buf, 2);
+            instrLen = 6;
+            targetPtrAddr = (nuint)((long)funcAddr + instrLen + disp32);
+        }
+        else
+        {
+            // Not a forwarding stub — hook here
+            return funcAddr;
+        }
+
+        // Read the 8-byte pointer at the target location
+        var ptrBuf = new byte[8];
+        if (!ReadProcessMemory(hProcess, (IntPtr)targetPtrAddr, ptrBuf, 8, out _))
+        {
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug("Could not read forwarding target pointer for {Func}", funcName);
+            return funcAddr;
+        }
+
+        var realTarget = (nuint)BitConverter.ToUInt64(ptrBuf);
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation(
+                "Followed forwarding stub for {Func}: 0x{Stub:X} -> 0x{Real:X}",
+                funcName, funcAddr, realTarget);
+
+        // Recurse once in case of double-forwarding (kernel32 -> kernelbase -> ntdll)
+        return FollowForwardingStubs(hProcess, realTarget, funcName);
+    }
 
     private static long ToFixedPoint(double multiplier) =>
         (long)(multiplier * 65536.0);

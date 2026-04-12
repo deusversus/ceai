@@ -18,7 +18,9 @@ public sealed class ScriptGenerationService
         sb.AppendLine(CultureInfo.InvariantCulture, $"// Generated: {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
         sb.AppendLine(CultureInfo.InvariantCulture, $"// Entries: {entries.Count}");
         sb.AppendLine();
+        sb.AppendLine("using System;");
         sb.AppendLine("using System.Diagnostics;");
+        sb.AppendLine("using System.Linq;");
         sb.AppendLine("using System.Runtime.InteropServices;");
         sb.AppendLine();
         sb.AppendLine("namespace CEAISuite.GeneratedTrainer;");
@@ -61,6 +63,13 @@ public sealed class ScriptGenerationService
         sb.AppendLine("    private static void WriteValue(IntPtr handle, IntPtr address, byte[] value)");
         sb.AppendLine("    {");
         sb.AppendLine("        WriteProcessMemory(handle, address, value, value.Length, out _);");
+        sb.AppendLine("    }");
+        sb.AppendLine();
+        sb.AppendLine("    public static void Main()");
+        sb.AppendLine("    {");
+        sb.AppendLine("        Apply();");
+        sb.AppendLine("        Console.WriteLine(\"Press any key to exit...\");");
+        sb.AppendLine("        Console.ReadKey(true);");
         sb.AppendLine("    }");
         sb.AppendLine("}");
 

@@ -46,6 +46,7 @@ public sealed partial class AiToolFunctions(
     ISymbolEngine? symbolEngine = null,
     AgentLoop.PluginHost? pluginHost = null,
     IUiCommandBus? uiCommandBus = null,
+    SpeedHackService? speedHackService = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;

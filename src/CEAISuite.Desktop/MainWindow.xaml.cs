@@ -52,7 +52,7 @@ public partial class MainWindow : Window, IDisposable
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 20; // v20 = add Plugin Manager sidebar panel
+    private const int LayoutVersion = 21; // v21 = add Speed Hack bottom panel
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -92,6 +92,7 @@ public partial class MainWindow : Window, IDisposable
         MemoryRegionsViewModel memoryRegionsVm,
         WorkspaceViewModel workspaceVm,
         PluginManagerViewModel pluginManagerVm,
+        SpeedHackViewModel speedHackVm,
         MemoryBrowserViewModel memoryBrowserVm,
         IAiContextService aiContextService,
         IUiCommandBus uiCommandBus,
@@ -220,6 +221,7 @@ public partial class MainWindow : Window, IDisposable
         MemoryRegionsContent.DataContext = memoryRegionsVm;
         WorkspaceContent.DataContext = workspaceVm;
         PluginsContent.DataContext = pluginManagerVm;
+        SpeedHackContent.DataContext = speedHackVm;
 
         // Wire Phase 5 Memory Browser ViewModel
         MemoryBrowserTab.SetViewModel(memoryBrowserVm);
@@ -1621,6 +1623,7 @@ public partial class MainWindow : Window, IDisposable
         "memoryRegions" => "Memory Map",
         "workspace" => "Workspace",
         "plugins" => "Plugins",
+        "speedHack" => "Speed Hack",
         _ => contentId
     };
 
@@ -1754,7 +1757,7 @@ public partial class MainWindow : Window, IDisposable
             "aiOperator" => "aiOperator",
             // Bottom panels
             "scanner" or "breakpoints" or "scripts" or "snapshots"
-                or "findResults" or "hotkeys" or "journal" or "output" => "scanner",
+                or "findResults" or "hotkeys" or "journal" or "output" or "speedHack" => "scanner",
             _ => "scanner"
         };
 

@@ -1856,6 +1856,54 @@
                                     </TabItem>
                                 </TabControl>
                             </avalonDock:LayoutAnchorable>
+
+                            <!-- ═══ Speed Hack ═══ -->
+                            <avalonDock:LayoutAnchorable Title="Speed Hack" ContentId="speedHack">
+                                <Grid x:Name="SpeedHackContent" Background="{DynamicResource SidebarBackground}" Margin="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Multiplier slider -->
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                                        <TextBlock Text="Speed:" VerticalAlignment="Center" Width="50" />
+                                        <Slider Value="{Binding Multiplier}" Minimum="0.1" Maximum="8.0"
+                                                TickFrequency="0.1" IsSnapToTickEnabled="True" Width="200"
+                                                ToolTip="Speed multiplier (0.1 = 10%, 1.0 = normal, 8.0 = 8x)" />
+                                        <TextBlock Text="{Binding MultiplierDisplay}" VerticalAlignment="Center"
+                                                   Margin="8,0,0,0" FontWeight="SemiBold" FontSize="14" />
+                                    </StackPanel>
+
+                                    <!-- Per-function checkboxes -->
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                                        <CheckBox Content="timeGetTime" IsChecked="{Binding PatchTimeGetTime}" Margin="0,0,12,0" />
+                                        <CheckBox Content="QueryPerformanceCounter" IsChecked="{Binding PatchQueryPerformanceCounter}" Margin="0,0,12,0" />
+                                        <CheckBox Content="GetTickCount64" IsChecked="{Binding PatchGetTickCount64}" />
+                                    </StackPanel>
+
+                                    <!-- Buttons -->
+                                    <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,0,0,8">
+                                        <Button Content="Apply" Command="{Binding ApplyCommand}" Padding="12,4" Margin="0,0,4,0"
+                                                ToolTip="Patch timing APIs in target process" />
+                                        <Button Content="Remove" Command="{Binding RemoveCommand}" Padding="12,4"
+                                                ToolTip="Restore original timing functions" />
+                                    </StackPanel>
+
+                                    <!-- Warning -->
+                                    <TextBlock Grid.Row="3" Text="Speed hacking may trigger anti-cheat detection."
+                                               Foreground="{DynamicResource WarningForeground}" FontStyle="Italic" FontSize="11"
+                                               Margin="0,0,0,4" />
+
+                                    <!-- Status -->
+                                    <TextBlock Grid.Row="4" Text="{Binding StatusText}"
+                                               Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
+                                               VerticalAlignment="Top" />
+                                </Grid>
+                            </avalonDock:LayoutAnchorable>
                         </avalonDock:LayoutAnchorablePane>
                     </avalonDock:LayoutPanel>
 

@@ -746,44 +746,50 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 
     /// <summary>Restore all inline hooks by writing back the stolen prologue bytes.</summary>
     /// <remarks>
-    /// After restoring, the trampoline entry points are patched to JMP directly to
-    /// the original function. This way, any thread whose RIP was inside the trampoline
-    /// at suspend time will safely redirect to the restored function on resume —
-    /// even before VirtualFreeEx reclaims the cave.
+    /// We do NOT suspend threads during removal. The suspend/resume cycle was causing
+    /// game input threads to hang permanently (suspend count mismatch or RIP landing
+    /// in freed cave memory on resume). Instead:
+    ///
+    /// 1. Patch each trampoline to JMP directly to the original function (safe redirect)
+    /// 2. Restore the original prologue bytes via WriteProcessMemory (atomic for small aligned writes)
+    /// 3. Flush instruction cache
+    ///
+    /// Between steps 1 and 2, any thread calling the hooked function hits the trampoline
+    /// which now just JMPs to the original — completely safe. After step 2, all future
+    /// calls go directly to the restored original. No thread suspension needed.
     /// </remarks>
     private void RestoreAllHooks(IntPtr hProcess, int processId, List<InlineHookInfo> hooks)
     {
-        var suspended = SuspendTargetThreads(processId);
-        try
+        foreach (var hook in hooks)
         {
-            foreach (var hook in hooks)
-            {
-                var len = (UIntPtr)hook.StolenBytes.Length;
-                if (VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
-                        len, PageExecuteReadWrite, out uint oldProtect))
-                {
-                    if (!WriteProcessMemory(hProcess, (IntPtr)hook.OriginalFunctionAddress,
-                            hook.StolenBytes, hook.StolenBytes.Length, out _))
-                    {
-                        if (_logger.IsEnabled(LogLevel.Warning))
-                            _logger.LogWarning("Failed to restore {Function} at 0x{Addr:X}",
-                                hook.FunctionName, hook.OriginalFunctionAddress);
-                    }
-                    VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
-                        len, oldProtect, out _);
-                    FlushInstructionCache(hProcess, (IntPtr)hook.OriginalFunctionAddress, len);
-                }
-
-                // Patch the trampoline entry to JMP to the restored original function.
-                // Any thread whose RIP is inside the cave will safely redirect here on resume.
-                var safeJmp = BuildAbsoluteJmp(hook.OriginalFunctionAddress);
-                WriteProcessMemory(hProcess, (IntPtr)hook.TrampolineAddress, safeJmp, safeJmp.Length, out _);
-                FlushInstructionCache(hProcess, (IntPtr)hook.TrampolineAddress, (UIntPtr)safeJmp.Length);
-            }
+            // Step 1: Redirect the trampoline to the original function.
+            // Any in-flight call through the hook now safely reaches the original.
+            var safeJmp = BuildAbsoluteJmp(hook.OriginalFunctionAddress);
+            WriteProcessMemory(hProcess, (IntPtr)hook.TrampolineAddress, safeJmp, safeJmp.Length, out _);
+            FlushInstructionCache(hProcess, (IntPtr)hook.TrampolineAddress, (UIntPtr)safeJmp.Length);
         }
-        finally
+
+        // Brief pause to let any thread that just entered the trampoline exit through the safe redirect
+        Thread.Sleep(50);
+
+        // Step 2: Restore original prologue bytes
+        foreach (var hook in hooks)
         {
-            ResumeTargetThreads(suspended);
+            var len = (UIntPtr)hook.StolenBytes.Length;
+            if (VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
+                    len, PageExecuteReadWrite, out uint oldProtect))
+            {
+                if (!WriteProcessMemory(hProcess, (IntPtr)hook.OriginalFunctionAddress,
+                        hook.StolenBytes, hook.StolenBytes.Length, out _))
+                {
+                    if (_logger.IsEnabled(LogLevel.Warning))
+                        _logger.LogWarning("Failed to restore {Function} at 0x{Addr:X}",
+                            hook.FunctionName, hook.OriginalFunctionAddress);
+                }
+                VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
+                    len, oldProtect, out _);
+                FlushInstructionCache(hProcess, (IntPtr)hook.OriginalFunctionAddress, len);
+            }
         }
     }
 

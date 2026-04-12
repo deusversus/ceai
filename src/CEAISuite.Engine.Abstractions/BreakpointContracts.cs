@@ -68,7 +68,19 @@ public enum BreakpointMode
     /// <para><b>Mitigations:</b> Instruction boundary validation (2C) prevents accidental
     /// corruption. Original byte is tracked for clean restoration.</para>
     /// </summary>
-    Software
+    Software,
+
+    /// <summary>
+    /// Vectored Exception Handler — hardware breakpoints set via injected VEH agent DLL.
+    /// No DebugActiveProcess attachment required — bypasses IsDebuggerPresent and
+    /// NtQueryInformationProcess(ProcessDebugPort) anti-debug checks.
+    /// <para><b>Detection surface:</b> GetThreadContext still reveals DR0-DR3 values.
+    /// Loaded agent DLL visible in module list. VEH handler chain detectable via
+    /// undocumented NtQueryInformationProcess calls.</para>
+    /// <para><b>Mitigations:</b> No debugger flag set. Agent DLL has minimal footprint.
+    /// Shared memory IPC avoids debug API surface entirely.</para>
+    /// </summary>
+    VectoredExceptionHandler
 }
 
 // ─── Capability Flags ────────────────────────────────────────────────

@@ -234,6 +234,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IScreenCaptureEngine, WindowsScreenCaptureEngine>();
         services.AddSingleton<ICallStackEngine, WindowsCallStackEngine>();
         services.AddSingleton<ISpeedHackEngine, WindowsSpeedHackEngine>();
+        services.AddSingleton<IVehDebugger, WindowsVehDebugger>();
 
         // ── Persistence ──
         services.AddSingleton<IInvestigationSessionRepository>(
@@ -265,6 +266,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<UiCommandBus>(sp => new UiCommandBus(sp.GetRequiredService<AppSettingsService>()));
         services.AddSingleton<IUiCommandBus>(sp => sp.GetRequiredService<UiCommandBus>());
         services.AddSingleton<SpeedHackService>();
+        services.AddSingleton<VehDebugService>();
 
 
         // ── Settings (needs .Load() called) ──
@@ -318,7 +320,8 @@ public partial class App : System.Windows.Application
                 luaEngine: sp.GetService<ILuaScriptEngine>(),
                 pluginHost: sp.GetRequiredService<PluginHost>(),
                 uiCommandBus: sp.GetRequiredService<IUiCommandBus>(),
-                speedHackService: sp.GetRequiredService<SpeedHackService>());
+                speedHackService: sp.GetRequiredService<SpeedHackService>(),
+                vehDebugService: sp.GetRequiredService<VehDebugService>());
         });
 
         // ── AI operator service (starts with null IChatClient — MainWindow hot-swaps it) ──

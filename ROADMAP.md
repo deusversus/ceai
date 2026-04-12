@@ -426,11 +426,13 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10A — Plugin System UI
+### Phase 10A — Plugin System UI ✅ COMPLETE
 
 **Goal:** Surface the already-built `PluginHost`/`ICeaiPlugin` backend (in `AgentLoop/PluginSystem.cs`) with a first-class management UI so users can install, browse, and unload community plugins.
 
 **Why:** The engine is 100% done. This sub-phase costs minimal work and immediately unlocks the community ecosystem.
+
+**Result:** PluginManagerViewModel with plugin discovery, catalog refresh, install from disk and online catalog. PluginHost promoted to DI singleton with AssemblyLoadContext isolation. AI tools: `ListPlugins`, `GetPluginTools`.
 
 **Complexity:** Low
 
@@ -446,11 +448,13 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10B — Trainer Generation GUI
+### Phase 10B — Trainer Generation GUI ✅ COMPLETE
 
 **Goal:** Build a dialog that takes selected address table entries and emits a standalone `.exe` trainer that locks values in the target process while running — CE's most visible "killer app" feature.
 
 **Approach:** Roslyn `CSharpCompilation` generates a self-contained C# source using P/Invoke `WriteProcessMemory` in a loop, compiled in-process to a `.exe`. No dotnet SDK required on end-user machines.
+
+**Result:** `RoslynTrainerCompiler` generates + compiles C# trainer source via Roslyn. `TrainerGeneratorDialog.xaml` with entry checklist, preview source, and build button. AI tools: `GenerateTrainer`, `PreviewTrainerSource`.
 
 **Complexity:** Medium
 
@@ -467,11 +471,13 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10C — AI Co-Pilot Mode
+### Phase 10C — AI Co-Pilot Mode ✅ COMPLETE
 
 **Goal:** Allow the AI to issue whitelisted UI commands — navigate to a panel, populate scan forms, set address entry values, attach a process — as staged actions shown to the user before execution. Strictly MVVM command invocation through a defined whitelist; not general UI automation.
 
 **Why now:** Phase 2.5 built MVVM specifically for this. `PermissionEngine`, `HookRegistry`, `SkillSystem`, and `AgentStreamEvent.ApprovalRequested` all exist and are waiting for this wiring.
+
+**Result:** `UiCommandBus` with whitelist enforcement, thread-safe dispatch, and ViewModel subscriptions. AI tools: `GetUiCommandWhitelist`, `ExecuteUiCommand`. Settings toggle for approval requirements.
 
 **Complexity:** Medium
 
@@ -488,18 +494,20 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10D — Speed Hack
+### Phase 10D — Speed Hack ✅ COMPLETE
 
-**Goal:** Intercept and scale `timeGetTime`, `QueryPerformanceCounter`, `GetTickCount`, and optionally `Sleep` via IAT patching + code cave injection to slow or accelerate game timers. No kernel required.
+**Goal:** Intercept and scale `timeGetTime`, `QueryPerformanceCounter`, `GetTickCount`, and optionally `Sleep` to slow or accelerate game timers. No kernel required.
 
-**Approach:** User-space IAT patching using existing `ICodeCaveEngine` for trampoline allocation. The `loadlibrary`/`createthread` injection path from Phase 7 (`WindowsAutoAssemblerEngine`) provides the injection primitive.
+**Approach:** Initially implemented as IAT patching, but **rewritten to inline hooking** after IAT patching failed on real games (forwarding stubs, delay-loaded DLLs, and multi-module IAT tables made IAT-only approaches unreliable). The final implementation uses Iced disassembler for instruction boundary detection and RIP-relative relocation, with fixed-point scaling in injected trampolines. Removal sets multiplier to 1.0× before unhooking to prevent timing discontinuities.
 
 **Complexity:** Medium-High
+
+**Lessons learned:** IAT patching alone is insufficient for production use — games load timing functions through forwarding stubs, delay-load tables, and statically linked CRT copies that bypass the IAT. Inline hooking at the function entry point is the only reliable approach. Thread suspension during unhooking causes input freezes; ramping to 1.0× then unhooking without suspension is the correct removal sequence.
 
 | Item | Details |
 |------|---------|
 | `SpeedHackContracts.cs` (Abstractions) | `SpeedHackConfig` (multiplier, per-function toggles), `SpeedHackState`, `ISpeedHackEngine` |
-| `WindowsSpeedHackEngine` (Engine.Windows) | IAT patching + trampoline code cave via `ICodeCaveEngine`; patches `timeGetTime`, `QueryPerformanceCounter`, `GetTickCount` |
+| `WindowsSpeedHackEngine` (Engine.Windows) | Inline hooking with Iced decoder for instruction boundaries + RIP-relative relocation; follows forwarding stubs before hooking; fixed-point multiplier scaling |
 | `SpeedHackService` (Application) | Rate-limit guards, state tracking, safe apply/remove |
 | `SpeedHackViewModel` (Desktop) | Speed slider (0.1×–8.0×), multiplier readout, per-function toggles, Apply/Remove buttons, anti-cheat warning label |
 | UI placement | New bottom panel tab or toolbar popout |
@@ -509,11 +517,13 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10E — VEH Debugging
+### Phase 10E — VEH Debugging ✅ COMPLETE
 
 **Goal:** Add a Vectored Exception Handler-based debugger mode that intercepts hardware breakpoints (`EXCEPTION_SINGLE_STEP` via Trap Flag, `EXCEPTION_BREAKPOINT` via INT3) without `DebugActiveProcess` attachment — bypassing common anti-debug checks (`IsDebuggerPresent`, `NtQueryInformationProcess(ProcessDebugPort)`).
 
-**Approach:** Inject a small VEH agent (native-AOT C# shim bundled as a resource) via existing `loadlibrary`/`createthread` infrastructure. Communicate via shared memory. `BreakpointMode` enum gains a `VEH` option.
+**Approach:** Native C VEH agent DLL (398 LOC) injected via `loadlibrary`/`createthread` infrastructure. Communicates via shared memory (`MemoryMappedFile` IPC). `BreakpointMode` enum gains a `VEH` option. CI workflow compiles the agent with MSVC and embeds it as a resource.
+
+**Result:** `WindowsVehDebugger` (797 LOC) manages agent injection, breakpoint set/remove, and hit streaming. `VehDebugService` adapts to `BreakpointService`. 20+ dedicated VEH tests. AI tools: `SetVehBreakpoint`, `GetVehStatus`.
 
 **Complexity:** High
 
@@ -541,9 +551,11 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10G — Community Distribution
+### Phase 10G — Community Distribution ✅ COMPLETE
 
 **Goal:** Complete the ecosystem story: versioned releases with a hosted update manifest, a `ceai://install-plugin?url=...` URI scheme for community catalog installs, and a GitHub Pages portal.
+
+**Result:** `PluginCatalogService` fetches catalog from GitHub Pages with SHA256 verification and HTTPS enforcement. `ceai://install-plugin` protocol handler wired in `App.xaml.cs`. Online catalog tab in Plugin Manager.
 
 **Complexity:** Low *(almost entirely DevOps + web)*
 
@@ -601,11 +613,13 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10J — Adversarial Robustness & Battle Testing
+### Phase 10J — Adversarial Robustness & Battle Testing ✅ COMPLETE
 
 **Goal:** Systematically harden every engine interface against real-world hostile conditions — processes that exit mid-operation, memory protection changes, malformed inputs, concurrent access, and edge-case Win32 error codes. Transform the test suite from "validates happy paths with mocks" to "proves the engine survives anything a real target throws at it."
 
 **Why this is critical:** Phases 1–9 were built at high velocity with AI assistance. The code is structurally correct and compiles, but the mock-based test suite cannot catch failures that only occur in live adversarial conditions. This phase bridges that gap before Tier 2/3 features (speed hack, VEH) add more injection surface area.
+
+**Result:** Adversarial test harness with hostile behaviors. Fault injection tests for all Win32 error codes. Malformed CT corpus tests (XXE, Billion Laughs, deep nesting, encoding). Concurrent tool stress tests. Dedicated CI job (`adversarial`) runs on every push.
 
 **Complexity:** Medium
 
@@ -627,11 +641,13 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10K — Security Review Checkpoint
+### Phase 10K — Security Review Checkpoint ✅ COMPLETE
 
 **Goal:** Audit the supply-chain and injection attack surfaces introduced by the plugin system (10A), community catalog downloads (10G), and DLL injection infrastructure (10D/10E) before community distribution goes live.
 
 **Why:** The combination of "download DLLs from a catalog" + "load them into the app process" + "inject code into target processes" is a textbook supply-chain attack vector. This checkpoint ensures the architecture is secure before external users depend on it.
+
+**Result:** `SECURITY.md` threat model with trust boundaries and mitigations. PID validation guards on all engine operations. Catalog SHA256 checksum enforcement. CT Lua execution warnings. Security validation test suite (`SecurityValidationTests.cs`, `CredentialSecurityTests.cs`).
 
 **Complexity:** Low-Medium *(audit + targeted hardening, not a rewrite)*
 
@@ -649,9 +665,11 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10L — Stabilization Pass
+### Phase 10L — Stabilization Pass ✅ COMPLETE
 
-**Goal:** Regression benchmark and stability verification gate between Tier 2 and Tier 3 features. After speed hack (10D) adds IAT patching and before VEH debugging (10E) adds exception handler injection, verify the engine hasn't regressed.
+**Goal:** Regression benchmark and stability verification gate between Tier 2 and Tier 3 features. After speed hack (10D) adds inline hooking and before VEH debugging (10E) adds exception handler injection, verify the engine hasn't regressed.
+
+**Result:** Scan benchmarks, 100-cycle attach/detach leak detection, speed hack apply/remove resource leak checks, crash recovery stress tests. Dedicated CI job (`stabilization`) runs on every push. Leak tests use behavioral deltas (not hard GC thresholds) for CI stability.
 
 **Complexity:** Low
 
@@ -721,19 +739,19 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ## Phase 10 Priority Order
 
-| Tier | Sub-Phase | Rationale |
-|------|-----------|-----------|
-| **Tier 1** (near-term) | **10A** Plugin System UI | Backend done; pure UI wiring; unlocks ecosystem immediately |
-| | **10C** AI Co-Pilot Mode | All plumbing exists; MVVM + `PermissionEngine` are waiting for this |
-| | **10B** Trainer Generation | Highest-visibility user feature; self-contained Roslyn addition |
-| | **10G** Community Distribution | Low complexity DevOps; must immediately follow 10A to make plugins useful |
-| **Gate 1** | **10J** Adversarial Robustness | Battle-test the engine before adding injection features; adversarial harness + fault injection + malformed CT corpus |
-| | **10K** Security Review | Audit plugin loading, catalog downloads, and injection code paths before community distribution goes live |
-| **Tier 2** (medium-term) | **10D** Speed Hack | Uses existing `ICodeCaveEngine`; high user demand; no kernel required |
-| **Gate 2** | **10L** Stabilization Pass | Regression benchmarks + memory leak checks + crash recovery stress before VEH injection |
-| **Tier 3** (long-term) | **10E** VEH Debugging | High complexity; requires injection agent DLL + shared memory IPC |
-| **Phase 11A** | Debugger stepping | Last universal parity gap; builds on VEH from 10E; every user needs this |
-| **Phase 11B** | Kernel driver | Niche but powerful; requires EV cert + dedicated kernel engineer |
+| Tier | Sub-Phase | Status | Rationale |
+|------|-----------|--------|-----------|
+| **Tier 1** (near-term) | **10A** Plugin System UI | ✅ Done | Backend done; pure UI wiring; unlocks ecosystem immediately |
+| | **10C** AI Co-Pilot Mode | ✅ Done | All plumbing exists; MVVM + `PermissionEngine` are waiting for this |
+| | **10B** Trainer Generation | ✅ Done | Highest-visibility user feature; self-contained Roslyn addition |
+| | **10G** Community Distribution | ✅ Done | Low complexity DevOps; must immediately follow 10A to make plugins useful |
+| **Gate 1** | **10J** Adversarial Robustness | ✅ Done | Battle-test the engine before adding injection features; adversarial harness + fault injection + malformed CT corpus |
+| | **10K** Security Review | ✅ Done | Audit plugin loading, catalog downloads, and injection code paths before community distribution goes live |
+| **Tier 2** (medium-term) | **10D** Speed Hack | ✅ Done | Rewritten from IAT patching to inline hooking; high user demand; no kernel required |
+| **Gate 2** | **10L** Stabilization Pass | ✅ Done | Regression benchmarks + memory leak checks + crash recovery stress before VEH injection |
+| **Tier 3** (long-term) | **10E** VEH Debugging | ✅ Done | Native C agent DLL + shared memory IPC; anti-debug bypass |
+| **Phase 11A** | Debugger stepping | Planned | Last universal parity gap; builds on VEH from 10E; every user needs this |
+| **Phase 11B** | Kernel driver | Future | Niche but powerful; requires EV cert + dedicated kernel engineer |
 
 ---
 
@@ -741,25 +759,29 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 2 ✅ | After Ph 2.5 ✅ | After Ph 3 ✅ | After Ph 4 ✅ | After Ph 5 ✅ | After Ph 6 ✅ | After Ph 7 ✅ | After Ph 8 ✅ | Target |
-|----------|-------------|-------------|-----------|-----------|-----------|-----------|-----------|-----------|--------|
-| Process & Attachment | 20% | 20% | 20% | 45% | 45% | 45% | 45% | 45% | 80%* |
-| Memory Read/Write | 10% | 10% | 10% | 15% | 80% | 80% | 80% | 80% | 90% |
-| Scanning | 67% | 67% | 67% | 67% | 67% | 67% | 90% | 90% | 95% |
-| Disassembly & Analysis | 20% | 20% | 70% | 70% | 70% | 70% | 70% | 70% | 85% |
-| Breakpoints & Hooks | 50% | 50% | 55% | 55% | 55% | 55% | 85% | 90% | 90% |
-| Address Table | 67% | 67% | 67% | 67% | 67% | 67% | 90% | 90% | 95% |
-| Scripting | 40% | 40% | 80% | 80% | 80% | 80% | 80% | 95% | 95% |
-| Pointer Resolution | 0% | 0% | 60% | 60% | 60% | 60% | 70% | 70% | 80% |
-| Structure Discovery | 0% | 0% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
-| Snapshots | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
-| Session & History | 60% | 60% | 60% | 75% | 75% | 75% | 75% | 75% | 80% |
-| Safety & Watchdog | 30% | 30% | 30% | 30% | 30% | 30% | 50% | 50% | 80% |
-| Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% | 100% |
-| **Overall** | **~42%** | **~42%** | **~62%** | **~65%** | **~72%** | **~72%** | **~82%** | **~88%** | **90%+** |
+| Category | After Ph 7 ✅ | After Ph 8 ✅ | After Ph 10 ✅ | Target |
+|----------|-----------|-----------|------------|--------|
+| Process & Attachment | 45% | 45% | 50% | 80%* |
+| Memory Read/Write | 80% | 80% | 80% | 90% |
+| Scanning | 90% | 90% | 90% | 95% |
+| Disassembly & Analysis | 70% | 70% | 70% | 85% |
+| Breakpoints & Hooks | 85% | 90% | 95% | 95%** |
+| Address Table | 90% | 90% | 90% | 95% |
+| Scripting | 80% | 95% | 95% | 95% |
+| Pointer Resolution | 70% | 70% | 70% | 80% |
+| Structure Discovery | 100% | 100% | 100% | 100% |
+| Snapshots | 100% | 100% | 100% | 100% |
+| Session & History | 75% | 75% | 75% | 80% |
+| Safety & Watchdog | 50% | 50% | 70% | 80% |
+| Hotkeys | 100% | 100% | 100% | 100% |
+| **Overall** | **~82%** | **~88%** | **~91%** | **95%+** |
 
 *Process & Attachment parity improves further with future engine enhancements (parent process, command line).
-**Scripting reaches 95% after Phase 8 (Lua Engine).
+**Breakpoints & Hooks reaches 95% with VEH debugging (10E) providing anti-debug bypass. Target raised from 90% to 95%.
+
+Phase 10 parity changes: Breakpoints & Hooks +5% (VEH debugging mode), Safety & Watchdog +20% (security review, adversarial testing, stabilization gate, PID validation), Process & Attachment +5% (speed hack process interaction). Overall target raised to 95%+ reflecting achievable ceiling with Phase 11 stepping.
+
+*Full historical parity table (Phases 2–8) preserved in git history.*
 
 ---
 
@@ -793,25 +815,12 @@ Phase 1 ✅ (Foundation)
     │
     Phase 9 ✅ (Infrastructure) ← CI/CD, Serilog, telemetry, benchmarks, progress bars, wizard; 579 tests
     │
-    └── Phase 10 (Advanced)
-            ├── Tier 1: Near-term
-            │   ├── 10A Plugin System UI (backend exists; pure UI)
-            │   ├── 10C AI Co-Pilot Mode (PermissionEngine + MVVM ready)
-            │   ├── 10B Trainer Generation (Roslyn .exe emit)
-            │   └── 10G Community Distribution (catalog + ceai:// protocol)
-            │
-            ├── Gate 1: Robustness
-            │   ├── 10J Adversarial Harness + Battle Testing
-            │   └── 10K Security Review (plugin/injection audit)
-            │
-            ├── Tier 2: Medium-term
-            │   └── 10D Speed Hack (IAT patching + ICodeCaveEngine)
-            │
-            ├── Gate 2: Stabilization
-            │   └── 10L Regression Benchmarks + Leak/Crash Stress
-            │
-            ├── Tier 3: Long-term
-            │   └── 10E VEH Debugging (VEH agent DLL + IPC)
+    └── Phase 10 ✅ (Advanced) ← all sub-phases complete; 2,558 tests
+            ├── Tier 1 ✅: 10A Plugin UI + 10C Co-Pilot + 10B Trainers + 10G Distribution
+            ├── Gate 1 ✅: 10J Adversarial Testing + 10K Security Review
+            ├── Tier 2 ✅: 10D Speed Hack (rewritten: IAT → inline hooking)
+            ├── Gate 2 ✅: 10L Stabilization (benchmarks + leak detection + crash recovery)
+            └── Tier 3 ✅: 10E VEH Debugging (native C agent + shared memory IPC)
             │
     Phase 11 (Full Debugger & Kernel)
             ├── 11A Debugger Stepping (builds on 10E VEH; last universal parity gap)
@@ -829,6 +838,7 @@ Phase 1 ✅ (Foundation)
 8. ✅ Phase 7 — Done (Engine gaps: multi-threaded scan, conditional BPs, trace, AA directives, address table, pointer maps; 385 tests)
 9. ✅ Phase 9 — Done (CI/CD + Codecov, Serilog logging, crash telemetry opt-in, progress indicators, first-run wizard, UI lifecycle tests, benchmark hardening; 579 tests)
 10. ✅ Phase 8 — Done (MoonSharp Lua 5.2 engine, CE API, REPL, forms, BP scripting; 489 tests)
+11. ✅ Phase 10 — Done (Plugin UI, Co-Pilot, Trainers, Speed Hack, VEH Debug, Community Distribution, Adversarial Testing, Security Review, Stabilization; 2,558 tests)
 
 ---
 
@@ -846,5 +856,5 @@ Phase 1 ✅ (Foundation)
 | **7** | Engine Gaps | ✅ Complete | Multi-threaded scan, bit-level scan, conditional/thread BPs, break-and-trace, AA directives (aobscanmodule, registersymbol, createthread, readmem/writemem, loadlibrary), address table hex/signed/dropdown/groups, pointer map save/load/compare; 385 tests |
 | **8** | Lua | ✅ Complete | MoonSharp Lua 5.2 engine: CE API bindings (20+ functions), {$luacode}/LuaCall AA integration, REPL console, CT Lua execution, form designer, breakpoint scripting, 3 AI tools; 489 tests |
 | **9** | Infrastructure | ✅ Complete | CI/CD (GitHub Actions + Codecov), Serilog structured logging (file + Output panel), crash telemetry opt-in, breakpoint/snapshot progress indicators, first-run wizard (3-page onboarding), UI lifecycle smoke tests, benchmark hardening; 579 tests |
-| **10** | Advanced | Planned | Tier 1: 10A Plugin UI + 10C Co-Pilot + 10B Trainers + 10G Distribution → Gate 1: 10J Battle Testing + 10K Security → Tier 2: 10D Speed Hack → Gate 2: 10L Stabilization → Tier 3: 10E VEH Debug |
-| **11** | Debugger & Kernel | Future | 11A Debugger Stepping (last universal parity gap) → 11B Kernel Driver (niche anti-debug bypass) |
+| **10** | Advanced | ✅ Complete | Plugin UI (10A), AI Co-Pilot (10C), Trainer Generation (10B), Community Distribution (10G), Adversarial Testing (10J), Security Review (10K), Speed Hack (10D, inline hooking), Stabilization (10L), VEH Debugging (10E); 2,558 tests |
+| **11** | Debugger & Kernel | Planned | 11A Debugger Stepping (last universal parity gap) → 11B Kernel Driver (niche anti-debug bypass) |

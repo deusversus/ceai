@@ -13,6 +13,7 @@ namespace CEAISuite.Tests;
 /// in the same process causes multi-MB swings unrelated to actual leaks).
 /// </summary>
 [Trait("Category", "Stabilization")]
+[Trait("Flaky", "GC")]
 public class StabilizationLeakTests
 {
     private const int TestProcessId = 1000;

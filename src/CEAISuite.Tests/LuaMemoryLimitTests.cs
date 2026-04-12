@@ -9,6 +9,7 @@ namespace CEAISuite.Tests;
 /// WaitAsync hard timeouts on the execution task. These tests verify that runaway
 /// scripts are terminated within the configured timeout.
 /// </summary>
+[Trait("Flaky", "Timing")]
 public sealed class LuaMemoryLimitTests : IDisposable
 {
     private readonly MoonSharpLuaEngine _engine = CreateEngine(timeoutSeconds: 10);

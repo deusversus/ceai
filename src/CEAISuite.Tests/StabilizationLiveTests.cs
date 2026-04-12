@@ -14,6 +14,7 @@ namespace CEAISuite.Tests;
 /// </summary>
 [Trait("Category", "Stabilization")]
 [Trait("Category", "Integration")]
+[Trait("Flaky", "Timing")]
 public class StabilizationLiveTests
 {
     // ── Benchmark: live scan against harness ──

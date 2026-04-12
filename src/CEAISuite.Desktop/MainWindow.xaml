@@ -523,7 +523,7 @@
                                         <TextBlock DockPanel.Dock="Bottom" Text="{Binding StatusText}" FontSize="11"
                                                    Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
                                         <ListView ItemsSource="{Binding Plugins}" SelectedItem="{Binding SelectedPlugin, Mode=TwoWay}"
-                                                  Style="{StaticResource SidebarListView}" Margin="0,4,0,0">
+                                                  Margin="0,4,0,0">
                                             <ListView.View>
                                                 <GridView>
                                                     <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="120" />
@@ -545,7 +545,7 @@
                                         <TextBlock DockPanel.Dock="Bottom" Text="{Binding CatalogStatus}" FontSize="11"
                                                    Foreground="{DynamicResource SecondaryForeground}" Margin="8,4" />
                                         <ListView ItemsSource="{Binding CatalogPlugins}" SelectedItem="{Binding SelectedCatalogPlugin, Mode=TwoWay}"
-                                                  Style="{StaticResource SidebarListView}" Margin="0,4,0,0">
+                                                  Margin="0,4,0,0">
                                             <ListView.View>
                                                 <GridView>
                                                     <GridViewColumn Header="Name" DisplayMemberBinding="{Binding Name}" Width="100" />

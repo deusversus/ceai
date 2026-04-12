@@ -7,17 +7,20 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace CEAISuite.Engine.Windows;
 
 /// <summary>
-/// IAT-patching speed hack engine for x64 Windows processes.
+/// Inline-hooking speed hack engine for x64 Windows processes.
 /// Intercepts timing APIs (timeGetTime, QueryPerformanceCounter, GetTickCount64) by:
-/// 1. Walking the target process PE import tables to locate IAT slots
-/// 2. Allocating code caves with scaling trampolines (fixed-point 16.16 arithmetic)
-/// 3. Overwriting IAT entries to redirect calls through our trampolines
+/// 1. Resolving the real function address in the target (system DLLs share addresses)
+/// 2. Saving the function prologue (14 bytes) and writing a JMP to our trampoline
+/// 3. The trampoline calls the original via a "gateway" (stolen bytes + JMP back),
+///    captures the result, and scales the delta with fixed-point arithmetic.
 ///
-/// The trampolines capture a base value at apply time and scale the delta:
-///   result = base + (real_result - base) * multiplier
+/// This catches ALL callers regardless of how they resolved the function address
+/// (IAT, GetProcAddress, direct call, etc.), matching Cheat Engine's approach.
 ///
-/// Multiplier updates are lock-free: 8-byte aligned writes are atomic on x64,
-/// so UpdateMultiplierAsync just overwrites the data section without suspending threads.
+/// Cave layout per function (256 bytes):
+///   [+0x00] Data section: real_func_addr(8) + base_value(8) + multiplier_fp(8) = 24 bytes
+///   [+0x18] Gateway: stolen prologue bytes + JMP back to original+14 = ~28 bytes
+///   [+0x40] Trampoline: scaling code that calls gateway = ~64 bytes
 /// </summary>
 public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 {
@@ -42,16 +45,16 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     private const uint TH32CS_SNAPMODULE = 0x00000008;
     private const uint TH32CS_SNAPTHREAD = 0x00000004;
 
-    // PE constants
-    private const ushort IMAGE_DOS_SIGNATURE = 0x5A4D;
-    private const uint IMAGE_NT_SIGNATURE = 0x00004550;
-    private const int IMAGE_DIRECTORY_ENTRY_IMPORT = 1;
+    // Inline hook: 14 bytes for `mov rax, imm64; jmp rax`
+    private const int HookPrologueSize = 14;
 
-    // Cave layout: 3 data slots (8 bytes each) + code per function
-    private const int DataSlotSize = 8;
-    private const int DataSectionSize = 3 * DataSlotSize; // real_func_addr, base_value, multiplier
-    private const int MaxTrampolineCodeSize = 64; // generous upper bound per trampoline
-    private const int PerFunctionCaveSize = DataSectionSize + MaxTrampolineCodeSize;
+    // Cave layout per function
+    private const int DataSectionSize = 24;      // 3 x 8-byte slots
+    private const int GatewayOffset = 0x18;      // after data
+    private const int GatewayMaxSize = 40;       // stolen bytes + jmp back
+    private const int TrampolineOffset = 0x40;   // after gateway
+    private const int TrampolineMaxSize = 80;    // scaling code
+    private const int PerFunctionCaveSize = 0xC0; // 192 bytes total (generous)
 
     // ─── Internal State ─────────────────────────────────────────────
 
@@ -59,7 +62,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     {
         public IntPtr ProcessHandle;
         public double Multiplier;
-        public List<IatPatchInfo> Patches = new();
+        public List<InlineHookInfo> Hooks = new();
         public IntPtr CaveBase;
         public int CaveSize;
 
@@ -73,10 +76,10 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         }
     }
 
-    private sealed record IatPatchInfo(
+    private sealed record InlineHookInfo(
         string FunctionName,
-        nuint IatSlotAddress,
-        nuint OriginalValue,
+        nuint OriginalFunctionAddress,
+        byte[] StolenBytes,
         nuint TrampolineAddress,
         nuint MultiplierDataAddress);
 
@@ -106,7 +109,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     {
         if (_states.TryGetValue(processId, out var state))
         {
-            var funcs = state.Patches.Select(p => p.FunctionName).ToList();
+            var funcs = state.Hooks.Select(p => p.FunctionName).ToList();
             return new SpeedHackState(true, state.Multiplier, funcs);
         }
         return new SpeedHackState(false, 1.0, []);
@@ -126,7 +129,6 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         if (multiplier <= 0.0)
             return new SpeedHackResult(false, "Multiplier must be positive");
 
-        // Open process
         var hProcess = OpenProcess(ProcessAllAccess, false, processId);
         if (hProcess == IntPtr.Zero)
         {
@@ -136,14 +138,12 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 
         try
         {
-            // Validate x64
             if (!IsProcess64Bit(hProcess))
             {
                 CloseHandle(hProcess);
                 return new SpeedHackResult(false, "Speed hack only supports x64 processes");
             }
 
-            // Determine which functions to patch
             var targets = new List<TimingFunction>();
             if (options.PatchTimeGetTime) targets.Add(AllTimingFunctions[0]);
             if (options.PatchQueryPerformanceCounter) targets.Add(AllTimingFunctions[1]);
@@ -155,15 +155,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                 return new SpeedHackResult(false, "No timing functions selected for patching");
             }
 
-            // Get all loaded module base addresses (main module first, then DLLs)
-            var moduleBases = GetAllModuleBases(processId);
-            if (moduleBases.Count == 0)
-            {
-                CloseHandle(hProcess);
-                return new SpeedHackResult(false, "Failed to enumerate process modules");
-            }
-
-            // Allocate a single code cave for all trampolines
+            // Allocate a single code cave for all hooks
             int totalCaveSize = targets.Count * PerFunctionCaveSize;
             var caveBase = VirtualAllocEx(
                 hProcess, IntPtr.Zero, (UIntPtr)totalCaveSize,
@@ -175,64 +167,58 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             }
 
             var patchedFunctions = new List<string>();
-            var patches = new List<IatPatchInfo>();
+            var hooks = new List<InlineHookInfo>();
             long fixedPointMultiplier = ToFixedPoint(multiplier);
 
-            // For each target function: resolve, find IAT slot, build trampoline, patch
             for (int i = 0; i < targets.Count; i++)
             {
                 var target = targets[i];
-                var caveOffset = (nuint)(i * PerFunctionCaveSize);
-                var functionCaveAddr = (nuint)(long)caveBase + caveOffset;
+                var caveAddr = (nuint)(long)caveBase + (nuint)(i * PerFunctionCaveSize);
 
                 try
                 {
-                    var patch = PatchFunction(
-                        hProcess, processId, moduleBases,
-                        target, functionCaveAddr, fixedPointMultiplier);
-
-                    if (patch != null)
+                    var hook = HookFunction(hProcess, processId, target, caveAddr, fixedPointMultiplier);
+                    if (hook != null)
                     {
-                        patches.Add(patch);
+                        hooks.Add(hook);
                         patchedFunctions.Add(target.FunctionName);
                         if (_logger.IsEnabled(LogLevel.Information))
                             _logger.LogInformation(
-                                "Patched {Function} IAT slot at 0x{IatSlot:X} -> trampoline at 0x{Trampoline:X}",
-                                target.FunctionName, patch.IatSlotAddress, patch.TrampolineAddress);
+                                "Hooked {Function} at 0x{Addr:X} -> trampoline at 0x{Trampoline:X}",
+                                target.FunctionName, hook.OriginalFunctionAddress, hook.TrampolineAddress);
                     }
                     else
                     {
                         if (_logger.IsEnabled(LogLevel.Warning))
-                            _logger.LogWarning("Skipped {Function}: IAT slot not found in any loaded module ({ModuleCount} scanned)", target.FunctionName, moduleBases.Count);
+                            _logger.LogWarning("Skipped {Function}: could not resolve or hook", target.FunctionName);
                     }
                 }
                 catch (Exception ex)
                 {
                     if (_logger.IsEnabled(LogLevel.Warning))
-                        _logger.LogWarning(ex, "Failed to patch {Function}, skipping", target.FunctionName);
+                        _logger.LogWarning(ex, "Failed to hook {Function}, skipping", target.FunctionName);
                 }
             }
 
-            if (patches.Count == 0)
+            if (hooks.Count == 0)
             {
                 VirtualFreeEx(hProcess, caveBase, UIntPtr.Zero, MemRelease);
                 CloseHandle(hProcess);
-                return new SpeedHackResult(false, $"No timing functions could be patched (IAT entries not found in any of {moduleBases.Count} loaded modules)");
+                return new SpeedHackResult(false, "No timing functions could be hooked");
             }
 
             var state = new ProcessSpeedHackState
             {
                 ProcessHandle = hProcess,
                 Multiplier = multiplier,
-                Patches = patches,
+                Hooks = hooks,
                 CaveBase = caveBase,
                 CaveSize = totalCaveSize,
             };
 
             if (!_states.TryAdd(processId, state))
             {
-                // Race: another thread applied first — undo everything
-                RestoreAllPatches(hProcess, processId, patches);
+                RestoreAllHooks(hProcess, processId, hooks);
                 VirtualFreeEx(hProcess, caveBase, UIntPtr.Zero, MemRelease);
                 CloseHandle(hProcess);
                 return new SpeedHackResult(false, "Speed hack was applied by another thread concurrently");
@@ -240,8 +226,8 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 
             if (_logger.IsEnabled(LogLevel.Information))
                 _logger.LogInformation(
-                    "Speed hack applied to process {ProcessId}: {Multiplier}x, {Count} function(s) patched",
-                    processId, multiplier, patches.Count);
+                    "Speed hack applied to process {ProcessId}: {Multiplier}x, {Count} function(s) hooked",
+                    processId, multiplier, hooks.Count);
 
             return new SpeedHackResult(true, PatchedFunctions: patchedFunctions);
         }
@@ -261,7 +247,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 
         try
         {
-            RestoreAllPatches(state.ProcessHandle, processId, state.Patches);
+            RestoreAllHooks(state.ProcessHandle, processId, state.Hooks);
 
             if (state.CaveBase != IntPtr.Zero)
                 VirtualFreeEx(state.ProcessHandle, state.CaveBase, UIntPtr.Zero, MemRelease);
@@ -293,10 +279,10 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         long fixedPoint = ToFixedPoint(newMultiplier);
         var fpBytes = BitConverter.GetBytes(fixedPoint);
 
-        foreach (var patch in state.Patches)
+        foreach (var hook in state.Hooks)
         {
             if (!WriteProcessMemory(
-                    state.ProcessHandle, (IntPtr)patch.MultiplierDataAddress,
+                    state.ProcessHandle, (IntPtr)hook.MultiplierDataAddress,
                     fpBytes, fpBytes.Length, out _))
             {
                 if (_logger.IsEnabled(LogLevel.Warning))
@@ -304,7 +290,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                     var err = Marshal.GetLastWin32Error();
                     _logger.LogWarning(
                         "Failed to update multiplier for {Function} at 0x{Addr:X} (Win32 error {Error})",
-                        patch.FunctionName, patch.MultiplierDataAddress, err);
+                        hook.FunctionName, hook.MultiplierDataAddress, err);
                 }
             }
         }
@@ -318,18 +304,21 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         return new SpeedHackResult(true);
     }
 
-    // ─── PE IAT Walking ─────────────────────────────────────────────
+    // ─── Inline Hooking ─────────────────────────────────────────────
 
     /// <summary>
-    /// Patch a single timing function by walking the target PE's import table,
-    /// building a trampoline, and overwriting the IAT slot.
+    /// Hook a single timing function using inline JMP detour.
+    /// 1. Resolve real function address (system DLLs share addresses across processes)
+    /// 2. Read and save the first 14 bytes of the function (stolen prologue)
+    /// 3. Write a "gateway" in the cave: stolen bytes + JMP back to original+14
+    /// 4. Write the scaling trampoline that calls the gateway
+    /// 5. Overwrite the function prologue with: mov rax, trampoline; jmp rax
     /// </summary>
-    private IatPatchInfo? PatchFunction(
-        IntPtr hProcess, int processId, List<nuint> moduleBases,
+    private InlineHookInfo? HookFunction(
+        IntPtr hProcess, int processId,
         TimingFunction target, nuint caveAddr, long fixedPointMultiplier)
     {
-        // Resolve the real function address in our own process.
-        // System DLLs are mapped at the same base address across all processes on Windows.
+        // Resolve the real function address. System DLLs are at the same base in all processes.
         var dllHandle = GetModuleHandleW(target.DllName);
         if (dllHandle == IntPtr.Zero)
         {
@@ -338,291 +327,181 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             return null;
         }
 
-        var realFuncAddr = GetProcAddress(dllHandle, target.FunctionName);
-        if (realFuncAddr == IntPtr.Zero)
+        var realFuncAddr = (nuint)(long)GetProcAddress(dllHandle, target.FunctionName);
+        if (realFuncAddr == nuint.Zero)
         {
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("GetProcAddress({Dll}, {Func}) returned null", target.DllName, target.FunctionName);
             return null;
         }
 
-        // Walk the PE import table of EVERY loaded module to find the IAT slot.
-        // Games typically import timing functions via engine DLLs, not the main exe.
-        nuint iatSlot = nuint.Zero;
-        foreach (var moduleBase in moduleBases)
+        // Read the function prologue (first 14 bytes) — we'll overwrite these with our JMP
+        var stolenBytes = new byte[HookPrologueSize];
+        if (!ReadProcessMemory(hProcess, (IntPtr)realFuncAddr, stolenBytes, HookPrologueSize, out _))
         {
-            iatSlot = FindIatSlot(hProcess, moduleBase, target.DllName, target.FunctionName);
-            if (iatSlot != nuint.Zero)
-                break;
-        }
-        if (iatSlot == nuint.Zero)
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("Failed to read prologue of {Function} at 0x{Addr:X}", target.FunctionName, realFuncAddr);
             return null;
+        }
 
-        // Capture the base value by calling the real function now.
-        // For timeGetTime/GetTickCount64 we call them locally (same system DLLs).
-        // For QPC we call QueryPerformanceCounter locally.
+        // Capture base timing value before hooking
         long baseValue = CaptureBaseValue(target);
 
-        // Write trampoline data section
-        nuint dataAddr = caveAddr;
-        nuint codeAddr = caveAddr + (nuint)DataSectionSize;
-        nuint multiplierAddr = caveAddr + 2 * DataSlotSize;
+        // ── Write cave sections ──
 
+        nuint dataAddr = caveAddr;                              // [+0x00] data
+        nuint gatewayAddr = caveAddr + GatewayOffset;           // [+0x18] gateway
+        nuint trampolineAddr = caveAddr + TrampolineOffset;     // [+0x40] trampoline
+        nuint multiplierAddr = caveAddr + 2 * 8;                // [+0x10] multiplier slot
+
+        // Write data section: real_func_addr, base_value, multiplier
         var dataBytes = new byte[DataSectionSize];
-        BitConverter.GetBytes((long)(nint)realFuncAddr).CopyTo(dataBytes, 0);     // [+0x00] real_func_addr
-        BitConverter.GetBytes(baseValue).CopyTo(dataBytes, 8);                     // [+0x08] base_value
-        BitConverter.GetBytes(fixedPointMultiplier).CopyTo(dataBytes, 16);         // [+0x10] multiplier_fp
+        BitConverter.GetBytes((long)realFuncAddr).CopyTo(dataBytes, 0);
+        BitConverter.GetBytes(baseValue).CopyTo(dataBytes, 8);
+        BitConverter.GetBytes(fixedPointMultiplier).CopyTo(dataBytes, 16);
 
         if (!WriteProcessMemory(hProcess, (IntPtr)dataAddr, dataBytes, dataBytes.Length, out _))
         {
             if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("Failed to write trampoline data for {Function}", target.FunctionName);
+                _logger.LogWarning("Failed to write data section for {Function}", target.FunctionName);
             return null;
         }
 
-        // Build and write trampoline code
-        byte[] code = target.IsQpc
-            ? BuildQpcTrampoline(dataAddr)
-            : BuildScalarTrampoline(dataAddr);
-
-        if (!WriteProcessMemory(hProcess, (IntPtr)codeAddr, code, code.Length, out _))
+        // Write gateway: stolen prologue bytes + absolute JMP back to original+14
+        var gateway = BuildGateway(stolenBytes, realFuncAddr + HookPrologueSize);
+        if (!WriteProcessMemory(hProcess, (IntPtr)gatewayAddr, gateway, gateway.Length, out _))
         {
             if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("Failed to write trampoline code for {Function}", target.FunctionName);
+                _logger.LogWarning("Failed to write gateway for {Function}", target.FunctionName);
             return null;
         }
 
-        FlushInstructionCache(hProcess, (IntPtr)codeAddr, (UIntPtr)code.Length);
+        // Write trampoline: calls gateway, scales result
+        byte[] trampoline = target.IsQpc
+            ? BuildQpcTrampoline(dataAddr, gatewayAddr)
+            : BuildScalarTrampoline(dataAddr, gatewayAddr);
 
-        // Read original IAT value
-        var origBytes = new byte[8];
-        if (!ReadProcessMemory(hProcess, (IntPtr)iatSlot, origBytes, 8, out _))
+        if (!WriteProcessMemory(hProcess, (IntPtr)trampolineAddr, trampoline, trampoline.Length, out _))
         {
             if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("Failed to read original IAT value for {Function}", target.FunctionName);
+                _logger.LogWarning("Failed to write trampoline for {Function}", target.FunctionName);
             return null;
         }
-        nuint originalIatValue = (nuint)BitConverter.ToUInt64(origBytes);
 
-        // Patch IAT slot: suspend threads, change protection, write, restore
+        FlushInstructionCache(hProcess, (IntPtr)caveAddr, (UIntPtr)PerFunctionCaveSize);
+
+        // ── Install the hook: overwrite function prologue with JMP to trampoline ──
+        var jmpBytes = BuildAbsoluteJmp(trampolineAddr);
+
         var suspended = SuspendTargetThreads(processId);
         try
         {
-            if (!VirtualProtectEx(hProcess, (IntPtr)iatSlot, (UIntPtr)8, PageReadWrite, out uint oldProtect))
+            if (!VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize, PageExecuteReadWrite, out uint oldProtect))
             {
                 if (_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning("VirtualProtectEx failed for IAT slot 0x{Addr:X}", iatSlot);
+                    _logger.LogWarning("VirtualProtectEx failed for {Function} at 0x{Addr:X}", target.FunctionName, realFuncAddr);
                 return null;
             }
 
-            var patchBytes = BitConverter.GetBytes((ulong)codeAddr);
-            if (!WriteProcessMemory(hProcess, (IntPtr)iatSlot, patchBytes, 8, out _))
+            if (!WriteProcessMemory(hProcess, (IntPtr)realFuncAddr, jmpBytes, jmpBytes.Length, out _))
             {
-                VirtualProtectEx(hProcess, (IntPtr)iatSlot, (UIntPtr)8, oldProtect, out _);
+                VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize, oldProtect, out _);
                 if (_logger.IsEnabled(LogLevel.Warning))
-                    _logger.LogWarning("Failed to write IAT patch for {Function}", target.FunctionName);
+                    _logger.LogWarning("Failed to write JMP hook for {Function}", target.FunctionName);
                 return null;
             }
 
-            VirtualProtectEx(hProcess, (IntPtr)iatSlot, (UIntPtr)8, oldProtect, out _);
+            VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize, oldProtect, out _);
+            FlushInstructionCache(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize);
         }
         finally
         {
             ResumeTargetThreads(suspended);
         }
 
-        return new IatPatchInfo(
+        return new InlineHookInfo(
             target.FunctionName,
-            iatSlot,
-            originalIatValue,
-            codeAddr,
+            realFuncAddr,
+            stolenBytes,
+            trampolineAddr,
             multiplierAddr);
     }
 
-    /// <summary>
-    /// Walk the PE import directory of the main module to find the IAT slot
-    /// for a specific function in a specific DLL.
-    /// </summary>
-    private nuint FindIatSlot(IntPtr hProcess, nuint moduleBase, string dllName, string functionName)
-    {
-        // Read DOS header
-        var dosHeaderBytes = new byte[64]; // IMAGE_DOS_HEADER is 64 bytes
-        if (!ReadProcessMemory(hProcess, (IntPtr)moduleBase, dosHeaderBytes, dosHeaderBytes.Length, out _))
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Failed to read DOS header at 0x{Base:X}", moduleBase);
-            return nuint.Zero;
-        }
-
-        ushort dosMagic = BitConverter.ToUInt16(dosHeaderBytes, 0);
-        if (dosMagic != IMAGE_DOS_SIGNATURE)
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Invalid DOS signature 0x{Magic:X4} at 0x{Base:X}", dosMagic, moduleBase);
-            return nuint.Zero;
-        }
-
-        int e_lfanew = BitConverter.ToInt32(dosHeaderBytes, 60); // offset 60 = e_lfanew
-
-        // Read NT signature (4 bytes)
-        var sigBytes = new byte[4];
-        if (!ReadProcessMemory(hProcess, (IntPtr)(moduleBase + (nuint)e_lfanew), sigBytes, 4, out _))
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Failed to read NT signature");
-            return nuint.Zero;
-        }
-
-        uint ntSig = BitConverter.ToUInt32(sigBytes);
-        if (ntSig != IMAGE_NT_SIGNATURE)
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Invalid NT signature 0x{Sig:X8}", ntSig);
-            return nuint.Zero;
-        }
-
-        // Import directory is DataDirectory[1] in the optional header.
-        // For x64 PE:
-        //   NT headers start at e_lfanew
-        //   Signature: 4 bytes
-        //   FileHeader: 20 bytes
-        //   OptionalHeader starts at e_lfanew + 24
-        //   DataDirectory starts at OptionalHeader + 112 (for PE32+)
-        //   DataDirectory[1] is at OptionalHeader + 112 + 8 = OptionalHeader + 120
-        //   Each entry: 4 bytes VirtualAddress + 4 bytes Size
-        nuint dataDirOffset = moduleBase + (nuint)e_lfanew + 24 + 120;
-        var importDirBytes = new byte[8];
-        if (!ReadProcessMemory(hProcess, (IntPtr)dataDirOffset, importDirBytes, 8, out _))
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Failed to read import directory entry");
-            return nuint.Zero;
-        }
-
-        uint importRva = BitConverter.ToUInt32(importDirBytes, 0);
-        uint importSize = BitConverter.ToUInt32(importDirBytes, 4);
-
-        if (importRva == 0 || importSize == 0)
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("No import directory in module at 0x{Base:X}", moduleBase);
-            return nuint.Zero;
-        }
-
-        // Walk IMAGE_IMPORT_DESCRIPTOR array (20 bytes each, null-terminated)
-        nuint importTableAddr = moduleBase + importRva;
-        var descriptorBytes = new byte[20]; // sizeof(IMAGE_IMPORT_DESCRIPTOR)
-        var nameBuffer = new byte[256];
-
-        for (int descIdx = 0; descIdx < 512; descIdx++) // safety cap
-        {
-            nuint descAddr = importTableAddr + (nuint)(descIdx * 20);
-            if (!ReadProcessMemory(hProcess, (IntPtr)descAddr, descriptorBytes, 20, out _))
-                break;
-
-            uint originalFirstThunk = BitConverter.ToUInt32(descriptorBytes, 0);
-            uint nameRva = BitConverter.ToUInt32(descriptorBytes, 12);
-            uint firstThunk = BitConverter.ToUInt32(descriptorBytes, 16);
-
-            // Null terminator check
-            if (nameRva == 0 && firstThunk == 0)
-                break;
-
-            if (nameRva == 0)
-                continue;
-
-            // Read DLL name string
-            if (!ReadProcessMemory(hProcess, (IntPtr)(moduleBase + nameRva), nameBuffer, nameBuffer.Length, out _))
-                continue;
-
-            string importedDll = ExtractNullTerminatedString(nameBuffer);
-            if (!importedDll.Equals(dllName, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            // Found the matching DLL. Walk the INT (OriginalFirstThunk) to find the function.
-            // Use OriginalFirstThunk if available, else fall back to FirstThunk
-            uint intRva = originalFirstThunk != 0 ? originalFirstThunk : firstThunk;
-
-            var thunkBytes = new byte[8]; // 8 bytes per entry on x64
-            var hintNameBuffer = new byte[512];
-
-            for (int thunkIdx = 0; thunkIdx < 4096; thunkIdx++) // safety cap
-            {
-                nuint thunkAddr = moduleBase + intRva + (nuint)(thunkIdx * 8);
-                if (!ReadProcessMemory(hProcess, (IntPtr)thunkAddr, thunkBytes, 8, out _))
-                    break;
-
-                ulong thunkValue = BitConverter.ToUInt64(thunkBytes);
-                if (thunkValue == 0)
-                    break;
-
-                // Check for ordinal import (high bit set)
-                if ((thunkValue & 0x8000000000000000UL) != 0)
-                    continue;
-
-                // Read IMAGE_IMPORT_BY_NAME: 2-byte hint + null-terminated name
-                nuint hintNameAddr = moduleBase + (nuint)(thunkValue & 0x7FFFFFFFFFFFFFFFUL);
-                if (!ReadProcessMemory(hProcess, (IntPtr)hintNameAddr, hintNameBuffer, hintNameBuffer.Length, out _))
-                    continue;
-
-                // Skip 2-byte hint, read name
-                string importedFunc = ExtractNullTerminatedString(hintNameBuffer, 2);
-
-                if (importedFunc.Equals(functionName, StringComparison.Ordinal))
-                {
-                    // IAT slot address = base + FirstThunk RVA + thunkIdx * 8
-                    nuint iatSlotAddr = moduleBase + firstThunk + (nuint)(thunkIdx * 8);
-                    if (_logger.IsEnabled(LogLevel.Debug))
-                        _logger.LogDebug(
-                            "Found IAT slot for {Dll}!{Func} at 0x{Addr:X}",
-                            dllName, functionName, iatSlotAddr);
-                    return iatSlotAddr;
-                }
-            }
-        }
-
-        return nuint.Zero;
-    }
-
-    // ─── Trampoline Code Generation ─────────────────────────────────
+    // ─── Code Generation ────────────────────────────────────────────
 
     /// <summary>
-    /// Build trampoline for scalar timing functions (timeGetTime, GetTickCount64).
-    /// These return a 64-bit counter in RAX.
-    ///
-    /// Algorithm: result = base + ((real() - base) * multiplier) >> 16
-    ///
-    /// Uses mov rbx,imm64 for absolute data addressing (no RIP-relative complexity).
+    /// Build the "gateway" — stolen prologue bytes followed by an absolute JMP
+    /// back to original_function + 14. This lets the trampoline call the original
+    /// function as if it were never hooked.
     /// </summary>
-    private static byte[] BuildScalarTrampoline(nuint dataAddr)
+    private static byte[] BuildGateway(byte[] stolenBytes, nuint returnAddr)
     {
-        using var ms = new System.IO.MemoryStream(64);
+        using var ms = new System.IO.MemoryStream(GatewayMaxSize);
         var w = new System.IO.BinaryWriter(ms);
 
-        // push rbx                         ; 53
+        // Write stolen prologue bytes
+        w.Write(stolenBytes);
+
+        // JMP to returnAddr (original + 14):  mov rax, imm64; jmp rax
+        w.Write(new byte[] { 0x48, 0xB8 }); // mov rax,
+        w.Write((ulong)returnAddr);
+        w.Write(new byte[] { 0xFF, 0xE0 }); // jmp rax
+
+        w.Flush();
+        return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Build an absolute 14-byte JMP: mov rax, imm64; jmp rax
+    /// Used to overwrite the function prologue.
+    /// </summary>
+    private static byte[] BuildAbsoluteJmp(nuint targetAddr)
+    {
+        var bytes = new byte[14];
+        bytes[0] = 0x48; bytes[1] = 0xB8; // mov rax,
+        BitConverter.GetBytes((ulong)targetAddr).CopyTo(bytes, 2);
+        bytes[10] = 0xFF; bytes[11] = 0xE0; // jmp rax
+        bytes[12] = 0x90; bytes[13] = 0x90; // NOP padding
+        return bytes;
+    }
+
+    /// <summary>
+    /// Trampoline for scalar timing functions (timeGetTime, GetTickCount64).
+    /// Calls gateway to get real result in RAX, then scales:
+    ///   result = base + ((real - base) * multiplier) >> 16
+    /// </summary>
+    private static byte[] BuildScalarTrampoline(nuint dataAddr, nuint gatewayAddr)
+    {
+        using var ms = new System.IO.MemoryStream(TrampolineMaxSize);
+        var w = new System.IO.BinaryWriter(ms);
+
+        // push rbx
         w.Write((byte)0x53);
-        // sub rsp, 0x20                    ; 48 83 EC 20 (shadow space)
+        // sub rsp, 0x20  (shadow space)
         w.Write(new byte[] { 0x48, 0x83, 0xEC, 0x20 });
-        // mov rbx, <dataAddr imm64>        ; 48 BB XX XX XX XX XX XX XX XX
+        // mov rbx, dataAddr
         w.Write(new byte[] { 0x48, 0xBB });
         w.Write((ulong)dataAddr);
-        // call qword [rbx]                 ; FF 13 (call [rbx+0] = real func)
-        w.Write(new byte[] { 0xFF, 0x13 });
-        // mov rcx, [rbx + 0x08]            ; 48 8B 4B 08 (base_value)
+        // mov rax, gatewayAddr
+        w.Write(new byte[] { 0x48, 0xB8 });
+        w.Write((ulong)gatewayAddr);
+        // call rax  (call gateway → returns real result in RAX)
+        w.Write(new byte[] { 0xFF, 0xD0 });
+        // mov rcx, [rbx + 0x08]  (base_value)
         w.Write(new byte[] { 0x48, 0x8B, 0x4B, 0x08 });
-        // sub rax, rcx                     ; 48 29 C8
+        // sub rax, rcx  (delta = real - base)
         w.Write(new byte[] { 0x48, 0x29, 0xC8 });
-        // imul rax, [rbx + 0x10]           ; 48 0F AF 43 10 (multiplier)
+        // imul rax, [rbx + 0x10]  (delta * multiplier_fp)
         w.Write(new byte[] { 0x48, 0x0F, 0xAF, 0x43, 0x10 });
-        // shr rax, 0x10                    ; 48 C1 E8 10
-        w.Write(new byte[] { 0x48, 0xC1, 0xE8, 0x10 });
-        // add rax, rcx                     ; 48 01 C8
+        // sar rax, 0x10  (arithmetic shift right by 16 for signed deltas)
+        w.Write(new byte[] { 0x48, 0xC1, 0xF8, 0x10 });
+        // add rax, rcx  (result = base + scaled_delta)
         w.Write(new byte[] { 0x48, 0x01, 0xC8 });
-        // add rsp, 0x20                    ; 48 83 C4 20
+        // add rsp, 0x20
         w.Write(new byte[] { 0x48, 0x83, 0xC4, 0x20 });
-        // pop rbx                          ; 5B
+        // pop rbx
         w.Write((byte)0x5B);
-        // ret                              ; C3
+        // ret
         w.Write((byte)0xC3);
 
         w.Flush();
@@ -630,54 +509,56 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     }
 
     /// <summary>
-    /// Build trampoline for QueryPerformanceCounter (takes LARGE_INTEGER* in RCX, returns BOOL).
-    /// Calls real QPC, then scales the value at [RCX].
-    ///
-    /// Algorithm: *ptr = base + ((*ptr - base) * multiplier) >> 16
+    /// Trampoline for QueryPerformanceCounter (takes LARGE_INTEGER* in RCX, returns BOOL).
+    /// Calls gateway, then scales the value at [RCX]:
+    ///   *ptr = base + ((*ptr - base) * multiplier) >> 16
     /// </summary>
-    private static byte[] BuildQpcTrampoline(nuint dataAddr)
+    private static byte[] BuildQpcTrampoline(nuint dataAddr, nuint gatewayAddr)
     {
-        using var ms = new System.IO.MemoryStream(64);
+        using var ms = new System.IO.MemoryStream(TrampolineMaxSize);
         var w = new System.IO.BinaryWriter(ms);
 
-        // push rbx                         ; 53
+        // push rbx
         w.Write((byte)0x53);
-        // push rdi                         ; 57
+        // push rdi
         w.Write((byte)0x57);
-        // sub rsp, 0x28                    ; 48 83 EC 28 (shadow space + alignment)
+        // sub rsp, 0x28  (shadow space + alignment)
         w.Write(new byte[] { 0x48, 0x83, 0xEC, 0x28 });
-        // mov rdi, rcx                     ; 48 89 CF (save LARGE_INTEGER* pointer)
+        // mov rdi, rcx  (save LARGE_INTEGER* pointer)
         w.Write(new byte[] { 0x48, 0x89, 0xCF });
-        // mov rbx, <dataAddr imm64>        ; 48 BB XX XX XX XX XX XX XX XX
+        // mov rbx, dataAddr
         w.Write(new byte[] { 0x48, 0xBB });
         w.Write((ulong)dataAddr);
-        // mov rcx, rdi                     ; 48 89 F9 (restore RCX for the call)
+        // mov rcx, rdi  (restore RCX for the call)
         w.Write(new byte[] { 0x48, 0x89, 0xF9 });
-        // call qword [rbx]                 ; FF 13 (call real QPC)
-        w.Write(new byte[] { 0xFF, 0x13 });
-        // mov rax, [rdi]                   ; 48 8B 07 (load counter value)
+        // mov rax, gatewayAddr
+        w.Write(new byte[] { 0x48, 0xB8 });
+        w.Write((ulong)gatewayAddr);
+        // call rax  (call gateway → real QPC fills [rdi])
+        w.Write(new byte[] { 0xFF, 0xD0 });
+        // mov rax, [rdi]  (load counter value)
         w.Write(new byte[] { 0x48, 0x8B, 0x07 });
-        // mov rcx, [rbx + 0x08]            ; 48 8B 4B 08 (base_value)
+        // mov rcx, [rbx + 0x08]  (base_value)
         w.Write(new byte[] { 0x48, 0x8B, 0x4B, 0x08 });
-        // sub rax, rcx                     ; 48 29 C8 (delta)
+        // sub rax, rcx  (delta)
         w.Write(new byte[] { 0x48, 0x29, 0xC8 });
-        // imul rax, [rbx + 0x10]           ; 48 0F AF 43 10 (multiplier)
+        // imul rax, [rbx + 0x10]  (multiplier)
         w.Write(new byte[] { 0x48, 0x0F, 0xAF, 0x43, 0x10 });
-        // shr rax, 0x10                    ; 48 C1 E8 10
-        w.Write(new byte[] { 0x48, 0xC1, 0xE8, 0x10 });
-        // add rax, rcx                     ; 48 01 C8
+        // sar rax, 0x10  (arithmetic shift right)
+        w.Write(new byte[] { 0x48, 0xC1, 0xF8, 0x10 });
+        // add rax, rcx
         w.Write(new byte[] { 0x48, 0x01, 0xC8 });
-        // mov [rdi], rax                   ; 48 89 07 (write back scaled value)
+        // mov [rdi], rax  (write back scaled value)
         w.Write(new byte[] { 0x48, 0x89, 0x07 });
-        // mov eax, 1                       ; B8 01 00 00 00 (return TRUE)
+        // mov eax, 1  (return TRUE)
         w.Write(new byte[] { 0xB8, 0x01, 0x00, 0x00, 0x00 });
-        // add rsp, 0x28                    ; 48 83 C4 28
+        // add rsp, 0x28
         w.Write(new byte[] { 0x48, 0x83, 0xC4, 0x28 });
-        // pop rdi                          ; 5F
+        // pop rdi
         w.Write((byte)0x5F);
-        // pop rbx                          ; 5B
+        // pop rbx
         w.Write((byte)0x5B);
-        // ret                              ; C3
+        // ret
         w.Write((byte)0xC3);
 
         w.Flush();
@@ -686,11 +567,9 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 
     // ─── Helpers ─────────────────────────────────────────────────────
 
-    /// <summary>Convert a double multiplier to 16.16 fixed-point representation.</summary>
     private static long ToFixedPoint(double multiplier) =>
         (long)(multiplier * 65536.0);
 
-    /// <summary>Capture a base timing value by calling the real function locally.</summary>
     private static long CaptureBaseValue(TimingFunction target)
     {
         if (target.IsQpc)
@@ -702,95 +581,39 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         if (target.FunctionName == "timeGetTime")
             return timeGetTime();
 
-        // GetTickCount64
         return (long)GetTickCount64();
     }
 
     private static bool IsProcess64Bit(IntPtr hProcess)
     {
-        // IsWow64Process2 available on Windows 10 1511+
-        // If the process is WOW64, processMachine != IMAGE_FILE_MACHINE_UNKNOWN (0)
-        // For native x64, processMachine == 0 (IMAGE_FILE_MACHINE_UNKNOWN)
         if (IsWow64Process2(hProcess, out ushort processMachine, out _))
-        {
-            // processMachine == 0 means native process (not running under WOW64)
-            // processMachine == 0x014C (IMAGE_FILE_MACHINE_I386) means 32-bit on 64-bit
             return processMachine == 0;
-        }
-
-        // Fallback: IsWow64Process
         if (IsWow64Process(hProcess, out bool isWow64))
             return !isWow64;
-
-        return false; // can't determine, assume not 64-bit for safety
+        return false;
     }
 
-    /// <summary>Get the base address of the main module using CreateToolhelp32Snapshot.</summary>
-    private nuint GetMainModuleBase(int processId)
-    {
-        var bases = GetAllModuleBases(processId);
-        return bases.Count > 0 ? bases[0] : nuint.Zero;
-    }
-
-    /// <summary>Get the base addresses of all loaded modules using CreateToolhelp32Snapshot.</summary>
-    private List<nuint> GetAllModuleBases(int processId)
-    {
-        var result = new List<nuint>();
-        var snapshot = CreateToolhelp32Snapshot(
-            TH32CS_SNAPMODULE, (uint)processId);
-        if (snapshot == IntPtr.Zero || snapshot == (IntPtr)(-1))
-        {
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("CreateToolhelp32Snapshot(SNAPMODULE) failed for PID {Pid}", processId);
-            return result;
-        }
-
-        try
-        {
-            var entry = new MODULEENTRY32W { dwSize = (uint)Marshal.SizeOf<MODULEENTRY32W>() };
-            if (!Module32FirstW(snapshot, ref entry))
-            {
-                if (_logger.IsEnabled(LogLevel.Debug))
-                    _logger.LogDebug("Module32FirstW returned false for PID {Pid}", processId);
-                return result;
-            }
-
-            do
-            {
-                result.Add((nuint)(long)entry.modBaseAddr);
-                entry.dwSize = (uint)Marshal.SizeOf<MODULEENTRY32W>();
-            } while (Module32NextW(snapshot, ref entry));
-
-            if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Enumerated {Count} modules for PID {Pid}", result.Count, processId);
-        }
-        finally
-        {
-            CloseHandle(snapshot);
-        }
-
-        return result;
-    }
-
-    /// <summary>Restore all IAT patches to their original values.</summary>
-    private void RestoreAllPatches(IntPtr hProcess, int processId, List<IatPatchInfo> patches)
+    /// <summary>Restore all inline hooks by writing back the stolen prologue bytes.</summary>
+    private void RestoreAllHooks(IntPtr hProcess, int processId, List<InlineHookInfo> hooks)
     {
         var suspended = SuspendTargetThreads(processId);
         try
         {
-            foreach (var patch in patches)
+            foreach (var hook in hooks)
             {
-                var origBytes = BitConverter.GetBytes((ulong)patch.OriginalValue);
-                if (VirtualProtectEx(hProcess, (IntPtr)patch.IatSlotAddress, (UIntPtr)8, PageReadWrite, out uint oldProtect))
+                if (VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
+                        (UIntPtr)HookPrologueSize, PageExecuteReadWrite, out uint oldProtect))
                 {
-                    if (!WriteProcessMemory(hProcess, (IntPtr)patch.IatSlotAddress, origBytes, 8, out _))
+                    if (!WriteProcessMemory(hProcess, (IntPtr)hook.OriginalFunctionAddress,
+                            hook.StolenBytes, hook.StolenBytes.Length, out _))
                     {
                         if (_logger.IsEnabled(LogLevel.Warning))
-                            _logger.LogWarning(
-                                "Failed to restore IAT slot for {Function} at 0x{Addr:X}",
-                                patch.FunctionName, patch.IatSlotAddress);
+                            _logger.LogWarning("Failed to restore {Function} at 0x{Addr:X}",
+                                hook.FunctionName, hook.OriginalFunctionAddress);
                     }
-                    VirtualProtectEx(hProcess, (IntPtr)patch.IatSlotAddress, (UIntPtr)8, oldProtect, out _);
+                    VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
+                        (UIntPtr)HookPrologueSize, oldProtect, out _);
+                    FlushInstructionCache(hProcess, (IntPtr)hook.OriginalFunctionAddress, (UIntPtr)HookPrologueSize);
                 }
             }
         }
@@ -800,22 +623,9 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         }
     }
 
-    /// <summary>Extract a null-terminated ASCII string from a byte buffer.</summary>
-    private static string ExtractNullTerminatedString(byte[] buffer, int offset = 0)
-    {
-        int end = offset;
-        while (end < buffer.Length && buffer[end] != 0)
-            end++;
-        return System.Text.Encoding.ASCII.GetString(buffer, offset, end - offset);
-    }
-
     // ─── Thread Suspension ──────────────────────────────────────────
 
-    /// <summary>
-    /// Suspend all threads in the target process.
-    /// Follows the same pattern as WindowsCodeCaveEngine.SuspendTargetThreads.
-    /// </summary>
-    private List<IntPtr> SuspendTargetThreads(int processId)
+    private static List<IntPtr> SuspendTargetThreads(int processId)
     {
         var suspended = new List<IntPtr>();
         var snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -833,20 +643,14 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                 if (entry.th32OwnerProcessID != processId)
                     continue;
 
-                var threadHandle = OpenThread(
-                    0x0002 /* THREAD_SUSPEND_RESUME */,
-                    false, entry.th32ThreadID);
+                var threadHandle = OpenThread(0x0002, false, entry.th32ThreadID);
                 if (threadHandle == IntPtr.Zero)
                     continue;
 
                 if (SuspendThread(threadHandle) != unchecked((uint)-1))
-                {
                     suspended.Add(threadHandle);
-                }
                 else
-                {
                     CloseHandle(threadHandle);
-                }
             } while (Thread32Next(snapshot, ref entry));
         }
         finally
@@ -854,12 +658,9 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             CloseHandle(snapshot);
         }
 
-        if (_logger.IsEnabled(LogLevel.Trace))
-            _logger.LogTrace("Suspended {Count} thread(s) in process {Pid}", suspended.Count, processId);
         return suspended;
     }
 
-    /// <summary>Resume all previously suspended threads and close their handles.</summary>
     private static void ResumeTargetThreads(List<IntPtr> suspendedThreads)
     {
         foreach (var handle in suspendedThreads)
@@ -880,7 +681,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         {
             try
             {
-                RestoreAllPatches(kvp.Value.ProcessHandle, kvp.Key, kvp.Value.Patches);
+                RestoreAllHooks(kvp.Value.ProcessHandle, kvp.Key, kvp.Value.Hooks);
                 if (kvp.Value.CaveBase != IntPtr.Zero)
                     VirtualFreeEx(kvp.Value.ProcessHandle, kvp.Value.CaveBase, UIntPtr.Zero, MemRelease);
             }
@@ -950,19 +751,9 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
 
-    // Toolhelp32 — modules
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
 
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Module32FirstW(IntPtr hSnapshot, ref MODULEENTRY32W lpme);
-
-    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Module32NextW(IntPtr hSnapshot, ref MODULEENTRY32W lpme);
-
-    // Toolhelp32 — threads
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool Thread32First(IntPtr hSnapshot, ref THREADENTRY32 lpte);
@@ -992,23 +783,6 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     private static extern uint timeGetTime();
 
     // ─── Structs ────────────────────────────────────────────────────
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct MODULEENTRY32W
-    {
-        public uint dwSize;
-        public uint th32ModuleID;
-        public uint th32ProcessID;
-        public uint GlbcntUsage;
-        public uint ProccntUsage;
-        public IntPtr modBaseAddr;
-        public uint modBaseSize;
-        public IntPtr hModule;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
-        public string szModule;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szExePath;
-    }
 
     [StructLayout(LayoutKind.Sequential)]
     private struct THREADENTRY32

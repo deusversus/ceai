@@ -254,17 +254,12 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         {
             RestoreAllHooks(state.ProcessHandle, processId, state.Hooks);
 
-            // IMPORTANT: Do NOT free the cave immediately. A thread that was mid-execution
-            // inside the trampoline/gateway when we suspended may resume and briefly touch
-            // the cave code before reaching the restored original bytes. Freeing the cave
-            // causes that thread to execute freed memory → crash or hang.
-            //
-            // Instead, make the gateway redirect to the original function (NOP + JMP back)
-            // so any in-flight thread safely exits the cave, then delay-free.
+            // Brief delay before freeing the cave — any thread that entered the trampoline
+            // just before the hook was removed will have exited via the safe JMP redirect
+            // (written by RestoreAllHooks) within a few milliseconds.
             if (state.CaveBase != IntPtr.Zero)
             {
-                // Give any in-flight threads time to exit the cave
-                Thread.Sleep(100);
+                Thread.Sleep(50);
                 VirtualFreeEx(state.ProcessHandle, state.CaveBase, UIntPtr.Zero, MemRelease);
             }
 

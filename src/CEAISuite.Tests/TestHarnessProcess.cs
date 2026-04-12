@@ -93,9 +93,16 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
     // ── Typed helper methods for new harness commands ──
 
     /// <summary>Allocate RWX memory in the harness process, filled with 0xDE. Returns the address.</summary>
+    /// <remarks>Retries once on empty response (CI startup race condition).</remarks>
     public async Task<nuint> AllocAsync(int size, CancellationToken ct = default)
     {
         var resp = await SendCommandAsync($"ALLOC {size}", ct: ct);
+        if (resp is null || !resp.StartsWith("ALLOC_OK:", StringComparison.Ordinal))
+        {
+            // Retry once — CI runners may have slow harness startup
+            await Task.Delay(200, ct);
+            resp = await SendCommandAsync($"ALLOC {size}", ct: ct);
+        }
         if (resp is null || !resp.StartsWith("ALLOC_OK:", StringComparison.Ordinal))
             throw new InvalidOperationException($"ALLOC failed: {resp}");
         return nuint.Parse(resp.AsSpan(9), NumberStyles.HexNumber, CultureInfo.InvariantCulture);

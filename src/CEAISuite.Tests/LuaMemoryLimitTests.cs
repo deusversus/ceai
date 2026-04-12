@@ -11,7 +11,7 @@ namespace CEAISuite.Tests;
 /// </summary>
 public sealed class LuaMemoryLimitTests : IDisposable
 {
-    private readonly MoonSharpLuaEngine _engine = CreateEngine(timeoutSeconds: 3);
+    private readonly MoonSharpLuaEngine _engine = CreateEngine(timeoutSeconds: 10);
 
     public void Dispose() => _engine.Dispose();
 

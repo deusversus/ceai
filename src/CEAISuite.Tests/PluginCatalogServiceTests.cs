@@ -81,6 +81,23 @@ public class PluginCatalogServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task DownloadAndVerify_HttpUrl_ThrowsRequiringHttps()
+    {
+        var content = "fake dll content"u8.ToArray();
+        var checksum = Convert.ToHexStringLower(SHA256.HashData(content));
+        var handler = new MockDownloadHandler(content);
+        using var svc = new PluginCatalogService(new HttpClient(handler));
+
+        var entry = new PluginCatalogService.CatalogEntry(
+            "Test", "1.0", "desc", "author",
+            "http://example.com/test.dll", checksum, content.Length);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => svc.DownloadAndVerifyAsync(entry, _tempDir));
+        Assert.Contains("HTTPS", ex.Message);
+    }
+
+    [Fact]
     public async Task DownloadAndVerify_ChecksumMatch_Succeeds()
     {
         var content = "valid plugin bytes"u8.ToArray();

@@ -61,6 +61,10 @@ public sealed class PluginCatalogService : IDisposable
         if (string.IsNullOrWhiteSpace(entry.Checksum))
             throw new InvalidOperationException($"Plugin '{entry.Name}' has no checksum. Refusing to download unverified plugin.");
 
+        // Security: enforce HTTPS for all plugin downloads
+        if (!entry.DownloadUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Plugin '{entry.Name}' download URL must use HTTPS. Got: {entry.DownloadUrl}");
+
         if (!Directory.Exists(targetDirectory))
             Directory.CreateDirectory(targetDirectory);
 

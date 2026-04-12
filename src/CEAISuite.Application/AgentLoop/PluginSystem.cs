@@ -188,6 +188,10 @@ public sealed class PluginHost : IAsyncDisposable
     private async Task<LoadedPlugin?> LoadPluginAsync(
         string dllPath, PluginContext baseContext, CancellationToken ct)
     {
+        // Security: warn about unverified locally-placed plugin DLLs
+        _log?.Invoke("PLUGIN", $"WARNING: Loading unverified plugin DLL: {Path.GetFileName(dllPath)}. " +
+            "Locally-placed plugins are not SHA256-verified. Use the online catalog for verified installs.");
+
         // Create isolated assembly load context
         var alc = new PluginAssemblyLoadContext(dllPath);
         var assembly = alc.LoadFromAssemblyPath(dllPath);

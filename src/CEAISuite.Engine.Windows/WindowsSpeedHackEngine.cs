@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using CEAISuite.Engine.Abstractions;
+using Iced.Intel;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -155,11 +156,15 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                 return new SpeedHackResult(false, "No timing functions selected for patching");
             }
 
-            // Allocate a single code cave for all hooks
+            // Resolve first target to determine near-allocation anchor address
+            var anchorDll = GetModuleHandleW(targets[0].DllName);
+            var anchorAddr = anchorDll != IntPtr.Zero
+                ? (nuint)(long)GetProcAddress(anchorDll, targets[0].FunctionName)
+                : nuint.Zero;
+
+            // Allocate cave within ±2GB of target for RIP-relative instruction relocation
             int totalCaveSize = targets.Count * PerFunctionCaveSize;
-            var caveBase = VirtualAllocEx(
-                hProcess, IntPtr.Zero, (UIntPtr)totalCaveSize,
-                MemCommit | MemReserve, PageExecuteReadWrite);
+            var caveBase = AllocateNearTarget(hProcess, anchorAddr, totalCaveSize);
             if (caveBase == IntPtr.Zero)
             {
                 CloseHandle(hProcess);
@@ -335,14 +340,32 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             return null;
         }
 
-        // Read the function prologue (first 14 bytes) — we'll overwrite these with our JMP
-        var stolenBytes = new byte[HookPrologueSize];
-        if (!ReadProcessMemory(hProcess, (IntPtr)realFuncAddr, stolenBytes, HookPrologueSize, out _))
+        // Read enough bytes to decode instruction boundaries (32 bytes is generous for 14-byte minimum)
+        const int readSize = 32;
+        var prologueBuffer = new byte[readSize];
+        if (!ReadProcessMemory(hProcess, (IntPtr)realFuncAddr, prologueBuffer, readSize, out _))
         {
             if (_logger.IsEnabled(LogLevel.Warning))
                 _logger.LogWarning("Failed to read prologue of {Function} at 0x{Addr:X}", target.FunctionName, realFuncAddr);
             return null;
         }
+
+        // Use Iced decoder to find safe steal length at instruction boundaries
+        int stealLength;
+        try
+        {
+            stealLength = WindowsCodeCaveEngine.CalculateSafeStealLength(prologueBuffer, HookPrologueSize, realFuncAddr);
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("Cannot hook {Function}: {Message}", target.FunctionName, ex.Message);
+            return null;
+        }
+
+        // Extract exactly the bytes we'll steal (at instruction boundary)
+        var stolenBytes = new byte[stealLength];
+        Array.Copy(prologueBuffer, stolenBytes, stealLength);
 
         // Capture base timing value before hooking
         long baseValue = CaptureBaseValue(target);
@@ -367,8 +390,22 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             return null;
         }
 
-        // Write gateway: stolen prologue bytes + absolute JMP back to original+14
-        var gateway = BuildGateway(stolenBytes, realFuncAddr + HookPrologueSize);
+        // Relocate RIP-relative instructions in stolen bytes to the gateway address
+        byte[] relocatedStolen;
+        try
+        {
+            relocatedStolen = WindowsCodeCaveEngine.RelocateRipRelativeInstructions(
+                stolenBytes, realFuncAddr, gatewayAddr);
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Warning))
+                _logger.LogWarning("RIP relocation failed for {Function}: {Message}", target.FunctionName, ex.Message);
+            return null;
+        }
+
+        // Write gateway: relocated stolen bytes + absolute JMP back to original + stealLength
+        var gateway = BuildGateway(relocatedStolen, realFuncAddr + (nuint)stealLength);
         if (!WriteProcessMemory(hProcess, (IntPtr)gatewayAddr, gateway, gateway.Length, out _))
         {
             if (_logger.IsEnabled(LogLevel.Warning))
@@ -391,12 +428,13 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         FlushInstructionCache(hProcess, (IntPtr)caveAddr, (UIntPtr)PerFunctionCaveSize);
 
         // ── Install the hook: overwrite function prologue with JMP to trampoline ──
-        var jmpBytes = BuildAbsoluteJmp(trampolineAddr);
+        // We overwrite exactly stealLength bytes (>= 14), padding with NOPs
+        var jmpBytes = BuildAbsoluteJmp(trampolineAddr, stealLength);
 
         var suspended = SuspendTargetThreads(processId);
         try
         {
-            if (!VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize, PageExecuteReadWrite, out uint oldProtect))
+            if (!VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)stealLength, PageExecuteReadWrite, out uint oldProtect))
             {
                 if (_logger.IsEnabled(LogLevel.Warning))
                     _logger.LogWarning("VirtualProtectEx failed for {Function} at 0x{Addr:X}", target.FunctionName, realFuncAddr);
@@ -405,24 +443,28 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
 
             if (!WriteProcessMemory(hProcess, (IntPtr)realFuncAddr, jmpBytes, jmpBytes.Length, out _))
             {
-                VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize, oldProtect, out _);
+                VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)stealLength, oldProtect, out _);
                 if (_logger.IsEnabled(LogLevel.Warning))
                     _logger.LogWarning("Failed to write JMP hook for {Function}", target.FunctionName);
                 return null;
             }
 
-            VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize, oldProtect, out _);
-            FlushInstructionCache(hProcess, (IntPtr)realFuncAddr, (UIntPtr)HookPrologueSize);
+            VirtualProtectEx(hProcess, (IntPtr)realFuncAddr, (UIntPtr)stealLength, oldProtect, out _);
+            FlushInstructionCache(hProcess, (IntPtr)realFuncAddr, (UIntPtr)stealLength);
         }
         finally
         {
             ResumeTargetThreads(suspended);
         }
 
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("Hooked {Function}: stole {StealLen} bytes, gateway at 0x{Gateway:X}",
+                target.FunctionName, stealLength, gatewayAddr);
+
         return new InlineHookInfo(
             target.FunctionName,
             realFuncAddr,
-            stolenBytes,
+            stolenBytes,  // Original bytes for restoration
             trampolineAddr,
             multiplierAddr);
     }
@@ -452,16 +494,20 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     }
 
     /// <summary>
-    /// Build an absolute 14-byte JMP: mov rax, imm64; jmp rax
-    /// Used to overwrite the function prologue.
+    /// Build an absolute JMP: mov rax, imm64; jmp rax (12 bytes core, padded with NOPs to totalLength).
+    /// totalLength must be >= 12 (HookPrologueSize is 14 but instruction boundary may be larger).
     /// </summary>
-    private static byte[] BuildAbsoluteJmp(nuint targetAddr)
+    private static byte[] BuildAbsoluteJmp(nuint targetAddr, int totalLength = HookPrologueSize)
     {
-        var bytes = new byte[14];
-        bytes[0] = 0x48; bytes[1] = 0xB8; // mov rax,
+        var bytes = new byte[totalLength];
+        // Fill with NOPs first
+        Array.Fill(bytes, (byte)0x90);
+        // mov rax, imm64 (10 bytes)
+        bytes[0] = 0x48; bytes[1] = 0xB8;
         BitConverter.GetBytes((ulong)targetAddr).CopyTo(bytes, 2);
-        bytes[10] = 0xFF; bytes[11] = 0xE0; // jmp rax
-        bytes[12] = 0x90; bytes[13] = 0x90; // NOP padding
+        // jmp rax (2 bytes)
+        bytes[10] = 0xFF; bytes[11] = 0xE0;
+        // Remaining bytes are already NOPs
         return bytes;
     }
 
@@ -570,6 +616,36 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     private static long ToFixedPoint(double multiplier) =>
         (long)(multiplier * 65536.0);
 
+    // ±2GB range for RIP-relative addressing
+    private const long NearAllocRange = 0x7FFF0000L;
+    private const long AllocGranularity = 0x10000L; // 64KB Windows allocation granularity
+
+    /// <summary>
+    /// Allocate memory within ±2GB of target address for RIP-relative instruction relocation.
+    /// Falls back to any-address allocation if the entire range is exhausted.
+    /// </summary>
+    private IntPtr AllocateNearTarget(IntPtr hProcess, nuint targetAddress, int size)
+    {
+        if (targetAddress == nuint.Zero)
+            return VirtualAllocEx(hProcess, IntPtr.Zero, (UIntPtr)size, MemCommit | MemReserve, PageExecuteReadWrite);
+
+        var target = (long)targetAddress;
+        var rangeStart = Math.Max(0x10000L, target - NearAllocRange);
+        var rangeEnd = target + NearAllocRange;
+
+        for (var probe = rangeStart; probe < rangeEnd; probe += AllocGranularity)
+        {
+            var result = VirtualAllocEx(hProcess, checked((IntPtr)probe), checked((UIntPtr)size),
+                MemCommit | MemReserve, PageExecuteReadWrite);
+            if (result != IntPtr.Zero)
+                return result;
+        }
+
+        if (_logger.IsEnabled(LogLevel.Warning))
+            _logger.LogWarning("Could not allocate within ±2GB of 0x{Target:X}, falling back to any-address", targetAddress);
+        return VirtualAllocEx(hProcess, IntPtr.Zero, (UIntPtr)size, MemCommit | MemReserve, PageExecuteReadWrite);
+    }
+
     private static long CaptureBaseValue(TimingFunction target)
     {
         if (target.IsQpc)
@@ -601,8 +677,9 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
         {
             foreach (var hook in hooks)
             {
+                var len = (UIntPtr)hook.StolenBytes.Length;
                 if (VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
-                        (UIntPtr)HookPrologueSize, PageExecuteReadWrite, out uint oldProtect))
+                        len, PageExecuteReadWrite, out uint oldProtect))
                 {
                     if (!WriteProcessMemory(hProcess, (IntPtr)hook.OriginalFunctionAddress,
                             hook.StolenBytes, hook.StolenBytes.Length, out _))
@@ -612,8 +689,8 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                                 hook.FunctionName, hook.OriginalFunctionAddress);
                     }
                     VirtualProtectEx(hProcess, (IntPtr)hook.OriginalFunctionAddress,
-                        (UIntPtr)HookPrologueSize, oldProtect, out _);
-                    FlushInstructionCache(hProcess, (IntPtr)hook.OriginalFunctionAddress, (UIntPtr)HookPrologueSize);
+                        len, oldProtect, out _);
+                    FlushInstructionCache(hProcess, (IntPtr)hook.OriginalFunctionAddress, len);
                 }
             }
         }

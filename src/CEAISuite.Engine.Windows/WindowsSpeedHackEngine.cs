@@ -155,12 +155,12 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                 return new SpeedHackResult(false, "No timing functions selected for patching");
             }
 
-            // Get main module base address
-            var moduleBase = GetMainModuleBase(processId);
-            if (moduleBase == nuint.Zero)
+            // Get all loaded module base addresses (main module first, then DLLs)
+            var moduleBases = GetAllModuleBases(processId);
+            if (moduleBases.Count == 0)
             {
                 CloseHandle(hProcess);
-                return new SpeedHackResult(false, "Failed to get main module base address");
+                return new SpeedHackResult(false, "Failed to enumerate process modules");
             }
 
             // Allocate a single code cave for all trampolines
@@ -188,7 +188,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                 try
                 {
                     var patch = PatchFunction(
-                        hProcess, processId, moduleBase,
+                        hProcess, processId, moduleBases,
                         target, functionCaveAddr, fixedPointMultiplier);
 
                     if (patch != null)
@@ -203,7 +203,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
                     else
                     {
                         if (_logger.IsEnabled(LogLevel.Warning))
-                            _logger.LogWarning("Skipped {Function}: IAT slot not found in main module", target.FunctionName);
+                            _logger.LogWarning("Skipped {Function}: IAT slot not found in any loaded module ({ModuleCount} scanned)", target.FunctionName, moduleBases.Count);
                     }
                 }
                 catch (Exception ex)
@@ -217,7 +217,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             {
                 VirtualFreeEx(hProcess, caveBase, UIntPtr.Zero, MemRelease);
                 CloseHandle(hProcess);
-                return new SpeedHackResult(false, "No timing functions could be patched (IAT entries not found in main module)");
+                return new SpeedHackResult(false, $"No timing functions could be patched (IAT entries not found in any of {moduleBases.Count} loaded modules)");
             }
 
             var state = new ProcessSpeedHackState
@@ -325,7 +325,7 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     /// building a trampoline, and overwriting the IAT slot.
     /// </summary>
     private IatPatchInfo? PatchFunction(
-        IntPtr hProcess, int processId, nuint moduleBase,
+        IntPtr hProcess, int processId, List<nuint> moduleBases,
         TimingFunction target, nuint caveAddr, long fixedPointMultiplier)
     {
         // Resolve the real function address in our own process.
@@ -346,8 +346,15 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
             return null;
         }
 
-        // Walk the PE import table to find the IAT slot
-        var iatSlot = FindIatSlot(hProcess, moduleBase, target.DllName, target.FunctionName);
+        // Walk the PE import table of EVERY loaded module to find the IAT slot.
+        // Games typically import timing functions via engine DLLs, not the main exe.
+        nuint iatSlot = nuint.Zero;
+        foreach (var moduleBase in moduleBases)
+        {
+            iatSlot = FindIatSlot(hProcess, moduleBase, target.DllName, target.FunctionName);
+            if (iatSlot != nuint.Zero)
+                break;
+        }
         if (iatSlot == nuint.Zero)
             return null;
 
@@ -721,31 +728,48 @@ public sealed class WindowsSpeedHackEngine : ISpeedHackEngine, IDisposable
     /// <summary>Get the base address of the main module using CreateToolhelp32Snapshot.</summary>
     private nuint GetMainModuleBase(int processId)
     {
+        var bases = GetAllModuleBases(processId);
+        return bases.Count > 0 ? bases[0] : nuint.Zero;
+    }
+
+    /// <summary>Get the base addresses of all loaded modules using CreateToolhelp32Snapshot.</summary>
+    private List<nuint> GetAllModuleBases(int processId)
+    {
+        var result = new List<nuint>();
         var snapshot = CreateToolhelp32Snapshot(
             TH32CS_SNAPMODULE, (uint)processId);
         if (snapshot == IntPtr.Zero || snapshot == (IntPtr)(-1))
         {
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("CreateToolhelp32Snapshot(SNAPMODULE) failed for PID {Pid}", processId);
-            return nuint.Zero;
+            return result;
         }
 
         try
         {
             var entry = new MODULEENTRY32W { dwSize = (uint)Marshal.SizeOf<MODULEENTRY32W>() };
-            if (Module32FirstW(snapshot, ref entry))
+            if (!Module32FirstW(snapshot, ref entry))
             {
-                return (nuint)(long)entry.modBaseAddr;
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug("Module32FirstW returned false for PID {Pid}", processId);
+                return result;
             }
 
+            do
+            {
+                result.Add((nuint)(long)entry.modBaseAddr);
+                entry.dwSize = (uint)Marshal.SizeOf<MODULEENTRY32W>();
+            } while (Module32NextW(snapshot, ref entry));
+
             if (_logger.IsEnabled(LogLevel.Debug))
-                _logger.LogDebug("Module32FirstW returned false for PID {Pid}", processId);
-            return nuint.Zero;
+                _logger.LogDebug("Enumerated {Count} modules for PID {Pid}", result.Count, processId);
         }
         finally
         {
             CloseHandle(snapshot);
         }
+
+        return result;
     }
 
     /// <summary>Restore all IAT patches to their original values.</summary>

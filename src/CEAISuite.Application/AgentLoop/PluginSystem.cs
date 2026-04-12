@@ -1,5 +1,7 @@
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace CEAISuite.Application.AgentLoop;
@@ -185,12 +187,66 @@ public sealed class PluginHost : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Verify a plugin DLL's SHA256 against the manifest file (plugin-checksums.json).
+    /// Returns true if verified, false if rejected. Logs warnings/errors.
+    /// </summary>
+    private bool VerifyPluginChecksum(string dllPath)
+    {
+        var manifestPath = Path.Combine(_pluginDirectory, "plugin-checksums.json");
+        if (!File.Exists(manifestPath))
+        {
+            _log?.Invoke("PLUGIN", $"WARNING: No plugin-checksums.json manifest found. " +
+                $"Loading unverified DLL: {Path.GetFileName(dllPath)}. " +
+                "Create a manifest or use the online catalog for verified installs.");
+            return true; // Allow loading with warning when no manifest exists
+        }
+
+        try
+        {
+            var json = File.ReadAllText(manifestPath);
+            var checksums = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            if (checksums is null)
+            {
+                _log?.Invoke("PLUGIN", $"WARNING: plugin-checksums.json is empty or invalid. Allowing load of {Path.GetFileName(dllPath)}.");
+                return true;
+            }
+
+            var fileName = Path.GetFileName(dllPath);
+            if (!checksums.TryGetValue(fileName, out var expectedHash))
+            {
+                _log?.Invoke("PLUGIN", $"REJECTED: {fileName} is not listed in plugin-checksums.json. " +
+                    "Add its SHA256 hash to the manifest to allow loading.");
+                return false;
+            }
+
+            using var stream = File.OpenRead(dllPath);
+            var actualHash = Convert.ToHexStringLower(SHA256.HashData(stream));
+            var expected = expectedHash.Trim().ToLowerInvariant();
+
+            if (!string.Equals(actualHash, expected, StringComparison.Ordinal))
+            {
+                _log?.Invoke("PLUGIN", $"REJECTED: {fileName} checksum mismatch. " +
+                    $"Expected {expected}, got {actualHash}. The DLL may have been tampered with.");
+                return false;
+            }
+
+            _log?.Invoke("PLUGIN", $"Verified: {fileName} checksum OK.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke("PLUGIN", $"WARNING: Failed to verify {Path.GetFileName(dllPath)}: {ex.Message}. Allowing load.");
+            return true; // Fail-open on manifest read errors (graceful degradation)
+        }
+    }
+
     private async Task<LoadedPlugin?> LoadPluginAsync(
         string dllPath, PluginContext baseContext, CancellationToken ct)
     {
-        // Security: warn about unverified locally-placed plugin DLLs
-        _log?.Invoke("PLUGIN", $"WARNING: Loading unverified plugin DLL: {Path.GetFileName(dllPath)}. " +
-            "Locally-placed plugins are not SHA256-verified. Use the online catalog for verified installs.");
+        // Security: verify DLL checksum against manifest if available
+        if (!VerifyPluginChecksum(dllPath))
+            return null;
 
         // Create isolated assembly load context
         var alc = new PluginAssemblyLoadContext(dllPath);

@@ -133,6 +133,83 @@ public class AdversarialHarnessIntegrationTests
         }
     }
 
+    // ── Pointer chain with re-allocation ──
+
+    [Fact]
+    public async Task ReadPointerChain_DuringReallocation_HandlesGracefully()
+    {
+        await using var harness = await TestHarnessProcess.StartAsync(TestContext.Current.CancellationToken);
+        var pid = harness.ProcessId;
+
+        // Create a 3-deep pointer chain that re-allocates the final block every 50ms
+        var (baseAddr, chainThreadId) = await harness.StartPointerChainAsync(3, 50, TestContext.Current.CancellationToken);
+
+        var facade = new WindowsEngineFacade(NullLogger<WindowsEngineFacade>.Instance);
+        await facade.AttachAsync(pid);
+
+        int successfulWalks = 0;
+        int failedWalks = 0;
+
+        try
+        {
+            // Walk the chain 50 times while it's being re-allocated
+            for (int i = 0; i < 50; i++)
+            {
+                try
+                {
+                    var currentAddr = baseAddr;
+                    bool broken = false;
+
+                    // Walk 2 hops (depth 3 = 2 pointer hops + final value)
+                    for (int hop = 0; hop < 2; hop++)
+                    {
+                        var ptrBytes = await facade.ReadMemoryAsync(pid, currentAddr, (int)nuint.Size, TestContext.Current.CancellationToken);
+                        if (ptrBytes.Bytes.Count < nuint.Size)
+                        {
+                            broken = true;
+                            break;
+                        }
+                        currentAddr = (nuint)BitConverter.ToUInt64(ptrBytes.Bytes.ToArray(), 0);
+                        if (currentAddr == 0)
+                        {
+                            broken = true;
+                            break;
+                        }
+                    }
+
+                    if (!broken)
+                    {
+                        // Read final value (should be 0xDEAD if chain is intact)
+                        var valBytes = await facade.ReadMemoryAsync(pid, currentAddr, 4, TestContext.Current.CancellationToken);
+                        if (valBytes.Bytes.Count >= 4)
+                            successfulWalks++;
+                        else
+                            failedWalks++;
+                    }
+                    else
+                    {
+                        failedWalks++;
+                    }
+                }
+                catch (Exception ex) when (ex is not AccessViolationException)
+                {
+                    // Managed exceptions from stale pointers are acceptable
+                    failedWalks++;
+                }
+            }
+        }
+        finally
+        {
+            await harness.StopLoopAsync(chainThreadId, TestContext.Current.CancellationToken);
+            facade.Detach();
+        }
+
+        // The key assertion: no crash, and at least some walks succeeded
+        // (the chain is only briefly invalid during re-allocation)
+        Assert.True(successfulWalks + failedWalks == 50, "All 50 walks should complete (success or graceful failure)");
+        Assert.True(successfulWalks > 0, $"At least some chain walks should succeed (got {successfulWalks}/50)");
+    }
+
     // ── Breakpoint flood ──
 
     [Fact]

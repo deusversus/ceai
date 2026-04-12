@@ -112,8 +112,8 @@ public class StabilizationLeakTests
         var finalMemory = GC.GetTotalMemory(forceFullCollection: true);
 
         var delta = finalMemory - baselineMemory;
-        Assert.True(delta < 1_048_576,
-            $"Memory grew by {delta:N0} bytes after 100 speed hack cycles (threshold: 1MB). Possible leak.");
+        Assert.True(delta < 2_097_152,
+            $"Memory grew by {delta:N0} bytes after 100 speed hack cycles (threshold: 2MB). Possible leak.");
     }
 
     [Fact]

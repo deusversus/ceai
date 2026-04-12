@@ -1,0 +1,32 @@
+name: Build VEH Agent
+
+on:
+  push:
+    paths:
+      - 'native/veh_agent/**'
+  workflow_dispatch:
+
+jobs:
+  build-agent:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compile veh_agent.dll
+        working-directory: native/veh_agent
+        run: |
+          cl.exe /LD /O2 /W4 /WX veh_agent.c /link /DLL /OUT:veh_agent.dll kernel32.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          dir veh_agent.dll
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: veh-agent-dll
+          path: native/veh_agent/veh_agent.dll

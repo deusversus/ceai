@@ -17,6 +17,11 @@
     <None Include="runtimes\win-x64\native\msvcp120.dll" CopyToOutputDirectory="PreserveNewest" Link="x64\msvcp120.dll" />
   </ItemGroup>
 
+  <!-- VEH agent DLL (pre-compiled from native/veh_agent/veh_agent.c) -->
+  <ItemGroup Condition="Exists('native\veh_agent.dll')">
+    <None Include="native\veh_agent.dll" CopyToOutputDirectory="PreserveNewest" Link="veh_agent.dll" />
+  </ItemGroup>
+
   <PropertyGroup>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>

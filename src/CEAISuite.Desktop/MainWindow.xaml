@@ -513,7 +513,7 @@
                                 <!-- Installed plugins tab -->
                                 <TabItem Header="Installed">
                                     <DockPanel>
-                                        <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
+                                        <ToolBar DockPanel.Dock="Top">
                                             <Button Content="Install…" Command="{Binding InstallCommand}" ToolTip="Install a plugin from a .dll file" />
                                             <Button Content="Unload" Command="{Binding UnloadCommand}" ToolTip="Unload selected plugin" />
                                             <Separator />
@@ -538,7 +538,7 @@
                                 <!-- Online catalog tab -->
                                 <TabItem Header="Online Catalog">
                                     <DockPanel>
-                                        <ToolBar DockPanel.Dock="Top" Style="{StaticResource PanelToolBar}">
+                                        <ToolBar DockPanel.Dock="Top">
                                             <Button Content="Refresh Catalog" Command="{Binding RefreshCatalogCommand}" ToolTip="Fetch community plugin catalog" />
                                             <Button Content="Install" Command="{Binding InstallFromCatalogCommand}" ToolTip="Download and install selected plugin" />
                                         </ToolBar>

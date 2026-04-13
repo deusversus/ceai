@@ -39,22 +39,23 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
 
         var process = Process.Start(psi) ?? throw new InvalidOperationException("Failed to start harness");
 
-        // Send READY and parse PID response — retry on empty/unexpected lines
-        // (CI runners may emit blank lines or .NET runtime output before the harness is ready)
+        // Send a single READY with a generous timeout.
+        // Do NOT retry with multiple READY commands — each one produces a PID: response,
+        // and unread responses desync the pipe for subsequent commands.
+        await process.StandardInput.WriteLineAsync("READY");
+        await process.StandardInput.FlushAsync(CancellationToken.None);
+
         string? response = null;
-        for (int attempt = 0; attempt < 3; attempt++)
+        // Read lines until we get a PID: response (skip blank lines or .NET runtime output)
+        for (int attempt = 0; attempt < 5; attempt++)
         {
-            await process.StandardInput.WriteLineAsync("READY");
-            await process.StandardInput.FlushAsync(CancellationToken.None);
-            response = await ReadLineWithTimeoutAsync(process, TimeSpan.FromSeconds(5), ct);
+            response = await ReadLineWithTimeoutAsync(process, TimeSpan.FromSeconds(10), ct);
             if (response is not null && response.StartsWith("PID:", StringComparison.Ordinal))
                 break;
-            // Drain unexpected line and retry
-            await Task.Delay(200, ct);
         }
 
         if (response is null || !response.StartsWith("PID:", StringComparison.Ordinal))
-            throw new InvalidOperationException($"Unexpected READY response after 3 attempts: {response}");
+            throw new InvalidOperationException($"Unexpected READY response: {response}");
 
         var pid = int.Parse(response.AsSpan(4), provider: CultureInfo.InvariantCulture);
         return new TestHarnessProcess(process, pid);

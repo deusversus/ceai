@@ -182,17 +182,22 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
 
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
 {
-    LONG writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
-    LONG readIdx = g_shm->hitReadIndex; /* volatile read */
+    LONG writeIdx, readIdx;
+    LONG slot;
 
-    /* Overflow detection: if ring is full, increment overflow counter */
-    if (writeIdx - readIdx >= (LONG)g_maxHits)
+    /* Check for overflow before claiming a slot */
+    writeIdx = g_shm->hitWriteIndex;
+    readIdx = g_shm->hitReadIndex;
+    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
     {
         InterlockedIncrement(&g_shm->overflowCount);
+        return; /* ring full — drop this hit rather than overwrite unread data */
     }
 
+    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
+
     {
-        LONG slot = writeIdx % (LONG)g_maxHits;
+        slot = (LONG)((DWORD)writeIdx % g_maxHits);
         BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
         HitEntry* hit = (HitEntry*)base;
         LARGE_INTEGER ts;

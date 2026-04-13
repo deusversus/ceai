@@ -106,6 +106,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         public IntPtr SharedMemoryPtr;      // MapViewOfFile pointer
         public IntPtr CommandEvent;         // named auto-reset event
         public IntPtr HitEvent;             // named auto-reset event
+        public readonly SemaphoreSlim CommandLock = new(1, 1); // serialize command protocol
         public int ProcessId;
         public int MaxHits = DefaultMaxHits;
         public bool IsWow64Target;
@@ -142,6 +143,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 CloseHandle(HitEvent);
                 HitEvent = IntPtr.Zero;
             }
+
+            CommandLock.Dispose();
 
             if (ProcessHandle != IntPtr.Zero)
             {
@@ -628,51 +631,60 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
         try
         {
-            // 2. Write command arguments to shared memory
-            Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg1, (int)type);
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg2, drSlot);
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg3, dataSize);
-
-            // 3. Write command (must be last — agent polls this)
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue); // sentinel
-            Thread.MemoryBarrier();
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdSetBp);
-
-            // 4. Signal command event
-            SetEvent(state.CommandEvent);
-
-            // 5. Wait for result (poll, 3s timeout)
-            const int timeoutMs = 3000;
-            const int pollIntervalMs = 10;
-            int elapsed = 0;
-
-            while (elapsed < timeoutMs)
+            // Serialize command protocol — only one command can be in-flight at a time
+            state.CommandLock.Wait();
+            try
             {
-                var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
-                if (result != int.MinValue)
+                // 2. Write command arguments to shared memory
+                Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg1, (int)type);
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg2, drSlot);
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg3, dataSize);
+
+                // 3. Write command (must be last — agent polls this)
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue); // sentinel
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdSetBp);
+
+                // 4. Signal command event
+                SetEvent(state.CommandEvent);
+
+                // 5. Wait for result (poll, 3s timeout)
+                const int timeoutMs = 3000;
+                const int pollIntervalMs = 10;
+                int elapsed = 0;
+
+                while (elapsed < timeoutMs)
                 {
-                    if (result == 0)
+                    var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+                    if (result != int.MinValue)
                     {
-                        if (_logger.IsEnabled(LogLevel.Information))
-                            _logger.LogInformation(
-                                "VEH breakpoint set: DR{DrSlot} at 0x{Address:X} type={Type} size={DataSize} (pid={ProcessId})",
-                                drSlot, (ulong)address, type, dataSize, state.ProcessId);
-                        return new VehBreakpointResult(true, drSlot);
+                        if (result == 0)
+                        {
+                            if (_logger.IsEnabled(LogLevel.Information))
+                                _logger.LogInformation(
+                                    "VEH breakpoint set: DR{DrSlot} at 0x{Address:X} type={Type} size={DataSize} (pid={ProcessId})",
+                                    drSlot, (ulong)address, type, dataSize, state.ProcessId);
+                            return new VehBreakpointResult(true, drSlot);
+                        }
+
+                        // Agent reported failure
+                        Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
+                        return new VehBreakpointResult(false, Error: $"Agent failed to set breakpoint (result={result})");
                     }
 
-                    // Agent reported failure
-                    Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
-                    return new VehBreakpointResult(false, Error: $"Agent failed to set breakpoint (result={result})");
+                    Thread.Sleep(pollIntervalMs);
+                    elapsed += pollIntervalMs;
                 }
 
-                Thread.Sleep(pollIntervalMs);
-                elapsed += pollIntervalMs;
+                // Timeout — release slot
+                Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
+                return new VehBreakpointResult(false, Error: "Timeout waiting for agent to set breakpoint");
             }
-
-            // Timeout — release slot
-            Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
-            return new VehBreakpointResult(false, Error: "Timeout waiting for agent to set breakpoint");
+            finally
+            {
+                state.CommandLock.Release();
+            }
         }
         catch (Exception ex)
         {
@@ -701,48 +713,56 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
         try
         {
-            // Write command arguments
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg2, drSlot);
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
-            Thread.MemoryBarrier();
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdRemoveBp);
-            SetEvent(state.CommandEvent);
-
-            // Wait for result
-            const int timeoutMs = 3000;
-            const int pollIntervalMs = 10;
-            int elapsed = 0;
-
-            while (elapsed < timeoutMs)
+            state.CommandLock.Wait();
+            try
             {
-                var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
-                if (result != int.MinValue)
-                {
-                    Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
-                    state.Conditions[drSlot] = null;
-                    state.LuaCallbacks[drSlot] = null;
-                    state.SlotHitCounts[drSlot] = 0;
+                // Write command arguments
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg2, drSlot);
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdRemoveBp);
+                SetEvent(state.CommandEvent);
 
-                    if (result == 0)
+                // Wait for result
+                const int timeoutMs = 3000;
+                const int pollIntervalMs = 10;
+                int elapsed = 0;
+
+                while (elapsed < timeoutMs)
+                {
+                    var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+                    if (result != int.MinValue)
                     {
-                        if (_logger.IsEnabled(LogLevel.Information))
-                            _logger.LogInformation(
-                                "VEH breakpoint removed: DR{DrSlot} (pid={ProcessId})", drSlot, state.ProcessId);
-                        return true;
+                        Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
+                        state.Conditions[drSlot] = null;
+                        state.LuaCallbacks[drSlot] = null;
+                        state.SlotHitCounts[drSlot] = 0;
+
+                        if (result == 0)
+                        {
+                            if (_logger.IsEnabled(LogLevel.Information))
+                                _logger.LogInformation(
+                                    "VEH breakpoint removed: DR{DrSlot} (pid={ProcessId})", drSlot, state.ProcessId);
+                            return true;
+                        }
+
+                        if (_logger.IsEnabled(LogLevel.Warning))
+                            _logger.LogWarning("Agent failed to remove breakpoint DR{DrSlot} (result={Result})", drSlot, result);
+                        return false;
                     }
 
-                    if (_logger.IsEnabled(LogLevel.Warning))
-                        _logger.LogWarning("Agent failed to remove breakpoint DR{DrSlot} (result={Result})", drSlot, result);
-                    return false;
+                    Thread.Sleep(pollIntervalMs);
+                    elapsed += pollIntervalMs;
                 }
 
-                Thread.Sleep(pollIntervalMs);
-                elapsed += pollIntervalMs;
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning("Timeout waiting for agent to remove breakpoint DR{DrSlot}", drSlot);
+                return false;
             }
-
-            if (_logger.IsEnabled(LogLevel.Warning))
-                _logger.LogWarning("Timeout waiting for agent to remove breakpoint DR{DrSlot}", drSlot);
-            return false;
+            finally
+            {
+                state.CommandLock.Release();
+            }
         }
         catch (Exception ex)
         {
@@ -757,26 +777,34 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     {
         try
         {
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
-            Thread.MemoryBarrier();
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, command);
-            SetEvent(state.CommandEvent);
-
-            const int timeoutMs = 3000;
-            const int pollIntervalMs = 10;
-            int elapsed = 0;
-
-            while (elapsed < timeoutMs)
+            state.CommandLock.Wait();
+            try
             {
-                var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
-                if (result != int.MinValue)
-                    return result == 0;
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, command);
+                SetEvent(state.CommandEvent);
 
-                Thread.Sleep(pollIntervalMs);
-                elapsed += pollIntervalMs;
+                const int timeoutMs = 3000;
+                const int pollIntervalMs = 10;
+                int elapsed = 0;
+
+                while (elapsed < timeoutMs)
+                {
+                    var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+                    if (result != int.MinValue)
+                        return result == 0;
+
+                    Thread.Sleep(pollIntervalMs);
+                    elapsed += pollIntervalMs;
+                }
+
+                return false;
             }
-
-            return false;
+            finally
+            {
+                state.CommandLock.Release();
+            }
         }
         catch (Exception ex)
         {

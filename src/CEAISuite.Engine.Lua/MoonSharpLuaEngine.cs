@@ -22,6 +22,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IMemoryProtectionEngine? _memoryProtectionEngine;
     private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private LuaTimerBindings? _timerBindings;
+    private CeFormBindings? _formBindings;
     private Script _script;
     private int? _currentProcessId;
 
@@ -240,6 +241,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     public void Dispose()
     {
         _timerBindings?.Dispose();
+        _formBindings?.Dispose();
         _gate.Dispose();
     }
 
@@ -280,8 +282,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
         if (_formHost is not null)
         {
-            var formBindings = new CeFormBindings();
-            formBindings.Register(script, _formHost);
+            _formBindings?.Dispose(); // Unsubscribe old event handlers to prevent leak
+            _formBindings = new CeFormBindings();
+            _formBindings.Register(script, _formHost);
         }
 
         // Attach instruction-limit debugger when a limit is configured

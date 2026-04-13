@@ -101,6 +101,7 @@ public sealed class LuaFormHostService : ILuaFormHost
                         break;
                     case TextBox tb when element is LuaMemoElement memo:
                         tb.Text = memo.Text ?? "";
+                        tb.IsReadOnly = memo.ReadOnly;
                         break;
                     case CheckBox chk when element is LuaCheckBoxElement chkElem:
                         chk.Content = element.Caption ?? "";
@@ -137,18 +138,36 @@ public sealed class LuaFormHostService : ILuaFormHost
                 // Apply common styling
                 fe.Visibility = element.Visible ? Visibility.Visible : Visibility.Collapsed;
                 fe.IsEnabled = element.Enabled;
-                if (element.FontName is not null || element.FontSize is not null)
+
+                // Font — applies to both Control (buttons, textboxes) and TextBlock (labels)
+                if (element.FontName is not null)
                 {
-                    if (element.FontName is not null && fe is Control ctrl)
-                        ctrl.FontFamily = new FontFamily(element.FontName);
-                    if (element.FontSize is not null && fe is Control ctrl2)
-                        ctrl2.FontSize = element.FontSize.Value;
+                    var family = new FontFamily(element.FontName);
+                    if (fe is Control c1) c1.FontFamily = family;
+                    else if (fe is TextBlock tb1) tb1.FontFamily = family;
                 }
-                if (element.FontColor is not null && fe is Control fCtrl)
+                if (element.FontSize is not null)
                 {
-                    try { fCtrl.Foreground = new BrushConverter().ConvertFromString(element.FontColor) as Brush ?? fCtrl.Foreground; }
+                    if (fe is Control c2) c2.FontSize = element.FontSize.Value;
+                    else if (fe is TextBlock tb2) tb2.FontSize = element.FontSize.Value;
+                }
+
+                // Foreground color
+                if (element.FontColor is not null)
+                {
+                    try
+                    {
+                        var brush = new BrushConverter().ConvertFromString(element.FontColor) as Brush;
+                        if (brush is not null)
+                        {
+                            if (fe is Control fCtrl) fCtrl.Foreground = brush;
+                            else if (fe is TextBlock fTb) fTb.Foreground = brush;
+                        }
+                    }
                     catch { /* invalid color; ignore */ }
                 }
+
+                // Background color (Control only — TextBlock has no Background)
                 if (element.BackColor is not null && fe is Control bCtrl)
                 {
                     try { bCtrl.Background = new BrushConverter().ConvertFromString(element.BackColor) as Brush ?? bCtrl.Background; }

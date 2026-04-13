@@ -9,15 +9,20 @@ namespace CEAISuite.Engine.Lua;
 /// Forms are represented as Lua tables with method bindings; the actual WPF rendering
 /// is delegated to <see cref="ILuaFormHost"/>.
 /// </summary>
-internal sealed class CeFormBindings
+internal sealed class CeFormBindings : IDisposable
 {
     private int _nextFormId;
     private int _nextElementId;
     private readonly ConcurrentDictionary<string, LuaFormDescriptor> _forms = new();
     private readonly ConcurrentDictionary<string, DynValue> _callbacks = new();
+    private ILuaFormHost? _subscribedHost;
+    private Action<string, string>? _clickHandler;
+    private Action<string, string>? _timerHandler;
 
     public void Register(Script script, ILuaFormHost formHost)
     {
+        // Unsubscribe from previous host to prevent handler stacking on Reset
+        Unsubscribe();
         _forms.Clear();
         _callbacks.Clear();
 
@@ -156,7 +161,11 @@ internal sealed class CeFormBindings
                 element.Text = text;
                 formHost.UpdateElement(formId, element);
             });
-            elemTable["setReadOnly"] = (Action<bool>)(ro => element.ReadOnly = ro);
+            elemTable["setReadOnly"] = (Action<bool>)(ro =>
+            {
+                element.ReadOnly = ro;
+                formHost.UpdateElement(formId, element);
+            });
             return DynValue.NewTable(elemTable);
         });
 
@@ -217,8 +226,16 @@ internal sealed class CeFormBindings
             var element = new LuaTrackBarElement(elementId, 10, 10, 200, 30);
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
-            elemTable["setMin"] = (Action<int>)(v => element.Min = v);
-            elemTable["setMax"] = (Action<int>)(v => element.Max = v);
+            elemTable["setMin"] = (Action<int>)(v =>
+            {
+                element.Min = v;
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["setMax"] = (Action<int>)(v =>
+            {
+                element.Max = v;
+                formHost.UpdateElement(formId, element);
+            });
             elemTable["setPosition"] = (Action<int>)(v =>
             {
                 element.Position = v;
@@ -236,8 +253,16 @@ internal sealed class CeFormBindings
             var element = new LuaProgressBarElement(elementId, 10, 10, 200, 25);
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
-            elemTable["setMin"] = (Action<int>)(v => element.Min = v);
-            elemTable["setMax"] = (Action<int>)(v => element.Max = v);
+            elemTable["setMin"] = (Action<int>)(v =>
+            {
+                element.Min = v;
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["setMax"] = (Action<int>)(v =>
+            {
+                element.Max = v;
+                formHost.UpdateElement(formId, element);
+            });
             elemTable["setPosition"] = (Action<int>)(v =>
             {
                 element.Position = v;
@@ -279,21 +304,37 @@ internal sealed class CeFormBindings
             return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        // Wire click events back to Lua callbacks
-        formHost.ElementClicked += (fId, eId) =>
+        // Wire click events back to Lua callbacks (store delegates for unsubscribe)
+        _clickHandler = (fId, eId) =>
         {
             var key = $"{fId}:{eId}:onClick";
             if (_callbacks.TryGetValue(key, out var callback))
                 script.Call(callback);
         };
-
-        formHost.TimerFired += (fId, tId) =>
+        _timerHandler = (fId, tId) =>
         {
             var key = $"{fId}:{tId}:onTimer";
             if (_callbacks.TryGetValue(key, out var callback))
                 script.Call(callback);
         };
+        _subscribedHost = formHost;
+        formHost.ElementClicked += _clickHandler;
+        formHost.TimerFired += _timerHandler;
     }
+
+    private void Unsubscribe()
+    {
+        if (_subscribedHost is not null)
+        {
+            if (_clickHandler is not null) _subscribedHost.ElementClicked -= _clickHandler;
+            if (_timerHandler is not null) _subscribedHost.TimerFired -= _timerHandler;
+            _subscribedHost = null;
+            _clickHandler = null;
+            _timerHandler = null;
+        }
+    }
+
+    public void Dispose() => Unsubscribe();
 
     private void AddElementToForm(string formId, LuaFormElement element)
     {

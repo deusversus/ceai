@@ -29,6 +29,12 @@ public interface IVehDebugger
     /// <summary>Unregister a Lua callback from a DR slot.</summary>
     void UnregisterLuaCallback(int processId, int drSlot);
 
+    /// <summary>Enable stealth mode: hook NtGetThreadContext to cloak DR registers, hide agent DLL from PEB.</summary>
+    Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default);
+
+    /// <summary>Disable stealth mode: restore NtGetThreadContext, re-link agent DLL in PEB.</summary>
+    Task<bool> DisableStealthAsync(int processId, CancellationToken ct = default);
+
     /// <summary>Stream breakpoint hit events from the shared memory ring buffer.</summary>
     IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(int processId, CancellationToken ct = default);
 
@@ -45,6 +51,15 @@ public enum VehBreakpointType
     Write = 1,
     /// <summary>Break on data read or write (DR7 R/W = 11).</summary>
     ReadWrite = 2
+}
+
+/// <summary>Stealth mode state of the VEH agent.</summary>
+public enum VehStealthMode
+{
+    /// <summary>Stealth is not active — DR registers visible, agent DLL in module list.</summary>
+    None,
+    /// <summary>Stealth is active — DR registers cloaked, agent DLL hidden from PEB.</summary>
+    Active
 }
 
 /// <summary>Health status of the VEH agent running inside the target process.</summary>
@@ -85,4 +100,5 @@ public sealed record VehStatus(
     int ActiveBreakpoints,
     int TotalHits,
     int OverflowCount = 0,
-    VehAgentHealth AgentHealth = VehAgentHealth.Unknown);
+    VehAgentHealth AgentHealth = VehAgentHealth.Unknown,
+    VehStealthMode StealthMode = VehStealthMode.None);

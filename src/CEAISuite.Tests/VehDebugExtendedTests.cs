@@ -566,6 +566,79 @@ public class VehDebugExtendedTests
         Assert.Contains("required", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase C: Stealth Mode
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task EnableVehStealth_AfterInject_Succeeds()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.EnableVehStealth(AttachedPid);
+        Assert.Contains("Stealth enabled", result);
+    }
+
+    [Fact]
+    public async Task DisableVehStealth_AfterEnable_Succeeds()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        await tools.EnableVehStealth(AttachedPid);
+        var result = await tools.DisableVehStealth(AttachedPid);
+        Assert.Contains("Stealth disabled", result);
+    }
+
+    [Fact]
+    public async Task EnableVehStealth_NotInjected_Fails()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.EnableVehStealth(AttachedPid);
+        Assert.Contains("Failed", result);
+    }
+
+    [Fact]
+    public async Task EnableVehStealth_WrongPid_Rejected()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.EnableVehStealth(WrongPid);
+        Assert.Contains("PID", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task GetVehStatus_WithStealth_ReportsStealthMode()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        await tools.EnableVehStealth(AttachedPid);
+        var result = await tools.GetVehStatus(AttachedPid);
+        Assert.Contains("STEALTH", result);
+    }
+
+    [Fact]
+    public async Task GetVehStatus_WithoutStealth_NoStealthLabel()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.GetVehStatus(AttachedPid);
+        Assert.DoesNotContain("STEALTH", result);
+    }
+
+    [Fact]
+    public async Task StealthRoundTrip_EnableDisable_StatusReflectsChange()
+    {
+        var (svc, engine) = CreateService();
+        await svc.InjectAsync(AttachedPid);
+
+        await svc.EnableStealthAsync(AttachedPid);
+        var statusOn = svc.GetStatus(AttachedPid);
+        Assert.Equal(VehStealthMode.Active, statusOn.StealthMode);
+
+        await svc.DisableStealthAsync(AttachedPid);
+        var statusOff = svc.GetStatus(AttachedPid);
+        Assert.Equal(VehStealthMode.None, statusOff.StealthMode);
+    }
+
     // ── Helper ──
 
     private static (VehDebugService service, StubVehDebugger engine) CreateService()

@@ -127,20 +127,48 @@ public sealed partial class AiToolFunctions
         return Task.FromResult($"Lua callback unregistered from DR{drSlot}.");
     }
 
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Enable VEH stealth mode: cloak DR registers from GetThreadContext, hide agent DLL from module enumeration.")]
+    public async Task<string> EnableVehStealth([Description("Process ID")] int processId)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var ok = await vehDebugService.EnableStealthAsync(processId).ConfigureAwait(false);
+        return ok
+            ? "Stealth enabled. DR registers cloaked from GetThreadContext, agent DLL hidden from module list."
+            : "Failed to enable stealth. Ensure VEH agent is injected first.";
+    }
+
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Disable VEH stealth mode: restore NtGetThreadContext hook, re-link agent DLL in PEB.")]
+    public async Task<string> DisableVehStealth([Description("Process ID")] int processId)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var ok = await vehDebugService.DisableStealthAsync(processId).ConfigureAwait(false);
+        return ok ? "Stealth disabled. DR registers visible, agent DLL re-linked in module list." : "Failed to disable stealth.";
+    }
+
     [ReadOnlyTool]
     [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
-    [Description("Get VEH debugger status: injection state, active breakpoints, hit count, overflow count, agent health.")]
+    [Description("Get VEH debugger status: injection state, active breakpoints, hit count, overflow count, agent health, stealth mode.")]
     public Task<string> GetVehStatus([Description("Process ID")] int processId)
     {
         if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
-        // Validate PID for consistency — prevents information leak about arbitrary processes
         var pidError = ValidateDestructiveProcessId(processId);
         if (pidError is not null) return Task.FromResult(pidError);
         var status = vehDebugService.GetStatus(processId);
         if (!status.IsInjected) return Task.FromResult("VEH agent: not injected.");
+        var stealthStr = status.StealthMode == VehStealthMode.Active ? ", STEALTH" : "";
         return Task.FromResult(
-            $"VEH agent: ACTIVE ({status.AgentHealth}). {status.ActiveBreakpoints}/4 breakpoints, " +
+            $"VEH agent: ACTIVE ({status.AgentHealth}{stealthStr}). {status.ActiveBreakpoints}/4 breakpoints, " +
             $"{status.TotalHits} total hits, {status.OverflowCount} overflows.");
     }
 }

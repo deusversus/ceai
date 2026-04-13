@@ -30,6 +30,8 @@
 #define CMD_REMOVE_BP       2
 #define CMD_SHUTDOWN        3
 #define CMD_REFRESH_THREADS 4
+#define CMD_ENABLE_STEALTH  5
+#define CMD_DISABLE_STEALTH 6
 
 /* Agent status */
 #define STATUS_LOADING      0
@@ -91,6 +93,30 @@ static DWORD            g_bpTypes[4] = {0};
 static DWORD            g_bpSizes[4] = {0};
 static volatile BOOL    g_bpActive[4] = {FALSE, FALSE, FALSE, FALSE};
 
+/* ── Stealth globals ── */
+
+static volatile BOOL    g_stealthActive = FALSE;
+
+/* NtGetThreadContext hook: we detour this to zero DR0-DR7 in the output CONTEXT.
+ * The trampoline stores the original prologue bytes so we can call the real function. */
+#ifdef _M_IX86
+#define HOOK_PROLOGUE_SIZE 5   /* 5-byte JMP rel32 on x86 */
+#else
+#define HOOK_PROLOGUE_SIZE 14  /* 14-byte MOV RAX, imm64; JMP RAX on x64 */
+#endif
+#define TRAMPOLINE_SIZE    64  /* enough for prologue + JMP back */
+
+static BYTE*            g_hookTrampoline = NULL;    /* executable trampoline memory */
+static BYTE             g_hookOrigBytes[HOOK_PROLOGUE_SIZE] = {0};
+static BYTE*            g_hookTarget = NULL;        /* NtGetThreadContext entry point */
+static volatile BOOL    g_hookInstalled = FALSE;
+
+/* PEB module hiding state */
+static volatile BOOL    g_moduleHidden = FALSE;
+
+/* NtGetThreadContext typedef — NTSTATUS (NTAPI*)(HANDLE, PCONTEXT) */
+typedef LONG (NTAPI *PFN_NtGetThreadContext)(HANDLE ThreadHandle, PCONTEXT Context);
+
 /* ── Forward declarations ── */
 
 static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep);
@@ -99,6 +125,12 @@ static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot, DWORD dataS
 static BOOL RemoveHardwareBp(DWORD drSlot);
 static void RefreshThreadBreakpoints(void);
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6);
+static BOOL EnableStealth(void);
+static BOOL DisableStealth(void);
+static BOOL InstallNtGetThreadContextHook(void);
+static void RemoveNtGetThreadContextHook(void);
+static void HideModuleFromPeb(HMODULE hModule);
+static void UnhideModuleInPeb(void);
 
 /* ── DR7 helpers ── */
 
@@ -488,7 +520,17 @@ static DWORD WINAPI CommandThread(LPVOID param)
                 result = 0;
                 break;
 
+            case CMD_ENABLE_STEALTH:
+                result = EnableStealth() ? 0 : -1;
+                break;
+
+            case CMD_DISABLE_STEALTH:
+                result = DisableStealth() ? 0 : -1;
+                break;
+
             case CMD_SHUTDOWN:
+                /* Disable stealth before shutdown to re-link module for clean FreeLibrary */
+                if (g_stealthActive) DisableStealth();
                 g_running = FALSE;
                 result = 0;
                 break;
@@ -502,6 +544,310 @@ static DWORD WINAPI CommandThread(LPVOID param)
     }
 
     return 0;
+}
+
+/* ── Stealth: NtGetThreadContext hook ── */
+
+/*
+ * Our detour function. Called instead of NtGetThreadContext when the hook is active.
+ * Calls the original via the trampoline, then zeros DR0-DR7 in the returned CONTEXT
+ * if CONTEXT_DEBUG_REGISTERS was requested. This hides hardware breakpoints from
+ * anti-cheat GetThreadContext checks.
+ */
+static LONG NTAPI HookedNtGetThreadContext(HANDLE ThreadHandle, PCONTEXT Context)
+{
+    /* Call original via trampoline */
+    PFN_NtGetThreadContext pOriginal = (PFN_NtGetThreadContext)g_hookTrampoline;
+    LONG status = pOriginal(ThreadHandle, Context);
+
+    /* If call succeeded and debug registers were requested, zero them */
+    if (status >= 0 && Context != NULL)
+    {
+#ifdef _M_IX86
+        if (Context->ContextFlags & 0x00010010) /* CONTEXT_i386 | CONTEXT_DEBUG_REGISTERS */
+#else
+        if (Context->ContextFlags & 0x00100010) /* CONTEXT_AMD64 | CONTEXT_DEBUG_REGISTERS */
+#endif
+        {
+            Context->Dr0 = 0;
+            Context->Dr1 = 0;
+            Context->Dr2 = 0;
+            Context->Dr3 = 0;
+            Context->Dr6 = 0;
+            Context->Dr7 = 0;
+        }
+    }
+
+    return status;
+}
+
+static BOOL InstallNtGetThreadContextHook(void)
+{
+    HMODULE hNtdll;
+    DWORD oldProtect;
+    BYTE* target;
+
+    if (g_hookInstalled) return TRUE; /* already hooked */
+
+    hNtdll = GetModuleHandleW(L"ntdll.dll");
+    if (!hNtdll) return FALSE;
+
+    target = (BYTE*)GetProcAddress(hNtdll, "NtGetThreadContext");
+    if (!target) return FALSE;
+    g_hookTarget = target;
+
+    /* Allocate executable trampoline memory */
+    g_hookTrampoline = (BYTE*)VirtualAlloc(NULL, TRAMPOLINE_SIZE,
+        MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!g_hookTrampoline) return FALSE;
+
+    /* Save original prologue bytes */
+    memcpy(g_hookOrigBytes, target, HOOK_PROLOGUE_SIZE);
+
+    /* Build trampoline: original prologue bytes + JMP back to target + HOOK_PROLOGUE_SIZE */
+    memcpy(g_hookTrampoline, target, HOOK_PROLOGUE_SIZE);
+
+#ifdef _M_IX86
+    /* x86: 5-byte relative JMP back */
+    {
+        BYTE* trampolineJmpBack = g_hookTrampoline + HOOK_PROLOGUE_SIZE;
+        BYTE* returnAddr = target + HOOK_PROLOGUE_SIZE;
+        trampolineJmpBack[0] = 0xE9; /* JMP rel32 */
+        *(DWORD*)(trampolineJmpBack + 1) = (DWORD)(returnAddr - (trampolineJmpBack + 5));
+    }
+#else
+    /* x64: 14-byte absolute JMP back (MOV RAX, imm64; JMP RAX) */
+    {
+        BYTE* trampolineJmpBack = g_hookTrampoline + HOOK_PROLOGUE_SIZE;
+        ULONG64 returnAddr = (ULONG64)(target + HOOK_PROLOGUE_SIZE);
+        trampolineJmpBack[0] = 0x48; trampolineJmpBack[1] = 0xB8; /* MOV RAX, imm64 */
+        *(ULONG64*)(trampolineJmpBack + 2) = returnAddr;
+        trampolineJmpBack[10] = 0xFF; trampolineJmpBack[11] = 0xE0; /* JMP RAX */
+    }
+#endif
+
+    /* Patch original function entry: JMP to our hook */
+    if (!VirtualProtect(target, HOOK_PROLOGUE_SIZE, PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        VirtualFree(g_hookTrampoline, 0, MEM_RELEASE);
+        g_hookTrampoline = NULL;
+        return FALSE;
+    }
+
+#ifdef _M_IX86
+    /* x86: 5-byte relative JMP */
+    {
+        DWORD hookOffset = (DWORD)((BYTE*)HookedNtGetThreadContext - (target + 5));
+        target[0] = 0xE9; /* JMP rel32 */
+        *(DWORD*)(target + 1) = hookOffset;
+    }
+#else
+    /* x64: 14-byte absolute JMP (MOV RAX, imm64; JMP RAX) */
+    {
+        ULONG64 hookAddr = (ULONG64)HookedNtGetThreadContext;
+        target[0] = 0x48; target[1] = 0xB8; /* MOV RAX, imm64 */
+        *(ULONG64*)(target + 2) = hookAddr;
+        target[10] = 0xFF; target[11] = 0xE0; /* JMP RAX */
+    }
+#endif
+
+    FlushInstructionCache(GetCurrentProcess(), target, HOOK_PROLOGUE_SIZE);
+    VirtualProtect(target, HOOK_PROLOGUE_SIZE, oldProtect, &oldProtect);
+
+    g_hookInstalled = TRUE;
+    return TRUE;
+}
+
+static void RemoveNtGetThreadContextHook(void)
+{
+    DWORD oldProtect;
+    if (!g_hookInstalled || !g_hookTarget) return;
+
+    /* Restore original prologue bytes */
+    if (VirtualProtect(g_hookTarget, HOOK_PROLOGUE_SIZE, PAGE_EXECUTE_READWRITE, &oldProtect))
+    {
+        memcpy(g_hookTarget, g_hookOrigBytes, HOOK_PROLOGUE_SIZE);
+        FlushInstructionCache(GetCurrentProcess(), g_hookTarget, HOOK_PROLOGUE_SIZE);
+        VirtualProtect(g_hookTarget, HOOK_PROLOGUE_SIZE, oldProtect, &oldProtect);
+    }
+
+    /* Free trampoline */
+    if (g_hookTrampoline)
+    {
+        VirtualFree(g_hookTrampoline, 0, MEM_RELEASE);
+        g_hookTrampoline = NULL;
+    }
+
+    g_hookInstalled = FALSE;
+    g_hookTarget = NULL;
+}
+
+/* ── Stealth: PEB module hiding ── */
+
+/*
+ * Unlink our DLL from the PEB's three module lists (InLoadOrder, InMemoryOrder,
+ * InInitializationOrder). This hides the agent from EnumProcessModules,
+ * Module32First/Next, and GetModuleHandle.
+ *
+ * NOTE: PEB structure offsets are stable across Win10/11 x64 and x86.
+ * Re-linking is required before FreeLibrary (done in DisableStealth).
+ */
+
+#ifdef _M_IX86
+/* x86: PEB at fs:[0x30], Ldr at PEB+0x0C */
+#define PEB_LDR_OFFSET 0x0C
+#else
+/* x64: PEB at gs:[0x60], Ldr at PEB+0x18 */
+#define PEB_LDR_OFFSET 0x18
+#endif
+
+typedef struct _UNICODE_STRING_INTERNAL {
+    USHORT Length;
+    USHORT MaximumLength;
+    WCHAR* Buffer;
+} UNICODE_STRING_INTERNAL;
+
+typedef struct _LDR_DATA_TABLE_ENTRY_INTERNAL {
+    LIST_ENTRY InLoadOrderLinks;
+    LIST_ENTRY InMemoryOrderLinks;
+    LIST_ENTRY InInitializationOrderLinks;
+    PVOID DllBase;
+    PVOID EntryPoint;
+    ULONG SizeOfImage;
+    UNICODE_STRING_INTERNAL FullDllName;
+    UNICODE_STRING_INTERNAL BaseDllName;
+} LDR_DATA_TABLE_ENTRY_INTERNAL;
+
+typedef struct _PEB_LDR_DATA_INTERNAL {
+    ULONG Length;
+    BOOLEAN Initialized;
+    PVOID SsHandle;
+    LIST_ENTRY InLoadOrderModuleList;
+    LIST_ENTRY InMemoryOrderModuleList;
+    LIST_ENTRY InInitializationOrderModuleList;
+} PEB_LDR_DATA_INTERNAL;
+
+/* Saved link pointers for re-linking on DisableStealth */
+static LIST_ENTRY* g_savedLoadOrderFlink = NULL;
+static LIST_ENTRY* g_savedLoadOrderBlink = NULL;
+static LIST_ENTRY* g_savedMemOrderFlink = NULL;
+static LIST_ENTRY* g_savedMemOrderBlink = NULL;
+static LIST_ENTRY* g_savedInitOrderFlink = NULL;
+static LIST_ENTRY* g_savedInitOrderBlink = NULL;
+static LDR_DATA_TABLE_ENTRY_INTERNAL* g_hiddenEntry = NULL;
+
+static PEB_LDR_DATA_INTERNAL* GetPebLdrData(void)
+{
+    BYTE* peb;
+#ifdef _M_IX86
+    peb = (BYTE*)__readfsdword(0x30);
+#else
+    peb = (BYTE*)__readgsqword(0x60);
+#endif
+    return *(PEB_LDR_DATA_INTERNAL**)(peb + PEB_LDR_OFFSET);
+}
+
+static void HideModuleFromPeb(HMODULE hModule)
+{
+    PEB_LDR_DATA_INTERNAL* ldr;
+    LIST_ENTRY* head;
+    LIST_ENTRY* entry;
+
+    if (g_moduleHidden) return;
+
+    ldr = GetPebLdrData();
+    if (!ldr) return;
+
+    /* Walk InLoadOrderModuleList to find our entry */
+    head = &ldr->InLoadOrderModuleList;
+    for (entry = head->Flink; entry != head; entry = entry->Flink)
+    {
+        LDR_DATA_TABLE_ENTRY_INTERNAL* mod =
+            (LDR_DATA_TABLE_ENTRY_INTERNAL*)entry;
+
+        if (mod->DllBase == (PVOID)hModule)
+        {
+            g_hiddenEntry = mod;
+
+            /* Save links for re-linking */
+            g_savedLoadOrderFlink = mod->InLoadOrderLinks.Flink;
+            g_savedLoadOrderBlink = mod->InLoadOrderLinks.Blink;
+            g_savedMemOrderFlink  = mod->InMemoryOrderLinks.Flink;
+            g_savedMemOrderBlink  = mod->InMemoryOrderLinks.Blink;
+            g_savedInitOrderFlink = mod->InInitializationOrderLinks.Flink;
+            g_savedInitOrderBlink = mod->InInitializationOrderLinks.Blink;
+
+            /* Unlink from all three lists */
+            mod->InLoadOrderLinks.Blink->Flink = mod->InLoadOrderLinks.Flink;
+            mod->InLoadOrderLinks.Flink->Blink = mod->InLoadOrderLinks.Blink;
+
+            mod->InMemoryOrderLinks.Blink->Flink = mod->InMemoryOrderLinks.Flink;
+            mod->InMemoryOrderLinks.Flink->Blink = mod->InMemoryOrderLinks.Blink;
+
+            mod->InInitializationOrderLinks.Blink->Flink = mod->InInitializationOrderLinks.Flink;
+            mod->InInitializationOrderLinks.Flink->Blink = mod->InInitializationOrderLinks.Blink;
+
+            g_moduleHidden = TRUE;
+            return;
+        }
+    }
+}
+
+static void UnhideModuleInPeb(void)
+{
+    if (!g_moduleHidden || !g_hiddenEntry) return;
+
+    /* Re-link into all three lists */
+    g_hiddenEntry->InLoadOrderLinks.Flink = g_savedLoadOrderFlink;
+    g_hiddenEntry->InLoadOrderLinks.Blink = g_savedLoadOrderBlink;
+    g_savedLoadOrderBlink->Flink = &g_hiddenEntry->InLoadOrderLinks;
+    g_savedLoadOrderFlink->Blink = &g_hiddenEntry->InLoadOrderLinks;
+
+    g_hiddenEntry->InMemoryOrderLinks.Flink = g_savedMemOrderFlink;
+    g_hiddenEntry->InMemoryOrderLinks.Blink = g_savedMemOrderBlink;
+    g_savedMemOrderBlink->Flink = &g_hiddenEntry->InMemoryOrderLinks;
+    g_savedMemOrderFlink->Blink = &g_hiddenEntry->InMemoryOrderLinks;
+
+    g_hiddenEntry->InInitializationOrderLinks.Flink = g_savedInitOrderFlink;
+    g_hiddenEntry->InInitializationOrderLinks.Blink = g_savedInitOrderBlink;
+    g_savedInitOrderBlink->Flink = &g_hiddenEntry->InInitializationOrderLinks;
+    g_savedInitOrderFlink->Blink = &g_hiddenEntry->InInitializationOrderLinks;
+
+    g_moduleHidden = FALSE;
+    g_hiddenEntry = NULL;
+}
+
+/* ── Stealth: Master enable/disable ── */
+
+static HMODULE g_agentModule = NULL; /* set in DllMain */
+
+static BOOL EnableStealth(void)
+{
+    if (g_stealthActive) return TRUE;
+
+    /* Install NtGetThreadContext hook to cloak DR registers */
+    if (!InstallNtGetThreadContextHook()) return FALSE;
+
+    /* Hide our DLL from module enumeration */
+    if (g_agentModule)
+        HideModuleFromPeb(g_agentModule);
+
+    g_stealthActive = TRUE;
+    return TRUE;
+}
+
+static BOOL DisableStealth(void)
+{
+    if (!g_stealthActive) return TRUE;
+
+    /* Re-link module in PEB (must happen before FreeLibrary) */
+    UnhideModuleInPeb();
+
+    /* Remove NtGetThreadContext hook */
+    RemoveNtGetThreadContextHook();
+
+    g_stealthActive = FALSE;
+    return TRUE;
 }
 
 /* ── Agent initialization (runs on dedicated thread, NOT under loader lock) ── */
@@ -575,10 +921,10 @@ static DWORD WINAPI AgentInitThread(LPVOID param)
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
-    (void)hModule;
     (void)reserved;
 
     if (reason == DLL_PROCESS_ATTACH) {
+        g_agentModule = hModule;
         /* Minimize work under loader lock — only create the init thread.
          * All SHM mapping, event opening, and VEH registration happens on the
          * init thread, outside the loader lock, avoiding potential deadlocks. */
@@ -589,6 +935,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     else if (reason == DLL_PROCESS_DETACH) {
         DWORD i;
         g_running = FALSE;
+
+        /* Disable stealth first — must re-link module before FreeLibrary */
+        if (g_stealthActive) DisableStealth();
 
         if (g_vehHandle) {
             RemoveVectoredExceptionHandler(g_vehHandle);

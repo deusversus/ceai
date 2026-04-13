@@ -76,6 +76,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const int CmdRemoveBp = 2;
     private const int CmdShutdown = 3;
     private const int CmdRefreshThreads = 4;
+    private const int CmdEnableStealth = 5;
+    private const int CmdDisableStealth = 6;
 
     // Agent status
     private const int StatusLoading = 0;
@@ -116,6 +118,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         public readonly int[] SlotHitCounts = new int[MaxDrSlots]; // per-slot hit count for conditions
         public int TotalHits;
         public int LastOverflowCount;       // track overflow count for delta detection
+        public bool StealthActive;          // stealth mode state
         public string? TempAgentPath;       // temp copy of veh_agent.dll
 
         public void Dispose()
@@ -247,6 +250,40 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             return false;
 
         return await Task.Run(() => SendSimpleCommand(state, CmdRefreshThreads), ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_states.TryGetValue(processId, out var state))
+            return false;
+
+        var ok = await Task.Run(() => SendSimpleCommand(state, CmdEnableStealth), ct).ConfigureAwait(false);
+        if (ok)
+        {
+            state.StealthActive = true;
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("VEH stealth enabled for process {ProcessId}", processId);
+        }
+        return ok;
+    }
+
+    public async Task<bool> DisableStealthAsync(int processId, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_states.TryGetValue(processId, out var state))
+            return false;
+
+        var ok = await Task.Run(() => SendSimpleCommand(state, CmdDisableStealth), ct).ConfigureAwait(false);
+        if (ok)
+        {
+            state.StealthActive = false;
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("VEH stealth disabled for process {ProcessId}", processId);
+        }
+        return ok;
     }
 
     public async IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(
@@ -381,7 +418,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             }
         }
 
-        return new VehStatus(true, activeCount, state.TotalHits, overflowCount, agentHealth);
+        var stealthMode = state.StealthActive ? VehStealthMode.Active : VehStealthMode.None;
+        return new VehStatus(true, activeCount, state.TotalHits, overflowCount, agentHealth, stealthMode);
     }
 
     // ─── Core Implementation ────────────────────────────────────────
@@ -499,7 +537,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             // 8. Copy agent DLL to temp so we don't lock the original
             var tempDir = Path.Combine(Path.GetTempPath(), "CEAISuite_VEH");
             Directory.CreateDirectory(tempDir);
-            var tempAgentPath = Path.Combine(tempDir, $"veh_agent_{processId}.dll");
+            // Obfuscated filename — avoids "veh", "agent", "debug", "cheat" in the name
+            var randomSuffix = Guid.NewGuid().ToString("N")[..8];
+            var tempAgentPath = Path.Combine(tempDir, $"msvcrt_p140_{randomSuffix}.dll");
             File.Copy(agentPath, tempAgentPath, overwrite: true);
             state.TempAgentPath = tempAgentPath;
 

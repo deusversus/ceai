@@ -22,6 +22,7 @@ public sealed class StubVehDebugger : IVehDebugger
         public string?[] LuaCallbacks = new string?[4];
         public int TotalHits { get; set; }
         public int OverflowCount { get; set; }
+        public bool StealthActive { get; set; }
         public List<VehHitEvent> PendingHits = new();
     }
 
@@ -108,6 +109,22 @@ public sealed class StubVehDebugger : IVehDebugger
         return Task.FromResult(true);
     }
 
+    public Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(false);
+        state.StealthActive = true;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> DisableStealthAsync(int processId, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(false);
+        state.StealthActive = false;
+        return Task.FromResult(true);
+    }
+
     public async IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(int processId, [EnumeratorCancellation] CancellationToken ct = default)
     {
         if (!_states.TryGetValue(processId, out var state)) yield break;
@@ -129,6 +146,7 @@ public sealed class StubVehDebugger : IVehDebugger
             state.DrSlots.Count(s => s != 0),
             state.TotalHits,
             state.OverflowCount,
-            SimulatedHealth);
+            SimulatedHealth,
+            state.StealthActive ? VehStealthMode.Active : VehStealthMode.None);
     }
 }

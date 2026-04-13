@@ -59,6 +59,18 @@ public sealed class VehDebugService
         return await _engine.RefreshThreadsAsync(processId, ct).ConfigureAwait(false);
     }
 
+    public async Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default)
+    {
+        if (_engine is null) return false;
+        return await _engine.EnableStealthAsync(processId, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> DisableStealthAsync(int processId, CancellationToken ct = default)
+    {
+        if (_engine is null) return false;
+        return await _engine.DisableStealthAsync(processId, ct).ConfigureAwait(false);
+    }
+
     public VehStatus GetStatus(int processId)
     {
         if (_engine is null) return new VehStatus(false, 0, 0);

@@ -137,6 +137,17 @@ public partial class App : System.Windows.Application
         // ── Handle ceai:// protocol URLs from command line ──
         HandleProtocolArgs(e.Args);
 
+        // ── Execute autorun Lua scripts ──
+        try
+        {
+            var autorunSvc = Services.GetRequiredService<AutorunScriptService>();
+            _ = Task.Run(() => autorunSvc.ExecuteAllAsync(CancellationToken.None));
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to start autorun scripts");
+        }
+
         var mainWindow = Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
     }
@@ -271,6 +282,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IUiCommandBus>(sp => sp.GetRequiredService<UiCommandBus>());
         services.AddSingleton<SpeedHackService>();
         services.AddSingleton<VehDebugService>();
+        services.AddSingleton<AutorunScriptService>();
 
 
         // ── Settings (needs .Load() called) ──

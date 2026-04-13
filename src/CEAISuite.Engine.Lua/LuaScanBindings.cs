@@ -144,6 +144,73 @@ internal static class LuaScanBindings
 
             return DynValue.NewTable(memScan);
         });
+
+        // AOBReplace(searchPattern, replaceBytes) → number of replacements
+        // Scans for pattern and writes replacement bytes at each match. Returns count.
+        script.Globals["AOBReplace"] = (Func<string, string, double>)((searchPattern, replaceHex) =>
+        {
+            var pid = RequireProcess(engine);
+            var constraints = new ScanConstraints(MemoryDataType.ByteArray, ScanType.ArrayOfBytes, searchPattern);
+            var options = new ScanOptions(Alignment: 1, WritableOnly: false);
+            var results = scanEngine.StartScanAsync(pid, constraints, options).GetAwaiter().GetResult();
+
+            if (results.Results.Count == 0) return 0;
+
+            var replaceBytes = ParseHexBytes(replaceHex);
+            var count = 0;
+            foreach (var result in results.Results)
+            {
+                try
+                {
+                    engineFacade.WriteBytesAsync(pid, result.Address, replaceBytes).GetAwaiter().GetResult();
+                    count++;
+                }
+                catch { /* skip failed writes */ }
+            }
+            return count;
+        });
+
+        // AOBReplaceModule(module, searchPattern, replaceBytes) → number of replacements
+        script.Globals["AOBReplaceModule"] = (Func<string, string, string, double>)((moduleName, searchPattern, replaceHex) =>
+        {
+            var pid = RequireProcess(engine);
+
+            // Get AOBScanModule results
+            var scanResult = script.Call(script.Globals.Get("AOBScanModule"),
+                DynValue.NewString(moduleName), DynValue.NewString(searchPattern));
+
+            if (scanResult.Type == DataType.Nil) return 0;
+            if (scanResult.Type != DataType.Table) return 0;
+
+            var replaceBytes = ParseHexBytes(replaceHex);
+            var addrTable = scanResult.Table;
+            var count = 0;
+
+            for (int i = 1; i <= addrTable.Length; i++)
+            {
+                var addrStr = addrTable.Get(i).String;
+                var resolved = LuaAddressResolver.ResolveAsync(addrStr, pid, engineFacade, autoAssembler)
+                    .GetAwaiter().GetResult();
+                if (resolved.HasValue)
+                {
+                    try
+                    {
+                        engineFacade.WriteBytesAsync(pid, resolved.Value, replaceBytes).GetAwaiter().GetResult();
+                        count++;
+                    }
+                    catch { /* skip failed writes */ }
+                }
+            }
+            return count;
+        });
+    }
+
+    private static byte[] ParseHexBytes(string hex)
+    {
+        return hex.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(b => byte.Parse(b, System.Globalization.NumberStyles.HexNumber,
+                System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
     }
 
     private static ScanType ParseScanType(string scanType) => scanType.ToLowerInvariant() switch

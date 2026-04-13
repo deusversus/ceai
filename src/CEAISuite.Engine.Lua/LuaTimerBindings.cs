@@ -12,6 +12,7 @@ namespace CEAISuite.Engine.Lua;
 internal sealed class LuaTimerBindings : IDisposable
 {
     private readonly ConcurrentDictionary<string, TimerState> _timers = new();
+    private readonly ConcurrentDictionary<string, ThreadState> _threads = new();
     private int _nextTimerId;
 
     public void Register(Script script, MoonSharpLuaEngine engine)
@@ -61,14 +62,70 @@ internal sealed class LuaTimerBindings : IDisposable
 
         // destroyAllTimers() — cleanup helper
         script.Globals["destroyAllTimers"] = (Action)(() => DisposeAll());
+
+        // createThread(function) → thread handle table
+        // Runs a Lua function on a background .NET thread. The function can call sleep()
+        // to yield between iterations. Thread is cooperative — terminates on next sleep/yield.
+        script.Globals["createThread"] = (Func<DynValue, DynValue>)(func =>
+        {
+            if (func.Type != DataType.Function)
+                throw new ScriptRuntimeException("createThread: argument must be a function");
+
+            var threadId = $"thread_{Interlocked.Increment(ref _nextTimerId)}";
+            var cts = new CancellationTokenSource();
+            var threadState = new ThreadState(threadId, cts);
+            _threads[threadId] = threadState;
+
+            // Run the function on a background thread
+            threadState.Task = Task.Run(() =>
+            {
+                try
+                {
+                    script.Call(func);
+                }
+                catch (ScriptRuntimeException)
+                {
+                    // Script errors in threads are silently caught (matching CE behavior)
+                }
+                catch (OperationCanceledException) { }
+                finally
+                {
+                    _threads.TryRemove(threadId, out _);
+                }
+            }, cts.Token);
+
+            var threadTable = new Table(script);
+            threadTable["_id"] = threadId;
+
+            threadTable["terminate"] = (Action)(() =>
+            {
+                cts.Cancel();
+                _threads.TryRemove(threadId, out _);
+            });
+
+            threadTable["isRunning"] = (Func<bool>)(() =>
+                _threads.TryGetValue(threadId, out var ts) && ts.Task is { IsCompleted: false });
+
+            threadTable["waitFor"] = (Action)(() =>
+            {
+                if (_threads.TryGetValue(threadId, out var ts) && ts.Task is not null)
+                    ts.Task.GetAwaiter().GetResult();
+            });
+
+            return DynValue.NewTable(threadTable);
+        });
     }
 
-    /// <summary>Stop and dispose all active timers. Called on engine Reset/Dispose.</summary>
+    /// <summary>Stop and dispose all active timers and threads. Called on engine Reset/Dispose.</summary>
     public void DisposeAll()
     {
         foreach (var (_, state) in _timers)
             state.Dispose();
         _timers.Clear();
+
+        foreach (var (_, thread) in _threads)
+            thread.Cts.Cancel();
+        _threads.Clear();
     }
 
     public void Dispose() => DisposeAll();
@@ -142,5 +199,12 @@ internal sealed class LuaTimerBindings : IDisposable
         {
             Stop();
         }
+    }
+
+    private sealed class ThreadState(string id, CancellationTokenSource cts)
+    {
+        public string Id { get; } = id;
+        public CancellationTokenSource Cts { get; } = cts;
+        public Task? Task { get; set; }
     }
 }

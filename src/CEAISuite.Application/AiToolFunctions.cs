@@ -48,6 +48,7 @@ public sealed partial class AiToolFunctions(
     IUiCommandBus? uiCommandBus = null,
     SpeedHackService? speedHackService = null,
     VehDebugService? vehDebugService = null,
+    AutorunScriptService? autorunService = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;

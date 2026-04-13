@@ -1,5 +1,8 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using CEAISuite.Engine.Abstractions;
 
@@ -84,15 +87,74 @@ public sealed class LuaFormHostService : ILuaFormHost
                 fe.Width = element.Width;
                 fe.Height = element.Height;
 
-                // Update content
-                if (fe is Button btn) btn.Content = element.Caption ?? "";
-                else if (fe is TextBlock lbl) lbl.Text = element.Caption ?? "";
-                else if (fe is TextBox tb && element is LuaEditElement edit) tb.Text = edit.Text ?? "";
-                else if (fe is CheckBox chk)
+                // Update content by type
+                switch (fe)
                 {
-                    chk.Content = element.Caption ?? "";
-                    if (element is LuaCheckBoxElement chkElem) chk.IsChecked = chkElem.IsChecked;
+                    case Button btn:
+                        btn.Content = element.Caption ?? "";
+                        break;
+                    case TextBlock lbl:
+                        lbl.Text = element.Caption ?? "";
+                        break;
+                    case TextBox tb when element is LuaEditElement edit:
+                        tb.Text = edit.Text ?? "";
+                        break;
+                    case TextBox tb when element is LuaMemoElement memo:
+                        tb.Text = memo.Text ?? "";
+                        break;
+                    case CheckBox chk when element is LuaCheckBoxElement chkElem:
+                        chk.Content = element.Caption ?? "";
+                        chk.IsChecked = chkElem.IsChecked;
+                        break;
+                    case ListBox lb when element is LuaListBoxElement lstElem:
+                        lb.Items.Clear();
+                        foreach (var item in lstElem.Items) lb.Items.Add(item);
+                        break;
+                    case ComboBox cb when element is LuaComboBoxElement cmbElem:
+                        cb.Items.Clear();
+                        foreach (var item in cmbElem.Items) cb.Items.Add(item);
+                        if (cmbElem.SelectedIndex >= 0) cb.SelectedIndex = cmbElem.SelectedIndex;
+                        break;
+                    case Slider sl when element is LuaTrackBarElement trkElem:
+                        sl.Minimum = trkElem.Min;
+                        sl.Maximum = trkElem.Max;
+                        sl.Value = trkElem.Position;
+                        break;
+                    case ProgressBar pb when element is LuaProgressBarElement prgElem:
+                        pb.Minimum = prgElem.Min;
+                        pb.Maximum = prgElem.Max;
+                        pb.Value = prgElem.Position;
+                        break;
+                    case Image img when element is LuaImageElement imgElem && imgElem.ImagePath is not null:
+                        try { img.Source = new BitmapImage(new Uri(imgElem.ImagePath, UriKind.RelativeOrAbsolute)); }
+                        catch { /* invalid path; ignore */ }
+                        break;
+                    case GroupBox gb:
+                        gb.Header = element.Caption ?? "";
+                        break;
                 }
+
+                // Apply common styling
+                fe.Visibility = element.Visible ? Visibility.Visible : Visibility.Collapsed;
+                fe.IsEnabled = element.Enabled;
+                if (element.FontName is not null || element.FontSize is not null)
+                {
+                    if (element.FontName is not null && fe is Control ctrl)
+                        ctrl.FontFamily = new FontFamily(element.FontName);
+                    if (element.FontSize is not null && fe is Control ctrl2)
+                        ctrl2.FontSize = element.FontSize.Value;
+                }
+                if (element.FontColor is not null && fe is Control fCtrl)
+                {
+                    try { fCtrl.Foreground = new BrushConverter().ConvertFromString(element.FontColor) as Brush ?? fCtrl.Foreground; }
+                    catch { /* invalid color; ignore */ }
+                }
+                if (element.BackColor is not null && fe is Control bCtrl)
+                {
+                    try { bCtrl.Background = new BrushConverter().ConvertFromString(element.BackColor) as Brush ?? bCtrl.Background; }
+                    catch { /* invalid color; ignore */ }
+                }
+
                 break;
             }
         });
@@ -159,6 +221,26 @@ public sealed class LuaFormHostService : ILuaFormHost
         });
     }
 
+    public int? GetSelectedIndex(string formId, string elementId)
+    {
+        return _dispatcher.Invoke(() =>
+        {
+            var fe = FindElement(formId, elementId);
+            if (fe is ListBox lb) return lb.SelectedIndex;
+            if (fe is ComboBox cb) return cb.SelectedIndex;
+            return (int?)null;
+        });
+    }
+
+    public int? GetTrackBarPosition(string formId, string elementId)
+    {
+        return _dispatcher.Invoke(() =>
+        {
+            var fe = FindElement(formId, elementId);
+            return fe is Slider sl ? (int?)sl.Value : null;
+        });
+    }
+
     // ── Dialog Functions ──
 
     public void ShowMessageDialog(string text, string title)
@@ -214,6 +296,14 @@ public sealed class LuaFormHostService : ILuaFormHost
                 LuaLabelElement lbl => CreateLabel(lbl),
                 LuaEditElement edit => CreateEdit(form.Id, edit),
                 LuaCheckBoxElement chk => CreateCheckBox(form.Id, chk),
+                LuaMemoElement memo => CreateMemo(form.Id, memo),
+                LuaListBoxElement lst => CreateListBox(form.Id, lst),
+                LuaComboBoxElement cmb => CreateComboBox(form.Id, cmb),
+                LuaTrackBarElement trk => CreateTrackBar(form.Id, trk),
+                LuaProgressBarElement prg => CreateProgressBar(prg),
+                LuaImageElement img => CreateImage(img),
+                LuaPanelElement => new Border { BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1) },
+                LuaGroupBoxElement grp => new GroupBox { Header = grp.Caption ?? "Group" },
                 LuaTimerElement => null, // Timers are non-visual; started separately
                 _ => null
             };
@@ -264,6 +354,75 @@ public sealed class LuaFormHostService : ILuaFormHost
         };
         chk.Click += (_, _) => ElementClicked?.Invoke(formId, element.Id);
         return chk;
+    }
+
+    // ── S2: New control factories ──
+
+    private TextBox CreateMemo(string formId, LuaMemoElement element)
+    {
+        var memo = new TextBox
+        {
+            Text = element.Text ?? "",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            IsReadOnly = element.ReadOnly
+        };
+        memo.TextChanged += (_, _) =>
+            ElementTextChanged?.Invoke(formId, element.Id, memo.Text);
+        return memo;
+    }
+
+    private ListBox CreateListBox(string formId, LuaListBoxElement element)
+    {
+        var lb = new ListBox();
+        foreach (var item in element.Items) lb.Items.Add(item);
+        lb.SelectionChanged += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+        return lb;
+    }
+
+    private ComboBox CreateComboBox(string formId, LuaComboBoxElement element)
+    {
+        var cb = new ComboBox();
+        foreach (var item in element.Items) cb.Items.Add(item);
+        if (element.SelectedIndex >= 0) cb.SelectedIndex = element.SelectedIndex;
+        cb.SelectionChanged += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+        return cb;
+    }
+
+    private Slider CreateTrackBar(string formId, LuaTrackBarElement element)
+    {
+        var sl = new Slider
+        {
+            Minimum = element.Min,
+            Maximum = element.Max,
+            Value = element.Position,
+            IsSnapToTickEnabled = true,
+            TickFrequency = 1
+        };
+        sl.ValueChanged += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+        return sl;
+    }
+
+    private static ProgressBar CreateProgressBar(LuaProgressBarElement element)
+    {
+        return new ProgressBar
+        {
+            Minimum = element.Min,
+            Maximum = element.Max,
+            Value = element.Position
+        };
+    }
+
+    private static Image CreateImage(LuaImageElement element)
+    {
+        var img = new Image { Stretch = Stretch.Uniform };
+        if (element.ImagePath is not null)
+        {
+            try { img.Source = new BitmapImage(new Uri(element.ImagePath, UriKind.RelativeOrAbsolute)); }
+            catch { /* invalid path; leave blank */ }
+        }
+        return img;
     }
 
     private FrameworkElement? FindElement(string formId, string elementId)

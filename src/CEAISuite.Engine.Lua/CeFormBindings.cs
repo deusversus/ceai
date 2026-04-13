@@ -137,6 +137,148 @@ internal sealed class CeFormBindings
             return DynValue.NewTable(elemTable);
         });
 
+        // ── S2: New element types ──
+
+        script.Globals["createMemo"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"memo_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaMemoElement(elementId, 10, 10, 200, 100);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["getText"] = (Func<DynValue>)(() =>
+            {
+                var text = formHost.GetElementText(formId, elementId);
+                return text is not null ? DynValue.NewString(text) : DynValue.NewString("");
+            });
+            elemTable["setText"] = (Action<string>)(text =>
+            {
+                element.Text = text;
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["setReadOnly"] = (Action<bool>)(ro => element.ReadOnly = ro);
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createListBox"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"lst_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaListBoxElement(elementId, 10, 10, 150, 120);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["addItem"] = (Action<string>)(item =>
+            {
+                element.Items.Add(item);
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["clear"] = (Action)(() =>
+            {
+                element.Items.Clear();
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["getSelectedIndex"] = (Func<double>)(() =>
+                formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex);
+            elemTable["getItemCount"] = (Func<double>)(() => element.Items.Count);
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createComboBox"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"cmb_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaComboBoxElement(elementId, 10, 10, 150, 25);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["addItem"] = (Action<string>)(item =>
+            {
+                element.Items.Add(item);
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["clear"] = (Action)(() =>
+            {
+                element.Items.Clear();
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["getSelectedIndex"] = (Func<double>)(() =>
+                formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex);
+            elemTable["setSelectedIndex"] = (Action<int>)(idx =>
+            {
+                element.SelectedIndex = idx;
+                formHost.UpdateElement(formId, element);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createTrackBar"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"trk_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaTrackBarElement(elementId, 10, 10, 200, 30);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["setMin"] = (Action<int>)(v => element.Min = v);
+            elemTable["setMax"] = (Action<int>)(v => element.Max = v);
+            elemTable["setPosition"] = (Action<int>)(v =>
+            {
+                element.Position = v;
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["getPosition"] = (Func<double>)(() =>
+                formHost.GetTrackBarPosition(formId, elementId) ?? element.Position);
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createProgressBar"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"prg_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaProgressBarElement(elementId, 10, 10, 200, 25);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["setMin"] = (Action<int>)(v => element.Min = v);
+            elemTable["setMax"] = (Action<int>)(v => element.Max = v);
+            elemTable["setPosition"] = (Action<int>)(v =>
+            {
+                element.Position = v;
+                formHost.UpdateElement(formId, element);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createImage"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"img_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaImageElement(elementId, 10, 10, 100, 100);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["loadFromFile"] = (Action<string>)(path =>
+            {
+                element.ImagePath = path;
+                formHost.UpdateElement(formId, element);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createPanel"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"pnl_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaPanelElement(elementId, 10, 10, 200, 150);
+            AddElementToForm(formId, element);
+            return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
+        });
+
+        script.Globals["createGroupBox"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"grp_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaGroupBoxElement(elementId, 10, 10, 200, 150) { Caption = "Group" };
+            AddElementToForm(formId, element);
+            return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
+        });
+
         // Wire click events back to Lua callbacks
         formHost.ElementClicked += (fId, eId) =>
         {
@@ -184,6 +326,39 @@ internal sealed class CeFormBindings
         {
             element.Width = w;
             element.Height = h;
+            formHost.UpdateElement(formId, element);
+        });
+
+        // S2: Common styling methods
+        table["setVisible"] = (Action<bool>)(v =>
+        {
+            element.Visible = v;
+            formHost.UpdateElement(formId, element);
+        });
+
+        table["setEnabled"] = (Action<bool>)(v =>
+        {
+            element.Enabled = v;
+            formHost.UpdateElement(formId, element);
+        });
+
+        table["setFont"] = (Action<string, DynValue, DynValue>)((name, sizeArg, colorArg) =>
+        {
+            element.FontName = name;
+            if (!sizeArg.IsNil()) element.FontSize = (int)sizeArg.Number;
+            if (!colorArg.IsNil()) element.FontColor = colorArg.String;
+            formHost.UpdateElement(formId, element);
+        });
+
+        table["setColor"] = (Action<string>)(color =>
+        {
+            element.BackColor = color;
+            formHost.UpdateElement(formId, element);
+        });
+
+        table["setFontColor"] = (Action<string>)(color =>
+        {
+            element.FontColor = color;
             formHost.UpdateElement(formId, element);
         });
 

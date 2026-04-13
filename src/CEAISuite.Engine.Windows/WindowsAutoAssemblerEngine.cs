@@ -91,14 +91,14 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     public Task<ScriptExecutionResult> EnableAsync(int processId, string script, CancellationToken ct = default) =>
         Task.Run(() =>
         {
-            var processed = PreprocessIncludes(script);
+            var processed = PreprocessConditionals(PreprocessIncludes(script));
             return ExecuteSection(processId, processed, enable: true, ct);
         }, ct);
 
     public Task<ScriptExecutionResult> DisableAsync(int processId, string script, CancellationToken ct = default) =>
         Task.Run(() =>
         {
-            var processed = PreprocessIncludes(script);
+            var processed = PreprocessConditionals(PreprocessIncludes(script));
             return ExecuteSection(processId, processed, enable: false, ct);
         }, ct);
 
@@ -428,6 +428,11 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 }
 
                 currentBlock.Instructions.Add(trimmed);
+            }
+            else if (TryExecuteCustomCommand(trimmed))
+            {
+                // S5: Custom AA command handled
+                continue;
             }
             else if (strictMode)
             {
@@ -1224,6 +1229,129 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         }
 
         return IntPtr.Size == 8;
+    }
+
+    // ── S5: Custom AA Command Execution ──
+
+    private bool TryExecuteCustomCommand(string line)
+    {
+        // Custom commands look like: commandName(arg1, arg2) or commandName
+        var parenIdx = line.IndexOf('(');
+        string commandName;
+        string[] args;
+
+        if (parenIdx > 0 && line.EndsWith(')'))
+        {
+            commandName = line[..parenIdx].Trim();
+            var argsStr = line[(parenIdx + 1)..^1];
+            args = argsStr.Split(',', StringSplitOptions.TrimEntries);
+        }
+        else
+        {
+            commandName = line.Trim();
+            args = [];
+        }
+
+        if (_customCommands.TryGetValue(commandName, out var handler))
+        {
+            handler(args);
+            return true;
+        }
+
+        return false;
+    }
+
+    // ── S5: Custom AA Command Registration ──
+
+    private readonly Dictionary<string, Func<string[], bool>> _customCommands = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Register a custom AA directive that can be invoked from scripts.</summary>
+    public void RegisterCustomCommand(string name, Func<string[], bool> handler)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        ArgumentNullException.ThrowIfNull(handler);
+        _customCommands[name] = handler;
+    }
+
+    /// <summary>Unregister a previously registered custom AA directive.</summary>
+    public void UnregisterCustomCommand(string name) => _customCommands.Remove(name);
+
+    /// <summary>List all registered custom AA commands.</summary>
+    public IReadOnlyList<string> GetCustomCommands() => _customCommands.Keys.ToList();
+
+    // ── S5: Conditional Compilation Preprocessor ──
+
+    /// <summary>
+    /// Process {$ifdef SYMBOL}, {$ifndef SYMBOL}, {$else}, {$endif} directives.
+    /// Uses the symbol table + built-in defines (WIN32, WIN64) to decide which blocks to include.
+    /// </summary>
+    private string PreprocessConditionals(string script)
+    {
+        var sb = new StringBuilder();
+        var stack = new Stack<(bool Active, bool ElseSeen)>();
+        var active = true; // whether current lines should be included
+
+        foreach (var line in script.Split('\n'))
+        {
+            var trimmed = line.Trim();
+
+            if (trimmed.StartsWith("{$ifdef ", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith('}'))
+            {
+                var symbol = trimmed[8..^1].Trim();
+                var defined = IsSymbolDefined(symbol);
+                stack.Push((active, false));
+                active = active && defined;
+                continue;
+            }
+
+            if (trimmed.StartsWith("{$ifndef ", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith('}'))
+            {
+                var symbol = trimmed[9..^1].Trim();
+                var defined = IsSymbolDefined(symbol);
+                stack.Push((active, false));
+                active = active && !defined;
+                continue;
+            }
+
+            if (trimmed.Equals("{$else}", StringComparison.OrdinalIgnoreCase))
+            {
+                if (stack.Count > 0)
+                {
+                    var (parentActive, _) = stack.Pop();
+                    // If parent was active and current block was NOT active, switch to active
+                    active = parentActive && !active;
+                    stack.Push((parentActive, true));
+                }
+                continue;
+            }
+
+            if (trimmed.Equals("{$endif}", StringComparison.OrdinalIgnoreCase))
+            {
+                if (stack.Count > 0)
+                {
+                    var (parentActive, _) = stack.Pop();
+                    active = parentActive;
+                }
+                continue;
+            }
+
+            if (active)
+                sb.AppendLine(line);
+        }
+
+        return sb.ToString();
+    }
+
+    private bool IsSymbolDefined(string symbol)
+    {
+        // Built-in defines
+        if (symbol.Equals("WIN64", StringComparison.OrdinalIgnoreCase))
+            return IntPtr.Size == 8;
+        if (symbol.Equals("WIN32", StringComparison.OrdinalIgnoreCase))
+            return IntPtr.Size == 4;
+
+        // Check registered symbols
+        return _symbolTable.ContainsKey(symbol);
     }
 
     /// <summary>Recursively inline {$include filepath} directives. Max depth 10.</summary>

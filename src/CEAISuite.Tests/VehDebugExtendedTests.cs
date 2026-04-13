@@ -1,6 +1,9 @@
 using CEAISuite.Application;
 using CEAISuite.Engine.Abstractions;
+using CEAISuite.Engine.Windows;
 using CEAISuite.Tests.Stubs;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace CEAISuite.Tests;
 
@@ -642,6 +645,80 @@ public class VehDebugExtendedTests
         // No canned hits
         var result = await tools.TraceVehBreakpoint(AttachedPid, 10);
         Assert.Contains("no steps", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase F: Unified Breakpoint Pipeline
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task UnifiedPipeline_VehMode_RoutesToVehDebugger()
+    {
+        var engine = new StubVehDebugger();
+        var bpEngine = new WindowsBreakpointEngine(
+            NullLoggerFactory.Instance.CreateLogger<WindowsBreakpointEngine>(),
+            engine);
+
+        // Set BP with VEH mode — should auto-inject and delegate to VEH debugger
+        var bp = await bpEngine.SetBreakpointAsync(AttachedPid, (nuint)0x400000,
+            BreakpointType.HardwareExecute, BreakpointMode.VectoredExceptionHandler);
+
+        Assert.NotNull(bp);
+        Assert.Equal(BreakpointMode.VectoredExceptionHandler, bp.Mode);
+        Assert.True(bp.IsEnabled);
+
+        // VEH debugger should have been auto-injected and have 1 active BP
+        var vehStatus = engine.GetStatus(AttachedPid);
+        Assert.True(vehStatus.IsInjected);
+        Assert.Equal(1, vehStatus.ActiveBreakpoints);
+    }
+
+    [Fact]
+    public async Task UnifiedPipeline_VehMode_AppearsInListBreakpoints()
+    {
+        var engine = new StubVehDebugger();
+        var bpEngine = new WindowsBreakpointEngine(
+            NullLoggerFactory.Instance.CreateLogger<WindowsBreakpointEngine>(),
+            engine);
+
+        await bpEngine.SetBreakpointAsync(AttachedPid, (nuint)0x400000,
+            BreakpointType.HardwareExecute, BreakpointMode.VectoredExceptionHandler);
+
+        var list = await bpEngine.ListBreakpointsAsync(AttachedPid);
+
+        Assert.Single(list);
+        Assert.Equal(BreakpointMode.VectoredExceptionHandler, list[0].Mode);
+    }
+
+    [Fact]
+    public async Task UnifiedPipeline_VehMode_RemoveWorks()
+    {
+        var engine = new StubVehDebugger();
+        var bpEngine = new WindowsBreakpointEngine(
+            NullLoggerFactory.Instance.CreateLogger<WindowsBreakpointEngine>(),
+            engine);
+
+        var bp = await bpEngine.SetBreakpointAsync(AttachedPid, (nuint)0x400000,
+            BreakpointType.HardwareExecute, BreakpointMode.VectoredExceptionHandler);
+
+        var ok = await bpEngine.RemoveBreakpointAsync(AttachedPid, bp.Id);
+        Assert.True(ok);
+
+        // VEH debugger should have 0 active BPs
+        var vehStatus = engine.GetStatus(AttachedPid);
+        Assert.Equal(0, vehStatus.ActiveBreakpoints);
+    }
+
+    [Fact]
+    public async Task UnifiedPipeline_NoVehDebugger_ThrowsOnVehMode()
+    {
+        var bpEngine = new WindowsBreakpointEngine(
+            NullLoggerFactory.Instance.CreateLogger<WindowsBreakpointEngine>(),
+            vehDebugger: null);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            bpEngine.SetBreakpointAsync(AttachedPid, (nuint)0x400000,
+                BreakpointType.HardwareExecute, BreakpointMode.VectoredExceptionHandler));
     }
 
     // ══════════════════════════════════════════════════════════════════

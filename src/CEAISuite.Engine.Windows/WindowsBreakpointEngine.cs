@@ -11,10 +11,12 @@ namespace CEAISuite.Engine.Windows;
 public sealed class WindowsBreakpointEngine : IBreakpointEngine
 {
     private readonly ILogger<WindowsBreakpointEngine> _logger;
+    private readonly IVehDebugger? _vehDebugger;
 
-    public WindowsBreakpointEngine(ILogger<WindowsBreakpointEngine> logger)
+    public WindowsBreakpointEngine(ILogger<WindowsBreakpointEngine> logger, IVehDebugger? vehDebugger = null)
     {
         _logger = logger;
+        _vehDebugger = vehDebugger;
     }
 
     private const uint ProcessQueryInformation = 0x0400;
@@ -95,11 +97,16 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         if (resolvedMode == BreakpointMode.Stealth)
             resolvedMode = ResolveAutoMode(type);
 
+        // VEH breakpoints: route through the injected agent (no debugger attachment)
+        if (resolvedMode == BreakpointMode.VectoredExceptionHandler)
+            return SetVehBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
+
         // Page guard breakpoints are handled differently
         if (resolvedMode == BreakpointMode.PageGuard)
             return SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
 
-        // 2B: Wrap hardware BP installation with auto-fallback to PageGuard on slot exhaustion
+        // 2B: Wrap hardware BP installation with auto-fallback.
+        // Chain: Hardware → VEH (if available) → PageGuard
         if (resolvedMode == BreakpointMode.Hardware)
         {
             return Task.Run(async () =>
@@ -110,8 +117,23 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 }
                 catch (InvalidOperationException ex) when (ex.Message.Contains("four active hardware breakpoints", StringComparison.Ordinal))
                 {
+                    // Try VEH first (no debugger needed), then PageGuard
+                    if (_vehDebugger is not null)
+                    {
+                        if (_logger.IsEnabled(LogLevel.Debug))
+                            _logger.LogDebug("Hardware slots exhausted. Auto-falling back to VEH for BP at 0x{Address:X}", address);
+                        try
+                        {
+                            return await SetVehBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
+                        }
+                        catch
+                        {
+                            // VEH also failed — fall through to PageGuard
+                        }
+                    }
+
                     if (_logger.IsEnabled(LogLevel.Debug))
-                        _logger.LogDebug("Hardware slots exhausted. Auto-falling back to PageGuard for BP at 0x{Address:X}", address);
+                        _logger.LogDebug("Falling back to PageGuard for BP at 0x{Address:X}", address);
                     return await SetPageGuardBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
                 }
             }, cancellationToken);
@@ -214,6 +236,13 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
+
+                // Check if this is a VEH breakpoint (not session-based)
+                if (_breakpointRegistry.TryGetValue(breakpointId, out var vehBp) &&
+                    vehBp.Mode == BreakpointMode.VectoredExceptionHandler)
+                {
+                    return RemoveVehBreakpointAsync(breakpointId, vehBp).GetAwaiter().GetResult();
+                }
 
                 if (!_sessions.TryGetValue(processId, out var session))
                 {
@@ -319,18 +348,26 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!_sessions.TryGetValue(processId, out var session))
+                var results = new List<BreakpointDescriptor>();
+
+                // Include session-based breakpoints (Software, Hardware, PageGuard)
+                if (_sessions.TryGetValue(processId, out var session))
                 {
-                    return Array.Empty<BreakpointDescriptor>();
+                    lock (session.SyncRoot)
+                    {
+                        results.AddRange(session.Breakpoints.Values
+                            .Select(breakpoint => breakpoint.ToDescriptor()));
+                    }
                 }
 
-                lock (session.SyncRoot)
+                // Include VEH breakpoints from global registry (not session-based)
+                foreach (var bp in _breakpointRegistry.Values)
                 {
-                    return session.Breakpoints.Values
-                        .OrderBy(breakpoint => breakpoint.Address)
-                        .Select(breakpoint => breakpoint.ToDescriptor())
-                        .ToArray();
+                    if (bp.ProcessId == processId && bp.Mode == BreakpointMode.VectoredExceptionHandler)
+                        results.Add(bp.ToDescriptor());
                 }
+
+                return results.OrderBy(bp => bp.Address).ToArray();
             },
             cancellationToken);
 
@@ -738,6 +775,68 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             dr7 |= typeBits << controlShift;
             dr7 |= lengthBits << (controlShift + 2);
         }
+    }
+
+    // ─── VEH Breakpoint Support (Phase F: Unified Pipeline) ────────────
+
+    private async Task<BreakpointDescriptor> SetVehBreakpointAsync(
+        int processId,
+        nuint address,
+        BreakpointType type,
+        BreakpointHitAction action,
+        bool singleHit,
+        CancellationToken ct)
+    {
+        if (_vehDebugger is null)
+            throw new InvalidOperationException("VEH debugger is not available.");
+
+        // Auto-inject if not already injected
+        var status = _vehDebugger.GetStatus(processId);
+        if (!status.IsInjected)
+        {
+            var injectResult = await _vehDebugger.InjectAsync(processId, ct).ConfigureAwait(false);
+            if (!injectResult.Success)
+                throw new InvalidOperationException($"VEH agent injection failed: {injectResult.Error}");
+        }
+
+        // Map BreakpointType to VehBreakpointType
+        var vehType = type switch
+        {
+            BreakpointType.HardwareExecute => VehBreakpointType.Execute,
+            BreakpointType.HardwareWrite => VehBreakpointType.Write,
+            BreakpointType.HardwareReadWrite => VehBreakpointType.ReadWrite,
+            _ => VehBreakpointType.Execute
+        };
+
+        var vehResult = await _vehDebugger.SetBreakpointAsync(processId, address, vehType, ct: ct).ConfigureAwait(false);
+        if (!vehResult.Success)
+            throw new InvalidOperationException($"VEH breakpoint failed: {vehResult.Error}");
+
+        // Create a standard BreakpointState so it appears in ListBreakpoints
+        var bpId = $"bp-{Guid.NewGuid().ToString("N")[..8]}";
+        var bp = new BreakpointState(bpId, processId, address, type, action,
+            BreakpointMode.VectoredExceptionHandler, singleHit);
+        bp.HardwareSlot = vehResult.DrSlot;
+
+        // Store in global registry so ListBreakpoints/GetHitLog work
+        _breakpointRegistry[bpId] = bp;
+
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation(
+                "VEH breakpoint set via unified pipeline: {BpId} at 0x{Address:X} DR{Slot} (pid={Pid})",
+                bpId, address, vehResult.DrSlot, processId);
+
+        return bp.ToDescriptor();
+    }
+
+    private async Task<bool> RemoveVehBreakpointAsync(string breakpointId, BreakpointState bp)
+    {
+        if (_vehDebugger is null || bp.HardwareSlot is not { } drSlot)
+            return false;
+
+        var ok = await _vehDebugger.RemoveBreakpointAsync(bp.ProcessId, drSlot).ConfigureAwait(false);
+        _breakpointRegistry.TryRemove(breakpointId, out _);
+        return ok;
     }
 
     // ─── PAGE_GUARD Breakpoint Support ──────────────────────────────────

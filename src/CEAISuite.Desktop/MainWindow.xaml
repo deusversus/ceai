@@ -1944,6 +1944,10 @@
                                         <Button Content="Remove" Command="{Binding RemoveBreakpointCommand}" Padding="8,3" />
                                     </StackPanel>
 
+                                    <!-- Error message (collapses when empty via MinHeight=0 + TextWrapping) -->
+                                    <TextBlock Text="{Binding ErrorMessage}" Foreground="Red" FontSize="11"
+                                               Margin="0,-4,0,2" />
+
                                     <!-- Row 2: Breakpoint list -->
                                     <DataGrid Grid.Row="2" ItemsSource="{Binding Breakpoints}" SelectedItem="{Binding SelectedBreakpoint}"
                                               AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"

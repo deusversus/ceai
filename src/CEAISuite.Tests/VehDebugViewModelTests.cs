@@ -112,15 +112,14 @@ public class VehDebugViewModelTests
     }
 
     [Fact]
-    public void HitStream_StartStop_TogglesRunningState()
+    public async Task HitStream_StartStop_TogglesRunningState()
     {
         var (vm, _, _) = CreateVm();
 
         // Can't start without injection, but the flag should toggle
         vm.StartHitStreamCommand.Execute(null);
-        // IsHitStreamRunning should be true briefly (Task.Run fires)
-        // Stop immediately
-        vm.StopHitStreamCommand.Execute(null);
+        // Stop immediately — await the async stop
+        await vm.StopHitStreamCommand.ExecuteAsync(null);
         Assert.False(vm.IsHitStreamRunning);
     }
 
@@ -157,5 +156,32 @@ public class VehDebugViewModelTests
         vm.RefreshStatus();
 
         Assert.Contains("STEALTH", vm.AgentStatus);
+    }
+
+    [Fact]
+    public async Task SetBreakpoint_InvalidAddress_ShowsError()
+    {
+        var (vm, _, _) = CreateVm();
+        await vm.InjectAgentCommand.ExecuteAsync(null);
+        vm.NewBpAddress = "not_hex";
+
+        await vm.SetBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.Breakpoints);
+        Assert.Contains("Invalid address", vm.ErrorMessage);
+    }
+
+    [Fact]
+    public async Task SetBreakpoint_ValidAddress_ClearsError()
+    {
+        var (vm, _, _) = CreateVm();
+        await vm.InjectAgentCommand.ExecuteAsync(null);
+        vm.ErrorMessage = "old error";
+        vm.NewBpAddress = "0x400000";
+
+        await vm.SetBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.Breakpoints);
+        Assert.Equal("", vm.ErrorMessage);
     }
 }

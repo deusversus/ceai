@@ -20,6 +20,7 @@ public partial class VehDebugViewModel : ObservableObject
     private readonly IOutputLog _outputLog;
     private readonly IDispatcherService _dispatcher;
     private CancellationTokenSource? _hitStreamCts;
+    private Task? _hitStreamTask;
 
     public VehDebugViewModel(
         VehDebugService service,
@@ -61,6 +62,9 @@ public partial class VehDebugViewModel : ObservableObject
 
     [ObservableProperty]
     private string _healthStatus = "";
+
+    [ObservableProperty]
+    private string _errorMessage = "";
 
     // ─── New Breakpoint Fields ──────────────────────────────────────
 
@@ -109,7 +113,7 @@ public partial class VehDebugViewModel : ObservableObject
     private async Task EjectAgentAsync()
     {
         if (_processContext.AttachedProcessId is not { } pid) return;
-        StopHitStream();
+        await StopHitStreamAsync();
         try
         {
             await _service.EjectAsync(pid);
@@ -134,10 +138,26 @@ public partial class VehDebugViewModel : ObservableObject
     {
         if (_processContext.AttachedProcessId is not { } pid) return;
         if (string.IsNullOrWhiteSpace(NewBpAddress)) return;
+        ErrorMessage = "";
+
+        nuint addr;
+        try
+        {
+            addr = ParseAddress(NewBpAddress);
+        }
+        catch (FormatException)
+        {
+            ErrorMessage = $"Invalid address: '{NewBpAddress}' — use hex (e.g. 0x400000)";
+            return;
+        }
+        catch (OverflowException)
+        {
+            ErrorMessage = $"Address too large: '{NewBpAddress}'";
+            return;
+        }
 
         try
         {
-            var addr = ParseAddress(NewBpAddress);
             var result = await _service.SetBreakpointAsync(pid, addr, SelectedBpType, SelectedDataSize);
             if (result.Success)
             {
@@ -155,11 +175,13 @@ public partial class VehDebugViewModel : ObservableObject
             }
             else
             {
+                ErrorMessage = $"Failed: {result.Error}";
                 _outputLog.Append("VEH", "Error", $"Set BP failed: {result.Error}");
             }
         }
         catch (Exception ex)
         {
+            ErrorMessage = $"Error: {ex.Message}";
             _outputLog.Append("VEH", "Error", $"Set BP error: {ex.Message}");
         }
     }
@@ -222,9 +244,9 @@ public partial class VehDebugViewModel : ObservableObject
 
         _hitStreamCts = new CancellationTokenSource();
         var ct = _hitStreamCts.Token;
-        IsHitStreamRunning = true;
+        _dispatcher.Invoke(() => IsHitStreamRunning = true);
 
-        _ = Task.Run(async () =>
+        _hitStreamTask = Task.Run(async () =>
         {
             try
             {
@@ -248,6 +270,9 @@ public partial class VehDebugViewModel : ObservableObject
                             // Cap the display list
                             while (HitStream.Count > MaxHitStreamItems)
                                 HitStream.RemoveAt(HitStream.Count - 1);
+
+                            // Update hit count on matching breakpoint by DR6
+                            IncrementBreakpointHitCounts(hit);
                         });
                     }
                 }
@@ -265,18 +290,49 @@ public partial class VehDebugViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void StopHitStream()
+    private async Task StopHitStreamAsync()
     {
-        _hitStreamCts?.Cancel();
-        _hitStreamCts?.Dispose();
+        var cts = _hitStreamCts;
+        var task = _hitStreamTask;
         _hitStreamCts = null;
-        IsHitStreamRunning = false;
+        _hitStreamTask = null;
+
+        if (cts is not null)
+        {
+            cts.Cancel();
+            // Wait for background task to complete before disposing
+            if (task is not null)
+            {
+                try { await task.ConfigureAwait(false); }
+                catch (OperationCanceledException) { /* expected */ }
+            }
+            cts.Dispose();
+        }
+
+        _dispatcher.Invoke(() => IsHitStreamRunning = false);
     }
 
     [RelayCommand]
     private void ClearHitStream()
     {
-        HitStream.Clear();
+        _dispatcher.Invoke(() => HitStream.Clear());
+    }
+
+    /// <summary>Increment hit count on the breakpoint display item matching the hit's DR slot.</summary>
+    private void IncrementBreakpointHitCounts(VehHitEvent hit)
+    {
+        // Determine DR slot from DR6 bits 0-3
+        var dr6 = (ulong)hit.Dr6;
+        for (int i = 0; i < 4; i++)
+        {
+            if ((dr6 & (1UL << i)) != 0)
+            {
+                var bp = Breakpoints.FirstOrDefault(b => b.DrSlot == i);
+                if (bp is not null)
+                    bp.HitCount++;
+                break;
+            }
+        }
     }
 
     // ─── Status Refresh ─────────────────────────────────────────────

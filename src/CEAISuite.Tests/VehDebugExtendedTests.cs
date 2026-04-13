@@ -127,6 +127,22 @@ public class VehDebugExtendedTests
         Assert.Contains("not available", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Fact]
+    public async Task EnableVehStealth_NoService_ReturnsNotAvailable()
+    {
+        var tools = CreateToolsWithoutVeh(AttachedPid);
+        var result = await tools.EnableVehStealth(AttachedPid);
+        Assert.Contains("not available", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task DisableVehStealth_NoService_ReturnsNotAvailable()
+    {
+        var tools = CreateToolsWithoutVeh(AttachedPid);
+        var result = await tools.DisableVehStealth(AttachedPid);
+        Assert.Contains("not available", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // AI Tool Tests — Invalid Inputs
     // ══════════════════════════════════════════════════════════════════

@@ -581,6 +581,72 @@ static LONG NTAPI HookedNtGetThreadContext(HANDLE ThreadHandle, PCONTEXT Context
     return status;
 }
 
+/* ── Thread suspension helper for safe code patching (C2 fix) ── */
+
+static void SuspendAllThreadsExceptSelf(void)
+{
+    HANDLE snap;
+    THREADENTRY32 te;
+    DWORD pid = GetCurrentProcessId();
+    DWORD myTid = GetCurrentThreadId();
+
+    snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    te.dwSize = sizeof(te);
+    if (Thread32First(snap, &te)) {
+        do {
+            HANDLE hThread;
+            if (te.th32OwnerProcessID != pid || te.th32ThreadID == myTid) continue;
+            hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+            if (hThread) { SuspendThread(hThread); CloseHandle(hThread); }
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+}
+
+static void ResumeAllThreadsExceptSelf(void)
+{
+    HANDLE snap;
+    THREADENTRY32 te;
+    DWORD pid = GetCurrentProcessId();
+    DWORD myTid = GetCurrentThreadId();
+
+    snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+    te.dwSize = sizeof(te);
+    if (Thread32First(snap, &te)) {
+        do {
+            HANDLE hThread;
+            if (te.th32OwnerProcessID != pid || te.th32ThreadID == myTid) continue;
+            hThread = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+            if (hThread) { ResumeThread(hThread); CloseHandle(hThread); }
+        } while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+}
+
+/* ── Prologue validation (C1 fix) ── */
+
+/*
+ * Validate that the NtGetThreadContext prologue matches the expected ntdll
+ * syscall stub layout. On Win10/11 x64 this is:
+ *   4C 8B D1          mov r10, rcx
+ *   B8 xx xx 00 00    mov eax, <syscall_number>
+ *   ...               (test/syscall/etc)
+ * We check the first 3 bytes to confirm it's the expected pattern.
+ * If the layout changes, we refuse to hook rather than crash.
+ */
+static BOOL ValidatePrologue(const BYTE* target)
+{
+#ifdef _M_IX86
+    /* x86 ntdll stubs: B8 xx xx xx xx (mov eax, syscall#) */
+    return (target[0] == 0xB8);
+#else
+    /* x64: 4C 8B D1 = mov r10, rcx (standard syscall stub prefix) */
+    return (target[0] == 0x4C && target[1] == 0x8B && target[2] == 0xD1);
+#endif
+}
+
 static BOOL InstallNtGetThreadContextHook(void)
 {
     HMODULE hNtdll;
@@ -594,6 +660,10 @@ static BOOL InstallNtGetThreadContextHook(void)
 
     target = (BYTE*)GetProcAddress(hNtdll, "NtGetThreadContext");
     if (!target) return FALSE;
+
+    /* C1: Validate prologue matches expected syscall stub layout */
+    if (!ValidatePrologue(target)) return FALSE;
+
     g_hookTarget = target;
 
     /* Allocate executable trampoline memory */
@@ -604,55 +674,67 @@ static BOOL InstallNtGetThreadContextHook(void)
     /* Save original prologue bytes */
     memcpy(g_hookOrigBytes, target, HOOK_PROLOGUE_SIZE);
 
-    /* Build trampoline: original prologue bytes + JMP back to target + HOOK_PROLOGUE_SIZE */
+    /* Build trampoline: original prologue bytes + register-preserving JMP back */
     memcpy(g_hookTrampoline, target, HOOK_PROLOGUE_SIZE);
 
 #ifdef _M_IX86
-    /* x86: 5-byte relative JMP back */
+    /* x86: 5-byte relative JMP back (doesn't clobber any registers) */
     {
-        BYTE* trampolineJmpBack = g_hookTrampoline + HOOK_PROLOGUE_SIZE;
+        BYTE* jmpBack = g_hookTrampoline + HOOK_PROLOGUE_SIZE;
         BYTE* returnAddr = target + HOOK_PROLOGUE_SIZE;
-        trampolineJmpBack[0] = 0xE9; /* JMP rel32 */
-        *(DWORD*)(trampolineJmpBack + 1) = (DWORD)(returnAddr - (trampolineJmpBack + 5));
+        jmpBack[0] = 0xE9; /* JMP rel32 */
+        *(DWORD*)(jmpBack + 1) = (DWORD)(returnAddr - (jmpBack + 5));
     }
 #else
-    /* x64: 14-byte absolute JMP back (MOV RAX, imm64; JMP RAX) */
+    /* x64 C3 FIX: Use indirect JMP via RIP-relative memory, NOT MOV RAX which
+     * would clobber EAX (holding the syscall number set by the prologue).
+     * Encoding: FF 25 00 00 00 00 = JMP QWORD PTR [RIP+0] (6 bytes)
+     *           followed by the 8-byte absolute address (8 bytes)
+     * Total: 14 bytes, clobbers NO registers. */
     {
-        BYTE* trampolineJmpBack = g_hookTrampoline + HOOK_PROLOGUE_SIZE;
+        BYTE* jmpBack = g_hookTrampoline + HOOK_PROLOGUE_SIZE;
         ULONG64 returnAddr = (ULONG64)(target + HOOK_PROLOGUE_SIZE);
-        trampolineJmpBack[0] = 0x48; trampolineJmpBack[1] = 0xB8; /* MOV RAX, imm64 */
-        *(ULONG64*)(trampolineJmpBack + 2) = returnAddr;
-        trampolineJmpBack[10] = 0xFF; trampolineJmpBack[11] = 0xE0; /* JMP RAX */
+        jmpBack[0] = 0xFF; jmpBack[1] = 0x25;         /* JMP [RIP+0] */
+        *(DWORD*)(jmpBack + 2) = 0x00000000;           /* disp32 = 0 */
+        *(ULONG64*)(jmpBack + 6) = returnAddr;         /* 8-byte address */
     }
 #endif
+
+    /* C2: Suspend all threads before patching to prevent partial-instruction execution */
+    SuspendAllThreadsExceptSelf();
 
     /* Patch original function entry: JMP to our hook */
     if (!VirtualProtect(target, HOOK_PROLOGUE_SIZE, PAGE_EXECUTE_READWRITE, &oldProtect))
     {
+        ResumeAllThreadsExceptSelf();
         VirtualFree(g_hookTrampoline, 0, MEM_RELEASE);
         g_hookTrampoline = NULL;
         return FALSE;
     }
 
 #ifdef _M_IX86
-    /* x86: 5-byte relative JMP */
+    /* x86: 5-byte relative JMP to detour */
     {
         DWORD hookOffset = (DWORD)((BYTE*)HookedNtGetThreadContext - (target + 5));
         target[0] = 0xE9; /* JMP rel32 */
         *(DWORD*)(target + 1) = hookOffset;
     }
 #else
-    /* x64: 14-byte absolute JMP (MOV RAX, imm64; JMP RAX) */
+    /* x64: 14-byte indirect JMP to detour (register-preserving)
+     * FF 25 00 00 00 00 = JMP [RIP+0], followed by 8-byte hook address */
     {
         ULONG64 hookAddr = (ULONG64)HookedNtGetThreadContext;
-        target[0] = 0x48; target[1] = 0xB8; /* MOV RAX, imm64 */
-        *(ULONG64*)(target + 2) = hookAddr;
-        target[10] = 0xFF; target[11] = 0xE0; /* JMP RAX */
+        target[0] = 0xFF; target[1] = 0x25;            /* JMP [RIP+0] */
+        *(DWORD*)(target + 2) = 0x00000000;             /* disp32 = 0 */
+        *(ULONG64*)(target + 6) = hookAddr;             /* 8-byte address */
     }
 #endif
 
     FlushInstructionCache(GetCurrentProcess(), target, HOOK_PROLOGUE_SIZE);
     VirtualProtect(target, HOOK_PROLOGUE_SIZE, oldProtect, &oldProtect);
+
+    /* Resume threads after patch is complete and caches flushed */
+    ResumeAllThreadsExceptSelf();
 
     g_hookInstalled = TRUE;
     return TRUE;
@@ -663,6 +745,9 @@ static void RemoveNtGetThreadContextHook(void)
     DWORD oldProtect;
     if (!g_hookInstalled || !g_hookTarget) return;
 
+    /* C2: Suspend threads during unhook too */
+    SuspendAllThreadsExceptSelf();
+
     /* Restore original prologue bytes */
     if (VirtualProtect(g_hookTarget, HOOK_PROLOGUE_SIZE, PAGE_EXECUTE_READWRITE, &oldProtect))
     {
@@ -670,6 +755,8 @@ static void RemoveNtGetThreadContextHook(void)
         FlushInstructionCache(GetCurrentProcess(), g_hookTarget, HOOK_PROLOGUE_SIZE);
         VirtualProtect(g_hookTarget, HOOK_PROLOGUE_SIZE, oldProtect, &oldProtect);
     }
+
+    ResumeAllThreadsExceptSelf();
 
     /* Free trampoline */
     if (g_hookTrampoline)
@@ -747,16 +834,35 @@ static PEB_LDR_DATA_INTERNAL* GetPebLdrData(void)
     return *(PEB_LDR_DATA_INTERNAL**)(peb + PEB_LDR_OFFSET);
 }
 
+/* LdrLockLoaderLock / LdrUnlockLoaderLock — resolve dynamically from ntdll */
+typedef LONG (NTAPI *PFN_LdrLockLoaderLock)(ULONG Flags, ULONG* State, ULONG_PTR* Cookie);
+typedef LONG (NTAPI *PFN_LdrUnlockLoaderLock)(ULONG Flags, ULONG_PTR Cookie);
+
 static void HideModuleFromPeb(HMODULE hModule)
 {
     PEB_LDR_DATA_INTERNAL* ldr;
     LIST_ENTRY* head;
     LIST_ENTRY* entry;
+    ULONG_PTR loaderCookie = 0;
+    PFN_LdrLockLoaderLock pfnLock = NULL;
+    PFN_LdrUnlockLoaderLock pfnUnlock = NULL;
+    HMODULE hNtdll;
 
     if (g_moduleHidden) return;
 
+    /* M1: Acquire loader lock to prevent concurrent list modification */
+    hNtdll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtdll) {
+        pfnLock = (PFN_LdrLockLoaderLock)GetProcAddress(hNtdll, "LdrLockLoaderLock");
+        pfnUnlock = (PFN_LdrUnlockLoaderLock)GetProcAddress(hNtdll, "LdrUnlockLoaderLock");
+    }
+    if (pfnLock) pfnLock(0, NULL, &loaderCookie);
+
     ldr = GetPebLdrData();
-    if (!ldr) return;
+    if (!ldr) {
+        if (pfnUnlock && loaderCookie) pfnUnlock(0, loaderCookie);
+        return;
+    }
 
     /* Walk InLoadOrderModuleList to find our entry */
     head = &ldr->InLoadOrderModuleList;
@@ -788,14 +894,30 @@ static void HideModuleFromPeb(HMODULE hModule)
             mod->InInitializationOrderLinks.Flink->Blink = mod->InInitializationOrderLinks.Blink;
 
             g_moduleHidden = TRUE;
+            if (pfnUnlock && loaderCookie) pfnUnlock(0, loaderCookie);
             return;
         }
     }
+
+    if (pfnUnlock && loaderCookie) pfnUnlock(0, loaderCookie);
 }
 
 static void UnhideModuleInPeb(void)
 {
+    ULONG_PTR loaderCookie = 0;
+    PFN_LdrLockLoaderLock pfnLock = NULL;
+    PFN_LdrUnlockLoaderLock pfnUnlock = NULL;
+    HMODULE hNtdll;
+
     if (!g_moduleHidden || !g_hiddenEntry) return;
+
+    /* M1: Acquire loader lock for safe re-linking */
+    hNtdll = GetModuleHandleW(L"ntdll.dll");
+    if (hNtdll) {
+        pfnLock = (PFN_LdrLockLoaderLock)GetProcAddress(hNtdll, "LdrLockLoaderLock");
+        pfnUnlock = (PFN_LdrUnlockLoaderLock)GetProcAddress(hNtdll, "LdrUnlockLoaderLock");
+    }
+    if (pfnLock) pfnLock(0, NULL, &loaderCookie);
 
     /* Re-link into all three lists */
     g_hiddenEntry->InLoadOrderLinks.Flink = g_savedLoadOrderFlink;
@@ -815,6 +937,8 @@ static void UnhideModuleInPeb(void)
 
     g_moduleHidden = FALSE;
     g_hiddenEntry = NULL;
+
+    if (pfnUnlock && loaderCookie) pfnUnlock(0, loaderCookie);
 }
 
 /* ── Stealth: Master enable/disable ── */
@@ -934,9 +1058,17 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     }
     else if (reason == DLL_PROCESS_DETACH) {
         DWORD i;
-        g_running = FALSE;
 
-        /* Disable stealth first — must re-link module before FreeLibrary */
+        /* M3 fix: Stop command thread FIRST to prevent race with DisableStealth.
+         * Set g_running = FALSE and wait for it to exit before cleanup. */
+        g_running = FALSE;
+        if (g_cmdThread) {
+            WaitForSingleObject(g_cmdThread, 2000);
+            CloseHandle(g_cmdThread);
+            g_cmdThread = NULL;
+        }
+
+        /* Now safe to disable stealth — command thread is stopped */
         if (g_stealthActive) DisableStealth();
 
         if (g_vehHandle) {
@@ -950,11 +1082,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 
         if (g_shm)
             InterlockedExchange(&g_shm->agentStatus, STATUS_SHUTDOWN);
-
-        if (g_cmdThread) {
-            WaitForSingleObject(g_cmdThread, 1000);
-            CloseHandle(g_cmdThread);
-        }
 
         if (g_shm) { UnmapViewOfFile(g_shm); g_shm = NULL; }
         if (g_shmHandle) { CloseHandle(g_shmHandle); g_shmHandle = NULL; }

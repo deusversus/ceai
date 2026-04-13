@@ -226,7 +226,11 @@ public partial class App : System.Windows.Application
             new MoonSharpLuaEngine(
                 sp.GetRequiredService<IEngineFacade>(),
                 sp.GetService<IAutoAssemblerEngine>(),
-                formHost: sp.GetService<ILuaFormHost>()));
+                formHost: sp.GetService<ILuaFormHost>(),
+                disassemblyEngine: sp.GetService<IDisassemblyEngine>(),
+                breakpointEngine: sp.GetService<IBreakpointEngine>(),
+                scanEngine: sp.GetService<IScanEngine>(),
+                memoryProtectionEngine: sp.GetService<IMemoryProtectionEngine>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();

@@ -16,6 +16,10 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IEngineFacade? _engineFacade;
     private readonly IAutoAssemblerEngine? _autoAssembler;
     private readonly ILuaFormHost? _formHost;
+    private readonly IDisassemblyEngine? _disassemblyEngine;
+    private readonly IBreakpointEngine? _breakpointEngine;
+    private readonly IScanEngine? _scanEngine;
+    private readonly IMemoryProtectionEngine? _memoryProtectionEngine;
     private Script _script;
     private int? _currentProcessId;
 
@@ -46,11 +50,19 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         IAutoAssemblerEngine? autoAssembler = null,
         ILuaFormHost? formHost = null,
         TimeSpan? executionTimeout = null,
-        long maxInstructions = 0)
+        long maxInstructions = 0,
+        IDisassemblyEngine? disassemblyEngine = null,
+        IBreakpointEngine? breakpointEngine = null,
+        IScanEngine? scanEngine = null,
+        IMemoryProtectionEngine? memoryProtectionEngine = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
         _formHost = formHost;
+        _disassemblyEngine = disassemblyEngine;
+        _breakpointEngine = breakpointEngine;
+        _scanEngine = scanEngine;
+        _memoryProtectionEngine = memoryProtectionEngine;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -225,8 +237,26 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         var script = new Script(SandboxModules);
         RegisterPrint(script);
 
+        // Always register data conversion utilities (no engine dependency)
+        LuaDataConversionBindings.Register(script);
+
         if (_engineFacade is not null)
+        {
             CeApiBindings.Register(script, this, _engineFacade, _autoAssembler, _formHost);
+            LuaModuleBindings.Register(script, this, _engineFacade, _scanEngine, _autoAssembler);
+
+            if (_disassemblyEngine is not null)
+                LuaDisassemblyBindings.Register(script, this, _disassemblyEngine, _engineFacade, _autoAssembler);
+
+            if (_breakpointEngine is not null)
+                LuaDebuggerBindings.Register(script, this, _breakpointEngine, _engineFacade, _autoAssembler);
+
+            if (_scanEngine is not null)
+                LuaScanBindings.Register(script, this, _scanEngine, _engineFacade, _autoAssembler);
+
+            if (_memoryProtectionEngine is not null)
+                LuaMemoryManagementBindings.Register(script, this, _memoryProtectionEngine, _engineFacade, _autoAssembler);
+        }
 
         if (_formHost is not null)
         {

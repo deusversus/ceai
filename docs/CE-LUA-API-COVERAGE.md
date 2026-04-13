@@ -1,6 +1,6 @@
 # CE Lua API Coverage -- CE AI Suite
 
-**Date:** 2026-04-08
+**Date:** 2026-04-13
 **Purpose:** Definitive reference for Cheat Engine Lua API compatibility in CE AI Suite
 
 CE AI Suite implements a subset of Cheat Engine's Lua API for script compatibility. Scripts are executed via MoonSharp (Lua 5.2) in a sandboxed environment. This document lists every supported function, known differences from CE behavior, and notable missing functions.
@@ -95,6 +95,90 @@ These are only registered when an `ILuaFormHost` is provided (GUI mode).
 
 **Form element common methods:** All form elements support `setCaption(str)`, `setPosition(x, y)`, `setSize(w, h)`, and callback assignment via `element.onClick = function() ... end` or `element.onTimer = function() ... end`.
 
+### Data Conversion Functions (LuaDataConversionBindings)
+
+| Function | Parameters | Return Type | CE Compatibility Notes | Tested |
+|---|---|---|---|---|
+| `wordToByteTable` | `value: number` | `table` | Identical to CE. Converts 16-bit value to 2-byte table (little-endian). | Yes |
+| `dwordToByteTable` | `value: number` | `table` | Identical to CE. Converts 32-bit value to 4-byte table. | Yes |
+| `qwordToByteTable` | `value: number` | `table` | Identical to CE. Converts 64-bit value to 8-byte table. | Yes |
+| `floatToByteTable` | `value: number` | `table` | Identical to CE. Converts float to 4-byte table. | Yes |
+| `doubleToByteTable` | `value: number` | `table` | Identical to CE. Converts double to 8-byte table. | Yes |
+| `stringToByteTable` | `str: string` | `table` | Identical to CE. ASCII string to byte table. | Yes |
+| `wideStringToByteTable` | `str: string` | `table` | Identical to CE. UTF-16 string to byte table. | No |
+| `byteTableToWord` | `table` | `number` | Identical to CE. 2-byte table to 16-bit value. | Yes |
+| `byteTableToDword` | `table` | `number` | Identical to CE. 4-byte table to 32-bit value. | Yes |
+| `byteTableToQword` | `table` | `number` | Identical to CE. 8-byte table to 64-bit value. | Yes |
+| `byteTableToFloat` | `table` | `number` | Identical to CE. 4-byte table to float. | Yes |
+| `byteTableToDouble` | `table` | `number` | Identical to CE. 8-byte table to double. | Yes |
+| `byteTableToString` | `table` | `string` | Identical to CE. Byte table to ASCII string. | Yes |
+| `byteTableToWideString` | `table` | `string` | Identical to CE. Byte table to UTF-16 string. | No |
+| `bOr` | `a, b: number` | `number` | Bitwise OR. CE legacy function; delegates to integer operations. | Yes |
+| `bXor` | `a, b: number` | `number` | Bitwise XOR. | Yes |
+| `bAnd` | `a, b: number` | `number` | Bitwise AND. | Yes |
+| `bShl` | `a, b: number` | `number` | Bitwise shift left. | Yes |
+| `bShr` | `a, b: number` | `number` | Bitwise shift right. | Yes |
+| `bNot` | `a: number` | `number` | Bitwise NOT. | Yes |
+
+### Disassembly Functions (LuaDisassemblyBindings)
+
+Registered when an `IDisassemblyEngine` is provided.
+
+| Function | Parameters | Return Type | CE Compatibility Notes | Tested |
+|---|---|---|---|---|
+| `disassemble` | `address: string` | `table` | Returns `{address, bytes, opcode, extra, size}`. CE returns a string; we return a structured table. | Yes |
+| `getInstructionSize` | `address: string` | `number` | Returns byte length of instruction at address. Identical to CE. | Yes |
+| `getPreviousOpcode` | `address: string` | `string\|nil` | Scans backward to find previous instruction start. Returns address as hex string. | No |
+| `splitDisassembledString` | `str: string` | `table` | Parses "address - bytes - opcode extra" into `{address, bytes, opcode, extra}`. | Yes |
+| `assemble` | `instruction: string, address?: string` | `boolean` | Validates assembly instruction via AA engine. | No |
+
+### Memory Management Functions (LuaMemoryManagementBindings)
+
+Registered when an `IMemoryProtectionEngine` is provided.
+
+| Function | Parameters | Return Type | CE Compatibility Notes | Tested |
+|---|---|---|---|---|
+| `allocateMemory` | `size: number` | `number` | VirtualAllocEx in target process. Returns base address. Identical to CE. | Yes |
+| `deAllocateMemory` | `address: number\|string` | `boolean` | VirtualFreeEx. Returns true on success. Identical to CE. | Yes |
+| `setMemoryProtection` | `address, size, protection: number` | `boolean` | VirtualProtectEx. Protection uses Win32 PAGE_* constants. | No |
+| `virtualQueryEx` | `address: number\|string` | `table` | Returns `{baseAddress, regionSize, isReadable, isWritable, isExecutable}`. | Yes |
+| `getRegionInfo` | `address: number\|string` | `table` | Alias for `virtualQueryEx`. | No |
+| `copyMemory` | `dest, source, size` | `void` | Reads from source and writes to dest within target process. | Yes |
+
+### Memory Scanning Functions (LuaScanBindings)
+
+Registered when an `IScanEngine` is provided.
+
+| Function | Parameters | Return Type | CE Compatibility Notes | Tested |
+|---|---|---|---|---|
+| `AOBScan` | `pattern: string` | `table\|nil` | Scans all readable memory for byte pattern. Returns table of address strings or nil. CE's `AOBScan` has additional optional parameters. | Yes |
+| `AOBScanModule` | `module: string, pattern: string` | `table\|nil` | Scans within specific module. Returns addresses or nil. | No |
+| `createMemScan` | _(none)_ | `table (MemScan)` | Returns a MemScan object. Methods: `firstScan(self, scanType, dataType, value)`, `nextScan(self, ...)`, `getResultCount(self)`, `getResults(self, maxCount?)`, `destroy(self)`. | Yes |
+
+### Debugger Functions (LuaDebuggerBindings)
+
+Registered when an `IBreakpointEngine` is provided.
+
+| Function | Parameters | Return Type | CE Compatibility Notes | Tested |
+|---|---|---|---|---|
+| `debug_setBreakpoint` | `address, [size], [type], [callback]` | `string` | Sets a breakpoint and returns its ID. Type: 0=HWExecute, 1=HWWrite, 2=HWReadWrite, 3=Software. Optional Lua callback function. | Yes |
+| `debug_removeBreakpoint` | `addressOrId: string\|number` | `boolean` | Removes by ID or by address. Returns true on success. | Yes |
+| `debug_getBreakpointList` | _(none)_ | `table` | Returns table of `{id, address, type, enabled, hitCount, mode}`. | Yes |
+| `debug_isDebugging` | _(none)_ | `boolean` | True if any breakpoint is enabled. | Yes |
+| `debug_getBreakpointHitLog` | `breakpointId: string, [maxEntries]` | `table` | Returns hit events with address, threadId, and register snapshot. | No |
+
+### Module & Symbol Extended Functions (LuaModuleBindings)
+
+| Function | Parameters | Return Type | CE Compatibility Notes | Tested |
+|---|---|---|---|---|
+| `enumModules` | _(none)_ | `table` | Returns `{name, base, size}` for all loaded modules. Requires `IScanEngine`. | Yes |
+| `getModuleSize` | `moduleName: string` | `number\|nil` | Returns module image size or nil. Identical to CE. | Yes |
+| `getNameFromAddress` | `address: number\|string` | `string` | Reverse lookup: returns "module+0xOffset" or "0xAddress". Identical to CE. | Yes |
+| `readPointer` | `address: string` | `number\|nil` | Reads an 8-byte pointer value. Identical to CE. | Yes |
+| `writePointer` | `address: string, value: number` | `void` | Writes an 8-byte pointer value. Identical to CE. | No |
+| `writeString` | `address: string, text: string, [wide]` | `void` | Writes null-terminated string. If `wide` is true, writes UTF-16. | Yes |
+| `enumMemoryRegions` | _(none)_ | `table` | Returns all memory regions with protection flags. Requires `IScanEngine`. | No |
+
 ---
 
 ## Missing Functions
@@ -103,13 +187,12 @@ The following are major Cheat Engine Lua API functions that are **not implemente
 
 ### Memory Scan / Foundlist
 
+> **Partially covered:** `AOBScan`, `AOBScanModule`, and `createMemScan` are now implemented (see Scanning Functions above).
+
 | Function | Description |
 |---|---|
-| `AOBScan` | Array of Bytes scan -- scan entire process memory for a byte pattern |
-| `AOBScanModule` | AOB scan within a specific module |
-| `createMemScan` | Creates a MemScan object for advanced scanning |
 | `getCurrentScanItems` | Returns foundlist results from the current scan |
-| `getScanResults` | Gets scan result addresses |
+| `getScanResults` | Gets scan result addresses (use `createMemScan():getResults()` instead) |
 
 ### Memory Record / Address List
 
@@ -125,24 +208,16 @@ The following are major Cheat Engine Lua API functions that are **not implemente
 
 ### Debugger
 
+> **Mostly covered:** `debug_setBreakpoint`, `debug_removeBreakpoint`, `debug_getBreakpointList`, and `debug_isDebugging` are now implemented (see Debugger Functions above).
+
 | Function | Description |
 |---|---|
-| `debug_setBreakpoint` | Set a hardware/software breakpoint |
-| `debug_removeBreakpoint` | Remove a breakpoint |
-| `debug_continueFromBreakpoint` | Continue execution after a breakpoint hit |
-| `debug_getBreakpointList` | List all active breakpoints |
+| `debug_continueFromBreakpoint` | Continue execution after a breakpoint hit (stepping not yet implemented) |
 | `debug_setLastChanceExceptionHandler` | Set an exception handler callback |
-
-> **Note:** CE AI Suite has a separate `BreakpointService` with Lua callback support (`RegisterBreakpointCallback`, `InvokeBreakpointCallbackAsync`), but these are not exposed as standard CE Lua functions.
 
 ### Disassembler
 
-| Function | Description |
-|---|---|
-| `disassemble` | Disassemble an instruction at an address |
-| `getInstructionSize` | Get the byte size of an instruction |
-| `getPreviousOpcode` | Get the address of the previous instruction |
-| `splitDisassembledString` | Parse a disassembly string into components |
+> **Covered:** `disassemble`, `getInstructionSize`, `getPreviousOpcode`, `splitDisassembledString`, and `assemble` are now implemented (see Disassembly Functions above).
 
 ### Structure / Class
 
@@ -171,13 +246,7 @@ The following are major Cheat Engine Lua API functions that are **not implemente
 
 ### Memory Allocation / Protection
 
-| Function | Description |
-|---|---|
-| `allocateMemory` | Allocate memory in the target process (VirtualAllocEx) |
-| `deAllocateMemory` | Free allocated memory in the target process |
-| `setMemoryProtection` | Change memory protection flags (VirtualProtectEx) |
-| `virtualQueryEx` | Query memory region information |
-| `getRegionInfo` | Get memory region info for an address |
+> **Covered:** `allocateMemory`, `deAllocateMemory`, `setMemoryProtection`, `virtualQueryEx`, and `getRegionInfo` are now implemented (see Memory Management Functions above).
 
 ### Advanced GUI / Graphics
 
@@ -207,11 +276,11 @@ The following are major Cheat Engine Lua API functions that are **not implemente
 
 ### Module / Symbol (Extended)
 
+> **Mostly covered:** `enumModules`, `getNameFromAddress`, and `getModuleSize` are now implemented (see Module & Symbol Extended Functions above).
+
 | Function | Description |
 |---|---|
-| `enumModules` | Enumerate all loaded modules with details |
-| `getNameFromAddress` | Get the symbol name for an address |
-| `getAddressFromName` | Alias-style lookup (uses symbol/export tables) |
+| `getAddressFromName` | Alias-style lookup (use `getAddress()` instead) |
 | `getSymbolListFromFile` | Load symbols from a file |
 
 ### Miscellaneous
@@ -318,13 +387,13 @@ Scripts that use only the following patterns should work without modification:
 
 | CE Function | Workaround in CE AI Suite |
 |---|---|
-| `AOBScan` / `AOBScanModule` | Not available. Use the AI operator or engine-level scan APIs outside of Lua. |
+| `AOBScan` / `AOBScanModule` | Now available. Call `AOBScan(pattern)` or `AOBScanModule(module, pattern)` directly. |
 | `createForm` (complex GUI) | Basic form support is available (`createForm`, `createButton`, `createLabel`, `createEdit`, `createCheckBox`, `createTimer`). For complex UIs, use the CE AI Suite WPF interface instead. |
 | `createImage` / `canvas_*` | No graphical rendering. Use the application UI layer for visualizations. |
 | `d3dhook_*` | No D3D overlay support. Use the application's overlay features if available. |
-| `debug_setBreakpoint` | Use `BreakpointService` through the application layer. Lua callback registration is available via `RegisterBreakpointCallback`. |
-| `disassemble` | Not available. Use the engine-level disassembly APIs outside of Lua. |
-| `allocateMemory` / `deAllocateMemory` | Not available directly. Auto Assembler scripts can use `alloc()` directives. |
+| `debug_setBreakpoint` | Now available via `debug_setBreakpoint(address, [size], [type], [callback])`. |
+| `disassemble` | Now available via `disassemble(address)`. Returns a table with instruction details. |
+| `allocateMemory` / `deAllocateMemory` | Now available directly. Call `allocateMemory(size)` and `deAllocateMemory(address)`. |
 | `getAddressList` / memory records | No cheat table concept. Use the application's address management features. |
 | `os.clock` / `os.date` | Blocked by sandbox. Use `getTickCount()` for timing. |
 | `io.open` / file operations | Blocked by sandbox. File operations must be handled at the application layer. |
@@ -343,10 +412,16 @@ Scripts that use only the following patterns should work without modification:
 
 | Category | Count |
 |---|---|
-| **Total registered Lua globals** | 38 (37 unique + 1 alias) |
+| **Total registered Lua globals** | ~95 (up from 38 in v0.1) |
 | **CeApiBindings functions** | 31 (8 memory read, 7 memory write, 4 process, 4 address/symbol, 2 auto assembler, 6 utility) |
 | **CeFormBindings functions** | 6 (createForm, createButton, createLabel, createEdit, createCheckBox, createTimer) |
+| **LuaDataConversionBindings** | 20 (14 byte-table converters, 6 legacy bitwise ops) |
+| **LuaDisassemblyBindings** | 5 (disassemble, getInstructionSize, getPreviousOpcode, splitDisassembledString, assemble) |
+| **LuaMemoryManagementBindings** | 6 (allocateMemory, deAllocateMemory, setMemoryProtection, virtualQueryEx, getRegionInfo, copyMemory) |
+| **LuaScanBindings** | 3 (AOBScan, AOBScanModule, createMemScan with 5 methods) |
+| **LuaDebuggerBindings** | 5 (debug_setBreakpoint, debug_removeBreakpoint, debug_getBreakpointList, debug_isDebugging, debug_getBreakpointHitLog) |
+| **LuaModuleBindings** | 7 (enumModules, getModuleSize, getNameFromAddress, readPointer, writePointer, writeString, enumMemoryRegions) |
 | **Engine-level** | 1 (print) |
-| **Functions with test coverage** | 24 (including `print` and `getProcessId` alias) |
-| **Functions without test coverage** | 14 (`readQword`, `readDouble`, `readString`, `writeSmallInteger`, `writeQword`, `writeDouble`, `writeBytes`, `inputQuery`, `openProcess`, all 6 form functions -- though `openProcess` is indirectly tested via `getProcessList`) |
-| **Major missing CE function categories** | 12+ (scanning, memory records, debugger, disassembler, structures, cheat tables, threads, memory allocation, advanced GUI, D3D, module enumeration, misc) |
+| **Functions with test coverage** | ~54 |
+| **Functions without test coverage** | ~41 (form functions, some read/write variants, some new functions) |
+| **Major missing CE function categories** | 6 (memory records, structures, cheat tables, advanced GUI, D3D, mono/.NET introspection) |

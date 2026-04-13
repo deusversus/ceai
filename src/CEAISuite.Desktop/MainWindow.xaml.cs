@@ -52,7 +52,7 @@ public partial class MainWindow : Window, IDisposable
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 21; // v21 = add Speed Hack bottom panel
+    private const int LayoutVersion = 22; // v22 = add VEH Debugger bottom panel
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
@@ -93,6 +93,7 @@ public partial class MainWindow : Window, IDisposable
         WorkspaceViewModel workspaceVm,
         PluginManagerViewModel pluginManagerVm,
         SpeedHackViewModel speedHackVm,
+        VehDebugViewModel vehDebugVm,
         MemoryBrowserViewModel memoryBrowserVm,
         IAiContextService aiContextService,
         IUiCommandBus uiCommandBus,
@@ -222,6 +223,7 @@ public partial class MainWindow : Window, IDisposable
         WorkspaceContent.DataContext = workspaceVm;
         PluginsContent.DataContext = pluginManagerVm;
         SpeedHackContent.DataContext = speedHackVm;
+        VehDebugContent.DataContext = vehDebugVm;
 
         // Wire Phase 5 Memory Browser ViewModel
         MemoryBrowserTab.SetViewModel(memoryBrowserVm);

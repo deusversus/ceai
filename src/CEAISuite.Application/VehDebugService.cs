@@ -71,6 +71,12 @@ public sealed class VehDebugService
         return await _engine.DisableStealthAsync(processId, ct).ConfigureAwait(false);
     }
 
+    public IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(int processId, CancellationToken ct = default)
+    {
+        if (_engine is null) return AsyncEnumerable.Empty<VehHitEvent>();
+        return _engine.GetHitStreamAsync(processId, ct);
+    }
+
     public VehStatus GetStatus(int processId)
     {
         if (_engine is null) return new VehStatus(false, 0, 0);

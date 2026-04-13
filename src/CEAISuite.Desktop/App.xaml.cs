@@ -399,6 +399,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<BreakpointsViewModel>();
         services.AddSingleton<ScriptsViewModel>();
         services.AddSingleton<SpeedHackViewModel>();
+        services.AddSingleton<VehDebugViewModel>();
 
         // ── Phase 2.5 panel ViewModels ──
         services.AddSingleton<ScannerViewModel>();

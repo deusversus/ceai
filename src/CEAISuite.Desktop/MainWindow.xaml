@@ -118,6 +118,9 @@
                                 <MenuItem Header="_Find Results" Click="ShowPanel" Tag="findResults" />
                                 <MenuItem Header="_Hotkeys" Click="ShowPanel" Tag="hotkeys" />
                                 <MenuItem Header="_Journal" Click="ShowPanel" Tag="journal" />
+                                <Separator />
+                                <MenuItem Header="Speed _Hack" Click="ShowPanel" Tag="speedHack" />
+                                <MenuItem Header="_VEH Debugger" Click="ShowPanel" Tag="vehDebugger" />
                             </MenuItem>
                             <MenuItem Header="S_kills">
                                 <MenuItem Header="_Manage Skills…" Click="OpenSkillsManager" />
@@ -1902,6 +1905,94 @@
                                     <TextBlock Grid.Row="4" Text="{Binding StatusText}"
                                                Foreground="{DynamicResource SecondaryForeground}" FontSize="11"
                                                VerticalAlignment="Top" />
+                                </Grid>
+                            </avalonDock:LayoutAnchorable>
+
+                            <!-- ═══ VEH Debugger ═══ -->
+                            <avalonDock:LayoutAnchorable Title="VEH Debugger" ContentId="vehDebugger">
+                                <Grid x:Name="VehDebugContent" Background="{DynamicResource SidebarBackground}" Margin="8">
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Row 0: Agent controls + status -->
+                                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,6">
+                                        <Button Content="Inject" Command="{Binding InjectAgentCommand}" Padding="8,3" Margin="0,0,4,0"
+                                                ToolTip="Inject VEH agent into target process (bypasses anti-debug)" />
+                                        <Button Content="Eject" Command="{Binding EjectAgentCommand}" Padding="8,3" Margin="0,0,4,0"
+                                                ToolTip="Eject VEH agent and remove all breakpoints" />
+                                        <Button Content="Stealth" Command="{Binding ToggleStealthCommand}" Padding="8,3" Margin="0,0,8,0"
+                                                ToolTip="Toggle stealth: cloak DR registers, hide agent DLL" />
+                                        <TextBlock Text="{Binding AgentStatus}" VerticalAlignment="Center"
+                                                   Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                    </StackPanel>
+
+                                    <!-- Row 1: New breakpoint -->
+                                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,6">
+                                        <TextBox Text="{Binding NewBpAddress, UpdateSourceTrigger=PropertyChanged}"
+                                                 Width="120" Padding="4,2" Margin="0,0,4,0"
+                                                 ToolTip="Address (hex, e.g. 0x400000)" />
+                                        <ComboBox ItemsSource="{Binding AvailableBpTypes}" SelectedItem="{Binding SelectedBpType}"
+                                                  Width="90" Margin="0,0,4,0" />
+                                        <ComboBox ItemsSource="{Binding AvailableDataSizes}" SelectedItem="{Binding SelectedDataSize}"
+                                                  Width="50" Margin="0,0,4,0" ToolTip="Data watch size (bytes)" />
+                                        <Button Content="Set BP" Command="{Binding SetBreakpointCommand}" Padding="8,3" Margin="0,0,4,0" />
+                                        <Button Content="Remove" Command="{Binding RemoveBreakpointCommand}" Padding="8,3" />
+                                    </StackPanel>
+
+                                    <!-- Row 2: Breakpoint list -->
+                                    <DataGrid Grid.Row="2" ItemsSource="{Binding Breakpoints}" SelectedItem="{Binding SelectedBreakpoint}"
+                                              AutoGenerateColumns="False" IsReadOnly="True" HeadersVisibility="Column"
+                                              MaxHeight="120" Margin="0,0,0,6" GridLinesVisibility="None"
+                                              Background="{DynamicResource SidebarBackground}"
+                                              RowBackground="{DynamicResource SidebarBackground}"
+                                              BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}">
+                                        <DataGrid.Columns>
+                                            <DataGridTextColumn Header="DR" Binding="{Binding DrSlot}" Width="30" />
+                                            <DataGridTextColumn Header="Address" Binding="{Binding Address}" Width="120" />
+                                            <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="70" />
+                                            <DataGridTextColumn Header="Size" Binding="{Binding DataSize}" Width="40" />
+                                            <DataGridTextColumn Header="Hits" Binding="{Binding HitCount}" Width="50" />
+                                        </DataGrid.Columns>
+                                    </DataGrid>
+
+                                    <!-- Row 3: Hit stream controls -->
+                                    <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,0,0,4">
+                                        <Button Content="Start Stream" Command="{Binding StartHitStreamCommand}" Padding="8,3" Margin="0,0,4,0" />
+                                        <Button Content="Stop" Command="{Binding StopHitStreamCommand}" Padding="8,3" Margin="0,0,4,0" />
+                                        <Button Content="Clear" Command="{Binding ClearHitStreamCommand}" Padding="8,3" Margin="0,0,8,0" />
+                                        <TextBlock VerticalAlignment="Center" FontSize="11"
+                                                   Foreground="{DynamicResource SecondaryForeground}">
+                                            <Run Text="{Binding HitStream.Count, Mode=OneWay}" />
+                                            <Run Text=" hits" />
+                                            <Run Text=" | " />
+                                            <Run Text="{Binding OverflowCount, Mode=OneWay}" />
+                                            <Run Text=" overflows" />
+                                        </TextBlock>
+                                    </StackPanel>
+
+                                    <!-- Row 4: Hit stream list -->
+                                    <ListView Grid.Row="4" ItemsSource="{Binding HitStream}"
+                                              VirtualizingPanel.IsVirtualizing="True"
+                                              VirtualizingPanel.VirtualizationMode="Recycling"
+                                              Background="{DynamicResource SidebarBackground}"
+                                              BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"
+                                              FontFamily="Consolas" FontSize="11">
+                                        <ListView.View>
+                                            <GridView>
+                                                <GridViewColumn Header="Address" DisplayMemberBinding="{Binding Address}" Width="100" />
+                                                <GridViewColumn Header="TID" DisplayMemberBinding="{Binding ThreadId}" Width="50" />
+                                                <GridViewColumn Header="Type" DisplayMemberBinding="{Binding Type}" Width="60" />
+                                                <GridViewColumn Header="RAX" DisplayMemberBinding="{Binding Rax}" Width="100" />
+                                                <GridViewColumn Header="RCX" DisplayMemberBinding="{Binding Rcx}" Width="100" />
+                                                <GridViewColumn Header="RDX" DisplayMemberBinding="{Binding Rdx}" Width="100" />
+                                            </GridView>
+                                        </ListView.View>
+                                    </ListView>
                                 </Grid>
                             </avalonDock:LayoutAnchorable>
                         </avalonDock:LayoutAnchorablePane>

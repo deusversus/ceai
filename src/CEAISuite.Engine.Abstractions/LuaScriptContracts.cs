@@ -58,3 +58,19 @@ public interface ILuaScriptEngine
         BreakpointHitEvent hitEvent,
         CancellationToken ct = default);
 }
+
+/// <summary>
+/// Interface for AI-assisted scripting functions. Implemented by the application layer
+/// to allow Lua scripts to invoke AI analysis without direct coupling.
+/// </summary>
+public interface ILuaAiAssistant
+{
+    /// <summary>Ask the AI for a code suggestion given a context description.</summary>
+    Task<string> SuggestAsync(string context, CancellationToken ct = default);
+
+    /// <summary>Ask the AI to explain what a function at an address does.</summary>
+    Task<string> ExplainAsync(nuint address, int processId, CancellationToken ct = default);
+
+    /// <summary>Ask the AI to generate an AOB pattern from a natural language description.</summary>
+    Task<string> FindPatternAsync(string description, int processId, CancellationToken ct = default);
+}

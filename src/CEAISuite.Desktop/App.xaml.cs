@@ -241,7 +241,8 @@ public partial class App : System.Windows.Application
                 disassemblyEngine: sp.GetService<IDisassemblyEngine>(),
                 breakpointEngine: sp.GetService<IBreakpointEngine>(),
                 scanEngine: sp.GetService<IScanEngine>(),
-                memoryProtectionEngine: sp.GetService<IMemoryProtectionEngine>()));
+                memoryProtectionEngine: sp.GetService<IMemoryProtectionEngine>(),
+                aiAssistant: sp.GetService<ILuaAiAssistant>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
@@ -283,6 +284,15 @@ public partial class App : System.Windows.Application
         services.AddSingleton<SpeedHackService>();
         services.AddSingleton<VehDebugService>();
         services.AddSingleton<AutorunScriptService>();
+        services.AddSingleton<ILuaAiAssistant>(sp =>
+            new LuaAiAssistantService(
+                () => {
+                    var settings = sp.GetRequiredService<AppSettingsService>();
+                    return ChatClientFactory.CreateAsync(settings.Settings).GetAwaiter().GetResult();
+                },
+                sp.GetRequiredService<ILogger<LuaAiAssistantService>>(),
+                sp.GetService<IDisassemblyEngine>(),
+                sp.GetService<IEngineFacade>()));
 
 
         // ── Settings (needs .Load() called) ──

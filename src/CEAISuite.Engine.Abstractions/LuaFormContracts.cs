@@ -128,6 +128,13 @@ public interface ILuaFormHost
     void ShowMessageDialog(string text, string title);
     string? ShowInputDialog(string title, string prompt, string defaultValue);
 
+    // Canvas drawing
+    void DrawLine(string formId, int x1, int y1, int x2, int y2, string color, int width);
+    void DrawRect(string formId, int x1, int y1, int x2, int y2, string color, bool fill);
+    void DrawEllipse(string formId, int x1, int y1, int x2, int y2, string color, bool fill);
+    void DrawText(string formId, int x, int y, string text, string color, string? fontName, int? fontSize);
+    void ClearCanvas(string formId);
+
     // Events
     event Action<string, string>? ElementClicked;  // formId, elementId
     event Action<string, string>? TimerFired;       // formId, timerId

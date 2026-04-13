@@ -54,6 +54,55 @@ internal sealed class CeFormBindings : IDisposable
                     _forms[formId] = f with { Width = w, Height = h };
             });
 
+            // Canvas drawing API: form:getCanvas() returns a drawing context table
+            formTable["getCanvas"] = (Func<DynValue>)(() =>
+            {
+                var canvas = new Table(script);
+
+                // Drawing state
+                var penColor = "#000000";
+                var penWidth = 1;
+                var brushColor = "#000000";
+                var fontName = "Segoe UI";
+                var fontSize = 12;
+
+                canvas["setPen"] = (Action<string, DynValue>)((color, widthArg) =>
+                {
+                    penColor = color;
+                    if (!widthArg.IsNil()) penWidth = (int)widthArg.Number;
+                });
+
+                canvas["setBrush"] = (Action<string>)(color => brushColor = color);
+
+                canvas["setFont"] = (Action<string, DynValue>)((name, sizeArg) =>
+                {
+                    fontName = name;
+                    if (!sizeArg.IsNil()) fontSize = (int)sizeArg.Number;
+                });
+
+                canvas["drawLine"] = (Action<int, int, int, int>)((x1, y1, x2, y2) =>
+                    formHost.DrawLine(formId, x1, y1, x2, y2, penColor, penWidth));
+
+                canvas["drawRect"] = (Action<int, int, int, int>)((x1, y1, x2, y2) =>
+                    formHost.DrawRect(formId, x1, y1, x2, y2, penColor, false));
+
+                canvas["fillRect"] = (Action<int, int, int, int>)((x1, y1, x2, y2) =>
+                    formHost.DrawRect(formId, x1, y1, x2, y2, brushColor, true));
+
+                canvas["drawEllipse"] = (Action<int, int, int, int>)((x1, y1, x2, y2) =>
+                    formHost.DrawEllipse(formId, x1, y1, x2, y2, penColor, false));
+
+                canvas["fillEllipse"] = (Action<int, int, int, int>)((x1, y1, x2, y2) =>
+                    formHost.DrawEllipse(formId, x1, y1, x2, y2, brushColor, true));
+
+                canvas["drawText"] = (Action<int, int, string>)((x, y, text) =>
+                    formHost.DrawText(formId, x, y, text, penColor, fontName, fontSize));
+
+                canvas["clear"] = (Action)(() => formHost.ClearCanvas(formId));
+
+                return DynValue.NewTable(canvas);
+            });
+
             var visible = visibleArg.IsNil() || visibleArg.Boolean;
             if (visible) formHost.ShowForm(form);
 

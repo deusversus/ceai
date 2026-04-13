@@ -16,6 +16,7 @@ public sealed class LuaFormHostService : ILuaFormHost
 {
     private readonly Dictionary<string, Window> _windows = new();
     private readonly Dictionary<string, DispatcherTimer> _timers = new();
+    private readonly Dictionary<string, Canvas> _canvases = new();
     private readonly Dispatcher _dispatcher;
 
     public event Action<string, string>? ElementClicked;
@@ -301,11 +302,105 @@ public sealed class LuaFormHostService : ILuaFormHost
         });
     }
 
+    // ── Canvas Drawing ──
+
+    public void DrawLine(string formId, int x1, int y1, int x2, int y2, string color, int width)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_canvases.TryGetValue(formId, out var canvas)) return;
+            var line = new System.Windows.Shapes.Line
+            {
+                X1 = x1, Y1 = y1, X2 = x2, Y2 = y2,
+                Stroke = ParseBrush(color),
+                StrokeThickness = width
+            };
+            canvas.Children.Add(line);
+        });
+    }
+
+    public void DrawRect(string formId, int x1, int y1, int x2, int y2, string color, bool fill)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_canvases.TryGetValue(formId, out var canvas)) return;
+            var rect = new System.Windows.Shapes.Rectangle
+            {
+                Width = Math.Abs(x2 - x1),
+                Height = Math.Abs(y2 - y1)
+            };
+            var brush = ParseBrush(color);
+            if (fill) rect.Fill = brush;
+            else { rect.Stroke = brush; rect.StrokeThickness = 1; }
+            Canvas.SetLeft(rect, Math.Min(x1, x2));
+            Canvas.SetTop(rect, Math.Min(y1, y2));
+            canvas.Children.Add(rect);
+        });
+    }
+
+    public void DrawEllipse(string formId, int x1, int y1, int x2, int y2, string color, bool fill)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_canvases.TryGetValue(formId, out var canvas)) return;
+            var ellipse = new System.Windows.Shapes.Ellipse
+            {
+                Width = Math.Abs(x2 - x1),
+                Height = Math.Abs(y2 - y1)
+            };
+            var brush = ParseBrush(color);
+            if (fill) ellipse.Fill = brush;
+            else { ellipse.Stroke = brush; ellipse.StrokeThickness = 1; }
+            Canvas.SetLeft(ellipse, Math.Min(x1, x2));
+            Canvas.SetTop(ellipse, Math.Min(y1, y2));
+            canvas.Children.Add(ellipse);
+        });
+    }
+
+    public void DrawText(string formId, int x, int y, string text, string color, string? fontName, int? fontSize)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_canvases.TryGetValue(formId, out var canvas)) return;
+            var tb = new TextBlock
+            {
+                Text = text,
+                Foreground = ParseBrush(color)
+            };
+            if (fontName is not null) tb.FontFamily = new FontFamily(fontName);
+            if (fontSize is not null) tb.FontSize = fontSize.Value;
+            Canvas.SetLeft(tb, x);
+            Canvas.SetTop(tb, y);
+            canvas.Children.Add(tb);
+        });
+    }
+
+    public void ClearCanvas(string formId)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_canvases.TryGetValue(formId, out var canvas)) return;
+            // Remove only drawing shapes (no Tag), keep form elements (they have Tags)
+            var toRemove = canvas.Children.OfType<UIElement>()
+                .Where(e => (e is System.Windows.Shapes.Shape || e is TextBlock) && (e as FrameworkElement)?.Tag is null)
+                .ToList();
+            foreach (var item in toRemove)
+                canvas.Children.Remove(item);
+        });
+    }
+
+    private static Brush ParseBrush(string color)
+    {
+        try { return new BrushConverter().ConvertFromString(color) as Brush ?? Brushes.Black; }
+        catch { return Brushes.Black; }
+    }
+
     // ── Helpers ──
 
     private Canvas BuildCanvas(LuaFormDescriptor form)
     {
         var canvas = new Canvas();
+        _canvases[form.Id] = canvas;
 
         foreach (var element in form.Elements)
         {

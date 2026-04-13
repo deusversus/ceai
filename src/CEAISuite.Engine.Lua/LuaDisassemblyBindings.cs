@@ -99,6 +99,32 @@ internal static class LuaDisassemblyBindings
             return DynValue.NewTable(table);
         });
 
+        // generateCallBytes(fromAddress, toAddress) → string of hex bytes for a rel32 CALL
+        script.Globals["generateCallBytes"] = (Func<DynValue, DynValue, string>)((fromArg, toArg) =>
+        {
+            var pid = RequireProcess(engine);
+            var from = LuaBindingHelpers.ResolveAddressArg(fromArg, pid, engineFacade, autoAssembler);
+            var to = LuaBindingHelpers.ResolveAddressArg(toArg, pid, engineFacade, autoAssembler);
+
+            // E8 xx xx xx xx — relative CALL (5 bytes, offset calculated from end of instruction)
+            var offset = (long)(ulong)to - (long)(ulong)from - 5;
+            var offsetBytes = BitConverter.GetBytes((int)offset);
+            return $"E8 {offsetBytes[0]:X2} {offsetBytes[1]:X2} {offsetBytes[2]:X2} {offsetBytes[3]:X2}";
+        });
+
+        // generateJmpBytes(fromAddress, toAddress) → string of hex bytes for a rel32 JMP
+        script.Globals["generateJmpBytes"] = (Func<DynValue, DynValue, string>)((fromArg, toArg) =>
+        {
+            var pid = RequireProcess(engine);
+            var from = LuaBindingHelpers.ResolveAddressArg(fromArg, pid, engineFacade, autoAssembler);
+            var to = LuaBindingHelpers.ResolveAddressArg(toArg, pid, engineFacade, autoAssembler);
+
+            // E9 xx xx xx xx — relative JMP (5 bytes)
+            var offset = (long)(ulong)to - (long)(ulong)from - 5;
+            var offsetBytes = BitConverter.GetBytes((int)offset);
+            return $"E9 {offsetBytes[0]:X2} {offsetBytes[1]:X2} {offsetBytes[2]:X2} {offsetBytes[3]:X2}";
+        });
+
         // assemble(instruction, address) → table of bytes
         if (autoAssembler is not null)
         {

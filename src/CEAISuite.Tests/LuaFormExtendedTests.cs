@@ -188,6 +188,72 @@ public sealed class LuaFormExtendedTests : IDisposable
         Assert.True(result.Success, result.Error);
     }
 
+    // ── Canvas Drawing Tests ──
+
+    [Fact]
+    public async Task GetCanvas_ReturnsDrawingContext()
+    {
+        var result = await _engine.ExecuteAsync("""
+            local f = createForm(false)
+            local c = f.getCanvas()
+            return type(c) == "table"
+            """, processId: 1234);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal("true", result.ReturnValue);
+    }
+
+    [Fact]
+    public async Task Canvas_DrawLine_CallsHost()
+    {
+        var result = await _engine.ExecuteAsync("""
+            local f = createForm(false)
+            local c = f.getCanvas()
+            c.drawLine(10, 10, 100, 100)
+            return true
+            """, processId: 1234);
+
+        Assert.True(result.Success, result.Error);
+        Assert.True(_formHost.DrawCallCount > 0);
+    }
+
+    [Fact]
+    public async Task Canvas_DrawShapes_MultipleTypes()
+    {
+        var result = await _engine.ExecuteAsync("""
+            local f = createForm(false)
+            local c = f.getCanvas()
+            c.setPen("#FF0000", 2)
+            c.setBrush("#00FF00")
+            c.drawLine(0, 0, 100, 100)
+            c.drawRect(10, 10, 50, 50)
+            c.fillRect(60, 60, 90, 90)
+            c.drawEllipse(10, 10, 40, 40)
+            c.fillEllipse(50, 50, 80, 80)
+            c.setFont("Consolas", 14)
+            c.drawText(10, 120, "Hello Canvas")
+            return true
+            """, processId: 1234);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(6, _formHost.DrawCallCount);
+    }
+
+    [Fact]
+    public async Task Canvas_Clear_ResetsCount()
+    {
+        var result = await _engine.ExecuteAsync("""
+            local f = createForm(false)
+            local c = f.getCanvas()
+            c.drawLine(0, 0, 10, 10)
+            c.clear()
+            return true
+            """, processId: 1234);
+
+        Assert.True(result.Success, result.Error);
+        Assert.Equal(0, _formHost.DrawCallCount); // clear resets
+    }
+
     [Fact]
     public async Task SetColor_CanBeCalledOnAnyElement()
     {
@@ -236,6 +302,14 @@ public sealed class LuaFormExtendedTests : IDisposable
 
         public void ShowMessageDialog(string text, string title) { }
         public string? ShowInputDialog(string title, string prompt, string defaultValue) => defaultValue;
+
+        // Canvas drawing stubs
+        public int DrawCallCount { get; private set; }
+        public void DrawLine(string formId, int x1, int y1, int x2, int y2, string color, int width) => DrawCallCount++;
+        public void DrawRect(string formId, int x1, int y1, int x2, int y2, string color, bool fill) => DrawCallCount++;
+        public void DrawEllipse(string formId, int x1, int y1, int x2, int y2, string color, bool fill) => DrawCallCount++;
+        public void DrawText(string formId, int x, int y, string text, string color, string? fontName, int? fontSize) => DrawCallCount++;
+        public void ClearCanvas(string formId) => DrawCallCount = 0;
 
         // Suppress unused event warnings
         internal void FireClicked(string fId, string eId) => ElementClicked?.Invoke(fId, eId);

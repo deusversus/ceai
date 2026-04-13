@@ -39,13 +39,20 @@ public sealed class LuaAuditCoverageTests : IDisposable
     [Fact]
     public async Task CreateThread_ReturnsHandle()
     {
+        // Only check that the thread handle table is returned correctly.
+        // Don't wait for the thread — it contends for the engine gate
+        // and can time out under parallel test load.
         var result = await _engine.ExecuteAsync("""
             local t = createThread(function() end)
-            return type(t) == "table" and type(t._id) == "string"
+            local ok = type(t) == "table" and type(t._id) == "string"
+            return ok
             """, processId: 1234);
 
         Assert.True(result.Success, result.Error);
         Assert.Equal("true", result.ReturnValue);
+
+        // Give the background thread time to acquire the gate and complete
+        await Task.Delay(200);
     }
 
     [Fact]

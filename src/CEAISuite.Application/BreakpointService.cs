@@ -16,6 +16,12 @@ public sealed record BreakpointOverview(
     string? Condition = null,
     int? ThreadFilter = null);
 
+/// <summary>B3: A named group of breakpoints for atomic enable/disable operations.</summary>
+public sealed record BreakpointGroup(
+    string GroupId,
+    string Name,
+    IReadOnlyList<string> BreakpointIds);
+
 public sealed record BreakpointHitOverview(
     string BreakpointId,
     string Address,
@@ -242,6 +248,84 @@ public sealed class BreakpointService(
     {
         EnsureAvailable();
         await breakpointEngine!.ForceDetachAndCleanupAsync(processId).ConfigureAwait(false);
+    }
+
+    // ── B3: Breakpoint Groups ──
+
+    private readonly ConcurrentDictionary<string, BreakpointGroup> _groups = new();
+
+    /// <summary>Create a named group of breakpoints for atomic enable/disable.</summary>
+    public BreakpointGroup CreateGroup(string name, IEnumerable<string> breakpointIds)
+    {
+        var groupId = $"grp-{Guid.NewGuid().ToString("N")[..8]}";
+        var group = new BreakpointGroup(groupId, name, breakpointIds.ToList());
+        _groups[groupId] = group;
+        return group;
+    }
+
+    /// <summary>Enable all breakpoints in a group by re-setting them.</summary>
+    public async Task<int> EnableGroupAsync(int processId, string groupId, CancellationToken ct = default)
+    {
+        EnsureAvailable();
+        if (!_groups.TryGetValue(groupId, out var group)) return 0;
+
+        var enabled = 0;
+        var bps = await breakpointEngine!.ListBreakpointsAsync(processId, ct).ConfigureAwait(false);
+        foreach (var bpId in group.BreakpointIds)
+        {
+            var bp = bps.FirstOrDefault(b => b.Id == bpId);
+            if (bp is not null && !bp.IsEnabled)
+            {
+                // Re-set the breakpoint to re-enable it
+                await breakpointEngine.SetBreakpointAsync(processId, bp.Address, bp.Type, bp.Mode,
+                    bp.HitAction, false, ct).ConfigureAwait(false);
+                enabled++;
+            }
+        }
+        return enabled;
+    }
+
+    /// <summary>Disable all breakpoints in a group by removing them.</summary>
+    public async Task<int> DisableGroupAsync(int processId, string groupId, CancellationToken ct = default)
+    {
+        EnsureAvailable();
+        if (!_groups.TryGetValue(groupId, out var group)) return 0;
+
+        var disabled = 0;
+        foreach (var bpId in group.BreakpointIds)
+        {
+            if (await breakpointEngine!.RemoveBreakpointAsync(processId, bpId, ct).ConfigureAwait(false))
+                disabled++;
+        }
+        return disabled;
+    }
+
+    /// <summary>Remove a group definition (does not remove the breakpoints themselves).</summary>
+    public bool RemoveGroup(string groupId) => _groups.TryRemove(groupId, out _);
+
+    /// <summary>List all defined groups.</summary>
+    public IReadOnlyList<BreakpointGroup> ListGroups() => _groups.Values.ToList();
+
+    /// <summary>Get a specific group by ID.</summary>
+    public BreakpointGroup? GetGroup(string groupId) =>
+        _groups.TryGetValue(groupId, out var group) ? group : null;
+
+    // ── B2: Region Breakpoints ──
+
+    /// <summary>Set a breakpoint spanning a memory region. Auto-selects PAGE_GUARD for regions > 8 bytes.</summary>
+    public async Task<IReadOnlyList<BreakpointOverview>> SetRegionBreakpointAsync(
+        int processId,
+        string startAddressText,
+        int length,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        if (length <= 0) throw new ArgumentOutOfRangeException(nameof(length), "Length must be positive.");
+        if (length > 64 * 1024) throw new ArgumentOutOfRangeException(nameof(length), $"Region size {length} exceeds maximum of 65536 bytes.");
+        var address = ParseAddress(startAddressText);
+        var bps = await breakpointEngine!.SetRegionBreakpointAsync(processId, address, length, action, cancellationToken).ConfigureAwait(false);
+        return bps.Select(ToOverview).ToArray();
     }
 
     private void EnsureAvailable()

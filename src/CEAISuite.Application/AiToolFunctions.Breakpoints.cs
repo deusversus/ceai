@@ -575,4 +575,88 @@ public sealed partial class AiToolFunctions
         return $"Lua callback unregistered from breakpoint {breakpointId}.";
     }
 
+    // ── B2: Region Breakpoint ──
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Set a breakpoint spanning a memory region. Uses hardware BP for ≤8 bytes, PAGE_GUARD chaining for larger regions (max 64KB).")]
+    public async Task<string> SetRegionBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Start address (hex)")] string startAddress,
+        [Description("Region size in bytes")] int length)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        try
+        {
+            var bps = await breakpointService.SetRegionBreakpointAsync(processId, startAddress, length).ConfigureAwait(false);
+            if (bps.Count == 1)
+                return $"Region breakpoint set: {bps[0].Id} at {bps[0].Address} ({bps[0].Mode} mode).";
+            return $"Region breakpoint set across {bps.Count} pages (PAGE_GUARD mode). IDs: {string.Join(", ", bps.Select(b => b.Id))}";
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return $"Invalid region: {ex.Message}";
+        }
+    }
+
+    // ── B3: Breakpoint Group tools ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Create a named breakpoint group for atomic enable/disable. Returns the group ID.")]
+    public string CreateBreakpointGroup(
+        [Description("Group name")] string name,
+        [Description("Comma-separated breakpoint IDs to include")] string breakpointIds)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var ids = breakpointIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (ids.Length == 0) return "No breakpoint IDs provided.";
+        var group = breakpointService.CreateGroup(name, ids);
+        return $"Created group '{name}' (ID: {group.GroupId}) with {ids.Length} breakpoints.";
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Enable all breakpoints in a group atomically.")]
+    public async Task<string> EnableBreakpointGroup(
+        [Description("Process ID")] int processId,
+        [Description("Group ID")] string groupId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var count = await breakpointService.EnableGroupAsync(processId, groupId).ConfigureAwait(false);
+        return count > 0 ? $"Enabled {count} breakpoints in group {groupId}." : $"No breakpoints enabled (group not found or all already active).";
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Disable all breakpoints in a group atomically.")]
+    public async Task<string> DisableBreakpointGroup(
+        [Description("Process ID")] int processId,
+        [Description("Group ID")] string groupId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var count = await breakpointService.DisableGroupAsync(processId, groupId).ConfigureAwait(false);
+        return count > 0 ? $"Disabled {count} breakpoints in group {groupId}." : $"No breakpoints disabled (group not found or none active).";
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("List all defined breakpoint groups.")]
+    public string ListBreakpointGroups()
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var groups = breakpointService.ListGroups();
+        if (groups.Count == 0) return "No breakpoint groups defined.";
+        return string.Join("\n", groups.Select(g => $"[{g.GroupId}] {g.Name}: {string.Join(", ", g.BreakpointIds)}"));
+    }
+
+    [Description("Remove a breakpoint group definition (does not remove the breakpoints themselves).")]
+    public string RemoveBreakpointGroup([Description("Group ID")] string groupId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        return breakpointService.RemoveGroup(groupId)
+            ? $"Removed group {groupId}."
+            : $"Group {groupId} not found.";
+    }
+
 }

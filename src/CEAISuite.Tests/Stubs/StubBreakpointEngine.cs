@@ -67,4 +67,15 @@ public sealed class StubBreakpointEngine : IBreakpointEngine
 
     public Task<int> EmergencyRestorePageProtectionAsync(int processId) => Task.FromResult(0);
     public Task ForceDetachAndCleanupAsync(int processId) => Task.CompletedTask;
+
+    public Task<IReadOnlyList<BreakpointDescriptor>> SetRegionBreakpointAsync(
+        int processId, nuint startAddress, int length,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        CancellationToken cancellationToken = default)
+    {
+        var bp = new BreakpointDescriptor($"bp-region-{_breakpoints.Count}", startAddress,
+            BreakpointType.HardwareReadWrite, action, true, 0, BreakpointMode.PageGuard);
+        _breakpoints.Add(bp);
+        return Task.FromResult<IReadOnlyList<BreakpointDescriptor>>([bp]);
+    }
 }

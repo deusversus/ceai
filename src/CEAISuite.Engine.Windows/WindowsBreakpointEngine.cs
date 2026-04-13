@@ -1869,6 +1869,47 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             }
         });
 
+    /// <summary>B2: Set PAGE_GUARD breakpoints spanning a memory region. Max 64KB.</summary>
+    private const int MaxRegionSize = 64 * 1024;
+    private const int PageGuardWarningThreshold = 16;
+
+    public async Task<IReadOnlyList<BreakpointDescriptor>> SetRegionBreakpointAsync(
+        int processId,
+        nuint startAddress,
+        int length,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        CancellationToken cancellationToken = default)
+    {
+        if (length <= 0) throw new ArgumentOutOfRangeException(nameof(length), "Length must be positive.");
+        if (length > MaxRegionSize) throw new ArgumentOutOfRangeException(nameof(length), $"Region size {length} exceeds maximum of {MaxRegionSize} bytes.");
+
+        // For small regions (≤ 8 bytes), use a single hardware breakpoint
+        if (length <= 8)
+        {
+            var bp = await SetBreakpointAsync(processId, startAddress, BreakpointType.HardwareReadWrite,
+                BreakpointMode.Hardware, action, cancellationToken: cancellationToken).ConfigureAwait(false);
+            return [bp];
+        }
+
+        // For larger regions, calculate spanning pages and set PAGE_GUARD on each
+        var firstPage = startAddress & ~(nuint)(PageSize - 1);
+        var lastPage = (startAddress + (nuint)(length - 1)) & ~(nuint)(PageSize - 1);
+        var pageCount = (int)((lastPage - firstPage) / PageSize) + 1;
+
+        if (pageCount > PageGuardWarningThreshold && _logger.IsEnabled(LogLevel.Warning))
+            _logger.LogWarning("Region breakpoint at 0x{Address:X} spans {Pages} pages — may impact performance", startAddress, pageCount);
+
+        var results = new List<BreakpointDescriptor>(pageCount);
+        for (var page = firstPage; page <= lastPage; page += PageSize)
+        {
+            var bp = await SetBreakpointAsync(processId, page, BreakpointType.HardwareReadWrite,
+                BreakpointMode.PageGuard, action, cancellationToken: cancellationToken).ConfigureAwait(false);
+            results.Add(bp);
+        }
+
+        return results;
+    }
+
     private void StopSession(ProcessDebugSession session, bool detachFromProcess)
     {
         session.StopRequested = true;

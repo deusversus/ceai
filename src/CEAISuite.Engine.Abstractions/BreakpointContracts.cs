@@ -241,6 +241,14 @@ public interface IBreakpointEngine
 
     /// <summary>Force detach debugger and clean up. Nuclear option for hung processes.</summary>
     Task ForceDetachAndCleanupAsync(int processId);
+
+    /// <summary>B2: Set a region breakpoint spanning multiple bytes. Uses PAGE_GUARD for regions > 8 bytes.</summary>
+    Task<IReadOnlyList<BreakpointDescriptor>> SetRegionBreakpointAsync(
+        int processId,
+        nuint startAddress,
+        int length,
+        BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
+        CancellationToken cancellationToken = default);
 }
 
 // ─── Code Cave Engine ────────────────────────────────────────────────

@@ -126,4 +126,56 @@ public class VehConditionEvaluatorTests
         var result = VehConditionEvaluator.Evaluate(condition, TestHit, 1, ReadMem);
         Assert.True(result); // read failure → pass through
     }
+
+    // ── Edge Cases ──
+
+    [Fact]
+    public void HitCount_ModuloZero_ReturnsFalse()
+    {
+        // % 0 should not divide by zero — short-circuit via value > 0 check
+        var condition = new BreakpointCondition("% 0", BreakpointConditionType.HitCount);
+        var result = VehConditionEvaluator.Evaluate(condition, TestHit, 10);
+        Assert.False(result);
+    }
+
+    [Theory]
+    [InlineData("rax == 0x100", true)]      // lowercase
+    [InlineData("Rax == 0x100", true)]      // mixed case
+    [InlineData("eax == 0x100", true)]      // lowercase 32-bit alias
+    public void RegisterCompare_CaseInsensitive(string expression, bool expected)
+    {
+        var condition = new BreakpointCondition(expression, BreakpointConditionType.RegisterCompare);
+        var result = VehConditionEvaluator.Evaluate(condition, TestHit, 1);
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void RegisterCompare_32BitAlias_MasksTo32Bits()
+    {
+        // RAX = 0x100, but if it were 0x100000100, EAX should be 0x100
+        var regsHigh = new RegisterSnapshot(
+            Rax: 0x100000100, Rbx: 0, Rcx: 0, Rdx: 0,
+            Rsi: 0, Rdi: 0, Rsp: 0, Rbp: 0,
+            R8: 0, R9: 0, R10: 0, R11: 0);
+        var hitHigh = new VehHitEvent(
+            (nuint)0x400000, 1234, VehBreakpointType.Execute, (nuint)0x1,
+            regsHigh, Environment.TickCount64);
+
+        // EAX should see only low 32 bits = 0x100
+        var condEax = new BreakpointCondition("EAX == 0x100", BreakpointConditionType.RegisterCompare);
+        Assert.True(VehConditionEvaluator.Evaluate(condEax, hitHigh, 1));
+
+        // RAX should see full 64-bit value
+        var condRax = new BreakpointCondition("RAX == 0x100", BreakpointConditionType.RegisterCompare);
+        Assert.False(VehConditionEvaluator.Evaluate(condRax, hitHigh, 1));
+    }
+
+    [Fact]
+    public void RegisterCompare_NegativeDecimal_PassesThrough()
+    {
+        // ulong.TryParse rejects negative values — condition should pass through
+        var condition = new BreakpointCondition("RAX == -1", BreakpointConditionType.RegisterCompare);
+        var result = VehConditionEvaluator.Evaluate(condition, TestHit, 1);
+        Assert.True(result); // unparseable value → pass through
+    }
 }

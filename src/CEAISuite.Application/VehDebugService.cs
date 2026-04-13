@@ -33,14 +33,18 @@ public sealed class VehDebugService
         return await _engine.SetBreakpointAsync(processId, address, type, dataSize, condition, ct).ConfigureAwait(false);
     }
 
-    public void RegisterLuaCallback(int processId, int drSlot, string luaFunctionName)
+    public bool RegisterLuaCallback(int processId, int drSlot, string luaFunctionName)
     {
-        _engine?.RegisterLuaCallback(processId, drSlot, luaFunctionName);
+        if (_engine is null) return false;
+        _engine.RegisterLuaCallback(processId, drSlot, luaFunctionName);
+        return true;
     }
 
-    public void UnregisterLuaCallback(int processId, int drSlot)
+    public bool UnregisterLuaCallback(int processId, int drSlot)
     {
-        _engine?.UnregisterLuaCallback(processId, drSlot);
+        if (_engine is null) return false;
+        _engine.UnregisterLuaCallback(processId, drSlot);
+        return true;
     }
 
     public async Task<bool> RemoveBreakpointAsync(int processId, int drSlot, CancellationToken ct = default)

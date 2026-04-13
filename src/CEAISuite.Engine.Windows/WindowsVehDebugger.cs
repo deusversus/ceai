@@ -294,7 +294,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                         if (condition is not null)
                         {
                             shouldYield = VehConditionEvaluator.Evaluate(
-                                condition, hit, state.SlotHitCounts[drSlot]);
+                                condition, hit, state.SlotHitCounts[drSlot],
+                                (addr, size) => ReadTargetMemory(state.ProcessHandle, addr, size));
                         }
 
                         // Fire Lua callback if registered (fires regardless of condition)
@@ -310,7 +311,17 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                                     hit.ThreadId,
                                     DateTimeOffset.UtcNow,
                                     regDict);
-                                _ = _luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct);
+                                // Fire-and-forget with fault observation to prevent unobserved task exceptions
+#pragma warning disable CS4014
+                                _luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct)
+                                    .ContinueWith(t =>
+                                    {
+                                        if (_logger.IsEnabled(LogLevel.Warning))
+                                            _logger.LogWarning(t.Exception?.InnerException,
+                                                "Lua callback '{Callback}' async fault for DR{DrSlot}",
+                                                luaCallback, drSlot);
+                                    }, TaskContinuationOptions.OnlyOnFaulted);
+#pragma warning restore CS4014
                             }
                             catch (Exception ex)
                             {
@@ -733,19 +744,21 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                     var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
                     if (result != int.MinValue)
                     {
-                        Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
-                        state.Conditions[drSlot] = null;
-                        state.LuaCallbacks[drSlot] = null;
-                        state.SlotHitCounts[drSlot] = 0;
-
                         if (result == 0)
                         {
+                            // Only clear slot state on successful removal
+                            Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
+                            state.Conditions[drSlot] = null;
+                            state.LuaCallbacks[drSlot] = null;
+                            state.SlotHitCounts[drSlot] = 0;
+
                             if (_logger.IsEnabled(LogLevel.Information))
                                 _logger.LogInformation(
                                     "VEH breakpoint removed: DR{DrSlot} (pid={ProcessId})", drSlot, state.ProcessId);
                             return true;
                         }
 
+                        // Agent failed — do NOT clear condition/callback state since BP is still active
                         if (_logger.IsEnabled(LogLevel.Warning))
                             _logger.LogWarning("Agent failed to remove breakpoint DR{DrSlot} (result={Result})", drSlot, result);
                         return false;
@@ -827,6 +840,17 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             ["R8"] = $"0x{regs.R8:X}", ["R9"] = $"0x{regs.R9:X}",
             ["R10"] = $"0x{regs.R10:X}", ["R11"] = $"0x{regs.R11:X}",
         };
+
+    /// <summary>Read memory from the target process for condition evaluation.</summary>
+    private static byte[]? ReadTargetMemory(IntPtr processHandle, nuint address, int size)
+    {
+        if (processHandle == IntPtr.Zero || size <= 0 || size > 64)
+            return null;
+        var buffer = new byte[size];
+        return ReadProcessMemory(processHandle, (IntPtr)(nint)address, buffer, size, out var bytesRead) && bytesRead > 0
+            ? buffer
+            : null;
+    }
 
     /// <summary>Determine which DR slot (0-3) triggered from DR6 bits 0-3. Returns -1 if none.</summary>
     private static int DetermineTriggeredSlot(ulong dr6)
@@ -1074,4 +1098,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ReadProcessMemory(
+        IntPtr hProcess, IntPtr lpBaseAddress, byte[] lpBuffer, int dwSize, out int lpNumberOfBytesRead);
 }

@@ -106,8 +106,10 @@ public sealed partial class AiToolFunctions
         if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
         if (drSlot is < 0 or > 3) return Task.FromResult("Invalid DR slot. Must be 0-3.");
         if (string.IsNullOrWhiteSpace(luaFunctionName)) return Task.FromResult("Lua function name is required.");
-        vehDebugService.RegisterLuaCallback(processId, drSlot, luaFunctionName);
-        return Task.FromResult($"Lua callback '{luaFunctionName}' registered for DR{drSlot}.");
+        var ok = vehDebugService.RegisterLuaCallback(processId, drSlot, luaFunctionName);
+        return Task.FromResult(ok
+            ? $"Lua callback '{luaFunctionName}' registered for DR{drSlot}."
+            : "Failed to register Lua callback — VEH engine not available.");
     }
 
     [Destructive]
@@ -120,6 +122,7 @@ public sealed partial class AiToolFunctions
         var pidError = ValidateDestructiveProcessId(processId);
         if (pidError is not null) return Task.FromResult(pidError);
         if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
+        if (drSlot is < 0 or > 3) return Task.FromResult("Invalid DR slot. Must be 0-3.");
         vehDebugService.UnregisterLuaCallback(processId, drSlot);
         return Task.FromResult($"Lua callback unregistered from DR{drSlot}.");
     }

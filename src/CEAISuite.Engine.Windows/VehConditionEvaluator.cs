@@ -147,18 +147,27 @@ internal static partial class VehConditionEvaluator
 
     private static ulong? GetRegisterValue(string name, RegisterSnapshot regs) => name switch
     {
-        "RAX" or "EAX" => regs.Rax,
-        "RBX" or "EBX" => regs.Rbx,
-        "RCX" or "ECX" => regs.Rcx,
-        "RDX" or "EDX" => regs.Rdx,
-        "RSI" or "ESI" => regs.Rsi,
-        "RDI" or "EDI" => regs.Rdi,
-        "RSP" or "ESP" => regs.Rsp,
-        "RBP" or "EBP" => regs.Rbp,
+        "RAX" => regs.Rax,
+        "RBX" => regs.Rbx,
+        "RCX" => regs.Rcx,
+        "RDX" => regs.Rdx,
+        "RSI" => regs.Rsi,
+        "RDI" => regs.Rdi,
+        "RSP" => regs.Rsp,
+        "RBP" => regs.Rbp,
         "R8" => regs.R8,
         "R9" => regs.R9,
         "R10" => regs.R10,
         "R11" => regs.R11,
+        // 32-bit aliases: mask to low 32 bits
+        "EAX" => regs.Rax & 0xFFFFFFFF,
+        "EBX" => regs.Rbx & 0xFFFFFFFF,
+        "ECX" => regs.Rcx & 0xFFFFFFFF,
+        "EDX" => regs.Rdx & 0xFFFFFFFF,
+        "ESI" => regs.Rsi & 0xFFFFFFFF,
+        "EDI" => regs.Rdi & 0xFFFFFFFF,
+        "ESP" => regs.Rsp & 0xFFFFFFFF,
+        "EBP" => regs.Rbp & 0xFFFFFFFF,
         _ => null
     };
 

@@ -868,7 +868,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             ok = false;
         }
 
-        _breakpointRegistry.TryRemove(breakpointId, out _);
+        // Only remove from registry on successful agent removal — prevents orphaning
+        if (ok)
+            _breakpointRegistry.TryRemove(breakpointId, out _);
         return ok;
     }
 

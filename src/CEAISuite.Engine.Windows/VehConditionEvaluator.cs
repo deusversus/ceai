@@ -32,6 +32,69 @@ internal static partial class VehConditionEvaluator
     }
 
     /// <summary>
+    /// Evaluate a condition against a standard engine register snapshot (Dictionary&lt;string, string&gt;).
+    /// Used by WindowsBreakpointEngine to enforce conditions in the standard debug loop.
+    /// Returns true if the hit passes the condition. Fail-open: returns true on any parse/eval error.
+    /// </summary>
+    public static bool EvaluateFromDictionary(
+        BreakpointCondition condition,
+        IReadOnlyDictionary<string, string> registers,
+        int currentHitCount,
+        Func<nuint, int, byte[]?>? readMemory = null)
+    {
+        try
+        {
+            return condition.Type switch
+            {
+                BreakpointConditionType.RegisterCompare => EvaluateRegisterCompareFromDictionary(condition.Expression, registers),
+                BreakpointConditionType.HitCount => EvaluateHitCount(condition.Expression, currentHitCount),
+                BreakpointConditionType.MemoryCompare => EvaluateMemoryCompare(condition.Expression, readMemory),
+                _ => true
+            };
+        }
+        catch
+        {
+            // Fail-open: if evaluation throws for any reason, pass the hit through
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Evaluate a register comparison against a dictionary snapshot (hex string values).
+    /// </summary>
+    private static bool EvaluateRegisterCompareFromDictionary(string expression, IReadOnlyDictionary<string, string> registers)
+    {
+        var match = RegisterCompareRegex().Match(expression);
+        if (!match.Success)
+            return true;
+
+        var regName = match.Groups[1].Value.ToUpperInvariant();
+        var op = match.Groups[2].Value;
+        var valueStr = match.Groups[3].Value;
+
+        if (!TryParseValue(valueStr, out var comparand))
+            return true;
+
+        // Look up register in dictionary — values stored as "0xHEX"
+        if (!registers.TryGetValue(regName, out var regStr))
+            return true; // unknown register — pass through
+
+        if (!TryParseValue(regStr, out var regValue))
+            return true;
+
+        return op switch
+        {
+            "==" => regValue == comparand,
+            "!=" => regValue != comparand,
+            ">" => regValue > comparand,
+            "<" => regValue < comparand,
+            ">=" => regValue >= comparand,
+            "<=" => regValue <= comparand,
+            _ => true
+        };
+    }
+
+    /// <summary>
     /// Evaluate a register comparison expression.
     /// Supported formats: "RAX == 0x100", "RCX > 0", "RDX != 5", "RSP &lt;= 0x7FFE0000"
     /// Register names: RAX, RBX, RCX, RDX, RSI, RDI, RSP, RBP, R8-R11

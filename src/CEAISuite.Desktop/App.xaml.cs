@@ -27,7 +27,44 @@ public partial class App : System.Windows.Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        try
+        {
+            OnStartupCore(e);
+        }
+        catch (Exception ex)
+        {
+            var diagPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CEAISuite", "logs", "startup-crash.log");
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(diagPath)!);
+                File.WriteAllText(diagPath, $"[{DateTime.Now:O}] Startup crash:\n{ex}\n");
+            }
+            catch { }
+            MessageBox.Show($"Startup failed:\n\n{ex.Message}\n\nSee: {diagPath}", "CE AI Suite — Fatal Error");
+            Shutdown(1);
+        }
+    }
+
+    private static readonly string s_diagPath = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "CEAISuite", "logs", "startup-diag.log");
+    private static void Diag(string msg)
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(s_diagPath)!);
+            File.AppendAllText(s_diagPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n");
+        }
+        catch { }
+    }
+
+    private void OnStartupCore(StartupEventArgs e)
+    {
+        Diag("OnStartupCore entered");
         base.OnStartup(e);
+        Diag("base.OnStartup done");
 
         // Catch unhandled UI-thread exceptions to prevent hard crashes
         DispatcherUnhandledException += OnDispatcherUnhandledException;
@@ -36,10 +73,13 @@ public partial class App : System.Windows.Application
         TaskScheduler.UnobservedTaskException += OnUnobservedTaskException;
 
         // ── Build DI container ──
+        Diag("Building DI container...");
         var services = new ServiceCollection();
         ConfigureServices(services);
         Services = services.BuildServiceProvider();
+        Diag("DI container built");
 
+        Diag("Wiring Serilog...");
         // Wire the OutputLog sink now that DI is built
         var outputLog = Services.GetRequiredService<IOutputLog>();
         var outputSink = new OutputLogSerilogSink(outputLog);
@@ -62,8 +102,10 @@ public partial class App : System.Windows.Application
         loggerFactory.AddSerilog(Log.Logger);
         ChatClientFactory.SetLogger(loggerFactory);
 
+        Diag("Serilog wired. Resolving settings...");
         // Initialize Gemini OAuth service from encrypted settings (if configured)
         var settingsService = Services.GetRequiredService<AppSettingsService>();
+        Diag($"Settings resolved. FirstRun={settingsService.IsFirstRun}");
         if (!string.IsNullOrWhiteSpace(settingsService.Settings.GeminiOAuthClientId)
             && !string.IsNullOrWhiteSpace(settingsService.Settings.GeminiOAuthClientSecret))
         {
@@ -134,22 +176,30 @@ public partial class App : System.Windows.Application
             try { File.Delete(recoveryPath); } catch { /* best-effort */ }
         }
 
+        Diag("Handling protocol args...");
         // ── Handle ceai:// protocol URLs from command line ──
         HandleProtocolArgs(e.Args);
 
+        Diag("Resolving AutorunScriptService...");
         // ── Execute autorun Lua scripts ──
         try
         {
             var autorunSvc = Services.GetRequiredService<AutorunScriptService>();
+            Diag("AutorunScriptService resolved. Launching Task.Run...");
             _ = Task.Run(() => autorunSvc.ExecuteAllAsync(CancellationToken.None));
+            Diag("Task.Run launched.");
         }
         catch (Exception ex)
         {
+            Diag($"Autorun FAILED: {ex.GetType().Name}: {ex.Message}");
             Log.Warning(ex, "Failed to start autorun scripts");
         }
 
+        Diag("Autorun done. Resolving MainWindow from DI...");
         var mainWindow = Services.GetRequiredService<MainWindow>();
+        Diag("MainWindow resolved. Calling Show()...");
         mainWindow.Show();
+        Diag($"Show() returned. Visible={mainWindow.IsVisible}, State={mainWindow.WindowState}, Size={mainWindow.ActualWidth}x{mainWindow.ActualHeight}, Top={mainWindow.Top}, Left={mainWindow.Left}");
     }
 
     /// <summary>
@@ -259,7 +309,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IVehDebugger>(sp =>
             new WindowsVehDebugger(
                 sp.GetService<ILogger<WindowsVehDebugger>>(),
-                sp.GetService<ILuaScriptEngine>()));
+                () => sp.GetService<ILuaScriptEngine>()));
 
         // ── Persistence ──
         services.AddSingleton<IInvestigationSessionRepository>(
@@ -276,7 +326,8 @@ public partial class App : System.Windows.Application
         services.AddSingleton<BreakpointService>(sp =>
             new BreakpointService(
                 sp.GetRequiredService<IBreakpointEngine>(),
-                sp.GetService<ILuaScriptEngine>()));
+                sp.GetService<ILuaScriptEngine>(),
+                sp.GetService<ILogger<BreakpointService>>()));
         services.AddSingleton<GlobalHotkeyService>();
         services.AddSingleton<PatchUndoService>();
         services.AddSingleton<MemorySnapshotService>();

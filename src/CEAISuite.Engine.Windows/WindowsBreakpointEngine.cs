@@ -617,6 +617,19 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         FlushInstructionCache(session.ProcessHandle, (IntPtr)breakpoint.Address, (UIntPtr)1);
     }
 
+    /// <summary>
+    /// Read bytes from the target process. Returns null if the read fails.
+    /// Used by condition evaluation to read memory for MemoryCompare conditions.
+    /// </summary>
+    private static byte[]? ReadProcessMemoryBytes(IntPtr processHandle, nuint address, int size)
+    {
+        if (size <= 0 || size > 8) return null;
+        var buffer = new byte[size];
+        return ReadProcessMemory(processHandle, (IntPtr)address, buffer, size, out var bytesRead) && bytesRead == size
+            ? buffer
+            : null;
+    }
+
     private void ApplyHardwareBreakpointsLocked(ProcessDebugSession session)
     {
         var activeHardwareBreakpoints = session.Breakpoints.Values
@@ -991,10 +1004,22 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             }
         }
 
-        // Log hit for ALL enabled BPs on this page
+        // Log hit for ALL enabled BPs on this page (gated by thread filter + condition)
         foreach (var breakpoint in bpList)
         {
             if (!breakpoint.IsEnabled) continue;
+
+            // A1: Thread filter enforcement for PAGE_GUARD breakpoints
+            if (breakpoint.ThreadFilter.HasValue && breakpoint.ThreadFilter.Value != debugEvent.dwThreadId)
+                continue;
+
+            // A2: Conditional evaluation for PAGE_GUARD breakpoints
+            if (breakpoint.Condition is { } cond)
+            {
+                Func<nuint, int, byte[]?> readMem = (addr, size) => ReadProcessMemoryBytes(session.ProcessHandle, addr, size);
+                if (!VehConditionEvaluator.EvaluateFromDictionary(cond, registers, breakpoint.HitCount, readMem))
+                    continue;
+            }
 
             // 2J: Apply same throttle window logic to PageGuard hits
             if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, faultAddress, registers))
@@ -1093,6 +1118,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     if (error == ErrorSemTimeout)
                     {
                         consecutiveFailures = 0; // Reset on successful timeout (normal idle)
+
+                        // A4: Periodic check for throttled BPs that have cooled down
+                        ReEnableThrottledBreakpoints(session);
+
                         continue;
                     }
 
@@ -1222,6 +1251,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
     private static uint HandleExitProcessEvent(ProcessDebugSession session, DEBUG_EVENT debugEvent, ref bool shouldExit)
     {
         shouldExit = true;
+        session.ProcessExited = true;
 
         foreach (var breakpoint in session.Breakpoints.Values)
         {
@@ -1269,7 +1299,20 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         var threadHandle = EnsureThreadHandleLocked(session, debugEvent.dwThreadId, IntPtr.Zero);
         var snapshot = CaptureRegisterSnapshot(session, threadHandle, exceptionAddress);
-        if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, exceptionAddress, snapshot))
+
+        // A1: Thread filter — skip hit logging if this thread doesn't match, but still
+        // complete the INT3→restore→single-step→re-arm mechanical cycle below.
+        var shouldLogHit = !breakpoint.ThreadFilter.HasValue ||
+                           breakpoint.ThreadFilter.Value == debugEvent.dwThreadId;
+
+        // A2: Conditional evaluation — skip hit logging if condition not met
+        if (shouldLogHit && breakpoint.Condition is { } condition)
+        {
+            Func<nuint, int, byte[]?> readMem = (addr, size) => ReadProcessMemoryBytes(session.ProcessHandle, addr, size);
+            shouldLogHit = VehConditionEvaluator.EvaluateFromDictionary(condition, snapshot, breakpoint.HitCount, readMem);
+        }
+
+        if (shouldLogHit && LogBreakpointHit(breakpoint, debugEvent.dwThreadId, exceptionAddress, snapshot))
         {
             // Hit-rate exceeded — auto-disable to prevent game freeze
             breakpoint.IsEnabled = false;
@@ -1362,7 +1405,18 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
             if (breakpoint is not null)
             {
-                if (LogBreakpointHit(breakpoint, debugEvent.dwThreadId, hitAddress, snapshot))
+                // A1: Thread filter enforcement for hardware breakpoints
+                var shouldLog = !breakpoint.ThreadFilter.HasValue ||
+                                breakpoint.ThreadFilter.Value == debugEvent.dwThreadId;
+
+                // A2: Conditional evaluation for hardware breakpoints
+                if (shouldLog && breakpoint.Condition is { } cond)
+                {
+                    Func<nuint, int, byte[]?> readMem = (addr, size) => ReadProcessMemoryBytes(session.ProcessHandle, addr, size);
+                    shouldLog = VehConditionEvaluator.EvaluateFromDictionary(cond, snapshot, breakpoint.HitCount, readMem);
+                }
+
+                if (shouldLog && LogBreakpointHit(breakpoint, debugEvent.dwThreadId, hitAddress, snapshot))
                 {
                     breakpoint.IsEnabled = false;
                     breakpoint.HardwareSlot = null;
@@ -1547,12 +1601,42 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             if (hits > MaxHitsPerSecond)
             {
                 breakpoint.ThrottleDisabled = true;
+                breakpoint.ThrottleDisabledAtTicks = Environment.TickCount64;
                 _logger.LogWarning("Auto-disabling BP {BreakpointId} at 0x{Address:X}: exceeded {MaxHitsPerSecond} hits/sec ({Hits} in window). This prevents game freezes", breakpoint.Id, breakpoint.Address, MaxHitsPerSecond, hits);
                 return true; // caller should disable this BP
             }
         }
 
         return false;
+    }
+
+    /// <summary>A4: Cooldown period in milliseconds before a throttled BP is auto re-enabled.</summary>
+    private const int ThrottleCooldownMs = 5000;
+
+    /// <summary>
+    /// A4: Check for throttle-disabled BPs that have cooled down and re-enable them.
+    /// Called from the debug loop idle path (ErrorSemTimeout).
+    /// </summary>
+    private void ReEnableThrottledBreakpoints(ProcessDebugSession session)
+    {
+        var now = Environment.TickCount64;
+        // Lock to prevent concurrent modification while iterating breakpoints
+        lock (session.SyncRoot)
+        foreach (var bp in session.Breakpoints.Values)
+        {
+            if (!bp.ThrottleDisabled || !bp.AutoReEnableAfterThrottle) continue;
+            if (bp.ThrottleDisabledAtTicks == 0) continue; // no timestamp recorded
+
+            if (now - bp.ThrottleDisabledAtTicks >= ThrottleCooldownMs)
+            {
+                bp.ThrottleDisabled = false;
+                bp.IsEnabled = true;
+                Interlocked.Exchange(ref bp.ThrottleWindowHits, 0);
+                Interlocked.Exchange(ref bp.ThrottleWindowStartTicks, now);
+                if (_logger.IsEnabled(LogLevel.Information))
+                    _logger.LogInformation("Re-enabled throttled BP {BreakpointId} at 0x{Address:X} after {CooldownMs}ms cooldown", bp.Id, bp.Address, ThrottleCooldownMs);
+            }
+        }
     }
 
     private Dictionary<string, string> CaptureRegisterSnapshot(
@@ -1817,16 +1901,30 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             session.PendingSoftwareRearm.Clear();
             session.PendingPageGuardRearm.Clear();
 
+            // A3: Retry restoration for any BPs with RestorationFailed before closing handles
+            if (!session.ProcessExited)
+            {
+                foreach (var bp in session.Breakpoints.Values.Where(b => b.RestorationFailed && b.OriginalByte.HasValue))
+                {
+                    RestoreOriginalByte(session, bp);
+                    if (!bp.RestorationFailed && _logger.IsEnabled(LogLevel.Information))
+                        _logger.LogInformation("Successfully restored original byte for BP {BreakpointId} on session cleanup", bp.Id);
+                }
+            }
+
+            // A5: Wrap handle closes in try-catch — handles may already be invalid after process exit
             foreach (var threadHandle in session.ThreadHandles.Values.Where(handle => handle != IntPtr.Zero))
             {
-                CloseHandle(threadHandle);
+                try { CloseHandle(threadHandle); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to close thread handle during session cleanup"); }
             }
 
             session.ThreadHandles.Clear();
 
             if (session.ProcessHandle != IntPtr.Zero)
             {
-                CloseHandle(session.ProcessHandle);
+                try { CloseHandle(session.ProcessHandle); }
+                catch (Exception ex) { _logger.LogDebug(ex, "Failed to close process handle during session cleanup"); }
                 session.ProcessHandle = IntPtr.Zero;
             }
         }
@@ -1886,6 +1984,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         public IntPtr ProcessHandle { get; set; }
 
         public bool StopRequested { get; set; }
+
+        /// <summary>A5: Set when the target process has exited. Guards cleanup from calling dead-process APIs.</summary>
+        public bool ProcessExited { get; set; }
 
         public bool IsDebuggerAttached { get; set; }
 
@@ -1973,6 +2074,12 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
         /// <summary>When true, this BP was auto-disabled due to excessive hit rate.</summary>
         public bool ThrottleDisabled;
+
+        /// <summary>A4: Timestamp when the BP was throttle-disabled. Used for cooldown re-enable.</summary>
+        public long ThrottleDisabledAtTicks;
+
+        /// <summary>A4: When true (default), throttled BPs auto re-enable after the cooldown period.</summary>
+        public bool AutoReEnableAfterThrottle = true;
 
         /// <summary>When true, the original byte could not be restored — 0xCC persists at the address.</summary>
         public bool RestorationFailed;

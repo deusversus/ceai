@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using CEAISuite.Engine.Abstractions;
+using Microsoft.Extensions.Logging;
 
 namespace CEAISuite.Application;
 
@@ -28,13 +29,16 @@ public sealed record BreakpointHitOverview(
 /// </summary>
 public sealed class BreakpointService(
     IBreakpointEngine? breakpointEngine,
-    ILuaScriptEngine? luaScriptEngine = null)
+    ILuaScriptEngine? luaScriptEngine = null,
+    ILogger<BreakpointService>? logger = null)
 {
     private bool IsAvailable => breakpointEngine is not null;
 
     private readonly ConcurrentDictionary<string, BreakpointLifecycleStatus> _lifecycleStatuses = new();
     private readonly ConcurrentDictionary<string, string> _luaCallbacks = new(); // bpId → luaFuncName
     private readonly ConcurrentDictionary<string, int> _lastProcessedHitCount = new();
+    private readonly ConcurrentDictionary<string, int> _consecutiveCallbackFailures = new(); // A6: per-BP failure counter
+    private const int MaxConsecutiveCallbackFailures = 3;
 
     /// <summary>Register a Lua function to be called when a breakpoint is hit.</summary>
     public void RegisterLuaCallback(string breakpointId, string luaFunctionName)
@@ -66,7 +70,29 @@ public sealed class BreakpointService(
 
         foreach (var hit in newHits)
         {
-            await luaScriptEngine.InvokeBreakpointCallbackAsync(funcName, hit, ct).ConfigureAwait(false);
+            try
+            {
+                await luaScriptEngine.InvokeBreakpointCallbackAsync(funcName, hit, ct).ConfigureAwait(false);
+                _consecutiveCallbackFailures.AddOrUpdate(breakpointId, 0, (_, _) => 0); // atomic reset on success
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // propagate cancellation
+            }
+            catch (Exception ex)
+            {
+                var failures = _consecutiveCallbackFailures.AddOrUpdate(breakpointId, 1, (_, v) => v + 1);
+                logger?.LogWarning(ex, "Lua callback '{FuncName}' for BP {BreakpointId} threw (failure {Count}/{Max})",
+                    funcName, breakpointId, failures, MaxConsecutiveCallbackFailures);
+
+                if (failures >= MaxConsecutiveCallbackFailures)
+                {
+                    UnregisterLuaCallback(breakpointId);
+                    logger?.LogError("Auto-unregistered Lua callback '{FuncName}' for BP {BreakpointId} after {Max} consecutive failures",
+                        funcName, breakpointId, MaxConsecutiveCallbackFailures);
+                    break; // stop processing hits for this BP
+                }
+            }
         }
         _lastProcessedHitCount[breakpointId] = hits.Count;
     }

@@ -1254,8 +1254,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
         if (_customCommands.TryGetValue(commandName, out var handler))
         {
-            handler(args);
-            return true;
+            return handler(args);
         }
 
         return false;

@@ -87,6 +87,16 @@ internal static class LuaMemoryManagementBindings
         table["isReadable"] = region.IsReadable;
         table["isWritable"] = region.IsWritable;
         table["isExecutable"] = region.IsExecutable;
+
+        // Reconstruct approximate PAGE_* protection constant for CE compatibility
+        var prot = 0x01; // PAGE_NOACCESS
+        if (region.IsExecutable && region.IsWritable) prot = 0x40; // PAGE_EXECUTE_READWRITE
+        else if (region.IsExecutable && region.IsReadable) prot = 0x20; // PAGE_EXECUTE_READ
+        else if (region.IsExecutable) prot = 0x10; // PAGE_EXECUTE
+        else if (region.IsWritable) prot = 0x04; // PAGE_READWRITE
+        else if (region.IsReadable) prot = 0x02; // PAGE_READONLY
+        table["protection"] = (double)prot;
+
         return DynValue.NewTable(table);
     }
 

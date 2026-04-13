@@ -324,7 +324,7 @@ CE AI Suite uses MoonSharp's `Preset_HardSandbox` plus explicit additions. The f
 | `os` | **Blocked** | No access to OS functions (`os.execute`, `os.clock`, `os.date`, etc.) |
 | `io` | **Blocked** | No file I/O (`io.open`, `io.read`, `io.write`, etc.) |
 | `loadfile` / `dofile` | **Blocked** | Cannot load external Lua files |
-| `require` | **Blocked** | Cannot load external modules |
+| `require` | **Sandboxed** | Loads modules from `%LOCALAPPDATA%/CEAISuite/scripts/lib/` only. Dot notation supported (`require("utils.math")`). Cached after first load. No network or arbitrary path loading. |
 | `debug` (Lua library) | **Blocked** | No access to the Lua debug library |
 | `package` | **Blocked** | No dynamic module loading |
 

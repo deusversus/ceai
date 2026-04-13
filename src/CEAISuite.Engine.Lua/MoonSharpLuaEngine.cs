@@ -21,6 +21,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IScanEngine? _scanEngine;
     private readonly IMemoryProtectionEngine? _memoryProtectionEngine;
     private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
+    private LuaTimerBindings? _timerBindings;
     private Script _script;
     private int? _currentProcessId;
 
@@ -238,6 +239,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
     public void Dispose()
     {
+        _timerBindings?.Dispose();
         _gate.Dispose();
     }
 
@@ -249,8 +251,14 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         // S3: Controlled require() module loader
         RegisterRequire(script);
 
-        // Always register data conversion utilities (no engine dependency)
+        // Always register data conversion and utility functions (no engine dependency)
         LuaDataConversionBindings.Register(script);
+        LuaUtilityBindings.Register(script);
+
+        // S4: Native timer system
+        _timerBindings?.DisposeAll();
+        _timerBindings = new LuaTimerBindings();
+        _timerBindings.Register(script, this);
 
         if (_engineFacade is not null)
         {
@@ -297,6 +305,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     /// Registers a sandboxed require() function that loads Lua modules from whitelisted directories only.
     /// Modules are cached after first load (standard Lua package.loaded semantics).
     /// </summary>
+    private readonly HashSet<string> _loadingModules = new(StringComparer.OrdinalIgnoreCase);
+
     private void RegisterRequire(Script script)
     {
         script.Globals["require"] = (Func<string, DynValue>)(moduleName =>
@@ -304,6 +314,10 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             // Check cache first
             if (_moduleCache.TryGetValue(moduleName, out var cached))
                 return cached;
+
+            // Circular require detection
+            if (!_loadingModules.Add(moduleName))
+                throw new ScriptRuntimeException($"circular require detected: module '{moduleName}' is already being loaded");
 
             // Build search paths
             var searchDirs = new List<string>();
@@ -335,13 +349,20 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
                 throw new ScriptRuntimeException($"module '{moduleName}' path escapes search directories");
 
             // Load and execute the module
-            var source = File.ReadAllText(fullPath);
-            var result = script.DoString(source, codeFriendlyName: moduleName);
+            try
+            {
+                var source = File.ReadAllText(fullPath);
+                var result = script.DoString(source, codeFriendlyName: moduleName);
 
-            // Cache the result (nil becomes true, matching Lua convention)
-            var moduleValue = result.Type == DataType.Nil ? DynValue.True : result;
-            _moduleCache[moduleName] = moduleValue;
-            return moduleValue;
+                // Cache the result (nil becomes true, matching Lua convention)
+                var moduleValue = result.Type == DataType.Nil ? DynValue.True : result;
+                _moduleCache[moduleName] = moduleValue;
+                return moduleValue;
+            }
+            finally
+            {
+                _loadingModules.Remove(moduleName);
+            }
         });
     }
 

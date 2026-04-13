@@ -5,7 +5,8 @@
  * Installs a VEH that intercepts hardware breakpoint exceptions
  * (EXCEPTION_SINGLE_STEP) and reports hits via shared memory IPC.
  *
- * Compile: cl.exe /LD /O2 /W4 veh_agent.c /link /DLL /OUT:veh_agent.dll
+ * Compile (x64): cl.exe /LD /O2 /W4 veh_agent.c /link /DLL /OUT:veh_agent.dll
+ * Compile (x86): cl.exe /LD /O2 /W4 veh_agent.c /link /DLL /OUT:veh_agent_x86.dll
  *
  * Shared memory name: Local\CEAISuite_VEH_{pid}
  * Command event:      Local\CEAISuite_VEH_Cmd_{pid}
@@ -18,17 +19,17 @@
 /* ── Shared memory layout ── */
 
 #define SHM_MAGIC           0xCEAE
-#define SHM_VERSION         1
+#define SHM_VERSION         2
 #define SHM_HEADER_SIZE     0x40
 #define HIT_ENTRY_SIZE      128
-#define MAX_HITS            256
-#define SHM_TOTAL_SIZE      (SHM_HEADER_SIZE + MAX_HITS * HIT_ENTRY_SIZE)
+#define DEFAULT_MAX_HITS    4096
 
 /* Commands (host → agent) */
 #define CMD_IDLE            0
 #define CMD_SET_BP          1
 #define CMD_REMOVE_BP       2
 #define CMD_SHUTDOWN        3
+#define CMD_REFRESH_THREADS 4
 
 /* Agent status */
 #define STATUS_LOADING      0
@@ -55,12 +56,14 @@ typedef struct {
     LONG    hitCount;       /* 0x028 — total */
     LONG    agentStatus;    /* 0x02C */
     DWORD   maxHits;        /* 0x030 */
-    BYTE    reserved[12];   /* 0x034 */
+    LONG    overflowCount;  /* 0x034 — ring buffer overflows [V2] */
+    DWORD   commandArg3;    /* 0x038 — data size (1/2/4/8) [V2] */
+    LONG    heartbeat;      /* 0x03C — GetTickCount() [V2] */
     /* Hit ring buffer starts at 0x040 */
 } ShmHeader;
 
 typedef struct {
-    ULONG64 address;        /* 0x00 — RIP */
+    ULONG64 address;        /* 0x00 — RIP/EIP */
     DWORD   threadId;       /* 0x08 */
     DWORD   hitType;        /* 0x0C */
     ULONG64 dr6;            /* 0x10 */
@@ -80,37 +83,62 @@ static HANDLE           g_cmdEvent = NULL;
 static HANDLE           g_hitEvent = NULL;
 static HANDLE           g_cmdThread = NULL;
 static volatile BOOL    g_running = TRUE;
+static DWORD            g_maxHits = DEFAULT_MAX_HITS;
+
+/* Per-slot tracking for hitType population and thread refresh */
+static ULONG64          g_bpAddresses[4] = {0};
+static DWORD            g_bpTypes[4] = {0};
+static DWORD            g_bpSizes[4] = {0};
+static volatile BOOL    g_bpActive[4] = {FALSE, FALSE, FALSE, FALSE};
 
 /* ── Forward declarations ── */
 
 static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep);
 static DWORD WINAPI CommandThread(LPVOID param);
-static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot);
+static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot, DWORD dataSize);
 static BOOL RemoveHardwareBp(DWORD drSlot);
+static void RefreshThreadBreakpoints(void);
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6);
 
 /* ── DR7 helpers ── */
 
-/* Enable a DR slot in DR7. type: 0=execute, 1=write, 2=readwrite (mapped to DR7 R/W bits). */
-static ULONG64 EnableDr7Slot(ULONG64 dr7, DWORD slot, DWORD type)
+/* Enable a DR slot in DR7. type: 0=execute, 1=write, 2=readwrite. dataSize: 1/2/4/8. */
+static ULONG64 EnableDr7Slot(ULONG64 dr7, DWORD slot, DWORD type, DWORD dataSize)
 {
     DWORD rw, len;
     switch (type) {
-        case BP_EXECUTE:    rw = 0; len = 0; break; /* 00=execute, len=00 */
-        case BP_WRITE:      rw = 1; len = 3; break; /* 01=write, len=11 (8 bytes) */
-        case BP_READWRITE:  rw = 3; len = 3; break; /* 11=r/w, len=11 */
+        case BP_EXECUTE:    rw = 0; len = 0; break; /* 00=execute, len=00 (1 byte) */
+        case BP_WRITE:      rw = 1; goto data_len;
+        case BP_READWRITE:  rw = 3; goto data_len;
         default:            rw = 0; len = 0; break;
     }
+    goto apply;
+
+data_len:
+    /* Intel DR7 LEN encoding: 00=1byte, 01=2bytes, 11=4bytes, 10=8bytes */
+    switch (dataSize) {
+        case 1:  len = 0; break;
+        case 2:  len = 1; break;
+        case 4:  len = 3; break;
+        case 8:  len = 2; break;
+        default: len = 2; break; /* default to 8 bytes */
+    }
+
+apply:
     /* Local enable bit: bit (slot*2) */
     dr7 |= (1ULL << (slot * 2));
     /* R/W field: bits 16+slot*4 .. 17+slot*4 */
-    DWORD rwShift = 16 + slot * 4;
-    dr7 &= ~(3ULL << rwShift);
-    dr7 |= ((ULONG64)rw << rwShift);
+    {
+        DWORD rwShift = 16 + slot * 4;
+        dr7 &= ~(3ULL << rwShift);
+        dr7 |= ((ULONG64)rw << rwShift);
+    }
     /* LEN field: bits 18+slot*4 .. 19+slot*4 */
-    DWORD lenShift = 18 + slot * 4;
-    dr7 &= ~(3ULL << lenShift);
-    dr7 |= ((ULONG64)len << lenShift);
+    {
+        DWORD lenShift = 18 + slot * 4;
+        dr7 &= ~(3ULL << lenShift);
+        dr7 |= ((ULONG64)len << lenShift);
+    }
     return dr7;
 }
 
@@ -154,56 +182,98 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
 
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
 {
-    LONG idx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
-    LONG slot = idx % MAX_HITS;
-    BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
-    HitEntry* hit = (HitEntry*)base;
+    LONG writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
+    LONG readIdx = g_shm->hitReadIndex; /* volatile read */
 
-    LARGE_INTEGER ts;
-    QueryPerformanceCounter(&ts);
+    /* Overflow detection: if ring is full, increment overflow counter */
+    if (writeIdx - readIdx >= (LONG)g_maxHits)
+    {
+        InterlockedIncrement(&g_shm->overflowCount);
+    }
 
-    hit->address  = ctx->Rip;
-    hit->threadId = GetCurrentThreadId();
-    hit->hitType  = 0; /* Determine from DR6 which slot fired */
-    hit->dr6      = dr6;
-    hit->rax = ctx->Rax; hit->rbx = ctx->Rbx;
-    hit->rcx = ctx->Rcx; hit->rdx = ctx->Rdx;
-    hit->rsi = ctx->Rsi; hit->rdi = ctx->Rdi;
-    hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
-    hit->r8  = ctx->R8;  hit->r9  = ctx->R9;
-    hit->r10 = ctx->R10; hit->r11 = ctx->R11;
-    hit->timestamp = (ULONG64)ts.QuadPart;
+    {
+        LONG slot = writeIdx % (LONG)g_maxHits;
+        BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
+        HitEntry* hit = (HitEntry*)base;
+        LARGE_INTEGER ts;
+        DWORD triggeredSlot = 0;
+        DWORD i;
+
+        QueryPerformanceCounter(&ts);
+
+        /* Determine which DR slot triggered from DR6 bits 0-3 */
+        for (i = 0; i < 4; i++) {
+            if (dr6 & (1ULL << i)) { triggeredSlot = i; break; }
+        }
+
+#ifdef _M_IX86
+        hit->address  = (ULONG64)ctx->Eip;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType  = g_bpTypes[triggeredSlot];
+        hit->dr6      = dr6;
+        hit->rax = ctx->Eax; hit->rbx = ctx->Ebx;
+        hit->rcx = ctx->Ecx; hit->rdx = ctx->Edx;
+        hit->rsi = ctx->Esi; hit->rdi = ctx->Edi;
+        hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
+        hit->r8  = 0;        hit->r9  = 0;
+        hit->r10 = 0;        hit->r11 = 0;
+#else
+        hit->address  = ctx->Rip;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType  = g_bpTypes[triggeredSlot];
+        hit->dr6      = dr6;
+        hit->rax = ctx->Rax; hit->rbx = ctx->Rbx;
+        hit->rcx = ctx->Rcx; hit->rdx = ctx->Rdx;
+        hit->rsi = ctx->Rsi; hit->rdi = ctx->Rdi;
+        hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
+        hit->r8  = ctx->R8;  hit->r9  = ctx->R9;
+        hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+#endif
+        hit->timestamp = (ULONG64)ts.QuadPart;
+    }
 
     InterlockedIncrement(&g_shm->hitCount);
 }
 
 /* ── Hardware breakpoint management ── */
 
-static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot)
+static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot, DWORD dataSize)
 {
-    if (drSlot > 3) return FALSE;
+    HANDLE snap;
+    THREADENTRY32 te;
+    DWORD pid, myTid;
+    BOOL ok = TRUE;
 
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (drSlot > 3) return FALSE;
+    if (dataSize == 0) dataSize = (type == BP_EXECUTE) ? 1 : 8;
+
+    /* Record in tracking arrays for hitType population and thread refresh */
+    g_bpAddresses[drSlot] = address;
+    g_bpTypes[drSlot] = type;
+    g_bpSizes[drSlot] = dataSize;
+    InterlockedExchange((volatile LONG*)&g_bpActive[drSlot], TRUE);
+
+    snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snap == INVALID_HANDLE_VALUE) return FALSE;
 
-    THREADENTRY32 te;
     te.dwSize = sizeof(te);
-    DWORD pid = GetCurrentProcessId();
-    DWORD myTid = GetCurrentThreadId();
-    BOOL ok = TRUE;
+    pid = GetCurrentProcessId();
+    myTid = GetCurrentThreadId();
 
     if (Thread32First(snap, &te)) {
         do {
+            HANDLE hThread;
+            CONTEXT ctx;
+
             if (te.th32OwnerProcessID != pid) continue;
             if (te.th32ThreadID == myTid) continue; /* skip our command thread */
 
-            HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+            hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
                                         FALSE, te.th32ThreadID);
             if (!hThread) continue;
 
             SuspendThread(hThread);
 
-            CONTEXT ctx;
             ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
             if (GetThreadContext(hThread, &ctx)) {
                 /* Set DR[slot] to the target address */
@@ -213,7 +283,7 @@ static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot)
                     case 2: ctx.Dr2 = address; break;
                     case 3: ctx.Dr3 = address; break;
                 }
-                ctx.Dr7 = EnableDr7Slot(ctx.Dr7, drSlot, type);
+                ctx.Dr7 = EnableDr7Slot(ctx.Dr7, drSlot, type, dataSize);
                 ctx.Dr6 = 0;  /* clear pending status */
                 if (!SetThreadContext(hThread, &ctx))
                     ok = FALSE;
@@ -232,28 +302,39 @@ static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot)
 
 static BOOL RemoveHardwareBp(DWORD drSlot)
 {
+    HANDLE snap;
+    THREADENTRY32 te;
+    DWORD pid, myTid;
+
     if (drSlot > 3) return FALSE;
 
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    /* Clear tracking arrays */
+    InterlockedExchange((volatile LONG*)&g_bpActive[drSlot], FALSE);
+    g_bpAddresses[drSlot] = 0;
+    g_bpTypes[drSlot] = 0;
+    g_bpSizes[drSlot] = 0;
+
+    snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if (snap == INVALID_HANDLE_VALUE) return FALSE;
 
-    THREADENTRY32 te;
     te.dwSize = sizeof(te);
-    DWORD pid = GetCurrentProcessId();
-    DWORD myTid = GetCurrentThreadId();
+    pid = GetCurrentProcessId();
+    myTid = GetCurrentThreadId();
 
     if (Thread32First(snap, &te)) {
         do {
+            HANDLE hThread;
+            CONTEXT ctx;
+
             if (te.th32OwnerProcessID != pid) continue;
             if (te.th32ThreadID == myTid) continue;
 
-            HANDLE hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+            hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
                                         FALSE, te.th32ThreadID);
             if (!hThread) continue;
 
             SuspendThread(hThread);
 
-            CONTEXT ctx;
             ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
             if (GetThreadContext(hThread, &ctx)) {
                 switch (drSlot) {
@@ -275,29 +356,124 @@ static BOOL RemoveHardwareBp(DWORD drSlot)
     return TRUE;
 }
 
+/* ── Thread refresh: apply all active BPs to any threads missing them ── */
+
+static void RefreshThreadBreakpoints(void)
+{
+    HANDLE snap;
+    THREADENTRY32 te;
+    DWORD pid, myTid;
+    DWORD i;
+    BOOL anyActive = FALSE;
+
+    for (i = 0; i < 4; i++) {
+        if (g_bpActive[i]) { anyActive = TRUE; break; }
+    }
+    if (!anyActive) return;
+
+    snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) return;
+
+    te.dwSize = sizeof(te);
+    pid = GetCurrentProcessId();
+    myTid = GetCurrentThreadId();
+
+    if (Thread32First(snap, &te)) {
+        do {
+            HANDLE hThread;
+            CONTEXT ctx;
+
+            if (te.th32OwnerProcessID != pid) continue;
+            if (te.th32ThreadID == myTid) continue;
+
+            hThread = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT | THREAD_SUSPEND_RESUME,
+                                 FALSE, te.th32ThreadID);
+            if (!hThread) continue;
+
+            SuspendThread(hThread);
+            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            if (GetThreadContext(hThread, &ctx)) {
+                BOOL needsUpdate = FALSE;
+                for (i = 0; i < 4; i++) {
+                    ULONG64 currentDr;
+                    if (!g_bpActive[i]) continue;
+
+                    switch (i) {
+                        case 0: currentDr = ctx.Dr0; break;
+                        case 1: currentDr = ctx.Dr1; break;
+                        case 2: currentDr = ctx.Dr2; break;
+                        case 3: currentDr = ctx.Dr3; break;
+                        default: currentDr = 0; break;
+                    }
+                    if (currentDr != g_bpAddresses[i]) {
+                        switch (i) {
+                            case 0: ctx.Dr0 = g_bpAddresses[i]; break;
+                            case 1: ctx.Dr1 = g_bpAddresses[i]; break;
+                            case 2: ctx.Dr2 = g_bpAddresses[i]; break;
+                            case 3: ctx.Dr3 = g_bpAddresses[i]; break;
+                        }
+                        ctx.Dr7 = EnableDr7Slot(ctx.Dr7, i, g_bpTypes[i], g_bpSizes[i]);
+                        needsUpdate = TRUE;
+                    }
+                }
+                if (needsUpdate) {
+                    ctx.Dr6 = 0;
+                    SetThreadContext(hThread, &ctx);
+                }
+            }
+            ResumeThread(hThread);
+            CloseHandle(hThread);
+        } while (Thread32Next(snap, &te));
+    }
+
+    CloseHandle(snap);
+}
+
 /* ── Command processing thread ── */
 
 static DWORD WINAPI CommandThread(LPVOID param)
 {
+    DWORD refreshCounter = 0;
+
     (void)param;
 
     while (g_running) {
+        LONG cmd;
+        LONG result = 0;
+
         /* Wait for command event or timeout (check shutdown flag) */
         WaitForSingleObject(g_cmdEvent, 100);
 
-        LONG cmd = InterlockedExchange(&g_shm->commandSlot, CMD_IDLE);
-        if (cmd == CMD_IDLE) continue;
+        /* Update heartbeat */
+        InterlockedExchange(&g_shm->heartbeat, (LONG)GetTickCount());
 
-        LONG result = 0;
+        cmd = InterlockedExchange(&g_shm->commandSlot, CMD_IDLE);
+        if (cmd == CMD_IDLE) {
+            /* Periodic thread refresh every ~500ms (5 iterations * 100ms) */
+            refreshCounter++;
+            if (refreshCounter >= 5) {
+                refreshCounter = 0;
+                RefreshThreadBreakpoints();
+            }
+            continue;
+        }
+
+        refreshCounter = 0; /* reset on command activity */
 
         switch (cmd) {
             case CMD_SET_BP:
-                result = SetHardwareBp(g_shm->commandArg0, g_shm->commandArg1, g_shm->commandArg2)
+                result = SetHardwareBp(g_shm->commandArg0, g_shm->commandArg1,
+                                       g_shm->commandArg2, g_shm->commandArg3)
                          ? 0 : -1;
                 break;
 
             case CMD_REMOVE_BP:
                 result = RemoveHardwareBp(g_shm->commandArg2) ? 0 : -1;
+                break;
+
+            case CMD_REFRESH_THREADS:
+                RefreshThreadBreakpoints();
+                result = 0;
                 break;
 
             case CMD_SHUTDOWN:
@@ -326,6 +502,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     if (reason == DLL_PROCESS_ATTACH) {
         char shmName[128], cmdName[128], hitName[128];
         DWORD pid = GetCurrentProcessId();
+        DWORD shmTotalSize;
 
         wsprintfA(shmName, "Local\\CEAISuite_VEH_%u", pid);
         wsprintfA(cmdName, "Local\\CEAISuite_VEH_Cmd_%u", pid);
@@ -337,17 +514,31 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
             return FALSE; /* Host didn't create shared memory — abort */
         }
 
-        g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, SHM_TOTAL_SIZE);
+        /* First map just the header to read maxHits */
+        g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, SHM_HEADER_SIZE);
         if (!g_shm) {
             CloseHandle(g_shmHandle);
             return FALSE;
         }
 
-        /* Validate magic */
+        /* Validate magic and version */
         if (g_shm->magic != SHM_MAGIC || g_shm->version != SHM_VERSION) {
             UnmapViewOfFile(g_shm);
             CloseHandle(g_shmHandle);
             g_shm = NULL;
+            return FALSE;
+        }
+
+        /* Read host-configured maxHits */
+        g_maxHits = g_shm->maxHits;
+        if (g_maxHits == 0 || g_maxHits > 65536) g_maxHits = DEFAULT_MAX_HITS;
+        shmTotalSize = SHM_HEADER_SIZE + g_maxHits * HIT_ENTRY_SIZE;
+
+        /* Remap with full size including ring buffer */
+        UnmapViewOfFile(g_shm);
+        g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, shmTotalSize);
+        if (!g_shm) {
+            CloseHandle(g_shmHandle);
             return FALSE;
         }
 
@@ -370,6 +561,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         InterlockedExchange(&g_shm->agentStatus, STATUS_READY);
     }
     else if (reason == DLL_PROCESS_DETACH) {
+        DWORD i;
         g_running = FALSE;
 
         if (g_vehHandle) {
@@ -378,10 +570,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         }
 
         /* Remove all hardware breakpoints */
-        for (DWORD i = 0; i < 4; i++)
+        for (i = 0; i < 4; i++)
             RemoveHardwareBp(i);
 
-        InterlockedExchange(&g_shm->agentStatus, STATUS_SHUTDOWN);
+        if (g_shm)
+            InterlockedExchange(&g_shm->agentStatus, STATUS_SHUTDOWN);
 
         if (g_cmdThread) {
             WaitForSingleObject(g_cmdThread, 1000);

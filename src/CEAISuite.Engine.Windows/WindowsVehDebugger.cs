@@ -27,11 +27,10 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     // ─── Shared Memory Constants (must match veh_agent.c exactly) ───
 
     private const uint ShmMagic = 0xCEAE;
-    private const uint ShmVersion = 1;
+    private const uint ShmVersion = 2;
     private const int ShmHeaderSize = 0x40;
     private const int HitEntrySize = 128;
-    private const int MaxHits = 256;
-    private const int ShmTotalSize = ShmHeaderSize + MaxHits * HitEntrySize;
+    private const int DefaultMaxHits = 4096;
 
     // Header field offsets
     private const int OffsetMagic = 0x00;
@@ -46,6 +45,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const int OffsetHitCount = 0x28;
     private const int OffsetAgentStatus = 0x2C;
     private const int OffsetMaxHits = 0x30;
+    private const int OffsetOverflowCount = 0x34;
+    private const int OffsetCommandArg3 = 0x38;
+    private const int OffsetHeartbeat = 0x3C;
 
     // Hit entry field offsets (relative to entry start)
     private const int HitOffsetAddress = 0x00;
@@ -71,6 +73,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const int CmdSetBp = 1;
     private const int CmdRemoveBp = 2;
     private const int CmdShutdown = 3;
+    private const int CmdRefreshThreads = 4;
 
     // Agent status
     private const int StatusLoading = 0;
@@ -80,6 +83,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
     // Win32 constants
     private const uint ProcessAllAccess = 0x001FFFFF;
+    private const uint ProcessQueryInformation = 0x0400;
     private const uint MemCommit = 0x1000;
     private const uint MemReserve = 0x2000;
     private const uint MemRelease = 0x8000;
@@ -87,6 +91,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const uint FileMapAllAccess = 0x000F001F;
     private const uint WaitTimeout = 258;
     private const int MaxDrSlots = 4;
+
+    // Health monitoring
+    private const int HeartbeatTimeoutMs = 2000;
 
     // ─── Internal State ─────────────────────────────────────────────
 
@@ -98,8 +105,11 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         public IntPtr CommandEvent;         // named auto-reset event
         public IntPtr HitEvent;             // named auto-reset event
         public int ProcessId;
+        public int MaxHits = DefaultMaxHits;
+        public bool IsWow64Target;
         public readonly int[] ActiveDrSlots = new int[MaxDrSlots]; // 0=free, 1=in-use
         public int TotalHits;
+        public int LastOverflowCount;       // track overflow count for delta detection
         public string? TempAgentPath;       // temp copy of veh_agent.dll
 
         public void Dispose()
@@ -163,14 +173,27 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     }
 
     public async Task<VehBreakpointResult> SetBreakpointAsync(
-        int processId, nuint address, VehBreakpointType type, CancellationToken ct = default)
+        int processId, nuint address, VehBreakpointType type,
+        int dataSize = 8, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (!_states.TryGetValue(processId, out var state))
             return new VehBreakpointResult(false, Error: "VEH agent not injected");
 
-        return await Task.Run(() => SetBreakpointCore(state, address, type), ct).ConfigureAwait(false);
+        // Validate data size
+        if (dataSize is not (1 or 2 or 4 or 8))
+            return new VehBreakpointResult(false, Error: $"Invalid data size {dataSize}. Must be 1, 2, 4, or 8.");
+
+        // Execute type always uses 1-byte length
+        if (type == VehBreakpointType.Execute)
+            dataSize = 1;
+
+        // WOW64 address validation
+        if (state.IsWow64Target && (ulong)address > 0xFFFFFFFF)
+            return new VehBreakpointResult(false, Error: "Address exceeds 32-bit range for WOW64 target process.");
+
+        return await Task.Run(() => SetBreakpointCore(state, address, type, dataSize), ct).ConfigureAwait(false);
     }
 
     public async Task<bool> RemoveBreakpointAsync(int processId, int drSlot, CancellationToken ct = default)
@@ -183,6 +206,16 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         return await Task.Run(() => RemoveBreakpointCore(state, drSlot), ct).ConfigureAwait(false);
     }
 
+    public async Task<bool> RefreshThreadsAsync(int processId, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_states.TryGetValue(processId, out var state))
+            return false;
+
+        return await Task.Run(() => SendSimpleCommand(state, CmdRefreshThreads), ct).ConfigureAwait(false);
+    }
+
     public async IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(
         int processId, [EnumeratorCancellation] CancellationToken ct = default)
     {
@@ -191,13 +224,24 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
         while (!ct.IsCancellationRequested)
         {
+            // Check for overflow
+            var overflowCount = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetOverflowCount);
+            if (overflowCount > state.LastOverflowCount)
+            {
+                var dropped = overflowCount - state.LastOverflowCount;
+                state.LastOverflowCount = overflowCount;
+                if (_logger.IsEnabled(LogLevel.Warning))
+                    _logger.LogWarning("VEH ring buffer overflow: {Dropped} hits dropped (pid={ProcessId})",
+                        dropped, processId);
+            }
+
             // Read hit indices from shared memory
             var writeIdx = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetHitWriteIndex);
             var readIdx = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetHitReadIndex);
 
             while (readIdx < writeIdx)
             {
-                var slot = readIdx % MaxHits;
+                var slot = readIdx % state.MaxHits;
                 var entryPtr = state.SharedMemoryPtr + ShmHeaderSize + slot * HitEntrySize;
                 var hit = ParseHitEntry(entryPtr);
                 if (hit is not null)
@@ -228,19 +272,48 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 activeCount++;
         }
 
-        return new VehStatus(true, activeCount, state.TotalHits);
+        var overflowCount = 0;
+        var agentHealth = VehAgentHealth.Unknown;
+
+        if (state.SharedMemoryPtr != IntPtr.Zero)
+        {
+            overflowCount = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetOverflowCount);
+
+            // Check heartbeat for health
+            var heartbeatTick = (uint)Marshal.ReadInt32(state.SharedMemoryPtr + OffsetHeartbeat);
+            if (heartbeatTick == 0)
+            {
+                agentHealth = VehAgentHealth.Unknown; // agent hasn't written heartbeat yet
+            }
+            else
+            {
+                var currentTick = (uint)Environment.TickCount;
+                var elapsed = currentTick - heartbeatTick;
+                agentHealth = elapsed <= HeartbeatTimeoutMs
+                    ? VehAgentHealth.Healthy
+                    : VehAgentHealth.Unresponsive;
+            }
+        }
+
+        return new VehStatus(true, activeCount, state.TotalHits, overflowCount, agentHealth);
     }
 
     // ─── Core Implementation ────────────────────────────────────────
 
     private VehInjectResult InjectCore(int processId, CancellationToken ct)
     {
-        // 1. Find the agent DLL
-        var agentPath = FindAgentDll();
-        if (agentPath is null)
-            return new VehInjectResult(false, "veh_agent.dll not found. Build the native agent first.");
+        // 1. Detect target bitness to select correct agent DLL
+        var isWow64 = IsTargetWow64(processId);
 
-        // 2. Open target process
+        // 2. Find the agent DLL
+        var agentPath = FindAgentDll(isWow64);
+        if (agentPath is null)
+        {
+            var dllName = isWow64 ? "veh_agent_x86.dll" : "veh_agent.dll";
+            return new VehInjectResult(false, $"{dllName} not found. Build the native agent first.");
+        }
+
+        // 3. Open target process
         var hProcess = OpenProcess(ProcessAllAccess, false, processId);
         if (hProcess == IntPtr.Zero)
         {
@@ -250,18 +323,26 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             return new VehInjectResult(false, $"Failed to open process {processId} (Win32 error {err})");
         }
 
-        var state = new VehProcessState { ProcessHandle = hProcess, ProcessId = processId };
+        var maxHits = DefaultMaxHits;
+        var shmTotalSize = ShmHeaderSize + maxHits * HitEntrySize;
+        var state = new VehProcessState
+        {
+            ProcessHandle = hProcess,
+            ProcessId = processId,
+            MaxHits = maxHits,
+            IsWow64Target = isWow64
+        };
 
         try
         {
-            // 3. Create named shared memory
+            // 4. Create named shared memory
             var shmName = $"Local\\CEAISuite_VEH_{processId}";
             state.SharedMemoryHandle = CreateFileMappingA(
                 new IntPtr(-1), // INVALID_HANDLE_VALUE
                 IntPtr.Zero,
                 PageReadWrite,
                 0,
-                (uint)ShmTotalSize,
+                (uint)shmTotalSize,
                 shmName);
 
             if (state.SharedMemoryHandle == IntPtr.Zero)
@@ -273,9 +354,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 return new VehInjectResult(false, $"Failed to create shared memory (Win32 error {err})");
             }
 
-            // 4. Map view
+            // 5. Map view
             state.SharedMemoryPtr = MapViewOfFile(
-                state.SharedMemoryHandle, FileMapAllAccess, 0, 0, (UIntPtr)ShmTotalSize);
+                state.SharedMemoryHandle, FileMapAllAccess, 0, 0, (UIntPtr)shmTotalSize);
 
             if (state.SharedMemoryPtr == IntPtr.Zero)
             {
@@ -286,23 +367,26 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 return new VehInjectResult(false, $"Failed to map shared memory (Win32 error {err})");
             }
 
-            // 5. Initialize header
+            // 6. Initialize header
             unsafe
             {
-                NativeMemory.Clear(state.SharedMemoryPtr.ToPointer(), (nuint)ShmTotalSize);
+                NativeMemory.Clear(state.SharedMemoryPtr.ToPointer(), (nuint)shmTotalSize);
             }
 
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetMagic, unchecked((int)ShmMagic));
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetVersion, (int)ShmVersion);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetAgentStatus, StatusLoading);
-            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetMaxHits, MaxHits);
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetMaxHits, maxHits);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdIdle);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, 0);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetHitWriteIndex, 0);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetHitReadIndex, 0);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetHitCount, 0);
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetOverflowCount, 0);
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg3, 0);
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetHeartbeat, 0);
 
-            // 6. Create named events
+            // 7. Create named events
             var cmdEventName = $"Local\\CEAISuite_VEH_Cmd_{processId}";
             var hitEventName = $"Local\\CEAISuite_VEH_Hit_{processId}";
 
@@ -326,14 +410,14 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 return new VehInjectResult(false, $"Failed to create hit event (Win32 error {err})");
             }
 
-            // 7. Copy agent DLL to temp so we don't lock the original
+            // 8. Copy agent DLL to temp so we don't lock the original
             var tempDir = Path.Combine(Path.GetTempPath(), "CEAISuite_VEH");
             Directory.CreateDirectory(tempDir);
             var tempAgentPath = Path.Combine(tempDir, $"veh_agent_{processId}.dll");
             File.Copy(agentPath, tempAgentPath, overwrite: true);
             state.TempAgentPath = tempAgentPath;
 
-            // 8. Inject via LoadLibraryW + CreateRemoteThread
+            // 9. Inject via LoadLibraryW + CreateRemoteThread
             if (!LoadLibraryInTarget(hProcess, tempAgentPath))
             {
                 var err = Marshal.GetLastWin32Error();
@@ -343,7 +427,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 return new VehInjectResult(false, $"DLL injection failed (Win32 error {err})");
             }
 
-            // 9. Wait for agent to signal STATUS_READY (poll, 5s timeout)
+            // 10. Wait for agent to signal STATUS_READY (poll, 5s timeout)
             const int timeoutMs = 5000;
             const int pollIntervalMs = 25;
             int elapsed = 0;
@@ -374,7 +458,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 return new VehInjectResult(false, $"VEH agent did not become ready within {timeoutMs}ms");
             }
 
-            // 10. Store state
+            // 11. Store state
             if (!_states.TryAdd(processId, state))
             {
                 // Race condition — another thread injected first
@@ -383,7 +467,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             }
 
             if (_logger.IsEnabled(LogLevel.Information))
-                _logger.LogInformation("VEH agent injected into process {ProcessId}", processId);
+                _logger.LogInformation("VEH agent injected into process {ProcessId} (WOW64={IsWow64})",
+                    processId, isWow64);
 
             return new VehInjectResult(true);
         }
@@ -453,7 +538,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         }
     }
 
-    private VehBreakpointResult SetBreakpointCore(VehProcessState state, nuint address, VehBreakpointType type)
+    private VehBreakpointResult SetBreakpointCore(VehProcessState state, nuint address, VehBreakpointType type, int dataSize)
     {
         // 1. Find first free DR slot
         int drSlot = -1;
@@ -475,6 +560,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg1, (int)type);
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg2, drSlot);
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg3, dataSize);
 
             // 3. Write command (must be last — agent polls this)
             Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue); // sentinel
@@ -498,8 +584,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                     {
                         if (_logger.IsEnabled(LogLevel.Information))
                             _logger.LogInformation(
-                                "VEH breakpoint set: DR{DrSlot} at 0x{Address:X} type={Type} (pid={ProcessId})",
-                                drSlot, (ulong)address, type, state.ProcessId);
+                                "VEH breakpoint set: DR{DrSlot} at 0x{Address:X} type={Type} size={DataSize} (pid={ProcessId})",
+                                drSlot, (ulong)address, type, dataSize, state.ProcessId);
                         return new VehBreakpointResult(true, drSlot);
                     }
 
@@ -591,6 +677,40 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         }
     }
 
+    /// <summary>Send a simple command with no args (e.g., CMD_REFRESH_THREADS).</summary>
+    private bool SendSimpleCommand(VehProcessState state, int command)
+    {
+        try
+        {
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+            Thread.MemoryBarrier();
+            Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, command);
+            SetEvent(state.CommandEvent);
+
+            const int timeoutMs = 3000;
+            const int pollIntervalMs = 10;
+            int elapsed = 0;
+
+            while (elapsed < timeoutMs)
+            {
+                var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+                if (result != int.MinValue)
+                    return result == 0;
+
+                Thread.Sleep(pollIntervalMs);
+                elapsed += pollIntervalMs;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            if (_logger.IsEnabled(LogLevel.Error))
+                _logger.LogError(ex, "Error sending command {Command} to VEH agent", command);
+            return false;
+        }
+    }
+
     // ─── Hit Entry Parsing ──────────────────────────────────────────
 
     private static VehHitEvent? ParseHitEntry(IntPtr entryPtr)
@@ -633,22 +753,52 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         }
     }
 
+    // ─── WOW64 Detection ───────────────────────────────────────────
+
+    private static bool IsTargetWow64(int processId)
+    {
+        // On a 64-bit OS, check if target is 32-bit (WOW64)
+        if (!Environment.Is64BitOperatingSystem)
+            return false;
+
+        IntPtr hProcess = IntPtr.Zero;
+        try
+        {
+            hProcess = OpenProcess(ProcessQueryInformation, false, processId);
+            if (hProcess == IntPtr.Zero)
+                return false;
+
+            if (IsWow64Process(hProcess, out bool isWow64))
+                return isWow64;
+
+            return false;
+        }
+        finally
+        {
+            if (hProcess != IntPtr.Zero)
+                CloseHandle(hProcess);
+        }
+    }
+
     // ─── Agent DLL Location ─────────────────────────────────────────
 
-    private static string? FindAgentDll()
+    private static string? FindAgentDll(bool wow64)
     {
+        var dllName = wow64 ? "veh_agent_x86.dll" : "veh_agent.dll";
+
         // Check next to our assembly first
         var assemblyDir = Path.GetDirectoryName(typeof(WindowsVehDebugger).Assembly.Location);
         if (assemblyDir is not null)
         {
-            var path = Path.Combine(assemblyDir, "veh_agent.dll");
+            var path = Path.Combine(assemblyDir, dllName);
             if (File.Exists(path)) return path;
         }
 
         // Check native/veh_agent/ relative to working directory
-        var devPath = Path.Combine("native", "veh_agent", "veh_agent.dll");
+        var devPath = Path.Combine("native", "veh_agent", dllName);
         if (File.Exists(devPath)) return Path.GetFullPath(devPath);
 
+        // Fallback: if looking for x86 but only x64 exists (dev environment), return null
         return null;
     }
 
@@ -794,4 +944,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetEvent(IntPtr hEvent);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool IsWow64Process(IntPtr hProcess, out bool wow64Process);
 }

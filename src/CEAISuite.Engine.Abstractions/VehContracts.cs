@@ -14,10 +14,14 @@ public interface IVehDebugger
     Task<bool> EjectAsync(int processId, CancellationToken ct = default);
 
     /// <summary>Set a hardware breakpoint via the injected agent (DR0-DR3, max 4 simultaneous).</summary>
-    Task<VehBreakpointResult> SetBreakpointAsync(int processId, nuint address, VehBreakpointType type, CancellationToken ct = default);
+    Task<VehBreakpointResult> SetBreakpointAsync(int processId, nuint address, VehBreakpointType type,
+        int dataSize = 8, CancellationToken ct = default);
 
     /// <summary>Remove a hardware breakpoint by DR slot index (0-3).</summary>
     Task<bool> RemoveBreakpointAsync(int processId, int drSlot, CancellationToken ct = default);
+
+    /// <summary>Re-enumerate threads and apply active breakpoints to any threads missing them.</summary>
+    Task<bool> RefreshThreadsAsync(int processId, CancellationToken ct = default);
 
     /// <summary>Stream breakpoint hit events from the shared memory ring buffer.</summary>
     IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(int processId, CancellationToken ct = default);
@@ -35,6 +39,17 @@ public enum VehBreakpointType
     Write = 1,
     /// <summary>Break on data read or write (DR7 R/W = 11).</summary>
     ReadWrite = 2
+}
+
+/// <summary>Health status of the VEH agent running inside the target process.</summary>
+public enum VehAgentHealth
+{
+    /// <summary>Agent heartbeat is current (updated within last 2 seconds).</summary>
+    Healthy,
+    /// <summary>Agent heartbeat is stale (not updated for >2 seconds).</summary>
+    Unresponsive,
+    /// <summary>Agent is not injected or shared memory is invalid.</summary>
+    Unknown
 }
 
 /// <summary>Result of VEH agent injection.</summary>
@@ -59,4 +74,9 @@ public sealed record RegisterSnapshot(
     ulong R8, ulong R9, ulong R10, ulong R11);
 
 /// <summary>Current status of the VEH debugger for a process.</summary>
-public sealed record VehStatus(bool IsInjected, int ActiveBreakpoints, int TotalHits);
+public sealed record VehStatus(
+    bool IsInjected,
+    int ActiveBreakpoints,
+    int TotalHits,
+    int OverflowCount = 0,
+    VehAgentHealth AgentHealth = VehAgentHealth.Unknown);

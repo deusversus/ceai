@@ -34,21 +34,24 @@ public sealed partial class AiToolFunctions
 
     [Destructive]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
-    [Description("Set a VEH hardware breakpoint (DR0-DR3, max 4). Types: Execute, Write, ReadWrite.")]
+    [Description("Set a VEH hardware breakpoint (DR0-DR3, max 4). Types: Execute, Write, ReadWrite. DataSize: 1, 2, 4, or 8 bytes (default 8, ignored for Execute).")]
     public async Task<string> SetVehBreakpoint(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex)")] string address,
-        [Description("Breakpoint type: Execute, Write, ReadWrite")] string type = "Execute")
+        [Description("Breakpoint type: Execute, Write, ReadWrite")] string type = "Execute",
+        [Description("Data watch size in bytes: 1, 2, 4, or 8 (default 8, ignored for Execute)")] int dataSize = 8)
     {
         var pidError = ValidateDestructiveProcessId(processId);
         if (pidError is not null) return pidError;
         if (vehDebugService is null) return "VEH debugger not available.";
         if (!Enum.TryParse<VehBreakpointType>(type, true, out var bpType))
             return $"Invalid type '{type}'. Use: Execute, Write, ReadWrite.";
+        if (dataSize is not (1 or 2 or 4 or 8))
+            return $"Invalid dataSize '{dataSize}'. Use: 1, 2, 4, or 8.";
         var addr = ParseAddress(address);
-        var result = await vehDebugService.SetBreakpointAsync(processId, addr, bpType).ConfigureAwait(false);
+        var result = await vehDebugService.SetBreakpointAsync(processId, addr, bpType, dataSize).ConfigureAwait(false);
         return result.Success
-            ? $"VEH breakpoint set at 0x{addr:X} (DR{result.DrSlot}, type={bpType})"
+            ? $"VEH breakpoint set at 0x{addr:X} (DR{result.DrSlot}, type={bpType}, size={dataSize})"
             : $"Failed: {result.Error}";
     }
 
@@ -66,15 +69,29 @@ public sealed partial class AiToolFunctions
         return ok ? $"VEH breakpoint removed from DR{drSlot}." : $"Failed to remove DR{drSlot}.";
     }
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Re-enumerate threads and apply VEH breakpoints to any new threads missing them.")]
+    public async Task<string> RefreshVehThreads([Description("Process ID")] int processId)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var ok = await vehDebugService.RefreshThreadsAsync(processId).ConfigureAwait(false);
+        return ok ? "Thread refresh complete. All active breakpoints applied to new threads." : "Thread refresh failed.";
+    }
+
     [ReadOnlyTool]
     [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
-    [Description("Get VEH debugger status: injection state, active breakpoints, hit count.")]
+    [Description("Get VEH debugger status: injection state, active breakpoints, hit count, overflow count, agent health.")]
     public Task<string> GetVehStatus([Description("Process ID")] int processId)
     {
         if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
         var status = vehDebugService.GetStatus(processId);
         if (!status.IsInjected) return Task.FromResult("VEH agent: not injected.");
-        return Task.FromResult($"VEH agent: ACTIVE. {status.ActiveBreakpoints}/4 breakpoints, {status.TotalHits} total hits.");
+        return Task.FromResult(
+            $"VEH agent: ACTIVE ({status.AgentHealth}). {status.ActiveBreakpoints}/4 breakpoints, " +
+            $"{status.TotalHits} total hits, {status.OverflowCount} overflows.");
     }
 }

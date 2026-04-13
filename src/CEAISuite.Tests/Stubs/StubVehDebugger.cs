@@ -16,14 +16,26 @@ public sealed class StubVehDebugger : IVehDebugger
     {
         public bool IsInjected;
         public int[] DrSlots = new int[4]; // 0=free, 1=used
+        public int[] DataSizes = new int[4]; // per-slot data size
+        public VehBreakpointType[] BpTypes = new VehBreakpointType[4];
         public int TotalHits { get; set; }
+        public int OverflowCount { get; set; }
         public List<VehHitEvent> PendingHits = new();
     }
+
+    /// <summary>Simulate agent health for testing. Default: Healthy when injected.</summary>
+    public VehAgentHealth SimulatedHealth { get; set; } = VehAgentHealth.Healthy;
 
     public void AddCannedHit(int processId, VehHitEvent hit)
     {
         if (_states.TryGetValue(processId, out var state))
             state.PendingHits.Add(hit);
+    }
+
+    public void SimulateOverflow(int processId, int count)
+    {
+        if (_states.TryGetValue(processId, out var state))
+            state.OverflowCount += count;
     }
 
     public Task<VehInjectResult> InjectAsync(int processId, CancellationToken ct = default)
@@ -39,15 +51,21 @@ public sealed class StubVehDebugger : IVehDebugger
         return Task.FromResult(_states.TryRemove(processId, out _));
     }
 
-    public Task<VehBreakpointResult> SetBreakpointAsync(int processId, nuint address, VehBreakpointType type, CancellationToken ct = default)
+    public Task<VehBreakpointResult> SetBreakpointAsync(
+        int processId, nuint address, VehBreakpointType type,
+        int dataSize = 8, CancellationToken ct = default)
     {
         if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
             return Task.FromResult(new VehBreakpointResult(false, Error: "Not injected"));
+        if (dataSize is not (1 or 2 or 4 or 8))
+            return Task.FromResult(new VehBreakpointResult(false, Error: $"Invalid data size {dataSize}"));
         for (int i = 0; i < 4; i++)
         {
             if (state.DrSlots[i] == 0)
             {
                 state.DrSlots[i] = 1;
+                state.DataSizes[i] = dataSize;
+                state.BpTypes[i] = type;
                 return Task.FromResult(new VehBreakpointResult(true, i));
             }
         }
@@ -59,6 +77,15 @@ public sealed class StubVehDebugger : IVehDebugger
         if (!_states.TryGetValue(processId, out var state)) return Task.FromResult(false);
         if (drSlot < 0 || drSlot > 3 || state.DrSlots[drSlot] == 0) return Task.FromResult(false);
         state.DrSlots[drSlot] = 0;
+        state.DataSizes[drSlot] = 0;
+        state.BpTypes[drSlot] = default;
+        return Task.FromResult(true);
+    }
+
+    public Task<bool> RefreshThreadsAsync(int processId, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(false);
         return Task.FromResult(true);
     }
 
@@ -78,6 +105,11 @@ public sealed class StubVehDebugger : IVehDebugger
     {
         if (!_states.TryGetValue(processId, out var state))
             return new VehStatus(false, 0, 0);
-        return new VehStatus(state.IsInjected, state.DrSlots.Count(s => s != 0), state.TotalHits);
+        return new VehStatus(
+            state.IsInjected,
+            state.DrSlots.Count(s => s != 0),
+            state.TotalHits,
+            state.OverflowCount,
+            SimulatedHealth);
     }
 }

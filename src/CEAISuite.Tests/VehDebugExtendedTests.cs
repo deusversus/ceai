@@ -318,6 +318,161 @@ public class VehDebugExtendedTests
         Assert.Equal(1, successCount); // Only one should win the race
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase A: Data Size Validation
+    // ══════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public async Task SetBreakpoint_ValidDataSizes_Succeeds(int dataSize)
+    {
+        var (svc, _) = CreateService();
+        await svc.InjectAsync(AttachedPid);
+
+        var result = await svc.SetBreakpointAsync(AttachedPid, (nuint)0x400000, VehBreakpointType.Write, dataSize);
+
+        Assert.True(result.Success);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(5)]
+    [InlineData(16)]
+    public async Task SetVehBreakpoint_InvalidDataSize_ReturnsError(int dataSize)
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.SetVehBreakpoint(AttachedPid, "0x400000", "Write", dataSize);
+        Assert.Contains("Invalid", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task SetVehBreakpoint_WithDataSize_ReportsSizeInOutput()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.SetVehBreakpoint(AttachedPid, "0x400000", "Write", 2);
+        Assert.Contains("size=2", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase A: Overflow Detection
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task GetVehStatus_WithOverflows_ReportsOverflowCount()
+    {
+        var engine = new StubVehDebugger();
+        var svc = new VehDebugService(engine);
+        await svc.InjectAsync(AttachedPid);
+        engine.SimulateOverflow(AttachedPid, 5);
+
+        var status = svc.GetStatus(AttachedPid);
+
+        Assert.Equal(5, status.OverflowCount);
+    }
+
+    [Fact]
+    public async Task GetVehStatus_ReportsOverflowInToolOutput()
+    {
+        var engine = new StubVehDebugger();
+        var tools = CreateToolsWithVeh(AttachedPid, engine);
+        await tools.InjectVehAgent(AttachedPid);
+        engine.SimulateOverflow(AttachedPid, 3);
+
+        var result = await tools.GetVehStatus(AttachedPid);
+
+        Assert.Contains("3 overflows", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase A: Agent Health Monitoring
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task GetVehStatus_HealthyAgent_ReportsHealthy()
+    {
+        var engine = new StubVehDebugger { SimulatedHealth = VehAgentHealth.Healthy };
+        var svc = new VehDebugService(engine);
+        await svc.InjectAsync(AttachedPid);
+
+        var status = svc.GetStatus(AttachedPid);
+
+        Assert.Equal(VehAgentHealth.Healthy, status.AgentHealth);
+    }
+
+    [Fact]
+    public async Task GetVehStatus_UnresponsiveAgent_ReportsUnresponsive()
+    {
+        var engine = new StubVehDebugger { SimulatedHealth = VehAgentHealth.Unresponsive };
+        var svc = new VehDebugService(engine);
+        await svc.InjectAsync(AttachedPid);
+
+        var status = svc.GetStatus(AttachedPid);
+
+        Assert.Equal(VehAgentHealth.Unresponsive, status.AgentHealth);
+    }
+
+    [Fact]
+    public async Task GetVehStatus_ToolOutput_IncludesHealth()
+    {
+        var engine = new StubVehDebugger { SimulatedHealth = VehAgentHealth.Healthy };
+        var tools = CreateToolsWithVeh(AttachedPid, engine);
+        await tools.InjectVehAgent(AttachedPid);
+
+        var result = await tools.GetVehStatus(AttachedPid);
+
+        Assert.Contains("Healthy", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase A: Thread Refresh
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task RefreshThreads_AfterInject_Succeeds()
+    {
+        var (svc, engine) = CreateService();
+        await svc.InjectAsync(AttachedPid);
+
+        var ok = await svc.RefreshThreadsAsync(AttachedPid);
+
+        Assert.True(ok);
+    }
+
+    [Fact]
+    public async Task RefreshThreads_NotInjected_ReturnsFalse()
+    {
+        var (svc, _) = CreateService();
+
+        var ok = await svc.RefreshThreadsAsync(AttachedPid);
+
+        Assert.False(ok);
+    }
+
+    [Fact]
+    public async Task RefreshVehThreads_Tool_Succeeds()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+
+        var result = await tools.RefreshVehThreads(AttachedPid);
+
+        Assert.Contains("refresh complete", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RefreshVehThreads_WrongPid_Rejected()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.RefreshVehThreads(WrongPid);
+        Assert.Contains("PID", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── Helper ──
 
     private static (VehDebugService service, StubVehDebugger engine) CreateService()

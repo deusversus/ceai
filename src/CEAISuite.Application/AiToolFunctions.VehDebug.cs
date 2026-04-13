@@ -131,6 +131,9 @@ public sealed partial class AiToolFunctions
     public Task<string> GetVehStatus([Description("Process ID")] int processId)
     {
         if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
+        // Validate PID for consistency — prevents information leak about arbitrary processes
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return Task.FromResult(pidError);
         var status = vehDebugService.GetStatus(processId);
         if (!status.IsInjected) return Task.FromResult("VEH agent: not injected.");
         return Task.FromResult(

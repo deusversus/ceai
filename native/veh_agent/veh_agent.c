@@ -185,9 +185,11 @@ static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
     LONG writeIdx, readIdx;
     LONG slot;
 
-    /* Check for overflow before claiming a slot */
-    writeIdx = g_shm->hitWriteIndex;
-    readIdx = g_shm->hitReadIndex;
+    /* Check for overflow before claiming a slot.
+     * Use interlocked reads to ensure compiler doesn't reorder these
+     * relative to the InterlockedIncrement below. */
+    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
     if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
     {
         InterlockedIncrement(&g_shm->overflowCount);
@@ -410,15 +412,20 @@ static void RefreshThreadBreakpoints(void)
                         case 3: currentDr = ctx.Dr3; break;
                         default: currentDr = 0; break;
                     }
-                    if (currentDr != g_bpAddresses[i]) {
-                        switch (i) {
-                            case 0: ctx.Dr0 = g_bpAddresses[i]; break;
-                            case 1: ctx.Dr1 = g_bpAddresses[i]; break;
-                            case 2: ctx.Dr2 = g_bpAddresses[i]; break;
-                            case 3: ctx.Dr3 = g_bpAddresses[i]; break;
+                    /* Check both DR address AND DR7 local enable bit.
+                     * Anti-cheat may clear DR7 while leaving DR addresses intact. */
+                    {
+                        BOOL dr7Enabled = (ctx.Dr7 & (1ULL << (i * 2))) != 0;
+                        if (currentDr != g_bpAddresses[i] || !dr7Enabled) {
+                            switch (i) {
+                                case 0: ctx.Dr0 = g_bpAddresses[i]; break;
+                                case 1: ctx.Dr1 = g_bpAddresses[i]; break;
+                                case 2: ctx.Dr2 = g_bpAddresses[i]; break;
+                                case 3: ctx.Dr3 = g_bpAddresses[i]; break;
+                            }
+                            ctx.Dr7 = EnableDr7Slot(ctx.Dr7, i, g_bpTypes[i], g_bpSizes[i]);
+                            needsUpdate = TRUE;
                         }
-                        ctx.Dr7 = EnableDr7Slot(ctx.Dr7, i, g_bpTypes[i], g_bpSizes[i]);
-                        needsUpdate = TRUE;
                     }
                 }
                 if (needsUpdate) {
@@ -497,6 +504,73 @@ static DWORD WINAPI CommandThread(LPVOID param)
     return 0;
 }
 
+/* ── Agent initialization (runs on dedicated thread, NOT under loader lock) ── */
+
+static DWORD WINAPI AgentInitThread(LPVOID param)
+{
+    char shmName[128], cmdName[128], hitName[128];
+    DWORD pid = GetCurrentProcessId();
+    DWORD shmTotalSize;
+
+    (void)param;
+
+    wsprintfA(shmName, "Local\\CEAISuite_VEH_%u", pid);
+    wsprintfA(cmdName, "Local\\CEAISuite_VEH_Cmd_%u", pid);
+    wsprintfA(hitName, "Local\\CEAISuite_VEH_Hit_%u", pid);
+
+    /* Open shared memory (created by host before injection) */
+    g_shmHandle = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, shmName);
+    if (!g_shmHandle) {
+        return 1;
+    }
+
+    /* First map just the header to read maxHits */
+    g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, SHM_HEADER_SIZE);
+    if (!g_shm) {
+        CloseHandle(g_shmHandle);
+        return 1;
+    }
+
+    /* Validate magic and version */
+    if (g_shm->magic != SHM_MAGIC || g_shm->version != SHM_VERSION) {
+        UnmapViewOfFile(g_shm);
+        CloseHandle(g_shmHandle);
+        g_shm = NULL;
+        return 1;
+    }
+
+    /* Read host-configured maxHits */
+    g_maxHits = g_shm->maxHits;
+    if (g_maxHits == 0 || g_maxHits > 65536) g_maxHits = DEFAULT_MAX_HITS;
+    shmTotalSize = SHM_HEADER_SIZE + g_maxHits * HIT_ENTRY_SIZE;
+
+    /* Remap with full size including ring buffer */
+    UnmapViewOfFile(g_shm);
+    g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, shmTotalSize);
+    if (!g_shm) {
+        CloseHandle(g_shmHandle);
+        return 1;
+    }
+
+    /* Open events (created by host) */
+    g_cmdEvent = OpenEventA(EVENT_ALL_ACCESS, FALSE, cmdName);
+    g_hitEvent = OpenEventA(EVENT_ALL_ACCESS, FALSE, hitName);
+
+    /* Install VEH — priority handler (called first) */
+    g_vehHandle = AddVectoredExceptionHandler(1, VehHandler);
+    if (!g_vehHandle) {
+        InterlockedExchange(&g_shm->agentStatus, STATUS_ERROR);
+        return 1;
+    }
+
+    /* Signal ready — then fall through to command loop */
+    InterlockedExchange(&g_shm->agentStatus, STATUS_READY);
+
+    /* Run command loop on this thread (reuse init thread as command thread) */
+    CommandThread(NULL);
+    return 0;
+}
+
 /* ── DLL entry point ── */
 
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
@@ -505,65 +579,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
     (void)reserved;
 
     if (reason == DLL_PROCESS_ATTACH) {
-        char shmName[128], cmdName[128], hitName[128];
-        DWORD pid = GetCurrentProcessId();
-        DWORD shmTotalSize;
-
-        wsprintfA(shmName, "Local\\CEAISuite_VEH_%u", pid);
-        wsprintfA(cmdName, "Local\\CEAISuite_VEH_Cmd_%u", pid);
-        wsprintfA(hitName, "Local\\CEAISuite_VEH_Hit_%u", pid);
-
-        /* Open shared memory (created by host before injection) */
-        g_shmHandle = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, shmName);
-        if (!g_shmHandle) {
-            return FALSE; /* Host didn't create shared memory — abort */
-        }
-
-        /* First map just the header to read maxHits */
-        g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, SHM_HEADER_SIZE);
-        if (!g_shm) {
-            CloseHandle(g_shmHandle);
-            return FALSE;
-        }
-
-        /* Validate magic and version */
-        if (g_shm->magic != SHM_MAGIC || g_shm->version != SHM_VERSION) {
-            UnmapViewOfFile(g_shm);
-            CloseHandle(g_shmHandle);
-            g_shm = NULL;
-            return FALSE;
-        }
-
-        /* Read host-configured maxHits */
-        g_maxHits = g_shm->maxHits;
-        if (g_maxHits == 0 || g_maxHits > 65536) g_maxHits = DEFAULT_MAX_HITS;
-        shmTotalSize = SHM_HEADER_SIZE + g_maxHits * HIT_ENTRY_SIZE;
-
-        /* Remap with full size including ring buffer */
-        UnmapViewOfFile(g_shm);
-        g_shm = (ShmHeader*)MapViewOfFile(g_shmHandle, FILE_MAP_ALL_ACCESS, 0, 0, shmTotalSize);
-        if (!g_shm) {
-            CloseHandle(g_shmHandle);
-            return FALSE;
-        }
-
-        /* Open events (created by host) */
-        g_cmdEvent = OpenEventA(EVENT_ALL_ACCESS, FALSE, cmdName);
-        g_hitEvent = OpenEventA(EVENT_ALL_ACCESS, FALSE, hitName);
-
-        /* Install VEH — priority handler (called first) */
-        g_vehHandle = AddVectoredExceptionHandler(1, VehHandler);
-        if (!g_vehHandle) {
-            InterlockedExchange(&g_shm->agentStatus, STATUS_ERROR);
-            return FALSE;
-        }
-
-        /* Start command processing thread */
+        /* Minimize work under loader lock — only create the init thread.
+         * All SHM mapping, event opening, and VEH registration happens on the
+         * init thread, outside the loader lock, avoiding potential deadlocks. */
         g_running = TRUE;
-        g_cmdThread = CreateThread(NULL, 0, CommandThread, NULL, 0, NULL);
-
-        /* Signal ready */
-        InterlockedExchange(&g_shm->agentStatus, STATUS_READY);
+        g_cmdThread = CreateThread(NULL, 0, AgentInitThread, NULL, 0, NULL);
+        if (!g_cmdThread) return FALSE;
     }
     else if (reason == DLL_PROCESS_DETACH) {
         DWORD i;

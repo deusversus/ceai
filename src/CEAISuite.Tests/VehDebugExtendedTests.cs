@@ -87,6 +87,18 @@ public class VehDebugExtendedTests
         Assert.Contains("PID", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task RemoveVehBreakpoint_InvalidDrSlot_ReturnsFailed(int drSlot)
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.RemoveVehBreakpoint(AttachedPid, drSlot);
+        Assert.Contains("Failed", result);
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // AI Tool Tests — Null Service Fallback
     // ══════════════════════════════════════════════════════════════════

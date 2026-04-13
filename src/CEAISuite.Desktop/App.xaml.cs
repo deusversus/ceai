@@ -242,7 +242,8 @@ public partial class App : System.Windows.Application
                 breakpointEngine: sp.GetService<IBreakpointEngine>(),
                 scanEngine: sp.GetService<IScanEngine>(),
                 memoryProtectionEngine: sp.GetService<IMemoryProtectionEngine>(),
-                aiAssistant: sp.GetService<ILuaAiAssistant>()));
+                aiAssistant: sp.GetService<ILuaAiAssistant>(),
+                symbolEngine: sp.GetService<ISymbolEngine>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();

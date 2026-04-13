@@ -431,6 +431,52 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
+        script.Globals["createPopupMenu"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"popup_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaPopupMenuElement(elementId);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["addItem"] = (Func<string, DynValue>)(caption =>
+            {
+                var subId = $"pmi_{Interlocked.Increment(ref _nextElementId)}";
+                var subItem = new LuaMenuItemElement(subId) { Caption = caption };
+                element.Items.Add(subItem);
+
+                var subTable = new Table(script);
+                subTable["_id"] = subId;
+                subTable["_formId"] = formId;
+                subTable["setCaption"] = (Action<string>)(c => subItem.Caption = c);
+                var cbs = _callbacks;
+                subTable.MetaTable = new Table(script);
+                subTable.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
+                {
+                    if (key.String is "onClick")
+                        cbs[$"{formId}:{subId}:onClick"] = value;
+                    else
+                        subTable.Set(key.String, value);
+                });
+                return DynValue.NewTable(subTable);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createSplitter"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"spl_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaSplitterElement(elementId, 10, 10, 5, 200);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["setVertical"] = (Action<bool>)(v =>
+            {
+                element.IsVertical = v;
+                formHost.UpdateElement(formId, element);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
         // Wire click events back to Lua callbacks (store delegates for unsubscribe)
         _clickHandler = (fId, eId) =>
         {

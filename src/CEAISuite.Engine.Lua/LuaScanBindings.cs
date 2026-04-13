@@ -76,6 +76,13 @@ internal static class LuaScanBindings
             return DynValue.NewTable(table);
         });
 
+        // Track last-created MemScan for getCurrentMemScan()
+        DynValue? lastMemScan = null;
+
+        // getCurrentMemScan() → the most recently created MemScan, or nil
+        script.Globals["getCurrentMemScan"] = (Func<DynValue>)(() =>
+            lastMemScan ?? DynValue.Nil);
+
         // createMemScan() → MemScan object (table with methods)
         script.Globals["createMemScan"] = (Func<DynValue>)(() =>
         {
@@ -142,7 +149,9 @@ internal static class LuaScanBindings
                 currentResults = null;
             });
 
-            return DynValue.NewTable(memScan);
+            var result = DynValue.NewTable(memScan);
+            lastMemScan = result;
+            return result;
         });
 
         // AOBReplace(searchPattern, replaceBytes) → number of replacements

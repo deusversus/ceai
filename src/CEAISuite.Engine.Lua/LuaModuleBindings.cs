@@ -14,8 +14,25 @@ internal static class LuaModuleBindings
         MoonSharpLuaEngine engine,
         IEngineFacade engineFacade,
         IScanEngine? scanEngine,
-        IAutoAssemblerEngine? autoAssembler)
+        IAutoAssemblerEngine? autoAssembler,
+        ISymbolEngine? symbolEngine = null)
     {
+        // reinitializeSymbolhandler() — reload symbols for all modules
+        script.Globals["reinitializeSymbolhandler"] = (Action)(() =>
+        {
+            if (symbolEngine is null)
+                throw new ScriptRuntimeException("reinitializeSymbolhandler requires symbol engine");
+
+            var pid = RequireProcess(engine);
+            var attachment = engineFacade.AttachAsync(pid).GetAwaiter().GetResult();
+            symbolEngine.Cleanup(pid);
+            foreach (var mod in attachment.Modules)
+            {
+                symbolEngine.LoadSymbolsForModuleAsync(pid, mod.Name, mod.BaseAddress, mod.SizeBytes)
+                    .GetAwaiter().GetResult();
+            }
+        });
+
         // enumModules() → table of {name, base, size}
         script.Globals["enumModules"] = (Func<DynValue>)(() =>
         {
@@ -132,6 +149,40 @@ internal static class LuaModuleBindings
             }
 
             engineFacade.WriteBytesAsync(pid, resolved, bytes).GetAwaiter().GetResult();
+        });
+
+        // executeCode(address) — create a remote thread at the given address
+        script.Globals["executeCode"] = (Action<DynValue>)(addrArg =>
+        {
+            var pid = RequireProcess(engine);
+            var address = LuaBindingHelpers.ResolveAddressArg(addrArg, pid, engineFacade, autoAssembler);
+
+            // Delegate to AA engine's createthread infrastructure via a minimal AA script
+            if (autoAssembler is not null)
+            {
+                var script2 = $"[ENABLE]\ncreatethread(0x{(ulong)address:X})\n[DISABLE]\n";
+                autoAssembler.EnableAsync(pid, script2).GetAwaiter().GetResult();
+            }
+            else
+            {
+                throw new ScriptRuntimeException("executeCode requires Auto Assembler engine");
+            }
+        });
+
+        // injectDLL(path) — load a DLL into the target process
+        script.Globals["injectDLL"] = (Action<string>)(dllPath =>
+        {
+            var pid = RequireProcess(engine);
+
+            if (autoAssembler is not null)
+            {
+                var script2 = $"[ENABLE]\nloadlibrary({dllPath})\n[DISABLE]\n";
+                autoAssembler.EnableAsync(pid, script2).GetAwaiter().GetResult();
+            }
+            else
+            {
+                throw new ScriptRuntimeException("injectDLL requires Auto Assembler engine");
+            }
         });
 
         // enumMemoryRegions() → table of regions

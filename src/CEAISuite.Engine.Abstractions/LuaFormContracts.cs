@@ -124,6 +124,18 @@ public sealed class LuaMenuItemElement(string id)
     public List<LuaMenuItemElement> SubItems { get; set; } = [];
 }
 
+public sealed class LuaPopupMenuElement(string id)
+    : LuaFormElement(id, "popupmenu", 0, 0, 0, 0)
+{
+    public List<LuaMenuItemElement> Items { get; set; } = [];
+}
+
+public sealed class LuaSplitterElement(string id, int x, int y, int width, int height)
+    : LuaFormElement(id, "splitter", x, y, width, height)
+{
+    public bool IsVertical { get; set; }
+}
+
 /// <summary>
 /// Host interface for rendering Lua-created forms. Implemented by the WPF layer.
 /// The engine creates descriptors; the host renders and reports interactions.

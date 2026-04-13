@@ -440,7 +440,16 @@ public sealed class LuaFormHostService : ILuaFormHost
                 LuaImageElement img => CreateImage(img),
                 LuaRadioGroupElement rdg => CreateRadioGroup(form.Id, rdg),
                 LuaTabControlElement tab => CreateTabControl(tab),
-                LuaMenuItemElement => null, // Menus are handled separately via window.Menu
+                LuaMenuItemElement => null, // Menus are handled separately
+                LuaPopupMenuElement => null, // Popup menus are non-visual until shown
+                LuaSplitterElement spl => new GridSplitter
+                {
+                    Width = spl.IsVertical ? 5 : double.NaN,
+                    Height = spl.IsVertical ? double.NaN : 5,
+                    Background = Brushes.Gray,
+                    HorizontalAlignment = HorizontalAlignment.Stretch,
+                    VerticalAlignment = VerticalAlignment.Stretch
+                },
                 LuaPanelElement => new Border { BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1) },
                 LuaGroupBoxElement grp => new GroupBox { Header = grp.Caption ?? "Group" },
                 LuaTimerElement => null, // Timers are non-visual; started separately

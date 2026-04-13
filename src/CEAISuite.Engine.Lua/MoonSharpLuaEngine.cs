@@ -21,6 +21,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IScanEngine? _scanEngine;
     private readonly IMemoryProtectionEngine? _memoryProtectionEngine;
     private readonly ILuaAiAssistant? _aiAssistant;
+    private readonly ISymbolEngine? _symbolEngine;
     private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
@@ -66,7 +67,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         IBreakpointEngine? breakpointEngine = null,
         IScanEngine? scanEngine = null,
         IMemoryProtectionEngine? memoryProtectionEngine = null,
-        ILuaAiAssistant? aiAssistant = null)
+        ILuaAiAssistant? aiAssistant = null,
+        ISymbolEngine? symbolEngine = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
@@ -76,6 +78,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _scanEngine = scanEngine;
         _memoryProtectionEngine = memoryProtectionEngine;
         _aiAssistant = aiAssistant;
+        _symbolEngine = symbolEngine;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -281,7 +284,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         if (_engineFacade is not null)
         {
             CeApiBindings.Register(script, this, _engineFacade, _autoAssembler, _formHost);
-            LuaModuleBindings.Register(script, this, _engineFacade, _scanEngine, _autoAssembler);
+            LuaModuleBindings.Register(script, this, _engineFacade, _scanEngine, _autoAssembler, _symbolEngine);
 
             if (_disassemblyEngine is not null)
                 LuaDisassemblyBindings.Register(script, this, _disassemblyEngine, _engineFacade, _autoAssembler);

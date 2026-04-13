@@ -39,6 +39,24 @@ public class EngineWindowsBreakpointIntegrationTests
         throw ex;
     }
 
+    /// <summary>D1: Poll for hits with timeout instead of fixed delay. CI-friendly.</summary>
+    private static async Task<IReadOnlyList<BreakpointHitEvent>> WaitForHitsAsync(
+        WindowsBreakpointEngine engine,
+        string breakpointId,
+        int maxEntries = 50,
+        int timeoutMs = 10_000,
+        int pollIntervalMs = 200)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            var hits = await engine.GetHitLogAsync(breakpointId, maxEntries).ConfigureAwait(false);
+            if (hits.Count > 0) return hits;
+            await Task.Delay(pollIntervalMs).ConfigureAwait(false);
+        }
+        return await engine.GetHitLogAsync(breakpointId, maxEntries).ConfigureAwait(false);
+    }
+
     [Fact]
     public async Task TraceFromBreakpoint_KnownInstructions_ReturnsTrace()
     {
@@ -95,12 +113,10 @@ public class EngineWindowsBreakpointIntegrationTests
             Assert.NotNull(bp);
             Assert.True(bp.IsEnabled);
 
-            // Wait for the already-running loop to trigger hits via the debug event loop
-            await Task.Delay(2000);
-
-            var hits = await engine.GetHitLogAsync(bp.Id, maxEntries: 50, TestContext.Current.CancellationToken);
+            // D1: Poll for hits with timeout instead of fixed delay
+            var hits = await WaitForHitsAsync(engine, bp.Id, timeoutMs: 10_000);
             if (hits.Count == 0)
-                Assert.Skip("Breakpoint was armed but no hits were recorded (debug event loop may not have processed events in time)");
+                Assert.Skip("Breakpoint was armed but no hits were recorded after 10s (debug event loop may not have processed events in time)");
         }
         finally
         {

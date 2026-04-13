@@ -321,6 +321,8 @@ public sealed class BreakpointService : IDisposable
         CancellationToken cancellationToken = default)
     {
         EnsureAvailable();
+        if (filePath.Contains(".."))
+            throw new ArgumentException("Path traversal rejected: '..' not allowed in file paths.");
         var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, MaxHitLogEntries, cancellationToken).ConfigureAwait(false);
 
         if (format == HitLogExportFormat.Csv)
@@ -483,6 +485,8 @@ public sealed class BreakpointService : IDisposable
         CancellationToken ct = default)
     {
         EnsureAvailable();
+        if (filePath.Contains(".."))
+            throw new ArgumentException("Path traversal rejected: '..' not allowed in file paths.");
         var bps = await breakpointEngine!.ListBreakpointsAsync(processId, ct).ConfigureAwait(false);
 
         var xml = new XElement("BreakpointProfiles",

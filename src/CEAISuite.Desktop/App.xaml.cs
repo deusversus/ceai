@@ -281,10 +281,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<ISymbolEngine, WindowsSymbolEngine>();
         services.AddSingleton<IDisassemblyEngine>(sp =>
             new WindowsDisassemblyEngine(sp.GetRequiredService<ISymbolEngine>()));
+        services.AddSingleton<IBreakpointEventBus, BreakpointEventBus>();
         services.AddSingleton<IBreakpointEngine>(sp =>
             new WindowsBreakpointEngine(
                 sp.GetRequiredService<ILogger<WindowsBreakpointEngine>>(),
-                sp.GetService<IVehDebugger>()));
+                sp.GetService<IVehDebugger>(),
+                sp.GetService<IBreakpointEventBus>()));
         services.AddSingleton<ILuaFormHost, LuaFormHostService>();
         services.AddSingleton<ILuaScriptEngine>(sp =>
             new MoonSharpLuaEngine(

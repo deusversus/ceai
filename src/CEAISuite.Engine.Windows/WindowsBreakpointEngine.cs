@@ -12,11 +12,16 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 {
     private readonly ILogger<WindowsBreakpointEngine> _logger;
     private readonly IVehDebugger? _vehDebugger;
+    private readonly IBreakpointEventBus? _eventBus;
 
-    public WindowsBreakpointEngine(ILogger<WindowsBreakpointEngine> logger, IVehDebugger? vehDebugger = null)
+    public WindowsBreakpointEngine(
+        ILogger<WindowsBreakpointEngine> logger,
+        IVehDebugger? vehDebugger = null,
+        IBreakpointEventBus? eventBus = null)
     {
         _logger = logger;
         _vehDebugger = vehDebugger;
+        _eventBus = eventBus;
     }
 
     private const uint ProcessQueryInformation = 0x0400;
@@ -213,6 +218,11 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     }
 
                     _breakpointRegistry[breakpoint.Id] = breakpoint;
+
+                    // C1: Publish breakpoint-added event
+                    _eventBus?.Publish(new BreakpointAddedEvent(
+                        breakpoint.Id, $"0x{address:X}", resolvedMode.ToString(), type.ToString()));
+
                     return breakpoint.ToDescriptor();
                 }
             },
@@ -334,6 +344,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 }
 
                 _breakpointRegistry.TryRemove(breakpointId, out _);
+
+                // C1: Publish removal event
+                _eventBus?.Publish(new BreakpointRemovedEvent(breakpointId));
 
                 if (detachSession)
                 {
@@ -1609,10 +1622,14 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 DateTimeOffset.UtcNow,
                 registerSnapshot));
 
-        Interlocked.Increment(ref breakpoint.HitCount);
+        var newCount = Interlocked.Increment(ref breakpoint.HitCount);
+
+        // C1: Publish hit event
+        _eventBus?.Publish(new BreakpointHitOccurredEvent(
+            breakpoint.Id, $"0x{address:X}", threadId, newCount));
 
         // Single-hit enforcement: disable immediately after first hit
-        if (breakpoint.SingleHit && breakpoint.HitCount >= 1)
+        if (breakpoint.SingleHit && newCount >= 1)
         {
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Single-hit BP {BreakpointId} at 0x{Address:X}: auto-disabling after first hit", breakpoint.Id, breakpoint.Address);
@@ -1636,6 +1653,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 breakpoint.ThrottleDisabled = true;
                 breakpoint.ThrottleDisabledAtTicks = Environment.TickCount64;
                 _logger.LogWarning("Auto-disabling BP {BreakpointId} at 0x{Address:X}: exceeded {MaxHitsPerSecond} hits/sec ({Hits} in window). This prevents game freezes", breakpoint.Id, breakpoint.Address, MaxHitsPerSecond, hits);
+
+                // C1: Publish throttle event
+                _eventBus?.Publish(new BreakpointThrottledEvent(breakpoint.Id, hits));
+
                 return true; // caller should disable this BP
             }
         }

@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.Logging;
 
@@ -15,6 +17,24 @@ public sealed record BreakpointOverview(
     string Mode = "Hardware",
     string? Condition = null,
     int? ThreadFilter = null);
+
+/// <summary>C3: Filter for hit log queries.</summary>
+public sealed record HitLogFilter(
+    int? ThreadId = null,
+    DateTimeOffset? MinTimestamp = null,
+    DateTimeOffset? MaxTimestamp = null);
+
+/// <summary>C3: Aggregated statistics for a breakpoint's hit log.</summary>
+public sealed record HitStatistics(
+    int TotalHits,
+    double HitsPerSecond,
+    int UniqueThreads,
+    IReadOnlyList<string> TopAddresses,
+    DateTimeOffset? FirstHit,
+    DateTimeOffset? LastHit);
+
+/// <summary>C3: Export format for hit logs.</summary>
+public enum HitLogExportFormat { Csv, Json }
 
 /// <summary>B3: A named group of breakpoints for atomic enable/disable operations.</summary>
 public sealed record BreakpointGroup(
@@ -202,6 +222,102 @@ public sealed class BreakpointService(
             h.ThreadId,
             h.TimestampUtc.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
             h.RegisterSnapshot)).ToArray();
+    }
+
+    // ── C3: Hit Log Enhancements ──
+
+    /// <summary>Get filtered hit log for a breakpoint.</summary>
+    public async Task<IReadOnlyList<BreakpointHitOverview>> GetFilteredHitLogAsync(
+        string breakpointId,
+        HitLogFilter filter,
+        int maxEntries = 500,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, maxEntries, cancellationToken).ConfigureAwait(false);
+
+        IEnumerable<BreakpointHitEvent> filtered = hits;
+        if (filter.ThreadId.HasValue)
+            filtered = filtered.Where(h => h.ThreadId == filter.ThreadId.Value);
+        if (filter.MinTimestamp.HasValue)
+            filtered = filtered.Where(h => h.TimestampUtc >= filter.MinTimestamp.Value);
+        if (filter.MaxTimestamp.HasValue)
+            filtered = filtered.Where(h => h.TimestampUtc <= filter.MaxTimestamp.Value);
+
+        return filtered.Select(h => new BreakpointHitOverview(
+            h.BreakpointId, $"0x{h.Address:X}", h.ThreadId,
+            h.TimestampUtc.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
+            h.RegisterSnapshot)).ToArray();
+    }
+
+    /// <summary>Compute aggregated statistics for a breakpoint's hit log.</summary>
+    public async Task<HitStatistics> GetHitStatisticsAsync(
+        string breakpointId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, MaxHitLogEntries, cancellationToken).ConfigureAwait(false);
+
+        if (hits.Count == 0)
+            return new HitStatistics(0, 0, 0, [], null, null);
+
+        var first = hits[0].TimestampUtc;
+        var last = hits[^1].TimestampUtc;
+        var duration = (last - first).TotalSeconds;
+        var hitsPerSecond = duration > 0 ? hits.Count / duration : hits.Count;
+
+        var topAddresses = hits
+            .GroupBy(h => h.Address)
+            .OrderByDescending(g => g.Count())
+            .Take(5)
+            .Select(g => $"0x{g.Key:X} ({g.Count()})")
+            .ToList();
+
+        return new HitStatistics(
+            hits.Count,
+            Math.Round(hitsPerSecond, 2),
+            hits.Select(h => h.ThreadId).Distinct().Count(),
+            topAddresses,
+            first,
+            last);
+    }
+
+    private const int MaxHitLogEntries = 500;
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new() { WriteIndented = true };
+
+    /// <summary>Export hit log to a file in CSV or JSON format.</summary>
+    public async Task<string> ExportHitLogAsync(
+        string breakpointId,
+        string filePath,
+        HitLogExportFormat format,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAvailable();
+        var hits = await breakpointEngine!.GetHitLogAsync(breakpointId, MaxHitLogEntries, cancellationToken).ConfigureAwait(false);
+
+        if (format == HitLogExportFormat.Csv)
+        {
+            var sb = new StringBuilder();
+            sb.AppendLine("BreakpointId,Address,ThreadId,Timestamp");
+            foreach (var h in hits)
+                sb.AppendLine(CultureInfo.InvariantCulture, $"{h.BreakpointId},0x{h.Address:X},{h.ThreadId},{h.TimestampUtc:O}");
+            await File.WriteAllTextAsync(filePath, sb.ToString(), cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var data = hits.Select(h => new
+            {
+                h.BreakpointId,
+                Address = $"0x{h.Address:X}",
+                h.ThreadId,
+                Timestamp = h.TimestampUtc.ToString("O"),
+                Registers = h.RegisterSnapshot
+            });
+            var json = JsonSerializer.Serialize(data, IndentedJsonOptions);
+            await File.WriteAllTextAsync(filePath, json, cancellationToken).ConfigureAwait(false);
+        }
+
+        return $"Exported {hits.Count} hits to {filePath}";
     }
 
     /// <summary>Set a conditional breakpoint with an expression and optional thread filter.</summary>

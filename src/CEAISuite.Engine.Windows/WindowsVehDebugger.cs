@@ -16,12 +16,14 @@ namespace CEAISuite.Engine.Windows;
 public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 {
     private readonly ILogger<WindowsVehDebugger> _logger;
+    private readonly ILuaScriptEngine? _luaEngine;
     private readonly ConcurrentDictionary<int, VehProcessState> _states = new();
     private bool _disposed;
 
-    public WindowsVehDebugger(ILogger<WindowsVehDebugger>? logger = null)
+    public WindowsVehDebugger(ILogger<WindowsVehDebugger>? logger = null, ILuaScriptEngine? luaEngine = null)
     {
         _logger = logger ?? NullLoggerFactory.Instance.CreateLogger<WindowsVehDebugger>();
+        _luaEngine = luaEngine;
     }
 
     // ─── Shared Memory Constants (must match veh_agent.c exactly) ───
@@ -108,6 +110,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         public int MaxHits = DefaultMaxHits;
         public bool IsWow64Target;
         public readonly int[] ActiveDrSlots = new int[MaxDrSlots]; // 0=free, 1=in-use
+        public readonly BreakpointCondition?[] Conditions = new BreakpointCondition?[MaxDrSlots];
+        public readonly string?[] LuaCallbacks = new string?[MaxDrSlots];
+        public readonly int[] SlotHitCounts = new int[MaxDrSlots]; // per-slot hit count for conditions
         public int TotalHits;
         public int LastOverflowCount;       // track overflow count for delta detection
         public string? TempAgentPath;       // temp copy of veh_agent.dll
@@ -174,7 +179,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
     public async Task<VehBreakpointResult> SetBreakpointAsync(
         int processId, nuint address, VehBreakpointType type,
-        int dataSize = 8, CancellationToken ct = default)
+        int dataSize = 8, BreakpointCondition? condition = null, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -193,7 +198,13 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         if (state.IsWow64Target && (ulong)address > 0xFFFFFFFF)
             return new VehBreakpointResult(false, Error: "Address exceeds 32-bit range for WOW64 target process.");
 
-        return await Task.Run(() => SetBreakpointCore(state, address, type, dataSize), ct).ConfigureAwait(false);
+        var result = await Task.Run(() => SetBreakpointCore(state, address, type, dataSize), ct).ConfigureAwait(false);
+
+        // Store condition for host-side evaluation
+        if (result.Success && condition is not null)
+            state.Conditions[result.DrSlot] = condition;
+
+        return result;
     }
 
     public async Task<bool> RemoveBreakpointAsync(int processId, int drSlot, CancellationToken ct = default)
@@ -204,6 +215,25 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             return false;
 
         return await Task.Run(() => RemoveBreakpointCore(state, drSlot), ct).ConfigureAwait(false);
+    }
+
+    public void RegisterLuaCallback(int processId, int drSlot, string luaFunctionName)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_states.TryGetValue(processId, out var state)) return;
+        if (drSlot is < 0 or >= MaxDrSlots) return;
+        state.LuaCallbacks[drSlot] = luaFunctionName;
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("Lua callback '{Callback}' registered for DR{DrSlot} (pid={ProcessId})",
+                luaFunctionName, drSlot, processId);
+    }
+
+    public void UnregisterLuaCallback(int processId, int drSlot)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_states.TryGetValue(processId, out var state)) return;
+        if (drSlot is < 0 or >= MaxDrSlots) return;
+        state.LuaCallbacks[drSlot] = null;
     }
 
     public async Task<bool> RefreshThreadsAsync(int processId, CancellationToken ct = default)
@@ -247,7 +277,49 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 if (hit is not null)
                 {
                     state.TotalHits++;
-                    yield return hit;
+
+                    // Determine which DR slot triggered this hit (from DR6 bits 0-3)
+                    var drSlot = DetermineTriggeredSlot((ulong)hit.Dr6);
+
+                    // Evaluate condition if one is set for this slot
+                    var shouldYield = true;
+                    if (drSlot >= 0 && drSlot < MaxDrSlots)
+                    {
+                        state.SlotHitCounts[drSlot]++;
+
+                        var condition = state.Conditions[drSlot];
+                        if (condition is not null)
+                        {
+                            shouldYield = VehConditionEvaluator.Evaluate(
+                                condition, hit, state.SlotHitCounts[drSlot]);
+                        }
+
+                        // Fire Lua callback if registered (fires regardless of condition)
+                        var luaCallback = state.LuaCallbacks[drSlot];
+                        if (luaCallback is not null && _luaEngine is not null)
+                        {
+                            try
+                            {
+                                var regDict = RegisterSnapshotToDict(hit.Registers);
+                                var bpHit = new BreakpointHitEvent(
+                                    $"veh-dr{drSlot}",
+                                    hit.Address,
+                                    hit.ThreadId,
+                                    DateTimeOffset.UtcNow,
+                                    regDict);
+                                _ = _luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct);
+                            }
+                            catch (Exception ex)
+                            {
+                                if (_logger.IsEnabled(LogLevel.Warning))
+                                    _logger.LogWarning(ex, "Lua callback '{Callback}' failed for DR{DrSlot}",
+                                        luaCallback, drSlot);
+                            }
+                        }
+                    }
+
+                    if (shouldYield)
+                        yield return hit;
                 }
 
                 readIdx++;
@@ -647,6 +719,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 if (result != int.MinValue)
                 {
                     Interlocked.Exchange(ref state.ActiveDrSlots[drSlot], 0);
+                    state.Conditions[drSlot] = null;
+                    state.LuaCallbacks[drSlot] = null;
+                    state.SlotHitCounts[drSlot] = 0;
 
                     if (result == 0)
                     {
@@ -712,6 +787,29 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     }
 
     // ─── Hit Entry Parsing ──────────────────────────────────────────
+
+    /// <summary>Convert VEH RegisterSnapshot to dictionary for BreakpointHitEvent compatibility.</summary>
+    private static Dictionary<string, string> RegisterSnapshotToDict(RegisterSnapshot regs) =>
+        new Dictionary<string, string>
+        {
+            ["RAX"] = $"0x{regs.Rax:X}", ["RBX"] = $"0x{regs.Rbx:X}",
+            ["RCX"] = $"0x{regs.Rcx:X}", ["RDX"] = $"0x{regs.Rdx:X}",
+            ["RSI"] = $"0x{regs.Rsi:X}", ["RDI"] = $"0x{regs.Rdi:X}",
+            ["RSP"] = $"0x{regs.Rsp:X}", ["RBP"] = $"0x{regs.Rbp:X}",
+            ["R8"] = $"0x{regs.R8:X}", ["R9"] = $"0x{regs.R9:X}",
+            ["R10"] = $"0x{regs.R10:X}", ["R11"] = $"0x{regs.R11:X}",
+        };
+
+    /// <summary>Determine which DR slot (0-3) triggered from DR6 bits 0-3. Returns -1 if none.</summary>
+    private static int DetermineTriggeredSlot(ulong dr6)
+    {
+        for (int i = 0; i < 4; i++)
+        {
+            if ((dr6 & (1UL << i)) != 0)
+                return i;
+        }
+        return -1;
+    }
 
     private static VehHitEvent? ParseHitEntry(IntPtr entryPtr)
     {

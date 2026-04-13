@@ -15,13 +15,19 @@ public interface IVehDebugger
 
     /// <summary>Set a hardware breakpoint via the injected agent (DR0-DR3, max 4 simultaneous).</summary>
     Task<VehBreakpointResult> SetBreakpointAsync(int processId, nuint address, VehBreakpointType type,
-        int dataSize = 8, CancellationToken ct = default);
+        int dataSize = 8, BreakpointCondition? condition = null, CancellationToken ct = default);
 
     /// <summary>Remove a hardware breakpoint by DR slot index (0-3).</summary>
     Task<bool> RemoveBreakpointAsync(int processId, int drSlot, CancellationToken ct = default);
 
     /// <summary>Re-enumerate threads and apply active breakpoints to any threads missing them.</summary>
     Task<bool> RefreshThreadsAsync(int processId, CancellationToken ct = default);
+
+    /// <summary>Register a Lua callback function to be invoked on breakpoint hits for a specific DR slot.</summary>
+    void RegisterLuaCallback(int processId, int drSlot, string luaFunctionName);
+
+    /// <summary>Unregister a Lua callback from a DR slot.</summary>
+    void UnregisterLuaCallback(int processId, int drSlot);
 
     /// <summary>Stream breakpoint hit events from the shared memory ring buffer.</summary>
     IAsyncEnumerable<VehHitEvent> GetHitStreamAsync(int processId, CancellationToken ct = default);

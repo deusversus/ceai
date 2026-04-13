@@ -24,13 +24,23 @@ public sealed class VehDebugService
 
     public async Task<VehBreakpointResult> SetBreakpointAsync(
         int processId, nuint address, VehBreakpointType type,
-        int dataSize = 8, CancellationToken ct = default)
+        int dataSize = 8, BreakpointCondition? condition = null, CancellationToken ct = default)
     {
         if (_engine is null) return new VehBreakpointResult(false, Error: "VEH debugger not available.");
         var status = _engine.GetStatus(processId);
         if (!status.IsInjected) return new VehBreakpointResult(false, Error: "VEH agent not injected. Call InjectVehAgent first.");
         if (status.ActiveBreakpoints >= 4) return new VehBreakpointResult(false, Error: "All 4 hardware breakpoint slots are in use.");
-        return await _engine.SetBreakpointAsync(processId, address, type, dataSize, ct).ConfigureAwait(false);
+        return await _engine.SetBreakpointAsync(processId, address, type, dataSize, condition, ct).ConfigureAwait(false);
+    }
+
+    public void RegisterLuaCallback(int processId, int drSlot, string luaFunctionName)
+    {
+        _engine?.RegisterLuaCallback(processId, drSlot, luaFunctionName);
+    }
+
+    public void UnregisterLuaCallback(int processId, int drSlot)
+    {
+        _engine?.UnregisterLuaCallback(processId, drSlot);
     }
 
     public async Task<bool> RemoveBreakpointAsync(int processId, int drSlot, CancellationToken ct = default)

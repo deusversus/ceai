@@ -473,6 +473,87 @@ public class VehDebugExtendedTests
         Assert.Contains("PID", result, StringComparison.OrdinalIgnoreCase);
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase B: Conditional Breakpoints
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SetVehBreakpoint_WithCondition_ReportsConditionInOutput()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.SetVehBreakpoint(AttachedPid, "0x400000", "Execute", 8,
+            condition: "RAX == 0x100", conditionType: "RegisterCompare");
+        Assert.Contains("condition=RegisterCompare", result);
+        Assert.Contains("RAX == 0x100", result);
+    }
+
+    [Fact]
+    public async Task SetVehBreakpoint_InvalidConditionType_ReturnsError()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.SetVehBreakpoint(AttachedPid, "0x400000", "Execute", 8,
+            condition: "RAX == 0", conditionType: "InvalidType");
+        Assert.Contains("Invalid conditionType", result);
+    }
+
+    [Fact]
+    public async Task SetVehBreakpoint_NoCondition_NoConditionInOutput()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.SetVehBreakpoint(AttachedPid, "0x400000", "Execute");
+        Assert.DoesNotContain("condition=", result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // Sub-phase B: Lua Callbacks (AI tool layer)
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task RegisterVehLuaCallback_Succeeds()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        await tools.SetVehBreakpoint(AttachedPid, "0x400000", "Execute");
+        var result = await tools.RegisterVehLuaCallback(AttachedPid, 0, "onBreakpointHit");
+        Assert.Contains("registered", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task UnregisterVehLuaCallback_Succeeds()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.UnregisterVehLuaCallback(AttachedPid, 0);
+        Assert.Contains("unregistered", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RegisterVehLuaCallback_WrongPid_Rejected()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.RegisterVehLuaCallback(WrongPid, 0, "onHit");
+        Assert.Contains("PID", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RegisterVehLuaCallback_InvalidSlot_ReturnsError()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.RegisterVehLuaCallback(AttachedPid, 5, "onHit");
+        Assert.Contains("Invalid", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task RegisterVehLuaCallback_EmptyName_ReturnsError()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.RegisterVehLuaCallback(AttachedPid, 0, "");
+        Assert.Contains("required", result, StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── Helper ──
 
     private static (VehDebugService service, StubVehDebugger engine) CreateService()

@@ -34,12 +34,14 @@ public sealed partial class AiToolFunctions
 
     [Destructive]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
-    [Description("Set a VEH hardware breakpoint (DR0-DR3, max 4). Types: Execute, Write, ReadWrite. DataSize: 1, 2, 4, or 8 bytes (default 8, ignored for Execute).")]
+    [Description("Set a VEH hardware breakpoint (DR0-DR3, max 4). Types: Execute, Write, ReadWrite. DataSize: 1, 2, 4, or 8 bytes (default 8, ignored for Execute). Optional condition for filtered breaks.")]
     public async Task<string> SetVehBreakpoint(
         [Description("Process ID")] int processId,
         [Description("Memory address (hex)")] string address,
         [Description("Breakpoint type: Execute, Write, ReadWrite")] string type = "Execute",
-        [Description("Data watch size in bytes: 1, 2, 4, or 8 (default 8, ignored for Execute)")] int dataSize = 8)
+        [Description("Data watch size in bytes: 1, 2, 4, or 8 (default 8, ignored for Execute)")] int dataSize = 8,
+        [Description("Condition expression (e.g., 'RAX == 0x100', '> 10' for hit count). Leave empty for unconditional.")] string? condition = null,
+        [Description("Condition type: RegisterCompare, MemoryCompare, HitCount")] string conditionType = "RegisterCompare")
     {
         var pidError = ValidateDestructiveProcessId(processId);
         if (pidError is not null) return pidError;
@@ -48,10 +50,20 @@ public sealed partial class AiToolFunctions
             return $"Invalid type '{type}'. Use: Execute, Write, ReadWrite.";
         if (dataSize is not (1 or 2 or 4 or 8))
             return $"Invalid dataSize '{dataSize}'. Use: 1, 2, 4, or 8.";
+
+        BreakpointCondition? bpCondition = null;
+        if (!string.IsNullOrWhiteSpace(condition))
+        {
+            if (!Enum.TryParse<BreakpointConditionType>(conditionType, true, out var condType))
+                return $"Invalid conditionType '{conditionType}'. Use: RegisterCompare, MemoryCompare, HitCount.";
+            bpCondition = new BreakpointCondition(condition, condType);
+        }
+
         var addr = ParseAddress(address);
-        var result = await vehDebugService.SetBreakpointAsync(processId, addr, bpType, dataSize).ConfigureAwait(false);
+        var result = await vehDebugService.SetBreakpointAsync(processId, addr, bpType, dataSize, bpCondition).ConfigureAwait(false);
+        var condStr = bpCondition is not null ? $", condition={bpCondition.Type}:{bpCondition.Expression}" : "";
         return result.Success
-            ? $"VEH breakpoint set at 0x{addr:X} (DR{result.DrSlot}, type={bpType}, size={dataSize})"
+            ? $"VEH breakpoint set at 0x{addr:X} (DR{result.DrSlot}, type={bpType}, size={dataSize}{condStr})"
             : $"Failed: {result.Error}";
     }
 
@@ -79,6 +91,37 @@ public sealed partial class AiToolFunctions
         if (vehDebugService is null) return "VEH debugger not available.";
         var ok = await vehDebugService.RefreshThreadsAsync(processId).ConfigureAwait(false);
         return ok ? "Thread refresh complete. All active breakpoints applied to new threads." : "Thread refresh failed.";
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Register a Lua callback function to be invoked on VEH breakpoint hits for a specific DR slot.")]
+    public Task<string> RegisterVehLuaCallback(
+        [Description("Process ID")] int processId,
+        [Description("DR slot index (0-3)")] int drSlot,
+        [Description("Lua function name to invoke on hit")] string luaFunctionName)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return Task.FromResult(pidError);
+        if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
+        if (drSlot is < 0 or > 3) return Task.FromResult("Invalid DR slot. Must be 0-3.");
+        if (string.IsNullOrWhiteSpace(luaFunctionName)) return Task.FromResult("Lua function name is required.");
+        vehDebugService.RegisterLuaCallback(processId, drSlot, luaFunctionName);
+        return Task.FromResult($"Lua callback '{luaFunctionName}' registered for DR{drSlot}.");
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Unregister a Lua callback from a VEH breakpoint DR slot.")]
+    public Task<string> UnregisterVehLuaCallback(
+        [Description("Process ID")] int processId,
+        [Description("DR slot index (0-3)")] int drSlot)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return Task.FromResult(pidError);
+        if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
+        vehDebugService.UnregisterLuaCallback(processId, drSlot);
+        return Task.FromResult($"Lua callback unregistered from DR{drSlot}.");
     }
 
     [ReadOnlyTool]

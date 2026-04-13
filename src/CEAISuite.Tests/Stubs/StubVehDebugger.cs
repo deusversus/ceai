@@ -18,6 +18,8 @@ public sealed class StubVehDebugger : IVehDebugger
         public int[] DrSlots = new int[4]; // 0=free, 1=used
         public int[] DataSizes = new int[4]; // per-slot data size
         public VehBreakpointType[] BpTypes = new VehBreakpointType[4];
+        public BreakpointCondition?[] Conditions = new BreakpointCondition?[4];
+        public string?[] LuaCallbacks = new string?[4];
         public int TotalHits { get; set; }
         public int OverflowCount { get; set; }
         public List<VehHitEvent> PendingHits = new();
@@ -53,7 +55,7 @@ public sealed class StubVehDebugger : IVehDebugger
 
     public Task<VehBreakpointResult> SetBreakpointAsync(
         int processId, nuint address, VehBreakpointType type,
-        int dataSize = 8, CancellationToken ct = default)
+        int dataSize = 8, BreakpointCondition? condition = null, CancellationToken ct = default)
     {
         if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
             return Task.FromResult(new VehBreakpointResult(false, Error: "Not injected"));
@@ -66,6 +68,7 @@ public sealed class StubVehDebugger : IVehDebugger
                 state.DrSlots[i] = 1;
                 state.DataSizes[i] = dataSize;
                 state.BpTypes[i] = type;
+                state.Conditions[i] = condition;
                 return Task.FromResult(new VehBreakpointResult(true, i));
             }
         }
@@ -79,7 +82,23 @@ public sealed class StubVehDebugger : IVehDebugger
         state.DrSlots[drSlot] = 0;
         state.DataSizes[drSlot] = 0;
         state.BpTypes[drSlot] = default;
+        state.Conditions[drSlot] = null;
+        state.LuaCallbacks[drSlot] = null;
         return Task.FromResult(true);
+    }
+
+    public void RegisterLuaCallback(int processId, int drSlot, string luaFunctionName)
+    {
+        if (!_states.TryGetValue(processId, out var state)) return;
+        if (drSlot is < 0 or > 3) return;
+        state.LuaCallbacks[drSlot] = luaFunctionName;
+    }
+
+    public void UnregisterLuaCallback(int processId, int drSlot)
+    {
+        if (!_states.TryGetValue(processId, out var state)) return;
+        if (drSlot is < 0 or > 3) return;
+        state.LuaCallbacks[drSlot] = null;
     }
 
     public Task<bool> RefreshThreadsAsync(int processId, CancellationToken ct = default)

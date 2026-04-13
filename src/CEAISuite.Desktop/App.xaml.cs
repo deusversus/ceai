@@ -253,7 +253,10 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IScreenCaptureEngine, WindowsScreenCaptureEngine>();
         services.AddSingleton<ICallStackEngine, WindowsCallStackEngine>();
         services.AddSingleton<ISpeedHackEngine, WindowsSpeedHackEngine>();
-        services.AddSingleton<IVehDebugger, WindowsVehDebugger>();
+        services.AddSingleton<IVehDebugger>(sp =>
+            new WindowsVehDebugger(
+                sp.GetService<ILogger<WindowsVehDebugger>>(),
+                sp.GetService<ILuaScriptEngine>()));
 
         // ── Persistence ──
         services.AddSingleton<IInvestigationSessionRepository>(

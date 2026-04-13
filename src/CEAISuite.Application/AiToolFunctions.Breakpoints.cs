@@ -586,6 +586,8 @@ public sealed partial class AiToolFunctions
         [Description("Region size in bytes")] int length)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         try
         {
             var bps = await breakpointService.SetRegionBreakpointAsync(processId, startAddress, length).ConfigureAwait(false);
@@ -597,11 +599,14 @@ public sealed partial class AiToolFunctions
         {
             return $"Invalid region: {ex.Message}";
         }
+        catch (Exception ex)
+        {
+            return $"Region breakpoint failed: {ex.Message}";
+        }
     }
 
     // ── B3: Breakpoint Group tools ──
 
-    [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Create a named breakpoint group for atomic enable/disable. Returns the group ID.")]
     public string CreateBreakpointGroup(
@@ -623,6 +628,8 @@ public sealed partial class AiToolFunctions
         [Description("Group ID")] string groupId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         var count = await breakpointService.EnableGroupAsync(processId, groupId).ConfigureAwait(false);
         return count > 0 ? $"Enabled {count} breakpoints in group {groupId}." : $"No breakpoints enabled (group not found or all already active).";
     }
@@ -635,6 +642,8 @@ public sealed partial class AiToolFunctions
         [Description("Group ID")] string groupId)
     {
         if (breakpointService is null) return "Breakpoint engine not available.";
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
         var count = await breakpointService.DisableGroupAsync(processId, groupId).ConfigureAwait(false);
         return count > 0 ? $"Disabled {count} breakpoints in group {groupId}." : $"No breakpoints disabled (group not found or none active).";
     }

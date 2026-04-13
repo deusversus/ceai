@@ -380,6 +380,7 @@ public sealed class BreakpointService(
     }
 
     /// <summary>Enable all breakpoints in a group by re-setting them.</summary>
+    /// <remarks>Re-creating BPs generates new IDs. Group's stored IDs are updated to match.</remarks>
     public async Task<int> EnableGroupAsync(int processId, string groupId, CancellationToken ct = default)
     {
         EnsureAvailable();

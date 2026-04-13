@@ -178,7 +178,7 @@ public class BreakpointPhaseBTests
     public async Task SetRegionBreakpoint_AiTool_ReturnsInfo()
     {
         var bpService = new BreakpointService(new StubBreakpointEngine());
-        var tools = CreateToolFunctions(bpService);
+        var tools = CreateAttachedToolFunctions(bpService, 1234);
 
         var result = await tools.SetRegionBreakpoint(1234, "0x1000", 4);
         Assert.Contains("Region breakpoint set", result);
@@ -188,7 +188,7 @@ public class BreakpointPhaseBTests
     public async Task SetRegionBreakpoint_AiTool_InvalidLength()
     {
         var bpService = new BreakpointService(new StubBreakpointEngine());
-        var tools = CreateToolFunctions(bpService);
+        var tools = CreateAttachedToolFunctions(bpService, 1234);
 
         var result = await tools.SetRegionBreakpoint(1234, "0x1000", 0);
         Assert.Contains("Invalid region", result);
@@ -223,11 +223,78 @@ public class BreakpointPhaseBTests
         Assert.Equal(2, all.Count);
     }
 
+    // ── B4: Extended Register Snapshot ──
+
+    [Fact]
+    public void VehConditionEvaluator_R12_Supported()
+    {
+        var cond = new BreakpointCondition("R12 == 0x100", BreakpointConditionType.RegisterCompare);
+        var regs = new Dictionary<string, string> { ["R12"] = "0x100" };
+
+        Assert.True(Engine.Windows.VehConditionEvaluator.EvaluateFromDictionary(cond, regs, 0));
+    }
+
+    [Fact]
+    public void VehConditionEvaluator_RIP_Supported()
+    {
+        var cond = new BreakpointCondition("RIP == 0x401000", BreakpointConditionType.RegisterCompare);
+        var regs = new Dictionary<string, string> { ["RIP"] = "0x401000" };
+
+        Assert.True(Engine.Windows.VehConditionEvaluator.EvaluateFromDictionary(cond, regs, 0));
+    }
+
+    [Fact]
+    public void VehConditionEvaluator_RFLAGS_Supported()
+    {
+        var cond = new BreakpointCondition("RFLAGS == 0x246", BreakpointConditionType.RegisterCompare);
+        var regs = new Dictionary<string, string> { ["RFLAGS"] = "0x246" };
+
+        Assert.True(Engine.Windows.VehConditionEvaluator.EvaluateFromDictionary(cond, regs, 0));
+    }
+
+    [Fact]
+    public void RegisterSnapshot_ExtendedFields_HaveDefaults()
+    {
+        var snap = new RegisterSnapshot(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+
+        // B4: New fields default to 0
+        Assert.Equal(0UL, snap.Rip);
+        Assert.Equal(0UL, snap.R12);
+        Assert.Equal(0UL, snap.R13);
+        Assert.Equal(0UL, snap.R14);
+        Assert.Equal(0UL, snap.R15);
+        Assert.Equal(0UL, snap.EFlags);
+    }
+
+    [Fact]
+    public void RegisterSnapshot_ExtendedFields_CanBeSet()
+    {
+        var snap = new RegisterSnapshot(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+            Rip: 0x401000, R12: 100, R13: 200, R14: 300, R15: 400, EFlags: 0x246);
+
+        Assert.Equal(0x401000UL, snap.Rip);
+        Assert.Equal(100UL, snap.R12);
+        Assert.Equal(0x246UL, snap.EFlags);
+    }
+
     // ── Helpers ──
 
     private static AiToolFunctions CreateToolFunctions(BreakpointService? breakpointService = null)
     {
         var engine = new StubEngineFacade();
+        var dashboard = new WorkspaceDashboardService(engine, new StubSessionRepository());
+        var scan = new ScanService(new StubScanEngine());
+        var addressTable = new AddressTableService(engine);
+        var disassembly = new DisassemblyService(new StubDisassemblyEngine());
+        var scriptGen = new ScriptGenerationService();
+        return new AiToolFunctions(engine, dashboard, scan, addressTable, disassembly, scriptGen,
+            breakpointService: breakpointService);
+    }
+
+    private static AiToolFunctions CreateAttachedToolFunctions(BreakpointService? breakpointService, int processId)
+    {
+        var engine = new StubEngineFacade();
+        engine.AttachAsync(processId).GetAwaiter().GetResult();
         var dashboard = new WorkspaceDashboardService(engine, new StubSessionRepository());
         var scan = new ScanService(new StubScanEngine());
         var addressTable = new AddressTableService(engine);

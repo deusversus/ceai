@@ -34,6 +34,10 @@
 #define CMD_DISABLE_STEALTH 6
 #define CMD_START_TRACE     7
 #define CMD_STOP_TRACE      8
+#define CMD_SET_PAGE_GUARD  9
+#define CMD_REMOVE_PAGE_GUARD 10
+#define CMD_SET_INT3        11
+#define CMD_REMOVE_INT3     12
 
 /* Agent status */
 #define STATUS_LOADING      0
@@ -46,6 +50,9 @@
 #define BP_WRITE            1
 #define BP_READWRITE        2
 #define BP_TRACE            3   /* trace step entry */
+#define BP_PAGE_GUARD_READ  4
+#define BP_PAGE_GUARD_WRITE 5
+#define BP_SOFTWARE         6   /* INT3 software breakpoint */
 
 #pragma pack(push, 1)
 typedef struct {
@@ -96,6 +103,28 @@ static DWORD            g_bpTypes[4] = {0};
 static DWORD            g_bpSizes[4] = {0};
 static volatile BOOL    g_bpActive[4] = {FALSE, FALSE, FALSE, FALSE};
 
+/* ── Page Guard + INT3 globals ── */
+
+#define MAX_PAGE_GUARDS 64
+#define MAX_INT3_BPS    64
+#define PAGE_SIZE       0x1000
+
+typedef struct {
+    ULONG64 pageBase;       /* page-aligned base address */
+    DWORD   origProtection; /* original VirtualProtect flags */
+    volatile BOOL active;
+} PageGuardEntry;
+
+typedef struct {
+    ULONG64 address;
+    BYTE    origByte;
+    volatile BOOL active;
+    volatile BOOL pendingRearm; /* set during single-step re-arm cycle */
+} Int3BpEntry;
+
+static PageGuardEntry  g_pageGuards[MAX_PAGE_GUARDS] = {{0}};
+static Int3BpEntry     g_int3Bps[MAX_INT3_BPS] = {{0}};
+
 /* ── Trace globals ── */
 
 static volatile BOOL    g_traceActive = FALSE;
@@ -135,6 +164,12 @@ static BOOL RemoveHardwareBp(DWORD drSlot);
 static void RefreshThreadBreakpoints(void);
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6);
 static void WriteTraceEntry(PCONTEXT ctx);
+static void WritePageGuardHit(PCONTEXT ctx, ULONG64 faultAddr, DWORD hitType);
+static void WriteInt3Hit(PCONTEXT ctx, ULONG64 bpAddr);
+static BOOL SetPageGuardBp(ULONG64 address);
+static BOOL RemovePageGuardBp(ULONG64 address);
+static BOOL SetInt3Bp(ULONG64 address);
+static BOOL RemoveInt3Bp(ULONG64 address);
 static BOOL EnableStealth(void);
 static BOOL DisableStealth(void);
 static BOOL InstallNtGetThreadContextHook(void);
@@ -197,15 +232,152 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
 {
     PCONTEXT ctx;
     ULONG64 dr6;
-
-    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP)
-        return EXCEPTION_CONTINUE_SEARCH;
+    DWORD exCode = ep->ExceptionRecord->ExceptionCode;
 
     if (!g_shm || g_shm->agentStatus != STATUS_READY)
         return EXCEPTION_CONTINUE_SEARCH;
 
     ctx = ep->ContextRecord;
+
+    /* ── PAGE_GUARD violation (0x80000001) ── */
+    if (exCode == (DWORD)0x80000001UL) /* STATUS_GUARD_PAGE_VIOLATION */
+    {
+        ULONG64 faultAddr;
+        DWORD accessType; /* 0=read, 1=write, 8=execute */
+        int i;
+        BOOL found = FALSE;
+
+        /* ExceptionInformation[0] = access type, [1] = fault address */
+        accessType = (DWORD)ep->ExceptionRecord->ExceptionInformation[0];
+        faultAddr = (ULONG64)ep->ExceptionRecord->ExceptionInformation[1];
+
+        /* Check if this page is one of ours */
+        for (i = 0; i < MAX_PAGE_GUARDS; i++)
+        {
+            if (g_pageGuards[i].active &&
+                faultAddr >= g_pageGuards[i].pageBase &&
+                faultAddr < g_pageGuards[i].pageBase + PAGE_SIZE)
+            {
+                found = TRUE;
+                break;
+            }
+        }
+
+        if (!found)
+            return EXCEPTION_CONTINUE_SEARCH;
+
+        /* Record hit */
+        {
+            DWORD hitType = (accessType == 1) ? BP_PAGE_GUARD_WRITE : BP_PAGE_GUARD_READ;
+            WritePageGuardHit(ctx, faultAddr, hitType);
+        }
+
+        /* PAGE_GUARD is one-shot — Windows already removed it on violation.
+         * Set TF to single-step past the faulting instruction, then re-arm
+         * the guard in the next EXCEPTION_SINGLE_STEP handler. We store
+         * the page index in DR6 field (unused for page guards) for re-arm. */
+        ctx->EFlags |= 0x100; /* TF */
+
+        if (g_hitEvent) SetEvent(g_hitEvent);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    /* ── INT3 software breakpoint (0x80000003) ── */
+    if (exCode == (DWORD)0x80000003UL) /* EXCEPTION_BREAKPOINT */
+    {
+        ULONG64 bpAddr;
+        int i;
+        BOOL found = FALSE;
+        DWORD oldProt;
+
+#ifdef _M_IX86
+        bpAddr = (ULONG64)ctx->Eip;
+#else
+        bpAddr = ctx->Rip;
+#endif
+        /* INT3 increments IP past the 0xCC — subtract 1 to get the real BP address */
+        bpAddr -= 1;
+
+        for (i = 0; i < MAX_INT3_BPS; i++)
+        {
+            if (g_int3Bps[i].active && g_int3Bps[i].address == bpAddr)
+            {
+                found = TRUE;
+                break;
+            }
+        }
+
+        if (!found)
+            return EXCEPTION_CONTINUE_SEARCH;
+
+        /* Record hit */
+        WriteInt3Hit(ctx, bpAddr);
+
+        /* Restore original byte, set IP back, set TF for single-step, mark pending re-arm */
+        if (VirtualProtect((LPVOID)(ULONG_PTR)bpAddr, 1, PAGE_EXECUTE_READWRITE, &oldProt))
+        {
+            *(BYTE*)(ULONG_PTR)bpAddr = g_int3Bps[i].origByte;
+            FlushInstructionCache(GetCurrentProcess(), (LPCVOID)(ULONG_PTR)bpAddr, 1);
+            VirtualProtect((LPVOID)(ULONG_PTR)bpAddr, 1, oldProt, &oldProt);
+        }
+#ifdef _M_IX86
+        ctx->Eip = (DWORD)bpAddr; /* back up IP to the original instruction */
+#else
+        ctx->Rip = bpAddr;
+#endif
+        ctx->EFlags |= 0x100; /* TF — single-step, then re-arm 0xCC */
+        g_int3Bps[i].pendingRearm = TRUE;
+
+        if (g_hitEvent) SetEvent(g_hitEvent);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+
+    /* ── EXCEPTION_SINGLE_STEP (0x80000004) — hardware BPs + trace + re-arm ── */
+    if (exCode != EXCEPTION_SINGLE_STEP)
+        return EXCEPTION_CONTINUE_SEARCH;
+
     dr6 = ctx->Dr6;
+
+    /* ── Re-arm PAGE_GUARD after single-step past the faulting instruction ── */
+    if (dr6 & 0x4000) /* BS flag — this was a TF single-step */
+    {
+        int i;
+        BOOL rearmed = FALSE;
+
+        /* Re-arm any PAGE_GUARD entries (guard is one-shot, needs re-application) */
+        for (i = 0; i < MAX_PAGE_GUARDS; i++)
+        {
+            DWORD oldProt;
+            if (!g_pageGuards[i].active) continue;
+            /* Re-apply PAGE_GUARD to the page */
+            VirtualProtect((LPVOID)(ULONG_PTR)g_pageGuards[i].pageBase, PAGE_SIZE,
+                g_pageGuards[i].origProtection | 0x100 /* PAGE_GUARD */, &oldProt);
+            rearmed = TRUE;
+        }
+
+        /* Re-arm any INT3 breakpoints pending re-arm */
+        for (i = 0; i < MAX_INT3_BPS; i++)
+        {
+            DWORD oldProt;
+            if (!g_int3Bps[i].active || !g_int3Bps[i].pendingRearm) continue;
+            if (VirtualProtect((LPVOID)(ULONG_PTR)g_int3Bps[i].address, 1, PAGE_EXECUTE_READWRITE, &oldProt))
+            {
+                *(BYTE*)(ULONG_PTR)g_int3Bps[i].address = 0xCC;
+                FlushInstructionCache(GetCurrentProcess(), (LPCVOID)(ULONG_PTR)g_int3Bps[i].address, 1);
+                VirtualProtect((LPVOID)(ULONG_PTR)g_int3Bps[i].address, 1, oldProt, &oldProt);
+            }
+            g_int3Bps[i].pendingRearm = FALSE;
+            rearmed = TRUE;
+        }
+
+        /* If we re-armed something and no DR0-3 bits set, consume the single-step */
+        if (rearmed && (dr6 & 0xF) == 0 && !g_traceActive)
+        {
+            ctx->EFlags &= ~0x100UL; /* Clear TF */
+            ctx->Dr6 = 0;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+    }
 
     /* M2 fix: Handle orphaned TF — if DR6 bit 14 (BS) is set but trace is NOT active,
      * the trace was stopped mid-flight. Clear TF to prevent unhandled exception crash. */
@@ -406,6 +578,216 @@ static void WriteTraceEntry(PCONTEXT ctx)
     }
 
     InterlockedIncrement(&g_shm->hitCount);
+}
+
+/* ── Page Guard hit entry ── */
+
+static void WritePageGuardHit(PCONTEXT ctx, ULONG64 faultAddr, DWORD hitType)
+{
+    LONG writeIdx, readIdx, slot;
+
+    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    {
+        InterlockedIncrement(&g_shm->overflowCount);
+        return;
+    }
+    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
+    slot = (LONG)((DWORD)writeIdx % g_maxHits);
+    {
+        BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
+        HitEntry* hit = (HitEntry*)base;
+        LARGE_INTEGER ts;
+        QueryPerformanceCounter(&ts);
+#ifdef _M_IX86
+        hit->address = faultAddr;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType = hitType;
+        hit->dr6 = 0;
+        hit->rax = ctx->Eax; hit->rbx = ctx->Ebx;
+        hit->rcx = ctx->Ecx; hit->rdx = ctx->Edx;
+        hit->rsi = ctx->Esi; hit->rdi = ctx->Edi;
+        hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
+        hit->r8 = 0; hit->r9 = 0; hit->r10 = 0; hit->r11 = 0;
+#else
+        hit->address = faultAddr;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType = hitType;
+        hit->dr6 = 0;
+        hit->rax = ctx->Rax; hit->rbx = ctx->Rbx;
+        hit->rcx = ctx->Rcx; hit->rdx = ctx->Rdx;
+        hit->rsi = ctx->Rsi; hit->rdi = ctx->Rdi;
+        hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
+        hit->r8 = ctx->R8; hit->r9 = ctx->R9;
+        hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+#endif
+        hit->timestamp = (ULONG64)ts.QuadPart;
+    }
+    InterlockedIncrement(&g_shm->hitCount);
+}
+
+/* ── INT3 hit entry ── */
+
+static void WriteInt3Hit(PCONTEXT ctx, ULONG64 bpAddr)
+{
+    LONG writeIdx, readIdx, slot;
+
+    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    {
+        InterlockedIncrement(&g_shm->overflowCount);
+        return;
+    }
+    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
+    slot = (LONG)((DWORD)writeIdx % g_maxHits);
+    {
+        BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
+        HitEntry* hit = (HitEntry*)base;
+        LARGE_INTEGER ts;
+        QueryPerformanceCounter(&ts);
+#ifdef _M_IX86
+        hit->address = bpAddr;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType = BP_SOFTWARE;
+        hit->dr6 = 0;
+        hit->rax = ctx->Eax; hit->rbx = ctx->Ebx;
+        hit->rcx = ctx->Ecx; hit->rdx = ctx->Edx;
+        hit->rsi = ctx->Esi; hit->rdi = ctx->Edi;
+        hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
+        hit->r8 = 0; hit->r9 = 0; hit->r10 = 0; hit->r11 = 0;
+#else
+        hit->address = bpAddr;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType = BP_SOFTWARE;
+        hit->dr6 = 0;
+        hit->rax = ctx->Rax; hit->rbx = ctx->Rbx;
+        hit->rcx = ctx->Rcx; hit->rdx = ctx->Rdx;
+        hit->rsi = ctx->Rsi; hit->rdi = ctx->Rdi;
+        hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
+        hit->r8 = ctx->R8; hit->r9 = ctx->R9;
+        hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+#endif
+        hit->timestamp = (ULONG64)ts.QuadPart;
+    }
+    InterlockedIncrement(&g_shm->hitCount);
+}
+
+/* ── Page Guard BP set/remove ── */
+
+static BOOL SetPageGuardBp(ULONG64 address)
+{
+    ULONG64 pageBase = address & ~((ULONG64)PAGE_SIZE - 1);
+    DWORD oldProt;
+    int freeSlot = -1;
+    int i;
+
+    /* Find existing or free slot */
+    for (i = 0; i < MAX_PAGE_GUARDS; i++)
+    {
+        if (g_pageGuards[i].active && g_pageGuards[i].pageBase == pageBase)
+            return TRUE; /* already guarded */
+        if (!g_pageGuards[i].active && freeSlot == -1)
+            freeSlot = i;
+    }
+    if (freeSlot == -1) return FALSE; /* no free slots */
+
+    /* Query current protection */
+    {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!VirtualQuery((LPCVOID)(ULONG_PTR)pageBase, &mbi, sizeof(mbi)))
+            return FALSE;
+        oldProt = mbi.Protect & 0xFF; /* mask off PAGE_GUARD if somehow set */
+    }
+
+    /* Apply PAGE_GUARD */
+    if (!VirtualProtect((LPVOID)(ULONG_PTR)pageBase, PAGE_SIZE, oldProt | 0x100, &oldProt))
+        return FALSE;
+
+    g_pageGuards[freeSlot].pageBase = pageBase;
+    g_pageGuards[freeSlot].origProtection = oldProt;
+    InterlockedExchange((volatile LONG*)&g_pageGuards[freeSlot].active, TRUE);
+    return TRUE;
+}
+
+static BOOL RemovePageGuardBp(ULONG64 address)
+{
+    ULONG64 pageBase = address & ~((ULONG64)PAGE_SIZE - 1);
+    DWORD dummy;
+    int i;
+
+    for (i = 0; i < MAX_PAGE_GUARDS; i++)
+    {
+        if (g_pageGuards[i].active && g_pageGuards[i].pageBase == pageBase)
+        {
+            /* Restore original protection (without PAGE_GUARD) */
+            VirtualProtect((LPVOID)(ULONG_PTR)pageBase, PAGE_SIZE,
+                g_pageGuards[i].origProtection, &dummy);
+            InterlockedExchange((volatile LONG*)&g_pageGuards[i].active, FALSE);
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* ── INT3 BP set/remove ── */
+
+static BOOL SetInt3Bp(ULONG64 address)
+{
+    DWORD oldProt;
+    BYTE origByte;
+    int freeSlot = -1;
+    int i;
+
+    /* Find existing or free slot */
+    for (i = 0; i < MAX_INT3_BPS; i++)
+    {
+        if (g_int3Bps[i].active && g_int3Bps[i].address == address)
+            return TRUE; /* already set */
+        if (!g_int3Bps[i].active && freeSlot == -1)
+            freeSlot = i;
+    }
+    if (freeSlot == -1) return FALSE;
+
+    /* Read original byte */
+    origByte = *(BYTE*)(ULONG_PTR)address;
+    if (origByte == 0xCC) return TRUE; /* already INT3 */
+
+    /* Write 0xCC */
+    if (!VirtualProtect((LPVOID)(ULONG_PTR)address, 1, PAGE_EXECUTE_READWRITE, &oldProt))
+        return FALSE;
+    *(BYTE*)(ULONG_PTR)address = 0xCC;
+    FlushInstructionCache(GetCurrentProcess(), (LPCVOID)(ULONG_PTR)address, 1);
+    VirtualProtect((LPVOID)(ULONG_PTR)address, 1, oldProt, &oldProt);
+
+    g_int3Bps[freeSlot].address = address;
+    g_int3Bps[freeSlot].origByte = origByte;
+    g_int3Bps[freeSlot].pendingRearm = FALSE;
+    InterlockedExchange((volatile LONG*)&g_int3Bps[freeSlot].active, TRUE);
+    return TRUE;
+}
+
+static BOOL RemoveInt3Bp(ULONG64 address)
+{
+    DWORD oldProt;
+    int i;
+
+    for (i = 0; i < MAX_INT3_BPS; i++)
+    {
+        if (g_int3Bps[i].active && g_int3Bps[i].address == address)
+        {
+            if (VirtualProtect((LPVOID)(ULONG_PTR)address, 1, PAGE_EXECUTE_READWRITE, &oldProt))
+            {
+                *(BYTE*)(ULONG_PTR)address = g_int3Bps[i].origByte;
+                FlushInstructionCache(GetCurrentProcess(), (LPCVOID)(ULONG_PTR)address, 1);
+                VirtualProtect((LPVOID)(ULONG_PTR)address, 1, oldProt, &oldProt);
+            }
+            InterlockedExchange((volatile LONG*)&g_int3Bps[i].active, FALSE);
+            return TRUE;
+        }
+    }
+    return FALSE;
 }
 
 /* ── Hardware breakpoint management ── */
@@ -676,6 +1058,22 @@ static DWORD WINAPI CommandThread(LPVOID param)
                 InterlockedExchange((volatile LONG*)&g_traceActive, FALSE);
                 g_traceStepsRemaining = 0;
                 result = 0;
+                break;
+
+            case CMD_SET_PAGE_GUARD:
+                result = SetPageGuardBp(g_shm->commandArg0) ? 0 : -1;
+                break;
+
+            case CMD_REMOVE_PAGE_GUARD:
+                result = RemovePageGuardBp(g_shm->commandArg0) ? 0 : -1;
+                break;
+
+            case CMD_SET_INT3:
+                result = SetInt3Bp(g_shm->commandArg0) ? 0 : -1;
+                break;
+
+            case CMD_REMOVE_INT3:
+                result = RemoveInt3Bp(g_shm->commandArg0) ? 0 : -1;
                 break;
 
             case CMD_SHUTDOWN:

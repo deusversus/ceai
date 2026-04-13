@@ -109,6 +109,32 @@ public sealed class StubVehDebugger : IVehDebugger
         return Task.FromResult(true);
     }
 
+    public Task<VehBreakpointResult> SetPageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(new VehBreakpointResult(false, Error: "Not injected"));
+        return Task.FromResult(new VehBreakpointResult(true, DrSlot: -1));
+    }
+
+    public Task<bool> RemovePageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out _)) return Task.FromResult(false);
+        return Task.FromResult(true);
+    }
+
+    public Task<VehBreakpointResult> SetInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(new VehBreakpointResult(false, Error: "Not injected"));
+        return Task.FromResult(new VehBreakpointResult(true, DrSlot: -1));
+    }
+
+    public Task<bool> RemoveInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out _)) return Task.FromResult(false);
+        return Task.FromResult(true);
+    }
+
     public Task<VehTraceResult> TraceFromBreakpointAsync(
         int processId, int maxSteps = 500, int threadFilter = 0, CancellationToken ct = default)
     {

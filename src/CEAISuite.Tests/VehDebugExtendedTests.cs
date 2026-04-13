@@ -648,6 +648,80 @@ public class VehDebugExtendedTests
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // Sub-phase G: Page Guard + INT3 through VEH
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SetPageGuardBp_AfterInject_Succeeds()
+    {
+        var engine = new StubVehDebugger();
+        var svc = new VehDebugService(engine);
+        await svc.InjectAsync(AttachedPid);
+
+        var result = await engine.SetPageGuardBreakpointAsync(AttachedPid, (nuint)0x400000);
+        Assert.True(result.Success);
+        Assert.Equal(-1, result.DrSlot); // no DR slot consumed
+    }
+
+    [Fact]
+    public async Task SetInt3Bp_AfterInject_Succeeds()
+    {
+        var engine = new StubVehDebugger();
+        var svc = new VehDebugService(engine);
+        await svc.InjectAsync(AttachedPid);
+
+        var result = await engine.SetInt3BreakpointAsync(AttachedPid, (nuint)0x400000);
+        Assert.True(result.Success);
+        Assert.Equal(-1, result.DrSlot);
+    }
+
+    [Fact]
+    public async Task SetPageGuardBp_NotInjected_Fails()
+    {
+        var engine = new StubVehDebugger();
+        var result = await engine.SetPageGuardBreakpointAsync(AttachedPid, (nuint)0x400000);
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public async Task SetInt3Bp_NotInjected_Fails()
+    {
+        var engine = new StubVehDebugger();
+        var result = await engine.SetInt3BreakpointAsync(AttachedPid, (nuint)0x400000);
+        Assert.False(result.Success);
+    }
+
+    [Fact]
+    public async Task RemovePageGuardBp_AfterSet_Succeeds()
+    {
+        var engine = new StubVehDebugger();
+        await engine.InjectAsync(AttachedPid);
+        await engine.SetPageGuardBreakpointAsync(AttachedPid, (nuint)0x400000);
+
+        var ok = await engine.RemovePageGuardBreakpointAsync(AttachedPid, (nuint)0x400000);
+        Assert.True(ok);
+    }
+
+    [Fact]
+    public async Task RemoveInt3Bp_AfterSet_Succeeds()
+    {
+        var engine = new StubVehDebugger();
+        await engine.InjectAsync(AttachedPid);
+        await engine.SetInt3BreakpointAsync(AttachedPid, (nuint)0x400000);
+
+        var ok = await engine.RemoveInt3BreakpointAsync(AttachedPid, (nuint)0x400000);
+        Assert.True(ok);
+    }
+
+    [Fact]
+    public void VehBreakpointType_HasPageGuardAndSoftware()
+    {
+        Assert.Equal(4, (int)VehBreakpointType.PageGuardRead);
+        Assert.Equal(5, (int)VehBreakpointType.PageGuardWrite);
+        Assert.Equal(6, (int)VehBreakpointType.Software);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // Sub-phase F: Unified Breakpoint Pipeline
     // ══════════════════════════════════════════════════════════════════
 

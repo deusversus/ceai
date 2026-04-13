@@ -80,6 +80,10 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const int CmdDisableStealth = 6;
     private const int CmdStartTrace = 7;
     private const int CmdStopTrace = 8;
+    private const int CmdSetPageGuard = 9;
+    private const int CmdRemovePageGuard = 10;
+    private const int CmdSetInt3 = 11;
+    private const int CmdRemoveInt3 = 12;
 
     // Agent status
     private const int StatusLoading = 0;
@@ -252,6 +256,113 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             return false;
 
         return await Task.Run(() => SendSimpleCommand(state, CmdRefreshThreads), ct).ConfigureAwait(false);
+    }
+
+    public async Task<VehBreakpointResult> SetPageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_states.TryGetValue(processId, out var state))
+            return new VehBreakpointResult(false, Error: "VEH agent not injected");
+
+        var ok = await Task.Run(() =>
+        {
+            state.CommandLock.Wait();
+            try
+            {
+                Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdSetPageGuard);
+                SetEvent(state.CommandEvent);
+                return WaitForCommandResult(state);
+            }
+            finally { state.CommandLock.Release(); }
+        }, ct).ConfigureAwait(false);
+
+        return ok
+            ? new VehBreakpointResult(true, DrSlot: -1) // no DR slot consumed
+            : new VehBreakpointResult(false, Error: "Failed to set page guard breakpoint");
+    }
+
+    public async Task<bool> RemovePageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_states.TryGetValue(processId, out var state)) return false;
+        return await Task.Run(() =>
+        {
+            state.CommandLock.Wait();
+            try
+            {
+                Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdRemovePageGuard);
+                SetEvent(state.CommandEvent);
+                return WaitForCommandResult(state);
+            }
+            finally { state.CommandLock.Release(); }
+        }, ct).ConfigureAwait(false);
+    }
+
+    public async Task<VehBreakpointResult> SetInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_states.TryGetValue(processId, out var state))
+            return new VehBreakpointResult(false, Error: "VEH agent not injected");
+
+        var ok = await Task.Run(() =>
+        {
+            state.CommandLock.Wait();
+            try
+            {
+                Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdSetInt3);
+                SetEvent(state.CommandEvent);
+                return WaitForCommandResult(state);
+            }
+            finally { state.CommandLock.Release(); }
+        }, ct).ConfigureAwait(false);
+
+        return ok
+            ? new VehBreakpointResult(true, DrSlot: -1)
+            : new VehBreakpointResult(false, Error: "Failed to set INT3 breakpoint");
+    }
+
+    public async Task<bool> RemoveInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_states.TryGetValue(processId, out var state)) return false;
+        return await Task.Run(() =>
+        {
+            state.CommandLock.Wait();
+            try
+            {
+                Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdRemoveInt3);
+                SetEvent(state.CommandEvent);
+                return WaitForCommandResult(state);
+            }
+            finally { state.CommandLock.Release(); }
+        }, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Common command result polling used by Page Guard and INT3 commands.</summary>
+    private static bool WaitForCommandResult(VehProcessState state)
+    {
+        const int timeoutMs = 3000;
+        int elapsed = 0;
+        while (elapsed < timeoutMs)
+        {
+            var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+            if (result != int.MinValue) return result == 0;
+            Thread.Sleep(10);
+            elapsed += 10;
+        }
+        return false;
     }
 
     public async Task<VehTraceResult> TraceFromBreakpointAsync(
@@ -1023,6 +1134,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 1 => VehBreakpointType.Write,
                 2 => VehBreakpointType.ReadWrite,
                 3 => VehBreakpointType.Trace,
+                4 => VehBreakpointType.PageGuardRead,
+                5 => VehBreakpointType.PageGuardWrite,
+                6 => VehBreakpointType.Software,
                 _ => VehBreakpointType.Execute,
             };
 

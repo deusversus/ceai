@@ -29,6 +29,18 @@ public interface IVehDebugger
     /// <summary>Unregister a Lua callback from a DR slot.</summary>
     void UnregisterLuaCallback(int processId, int drSlot);
 
+    /// <summary>Set a PAGE_GUARD breakpoint on a memory page via the VEH agent. Does not consume a DR slot.</summary>
+    Task<VehBreakpointResult> SetPageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default);
+
+    /// <summary>Remove a PAGE_GUARD breakpoint.</summary>
+    Task<bool> RemovePageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default);
+
+    /// <summary>Set an INT3 software breakpoint via the VEH agent. Does not consume a DR slot.</summary>
+    Task<VehBreakpointResult> SetInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default);
+
+    /// <summary>Remove an INT3 software breakpoint.</summary>
+    Task<bool> RemoveInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default);
+
     /// <summary>Start dynamic tracing: single-step from the next hardware BP hit, collecting register state at each instruction.</summary>
     Task<VehTraceResult> TraceFromBreakpointAsync(int processId, int maxSteps = 500, int threadFilter = 0, CancellationToken ct = default);
 
@@ -58,7 +70,13 @@ public enum VehBreakpointType
     /// <summary>Break on data read or write (DR7 R/W = 11).</summary>
     ReadWrite = 2,
     /// <summary>Dynamic trace step (Trap Flag single-step).</summary>
-    Trace = 3
+    Trace = 3,
+    /// <summary>Page guard read access violation.</summary>
+    PageGuardRead = 4,
+    /// <summary>Page guard write access violation.</summary>
+    PageGuardWrite = 5,
+    /// <summary>INT3 software breakpoint (0xCC).</summary>
+    Software = 6
 }
 
 /// <summary>Stealth mode state of the VEH agent.</summary>

@@ -20,8 +20,15 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IBreakpointEngine? _breakpointEngine;
     private readonly IScanEngine? _scanEngine;
     private readonly IMemoryProtectionEngine? _memoryProtectionEngine;
+    private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private Script _script;
     private int? _currentProcessId;
+
+    /// <summary>
+    /// Additional directories to search for Lua modules via require().
+    /// Defaults to %LOCALAPPDATA%/CEAISuite/scripts/lib/.
+    /// </summary>
+    public List<string> ModuleSearchPaths { get; } = [];
 
     /// <summary>Modules allowed in the sandbox — no OS, IO, or dynamic loading.</summary>
     internal static readonly CoreModules SandboxModules =
@@ -198,6 +205,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         {
             _currentProcessId = null;
             _breakpointCallbacks.Clear();
+            _moduleCache.Clear();
             _script = CreateSandboxedScript();
         }
         finally
@@ -213,6 +221,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         {
             _currentProcessId = null;
             _breakpointCallbacks.Clear();
+            _moduleCache.Clear();
             _script = CreateSandboxedScript();
         }
         finally
@@ -236,6 +245,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     {
         var script = new Script(SandboxModules);
         RegisterPrint(script);
+
+        // S3: Controlled require() module loader
+        RegisterRequire(script);
 
         // Always register data conversion utilities (no engine dependency)
         LuaDataConversionBindings.Register(script);
@@ -280,6 +292,58 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     }
 
     private InstructionLimitDebugger? _instructionDebugger;
+
+    /// <summary>
+    /// Registers a sandboxed require() function that loads Lua modules from whitelisted directories only.
+    /// Modules are cached after first load (standard Lua package.loaded semantics).
+    /// </summary>
+    private void RegisterRequire(Script script)
+    {
+        script.Globals["require"] = (Func<string, DynValue>)(moduleName =>
+        {
+            // Check cache first
+            if (_moduleCache.TryGetValue(moduleName, out var cached))
+                return cached;
+
+            // Build search paths
+            var searchDirs = new List<string>();
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            var defaultLibPath = Path.Combine(localAppData, "CEAISuite", "scripts", "lib");
+            if (Directory.Exists(defaultLibPath))
+                searchDirs.Add(defaultLibPath);
+            searchDirs.AddRange(ModuleSearchPaths.Where(Directory.Exists));
+
+            // Search for the module file
+            var fileName = moduleName.Replace('.', Path.DirectorySeparatorChar) + ".lua";
+            string? foundPath = null;
+            foreach (var dir in searchDirs)
+            {
+                var candidate = Path.Combine(dir, fileName);
+                if (File.Exists(candidate))
+                {
+                    foundPath = candidate;
+                    break;
+                }
+            }
+
+            if (foundPath is null)
+                throw new ScriptRuntimeException($"module '{moduleName}' not found in search paths");
+
+            // Security: verify the resolved path is actually inside a search directory
+            var fullPath = Path.GetFullPath(foundPath);
+            if (!searchDirs.Any(dir => fullPath.StartsWith(Path.GetFullPath(dir), StringComparison.OrdinalIgnoreCase)))
+                throw new ScriptRuntimeException($"module '{moduleName}' path escapes search directories");
+
+            // Load and execute the module
+            var source = File.ReadAllText(fullPath);
+            var result = script.DoString(source, codeFriendlyName: moduleName);
+
+            // Cache the result (nil becomes true, matching Lua convention)
+            var moduleValue = result.Type == DataType.Nil ? DynValue.True : result;
+            _moduleCache[moduleName] = moduleValue;
+            return moduleValue;
+        });
+    }
 
     private void RegisterPrint(Script script)
     {

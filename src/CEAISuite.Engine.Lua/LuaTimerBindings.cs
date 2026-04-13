@@ -76,12 +76,13 @@ internal sealed class LuaTimerBindings : IDisposable
             var threadState = new ThreadState(threadId, cts);
             _threads[threadId] = threadState;
 
-            // Run the function on a background thread
+            // Run the function on a background thread, gated by the engine's semaphore
+            // to prevent concurrent access to MoonSharp's non-thread-safe Script instance
             threadState.Task = Task.Run(() =>
             {
                 try
                 {
-                    script.Call(func);
+                    engine.ExecuteGuarded(() => script.Call(func));
                 }
                 catch (ScriptRuntimeException)
                 {
@@ -180,9 +181,9 @@ internal sealed class LuaTimerBindings : IDisposable
             _inCallback = true;
             try
             {
-                // Execute callback synchronously on timer thread
-                // The callback runs inside the Lua engine which is semaphore-gated
-                _script.Call(_callback);
+                // Execute callback gated by the engine's semaphore to prevent
+                // concurrent access to MoonSharp's non-thread-safe Script instance
+                _engine.ExecuteGuarded(() => _script.Call(_callback));
             }
             catch
             {

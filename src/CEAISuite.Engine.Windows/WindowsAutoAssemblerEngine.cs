@@ -1291,10 +1291,30 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         var sb = new StringBuilder();
         var stack = new Stack<(bool Active, bool ElseSeen)>();
         var active = true; // whether current lines should be included
+        var insideLuaBlock = false; // skip conditionals inside {$luacode} blocks
 
         foreach (var line in script.Split('\n'))
         {
             var trimmed = line.Trim();
+
+            // Track {$luacode}...{$asm} boundaries — pass these through unchanged
+            if (trimmed.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase))
+            {
+                insideLuaBlock = true;
+                if (active) sb.AppendLine(line);
+                continue;
+            }
+            if (trimmed.Equals("{$asm}", StringComparison.OrdinalIgnoreCase))
+            {
+                insideLuaBlock = false;
+                if (active) sb.AppendLine(line);
+                continue;
+            }
+            if (insideLuaBlock)
+            {
+                if (active) sb.AppendLine(line);
+                continue;
+            }
 
             if (trimmed.StartsWith("{$ifdef ", StringComparison.OrdinalIgnoreCase) && trimmed.EndsWith('}'))
             {

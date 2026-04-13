@@ -258,6 +258,18 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     /// <summary>The underlying MoonSharp script instance. For CE API binding registration.</summary>
     internal Script Script => _script;
 
+    /// <summary>
+    /// Execute an action while holding the engine's execution gate.
+    /// Used by timer callbacks and createThread to prevent concurrent Script access.
+    /// MoonSharp's Script class is NOT thread-safe — all calls must be serialized.
+    /// </summary>
+    internal void ExecuteGuarded(Action action)
+    {
+        _gate.Wait();
+        try { action(); }
+        finally { _gate.Release(); }
+    }
+
     public void Dispose()
     {
         _hotReloadWatcher?.Dispose();

@@ -46,7 +46,7 @@ internal static class LuaMemoryManagementBindings
                     .GetAwaiter().GetResult();
                 return DynValue.True;
             }
-            catch
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
                 return DynValue.False;
             }
@@ -101,20 +101,9 @@ internal static class LuaMemoryManagementBindings
     }
 
     private static int RequireProcess(MoonSharpLuaEngine engine)
-    {
-        return engine.CurrentProcessId
-            ?? throw new ScriptRuntimeException("No process attached. Call openProcess() first.");
-    }
+        => LuaBindingHelpers.RequireProcess(engine);
 
     private static nuint ResolveAddressArg(
         DynValue addrArg, int pid, IEngineFacade facade, IAutoAssemblerEngine? aa)
-    {
-        if (addrArg.Type == DataType.Number)
-            return (nuint)(ulong)addrArg.Number;
-
-        var expr = addrArg.CastToString()
-            ?? throw new ScriptRuntimeException("Expected address number or string");
-        var resolved = LuaAddressResolver.ResolveAsync(expr, pid, facade, aa).GetAwaiter().GetResult();
-        return resolved ?? throw new ScriptRuntimeException($"Cannot resolve address: '{expr}'");
-    }
+        => LuaBindingHelpers.ResolveAddressArg(addrArg, pid, facade, aa);
 }

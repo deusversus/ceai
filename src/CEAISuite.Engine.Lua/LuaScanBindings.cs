@@ -175,11 +175,8 @@ internal static class LuaScanBindings
     };
 
     private static int RequireProcess(MoonSharpLuaEngine engine)
-    {
-        return engine.CurrentProcessId
-            ?? throw new ScriptRuntimeException("No process attached. Call openProcess() first.");
-    }
+        => LuaBindingHelpers.RequireProcess(engine);
 
     private static string FormatAddress(nuint address)
-        => $"0x{(ulong)address:X}";
+        => LuaBindingHelpers.FormatAddress(address);
 }

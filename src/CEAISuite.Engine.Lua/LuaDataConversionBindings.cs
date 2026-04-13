@@ -15,14 +15,14 @@ internal static class LuaDataConversionBindings
         script.Globals["wordToByteTable"] = (Func<double, DynValue>)(value =>
         {
             var bytes = new byte[2];
-            BinaryPrimitives.WriteInt16LittleEndian(bytes, (short)(long)value);
+            unchecked { BinaryPrimitives.WriteInt16LittleEndian(bytes, (short)(long)value); }
             return BytesToTable(script, bytes);
         });
 
         script.Globals["dwordToByteTable"] = (Func<double, DynValue>)(value =>
         {
             var bytes = new byte[4];
-            BinaryPrimitives.WriteInt32LittleEndian(bytes, (int)(long)value);
+            unchecked { BinaryPrimitives.WriteInt32LittleEndian(bytes, (int)(long)value); }
             return BytesToTable(script, bytes);
         });
 

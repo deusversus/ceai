@@ -122,18 +122,12 @@ internal static class LuaDisassemblyBindings
     }
 
     private static int RequireProcess(MoonSharpLuaEngine engine)
-    {
-        return engine.CurrentProcessId
-            ?? throw new ScriptRuntimeException("No process attached. Call openProcess() first.");
-    }
+        => LuaBindingHelpers.RequireProcess(engine);
 
     private static nuint ResolveAddress(
         string addrExpr, int pid, IEngineFacade facade, IAutoAssemblerEngine? aa)
-    {
-        var resolved = LuaAddressResolver.ResolveAsync(addrExpr, pid, facade, aa).GetAwaiter().GetResult();
-        return resolved ?? throw new ScriptRuntimeException($"Cannot resolve address: '{addrExpr}'");
-    }
+        => LuaBindingHelpers.ResolveAddress(addrExpr, pid, facade, aa);
 
     private static string FormatAddress(nuint address)
-        => $"0x{(ulong)address:X}";
+        => LuaBindingHelpers.FormatAddress(address);
 }

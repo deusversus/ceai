@@ -412,16 +412,20 @@ Scripts that use only the following patterns should work without modification:
 
 | Category | Count |
 |---|---|
-| **Total registered Lua globals** | ~95 (up from 38 in v0.1) |
+| **Total registered Lua globals** | ~145 (up from 38 in v0.1) |
 | **CeApiBindings functions** | 31 (8 memory read, 7 memory write, 4 process, 4 address/symbol, 2 auto assembler, 6 utility) |
-| **CeFormBindings functions** | 6 (createForm, createButton, createLabel, createEdit, createCheckBox, createTimer) |
+| **CeFormBindings functions** | 17 (createForm, createButton, createLabel, createEdit, createCheckBox, createTimer, createMemo, createListBox, createComboBox, createTrackBar, createProgressBar, createImage, createPanel, createGroupBox, createRadioGroup, createTabControl, createMainMenu) |
 | **LuaDataConversionBindings** | 20 (14 byte-table converters, 6 legacy bitwise ops) |
-| **LuaDisassemblyBindings** | 5 (disassemble, getInstructionSize, getPreviousOpcode, splitDisassembledString, assemble) |
+| **LuaDisassemblyBindings** | 7 (disassemble, getInstructionSize, getPreviousOpcode, splitDisassembledString, assemble, generateCallBytes, generateJmpBytes) |
 | **LuaMemoryManagementBindings** | 6 (allocateMemory, deAllocateMemory, setMemoryProtection, virtualQueryEx, getRegionInfo, copyMemory) |
-| **LuaScanBindings** | 3 (AOBScan, AOBScanModule, createMemScan with 5 methods) |
+| **LuaScanBindings** | 5 (AOBScan, AOBScanModule, createMemScan, AOBReplace, AOBReplaceModule) |
 | **LuaDebuggerBindings** | 5 (debug_setBreakpoint, debug_removeBreakpoint, debug_getBreakpointList, debug_isDebugging, debug_getBreakpointHitLog) |
 | **LuaModuleBindings** | 7 (enumModules, getModuleSize, getNameFromAddress, readPointer, writePointer, writeString, enumMemoryRegions) |
-| **Engine-level** | 1 (print) |
-| **Functions with test coverage** | ~54 |
-| **Functions without test coverage** | ~41 (form functions, some read/write variants, some new functions) |
-| **Major missing CE function categories** | 6 (memory records, structures, cheat tables, advanced GUI, D3D, mono/.NET introspection) |
+| **LuaUtilityBindings** | 13 (getCEVersion, getOperatingSystem, getScreenWidth/Height, beep, md5, messageDialog, getTickCount64, os_clock, encodeFunction, createRef/getRef/destroyRef) |
+| **LuaTimerBindings** | 3 (createNativeTimer, destroyAllTimers, createThread) |
+| **LuaAiBindings** | 4 (ai.suggest, ai.explain, ai.findPattern, ai.analyze) — **CE AI Suite exclusive** |
+| **LuaProfilerBindings** | 4 (profiler.start, profiler.stop, profiler.report, profiler.getEntries) |
+| **Engine-level** | 2 (print, require) |
+| **Functions with test coverage** | ~95 |
+| **Functions without test coverage** | ~50 (some form variants, read/write edge cases) |
+| **Major missing CE function categories** | 3 (memory records/address list, structures, D3D/overlay) |

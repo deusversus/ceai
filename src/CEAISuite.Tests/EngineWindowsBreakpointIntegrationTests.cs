@@ -151,11 +151,10 @@ public class EngineWindowsBreakpointIntegrationTests
             Assert.NotNull(bp);
             Assert.True(bp.IsEnabled);
 
-            await Task.Delay(2000);
-
-            var hits = await engine.GetHitLogAsync(bp.Id, maxEntries: 50, TestContext.Current.CancellationToken);
+            // D1: Poll for hits with timeout instead of fixed delay
+            var hits = await WaitForHitsAsync(engine, bp.Id, timeoutMs: 10_000);
             if (hits.Count == 0)
-                Assert.Skip("Breakpoint was armed but no hits were recorded (debug event loop may not have processed events in time)");
+                Assert.Skip("Breakpoint was armed but no hits were recorded after 10s (debug event loop may not have processed events in time)");
         }
         finally
         {
@@ -189,11 +188,10 @@ public class EngineWindowsBreakpointIntegrationTests
             Assert.NotNull(bp);
             Assert.True(bp.IsEnabled);
 
-            await Task.Delay(2000);
-
-            var hits = await engine.GetHitLogAsync(bp.Id, maxEntries: 50, TestContext.Current.CancellationToken);
+            // D1: Poll for hits with timeout instead of fixed delay
+            var hits = await WaitForHitsAsync(engine, bp.Id, timeoutMs: 10_000);
             if (hits.Count == 0)
-                Assert.Skip("Breakpoint was armed but no hits were recorded (debug event loop may not have processed events in time)");
+                Assert.Skip("Breakpoint was armed but no hits were recorded after 10s (debug event loop may not have processed events in time)");
         }
         finally
         {
@@ -227,11 +225,10 @@ public class EngineWindowsBreakpointIntegrationTests
             Assert.NotNull(bp);
             Assert.True(bp.IsEnabled);
 
-            await Task.Delay(2000);
-
-            var hits = await engine.GetHitLogAsync(bp.Id, maxEntries: 50, TestContext.Current.CancellationToken);
+            // D1: Poll for hits with timeout instead of fixed delay
+            var hits = await WaitForHitsAsync(engine, bp.Id, timeoutMs: 10_000);
             if (hits.Count == 0)
-                Assert.Skip("Breakpoint was armed but no hits were recorded (debug event loop may not have processed events in time)");
+                Assert.Skip("Breakpoint was armed but no hits were recorded after 10s (debug event loop may not have processed events in time)");
         }
         finally
         {

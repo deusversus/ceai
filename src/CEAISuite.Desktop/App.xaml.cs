@@ -243,7 +243,9 @@ public partial class App : System.Windows.Application
                 scanEngine: sp.GetService<IScanEngine>(),
                 memoryProtectionEngine: sp.GetService<IMemoryProtectionEngine>(),
                 aiAssistant: sp.GetService<ILuaAiAssistant>(),
-                symbolEngine: sp.GetService<ISymbolEngine>()));
+                symbolEngine: sp.GetService<ISymbolEngine>(),
+                addressListProvider: sp.GetService<ILuaAddressListProvider>(),
+                structureProvider: sp.GetService<ILuaStructureProvider>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
@@ -285,6 +287,12 @@ public partial class App : System.Windows.Application
         services.AddSingleton<SpeedHackService>();
         services.AddSingleton<VehDebugService>();
         services.AddSingleton<AutorunScriptService>();
+        services.AddSingleton<ILuaAddressListProvider>(sp =>
+            new LuaAddressListAdapter(
+                sp.GetRequiredService<AddressTableService>(),
+                sp.GetRequiredService<IEngineFacade>()));
+        services.AddSingleton<ILuaStructureProvider>(sp =>
+            new LuaStructureAdapter(sp.GetRequiredService<IEngineFacade>()));
         services.AddSingleton<ILuaAiAssistant>(sp =>
             new LuaAiAssistantService(
                 () => {

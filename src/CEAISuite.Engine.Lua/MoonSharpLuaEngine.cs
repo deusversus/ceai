@@ -22,6 +22,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IMemoryProtectionEngine? _memoryProtectionEngine;
     private readonly ILuaAiAssistant? _aiAssistant;
     private readonly ISymbolEngine? _symbolEngine;
+    private readonly ILuaAddressListProvider? _addressListProvider;
+    private readonly ILuaStructureProvider? _structureProvider;
     private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
@@ -68,7 +70,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         IScanEngine? scanEngine = null,
         IMemoryProtectionEngine? memoryProtectionEngine = null,
         ILuaAiAssistant? aiAssistant = null,
-        ISymbolEngine? symbolEngine = null)
+        ISymbolEngine? symbolEngine = null,
+        ILuaAddressListProvider? addressListProvider = null,
+        ILuaStructureProvider? structureProvider = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
@@ -79,6 +83,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _memoryProtectionEngine = memoryProtectionEngine;
         _aiAssistant = aiAssistant;
         _symbolEngine = symbolEngine;
+        _addressListProvider = addressListProvider;
+        _structureProvider = structureProvider;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -301,6 +307,12 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             if (_aiAssistant is not null)
                 LuaAiBindings.Register(script, this, _aiAssistant, _engineFacade, _autoAssembler);
         }
+
+        if (_addressListProvider is not null)
+            LuaAddressListBindings.Register(script, _addressListProvider);
+
+        if (_structureProvider is not null)
+            LuaStructureBindings.Register(script, this, _structureProvider);
 
         if (_formHost is not null)
         {

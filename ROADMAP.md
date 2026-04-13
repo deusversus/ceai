@@ -734,6 +734,15 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 | **D3D/OpenGL overlay** (10F) | Phase 10 | Very High complexity, highest crash risk, obsoleted by multi-monitor setups. Better suited as a community plugin via the 10A plugin system. |
 | **Multi-platform port** (10H) | Phase 10 | Target audience debugs Windows game processes. Linux/macOS via Wine/Proton is a tiny niche with fundamentally different process model challenges. Cherry on top after the core product is finished, not a prerequisite. |
 | **PDB/.NET symbol loading** | Phase 3A | Currently module exports only. Full PDB/DWARF/.NET metadata symbol resolution would enrich disassembler labels, stack traces, and structure dissection. Medium complexity (DbgHelp P/Invoke or similar). Not blocking any workflow — addresses resolve by module+offset — but would significantly improve readability. |
+| **`debug_continueFromBreakpoint`** | Scripting S1B | Requires `ISteppingEngine` from Phase 11A. Stepping commands don't exist yet. Wire as Lua global once 11A ships. |
+| **`debug_setLastChanceExceptionHandler`** | Scripting S1B | Requires exception handler infrastructure from Phase 11A stepping engine. |
+| **Lua form anchor/dock layout** | Scripting S2 | Resize-aware element positioning for script-created forms (`element:setAnchors()`). Low ROI — most CE trainers use fixed-size forms. Canvas uses absolute positioning. |
+| **Full coroutine `await(promise)` pattern** | Scripting S4 | MoonSharp coroutine integration for true async Lua. `createThread` + `createNativeTimer` cover primary use cases today. |
+| **Mono/.NET introspection bridge** | Scripting S6C | `mono_enumDomains`, `mono_class_enumFields`, etc. Needs new `IMonoEngine` + P/Invoke against mono runtime. High value for Unity targets, Very High effort. |
+| **Integrated Lua script debugger** | Scripting S6E | Set breakpoints in Lua code, step through scripts in Script Editor, variable inspector. Needs MoonSharp `IDebugger` rework. |
+| **`assemble()` byte extraction** | Scripting audit | Currently returns `true` not assembled bytes. Needs Keystone byte extraction without full AA execution context. |
+| **`AOBScanModule` range-constrained scan** | Scripting audit | Currently scans all memory then filters. Needs `IScanEngine` start/end address constraint support for performance. |
+| **Script library manager UI** | Scripting S3 | ViewModel + XAML panel for browsing installed script modules in `scripts/lib/`. |
 
 ---
 
@@ -759,22 +768,27 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 7 ✅ | After Ph 8 ✅ | After Ph 10 ✅ | Target |
-|----------|-----------|-----------|------------|--------|
-| Process & Attachment | 45% | 45% | 50% | 80%* |
-| Memory Read/Write | 80% | 80% | 80% | 90% |
-| Scanning | 90% | 90% | 90% | 95% |
-| Disassembly & Analysis | 70% | 70% | 70% | 85% |
-| Breakpoints & Hooks | 85% | 90% | 95% | 95%** |
-| Address Table | 90% | 90% | 90% | 95% |
-| Scripting | 80% | 95% | 95% | 95% |
+| Category | After Ph 8 ✅ | After Ph 10 ✅ | After Scripting Sprint ✅ | Target |
+|----------|-----------|------------|------------------------|--------|
+| Process & Attachment | 45% | 50% | 50% | 80%* |
+| Memory Read/Write | 80% | 80% | 85% | 90% |
+| Scanning | 90% | 90% | 95% | 95% |
+| Disassembly & Analysis | 70% | 70% | 80% | 85% |
+| Breakpoints & Hooks | 90% | 95% | 95% | 95%** |
+| Address Table | 90% | 90% | 95% | 95% |
+| Scripting (AA engine) | 95% | 95% | 95% | 95% |
+| Scripting (Lua API) | 25% | 25% | 90% | 95%*** |
 | Pointer Resolution | 70% | 70% | 70% | 80% |
 | Structure Discovery | 100% | 100% | 100% | 100% |
 | Snapshots | 100% | 100% | 100% | 100% |
 | Session & History | 75% | 75% | 75% | 80% |
-| Safety & Watchdog | 50% | 50% | 70% | 80% |
+| Safety & Watchdog | 50% | 70% | 70% | 80% |
 | Hotkeys | 100% | 100% | 100% | 100% |
-| **Overall** | **~82%** | **~88%** | **~91%** | **95%+** |
+| **Overall** | **~88%** | **~91%** | **~93%** | **95%+** |
+
+*Process & Attachment parity improves further with future engine enhancements (parent process, command line).
+**Breakpoints & Hooks reaches 95% with VEH debugging (10E) providing anti-debug bypass.
+***Scripting (Lua API) at 90%: ~150 globals registered, address list + structure APIs complete. Remaining 10% = Phase 11A-gated debugger stepping commands + mono introspection.
 
 *Process & Attachment parity improves further with future engine enhancements (parent process, command line).
 **Breakpoints & Hooks reaches 95% with VEH debugging (10E) providing anti-debug bypass. Target raised from 90% to 95%.

@@ -74,3 +74,64 @@ public interface ILuaAiAssistant
     /// <summary>Ask the AI to generate an AOB pattern from a natural language description.</summary>
     Task<string> FindPatternAsync(string description, int processId, CancellationToken ct = default);
 }
+
+// ── Address List / Memory Record Provider ──
+
+/// <summary>
+/// A memory record as seen by Lua scripts. Simplified view of AddressTableNode.
+/// </summary>
+public sealed record LuaMemoryRecord(
+    string Id,
+    string Description,
+    string Address,
+    string DataType,
+    string? Value,
+    bool IsActive,
+    bool IsGroupHeader);
+
+/// <summary>
+/// Provider for address list (memory record) operations, callable from Lua.
+/// Implemented by the Application layer to avoid Engine.Lua → Application dependency.
+/// </summary>
+public interface ILuaAddressListProvider
+{
+    int GetCount();
+    LuaMemoryRecord? GetRecord(int index);
+    LuaMemoryRecord? GetRecordById(string id);
+    LuaMemoryRecord? GetRecordByDescription(string description);
+    string AddRecord(string address, string dataType, string? description);
+    void RemoveRecord(string id);
+    void SetValue(string id, string value);
+    string? GetValue(string id);
+    string? GetAddress(string id);
+    string? GetDescription(string id);
+    void SetDescription(string id, string description);
+    void SetActive(string id, bool active);
+    bool GetActive(string id);
+    void RefreshAll(int processId);
+}
+
+// ── Structure Definition Provider ──
+
+/// <summary>A field in a Lua-defined structure.</summary>
+public sealed record LuaStructureField(
+    int Offset, string Name, string FieldType, string? Value);
+
+/// <summary>A complete structure definition created from Lua.</summary>
+public sealed record LuaStructureDefinition(
+    string Id, string Name, IReadOnlyList<LuaStructureField> Fields);
+
+/// <summary>
+/// Provider for structure definition operations, callable from Lua.
+/// Implemented by the Application layer wrapping StructureDissectorService.
+/// </summary>
+public interface ILuaStructureProvider
+{
+    string CreateStructure(string name);
+    void AddElement(string structureId, int offset, string fieldType, string name);
+    LuaStructureDefinition? GetStructure(string structureId);
+    IReadOnlyList<LuaStructureDefinition> ListStructures();
+    string ExportAsCStruct(string structureId);
+    void RemoveStructure(string structureId);
+    IReadOnlyList<LuaStructureField> DissectMemory(int processId, nuint address, int size);
+}

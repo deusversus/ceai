@@ -575,6 +575,125 @@ public sealed partial class AiToolFunctions
         return $"Lua callback unregistered from breakpoint {breakpointId}.";
     }
 
+    // ── C3: Hit Log Enhancements ──
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Get aggregated hit statistics for a breakpoint: total hits, hits/sec, unique threads, top addresses.")]
+    public async Task<string> GetBreakpointHitStatistics(
+        [Description("Breakpoint ID")] string breakpointId)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        try
+        {
+            var stats = await breakpointService.GetHitStatisticsAsync(breakpointId).ConfigureAwait(false);
+            return ToJson(new
+            {
+                stats.TotalHits,
+                stats.HitsPerSecond,
+                stats.UniqueThreads,
+                stats.TopAddresses,
+                FirstHit = stats.FirstHit?.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
+                LastHit = stats.LastHit?.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture)
+            });
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to get statistics: {ex.Message}";
+        }
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Export a breakpoint's hit log to a file. Supports CSV and JSON formats.")]
+    public async Task<string> ExportBreakpointHitLog(
+        [Description("Breakpoint ID")] string breakpointId,
+        [Description("Output file path")] string filePath,
+        [Description("Format: Csv or Json")] string format = "Csv")
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        if (!Enum.TryParse<HitLogExportFormat>(format, ignoreCase: true, out var fmt))
+            return $"Invalid format '{format}'. Use 'Csv' or 'Json'.";
+        // Path traversal check per SECURITY.md
+        if (filePath.Contains(".."))
+            return "Path traversal rejected: '..' not allowed in file paths.";
+        try
+        {
+            return await breakpointService.ExportHitLogAsync(breakpointId, filePath, fmt).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return $"Export failed: {ex.Message}";
+        }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [Description("Get filtered hit log for a breakpoint. Filter by thread ID and/or time range.")]
+    public async Task<string> GetFilteredBreakpointHitLog(
+        [Description("Breakpoint ID")] string breakpointId,
+        [Description("Optional: filter to this thread ID only")] int? threadId = null,
+        [Description("Max entries to return")] int maxEntries = 50)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        try
+        {
+            var filter = new HitLogFilter(ThreadId: threadId);
+            var hits = await breakpointService.GetFilteredHitLogAsync(breakpointId, filter, maxEntries).ConfigureAwait(false);
+            if (hits.Count == 0) return "No hits matching filter.";
+            return ToJson(hits.Select(h => new { h.Address, h.ThreadId, h.Timestamp }).Take(50));
+        }
+        catch (Exception ex)
+        {
+            return $"Failed to get filtered hits: {ex.Message}";
+        }
+    }
+
+    // ── C4: Breakpoint Persistence ──
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Save current breakpoints to a named profile XML file.")]
+    public async Task<string> SaveBreakpointProfile(
+        [Description("Process ID")] int processId,
+        [Description("Profile name")] string profileName,
+        [Description("Output file path")] string filePath)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (filePath.Contains("..")) return "Path traversal rejected.";
+        try
+        {
+            return await breakpointService.SaveProfileAsync(processId, profileName, filePath).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return $"Save failed: {ex.Message}";
+        }
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Load breakpoints from a profile XML file and re-create them.")]
+    public async Task<string> LoadBreakpointProfile(
+        [Description("Process ID")] int processId,
+        [Description("Profile file path")] string filePath)
+    {
+        if (breakpointService is null) return "Breakpoint engine not available.";
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (filePath.Contains("..")) return "Path traversal rejected.";
+        try
+        {
+            return await breakpointService.LoadProfileAsync(processId, filePath).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            return $"Load failed: {ex.Message}";
+        }
+    }
+
     // ── B2: Region Breakpoint ──
 
     [Destructive]

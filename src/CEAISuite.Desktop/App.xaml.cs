@@ -329,7 +329,8 @@ public partial class App : System.Windows.Application
             new BreakpointService(
                 sp.GetRequiredService<IBreakpointEngine>(),
                 sp.GetService<ILuaScriptEngine>(),
-                sp.GetService<ILogger<BreakpointService>>()));
+                sp.GetService<ILogger<BreakpointService>>(),
+                sp.GetService<IBreakpointEventBus>()));
         services.AddSingleton<GlobalHotkeyService>();
         services.AddSingleton<PatchUndoService>();
         services.AddSingleton<MemorySnapshotService>();

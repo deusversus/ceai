@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using System.Xml.Linq;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.Logging;
 
@@ -53,11 +54,38 @@ public sealed record BreakpointHitOverview(
 /// Application-level service wrapping IBreakpointEngine for the UI and AI operator.
 /// Supports optional Lua callback registration for breakpoint hits.
 /// </summary>
-public sealed class BreakpointService(
-    IBreakpointEngine? breakpointEngine,
-    ILuaScriptEngine? luaScriptEngine = null,
-    ILogger<BreakpointService>? logger = null)
+public sealed class BreakpointService : IDisposable
 {
+    private readonly IBreakpointEngine? breakpointEngine;
+    private readonly ILuaScriptEngine? luaScriptEngine;
+    private readonly ILogger<BreakpointService>? logger;
+    private readonly IDisposable? _eventBusSubscription;
+
+    public BreakpointService(
+        IBreakpointEngine? breakpointEngine,
+        ILuaScriptEngine? luaScriptEngine = null,
+        ILogger<BreakpointService>? logger = null,
+        IBreakpointEventBus? eventBus = null)
+    {
+        this.breakpointEngine = breakpointEngine;
+        this.luaScriptEngine = luaScriptEngine;
+        this.logger = logger;
+
+        // C2: Subscribe to lifecycle state changes from the engine
+        _eventBusSubscription = eventBus?.Subscribe(OnBreakpointEvent);
+    }
+
+    private void OnBreakpointEvent(BreakpointEvent evt)
+    {
+        if (evt is BreakpointStateChangedEvent stateEvt &&
+            Enum.TryParse<BreakpointLifecycleStatus>(stateEvt.NewStatus, out var status))
+        {
+            UpdateLifecycleStatus(stateEvt.BreakpointId, status);
+        }
+    }
+
+    public void Dispose() => _eventBusSubscription?.Dispose();
+
     private bool IsAvailable => breakpointEngine is not null;
 
     private readonly ConcurrentDictionary<string, BreakpointLifecycleStatus> _lifecycleStatuses = new();
@@ -443,6 +471,93 @@ public sealed class BreakpointService(
         var address = ParseAddress(startAddressText);
         var bps = await breakpointEngine!.SetRegionBreakpointAsync(processId, address, length, action, cancellationToken).ConfigureAwait(false);
         return bps.Select(ToOverview).ToArray();
+    }
+
+    // ── C4: Breakpoint Persistence ──
+
+    /// <summary>Save current breakpoints as a named profile to an XML file.</summary>
+    public async Task<string> SaveProfileAsync(
+        int processId,
+        string profileName,
+        string filePath,
+        CancellationToken ct = default)
+    {
+        EnsureAvailable();
+        var bps = await breakpointEngine!.ListBreakpointsAsync(processId, ct).ConfigureAwait(false);
+
+        var xml = new XElement("BreakpointProfiles",
+            new XElement("Profile",
+                new XAttribute("Name", profileName),
+                new XAttribute("SavedAt", DateTimeOffset.UtcNow.ToString("O")),
+                bps.Select(bp => new XElement("Breakpoint",
+                    new XAttribute("Address", $"0x{bp.Address:X}"),
+                    new XAttribute("Type", bp.Type.ToString()),
+                    new XAttribute("Mode", bp.Mode.ToString()),
+                    new XAttribute("HitAction", bp.HitAction.ToString()),
+                    bp.Condition is not null ? new XAttribute("Condition", bp.Condition.Expression) : null,
+                    bp.Condition is not null ? new XAttribute("ConditionType", bp.Condition.Type.ToString()) : null,
+                    bp.ThreadFilter.HasValue ? new XAttribute("ThreadFilter", bp.ThreadFilter.Value) : null
+                ))));
+
+        await File.WriteAllTextAsync(filePath, xml.ToString(), ct).ConfigureAwait(false);
+        return $"Saved {bps.Count} breakpoints to profile '{profileName}' at {filePath}";
+    }
+
+    /// <summary>Load a breakpoint profile from an XML file and re-create the breakpoints.</summary>
+    public async Task<string> LoadProfileAsync(
+        int processId,
+        string filePath,
+        CancellationToken ct = default)
+    {
+        EnsureAvailable();
+        // Path traversal check per SECURITY.md
+        if (filePath.Contains(".."))
+            throw new ArgumentException("Path traversal rejected: '..' not allowed in file paths.");
+
+        var xmlText = await File.ReadAllTextAsync(filePath, ct).ConfigureAwait(false);
+        var doc = XElement.Parse(xmlText);
+        var profile = doc.Element("Profile");
+        if (profile is null) return "No profile found in file.";
+
+        var loaded = 0;
+        var failed = 0;
+        foreach (var bpElem in profile.Elements("Breakpoint"))
+        {
+            try
+            {
+                var address = bpElem.Attribute("Address")?.Value ?? "0x0";
+                var type = Enum.Parse<BreakpointType>(bpElem.Attribute("Type")?.Value ?? "Software");
+                var mode = Enum.Parse<BreakpointMode>(bpElem.Attribute("Mode")?.Value ?? "Auto");
+                var action = Enum.Parse<BreakpointHitAction>(bpElem.Attribute("HitAction")?.Value ?? "LogAndContinue");
+
+                var condExpr = bpElem.Attribute("Condition")?.Value;
+                var condType = bpElem.Attribute("ConditionType")?.Value;
+                int? threadFilter = int.TryParse(bpElem.Attribute("ThreadFilter")?.Value, out var tf) ? tf : null;
+
+                if (condExpr is not null && condType is not null)
+                {
+                    var condition = new BreakpointCondition(condExpr, Enum.Parse<BreakpointConditionType>(condType));
+                    await SetConditionalBreakpointAsync(processId, address, type, condition, mode, action, threadFilter, ct)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    await SetBreakpointAsync(processId, address, type, mode, action, cancellationToken: ct)
+                        .ConfigureAwait(false);
+                }
+                loaded++;
+            }
+            catch (Exception ex)
+            {
+                logger?.LogWarning(ex, "Failed to load breakpoint from profile element: {Element}", bpElem);
+                failed++;
+            }
+        }
+
+        var profileName = profile.Attribute("Name")?.Value ?? "unknown";
+        return failed > 0
+            ? $"Loaded {loaded} breakpoints from profile '{profileName}' ({failed} failed — addresses may have relocated)."
+            : $"Loaded {loaded} breakpoints from profile '{profileName}'.";
     }
 
     private void EnsureAvailable()

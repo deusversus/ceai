@@ -655,6 +655,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             // 2A: 0xCC persists at this address — mark breakpoint as restoration-failed
             breakpoint.RestorationFailed = true;
             _logger.LogError("RestoreOriginalByte failed at 0x{Address:X} (error {Error}). The 0xCC byte persists -- breakpoint {BreakpointId} marked as restoration-failed", breakpoint.Address, Marshal.GetLastWin32Error(), breakpoint.Id);
+            _eventBus?.Publish(new BreakpointStateChangedEvent(breakpoint.Id, nameof(BreakpointLifecycleStatus.Faulted)));
             return;
         }
         FlushInstructionCache(session.ProcessHandle, (IntPtr)breakpoint.Address, (UIntPtr)1);
@@ -1628,11 +1629,16 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         _eventBus?.Publish(new BreakpointHitOccurredEvent(
             breakpoint.Id, $"0x{address:X}", threadId, newCount));
 
+        // C2: First hit transitions to Active
+        if (newCount == 1)
+            _eventBus?.Publish(new BreakpointStateChangedEvent(breakpoint.Id, nameof(BreakpointLifecycleStatus.Active)));
+
         // Single-hit enforcement: disable immediately after first hit
         if (breakpoint.SingleHit && newCount >= 1)
         {
             if (_logger.IsEnabled(LogLevel.Debug))
                 _logger.LogDebug("Single-hit BP {BreakpointId} at 0x{Address:X}: auto-disabling after first hit", breakpoint.Id, breakpoint.Address);
+            _eventBus?.Publish(new BreakpointStateChangedEvent(breakpoint.Id, nameof(BreakpointLifecycleStatus.SingleHitRemoved)));
             return true;
         }
 
@@ -1654,8 +1660,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 breakpoint.ThrottleDisabledAtTicks = Environment.TickCount64;
                 _logger.LogWarning("Auto-disabling BP {BreakpointId} at 0x{Address:X}: exceeded {MaxHitsPerSecond} hits/sec ({Hits} in window). This prevents game freezes", breakpoint.Id, breakpoint.Address, MaxHitsPerSecond, hits);
 
-                // C1: Publish throttle event
+                // C1: Publish throttle event + C2: lifecycle state change
                 _eventBus?.Publish(new BreakpointThrottledEvent(breakpoint.Id, hits));
+                _eventBus?.Publish(new BreakpointStateChangedEvent(breakpoint.Id, nameof(BreakpointLifecycleStatus.ThrottleDisabled)));
 
                 return true; // caller should disable this BP
             }

@@ -126,9 +126,11 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                         {
                             return await SetVehBreakpointAsync(processId, address, type, action, singleHit, cancellationToken);
                         }
-                        catch
+                        catch (Exception vehEx) when (vehEx is not OperationCanceledException)
                         {
                             // VEH also failed — fall through to PageGuard
+                            if (_logger.IsEnabled(LogLevel.Debug))
+                                _logger.LogDebug(vehEx, "VEH fallback failed, cascading to PageGuard");
                         }
                     }
 
@@ -233,7 +235,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         string breakpointId,
         CancellationToken cancellationToken = default) =>
         Task.Run(
-            () =>
+            async () =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -241,7 +243,7 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 if (_breakpointRegistry.TryGetValue(breakpointId, out var vehBp) &&
                     vehBp.Mode == BreakpointMode.VectoredExceptionHandler)
                 {
-                    return RemoveVehBreakpointAsync(breakpointId, vehBp).GetAwaiter().GetResult();
+                    return await RemoveVehBreakpointAsync(breakpointId, vehBp).ConfigureAwait(false);
                 }
 
                 if (!_sessions.TryGetValue(processId, out var session))
@@ -799,7 +801,23 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                 throw new InvalidOperationException($"VEH agent injection failed: {injectResult.Error}");
         }
 
-        // Map BreakpointType to VehBreakpointType
+        // Map BreakpointType to VEH method
+        // Software type uses INT3 via VEH; hardware types use DR registers
+        if (type == BreakpointType.Software)
+        {
+            var int3Result = await _vehDebugger.SetInt3BreakpointAsync(processId, address, ct).ConfigureAwait(false);
+            if (!int3Result.Success)
+                throw new InvalidOperationException($"VEH INT3 breakpoint failed: {int3Result.Error}");
+
+            var int3BpId = $"bp-{Guid.NewGuid().ToString("N")[..8]}";
+            var int3Bp = new BreakpointState(int3BpId, processId, address, type, action,
+                BreakpointMode.VectoredExceptionHandler, singleHit);
+            int3Bp.HardwareSlot = -1; // sentinel: INT3, not hardware
+
+            _breakpointRegistry[int3BpId] = int3Bp;
+            return int3Bp.ToDescriptor();
+        }
+
         var vehType = type switch
         {
             BreakpointType.HardwareExecute => VehBreakpointType.Execute,
@@ -831,10 +849,25 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
 
     private async Task<bool> RemoveVehBreakpointAsync(string breakpointId, BreakpointState bp)
     {
-        if (_vehDebugger is null || bp.HardwareSlot is not { } drSlot)
+        if (_vehDebugger is null)
             return false;
 
-        var ok = await _vehDebugger.RemoveBreakpointAsync(bp.ProcessId, drSlot).ConfigureAwait(false);
+        bool ok;
+        if (bp.HardwareSlot is -1)
+        {
+            // INT3 software BP via VEH — remove by address
+            ok = await _vehDebugger.RemoveInt3BreakpointAsync(bp.ProcessId, bp.Address).ConfigureAwait(false);
+        }
+        else if (bp.HardwareSlot is { } drSlot and >= 0)
+        {
+            // Hardware BP via VEH — remove by DR slot
+            ok = await _vehDebugger.RemoveBreakpointAsync(bp.ProcessId, drSlot).ConfigureAwait(false);
+        }
+        else
+        {
+            ok = false;
+        }
+
         _breakpointRegistry.TryRemove(breakpointId, out _);
         return ok;
     }

@@ -225,6 +225,20 @@ public partial class MainWindow : Window, IDisposable
         SpeedHackContent.DataContext = speedHackVm;
         VehDebugContent.DataContext = vehDebugVm;
 
+        // Wire VEH agent status → status bar (StatusBarRight, column 5)
+        vehDebugVm.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(VehDebugViewModel.AgentStatus) or nameof(VehDebugViewModel.IsAgentInjected))
+            {
+                Dispatcher.BeginInvoke(() =>
+                {
+                    StatusBarRight.Text = vehDebugVm.IsAgentInjected
+                        ? $"VEH: {vehDebugVm.AgentStatus}"
+                        : "";
+                });
+            }
+        };
+
         // Wire Phase 5 Memory Browser ViewModel
         MemoryBrowserTab.SetViewModel(memoryBrowserVm);
 
@@ -1626,6 +1640,7 @@ public partial class MainWindow : Window, IDisposable
         "workspace" => "Workspace",
         "plugins" => "Plugins",
         "speedHack" => "Speed Hack",
+        "vehDebugger" => "VEH Debugger",
         _ => contentId
     };
 
@@ -1759,7 +1774,7 @@ public partial class MainWindow : Window, IDisposable
             "aiOperator" => "aiOperator",
             // Bottom panels
             "scanner" or "breakpoints" or "scripts" or "snapshots"
-                or "findResults" or "hotkeys" or "journal" or "output" or "speedHack" => "scanner",
+                or "findResults" or "hotkeys" or "journal" or "output" or "speedHack" or "vehDebugger" => "scanner",
             _ => "scanner"
         };
 

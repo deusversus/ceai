@@ -931,6 +931,8 @@
                                         <ListView.ContextMenu>
                                             <ContextMenu Background="{DynamicResource MenuBarBackground}" Foreground="{DynamicResource PrimaryForeground}">
                                                 <MenuItem Header="Set Breakpoint" Command="{Binding SetBreakpointAtSelectedCommand}" />
+                                                <MenuItem Header="Set VEH Breakpoint" Command="{Binding SetVehBreakpointAtSelectedCommand}"
+                                                          ToolTip="Set breakpoint via VEH agent (no debugger attachment, bypasses anti-debug)" />
                                                 <MenuItem Header="Find What Writes" Command="{Binding FindWhatWritesCommand}" />
                                                 <MenuItem Header="Trace Field Writers (AI)" Command="{Binding TraceFieldWritersCommand}" ToolTip="Ask the AI to analyze code that writes to this field" />
                                                 <MenuItem Header="Generate Signature" Command="{Binding GenerateSignatureCommand}" />
@@ -2539,7 +2541,8 @@
                            Foreground="OrangeRed" FontWeight="SemiBold"
                            ToolTip="Watchdog auto-rollback alert" />
                 <TextBlock x:Name="StatusBarRight" Grid.Column="5" FontSize="11" Margin="12,0,0,0"
-                           Foreground="{DynamicResource SecondaryForeground}" />
+                           Foreground="{DynamicResource AccentForeground}"
+                           ToolTip="VEH debugger agent status" />
                 <TextBlock x:Name="StatusBarDensity" Grid.Column="6" FontSize="11" Margin="12,0,0,0"
                            Foreground="{DynamicResource AccentForeground}" Cursor="Hand" Text="Balanced"
                            ToolTip="Click to cycle density preset (Clean → Balanced → Dense)"

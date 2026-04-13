@@ -154,6 +154,27 @@ public partial class DisassemblerViewModel : ObservableObject
     }
 
     [RelayCommand]
+    private async Task SetVehBreakpointAtSelectedAsync()
+    {
+        if (SelectedLine is null) return;
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null) { StatusText = "No process attached."; return; }
+
+        IsBreakpointBusy = true;
+        try
+        {
+            var bp = await _breakpointService.SetBreakpointAsync(
+                pid.Value, SelectedLine.Address,
+                BreakpointType.HardwareExecute,
+                BreakpointMode.VectoredExceptionHandler);
+            StatusText = $"VEH breakpoint set at {SelectedLine.Address} ({bp.Mode})";
+            _outputLog.Append("Disasm", "Info", $"VEH breakpoint set at {SelectedLine.Address}");
+        }
+        catch (Exception ex) { StatusText = $"VEH BP failed: {ex.Message}"; }
+        finally { IsBreakpointBusy = false; }
+    }
+
+    [RelayCommand]
     private async Task FindWhatWritesAsync()
     {
         if (SelectedLine is null) return;

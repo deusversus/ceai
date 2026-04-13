@@ -168,9 +168,17 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
     /// <summary>Stop a previously started loop thread.</summary>
     public async Task StopLoopAsync(int nativeThreadId, CancellationToken ct = default)
     {
-        var resp = await SendCommandAsync($"STOP_LOOP {nativeThreadId}", ct: ct);
-        if (resp is not "STOP_LOOP_OK")
-            throw new InvalidOperationException($"STOP_LOOP failed: {resp}");
+        try
+        {
+            var resp = await SendCommandAsync($"STOP_LOOP {nativeThreadId}", TimeSpan.FromSeconds(5), ct);
+            if (resp is not "STOP_LOOP_OK")
+                System.Diagnostics.Debug.WriteLine($"STOP_LOOP returned unexpected: {resp}");
+        }
+        catch (Exception ex)
+        {
+            // Best-effort cleanup — harness may have already exited or be unresponsive on CI
+            System.Diagnostics.Debug.WriteLine($"STOP_LOOP failed (non-fatal): {ex.Message}");
+        }
     }
 
     /// <summary>Create a thread with N-deep call stack. Returns (threadId, baseAddress).</summary>

@@ -374,7 +374,19 @@ public partial class VehDebugViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
-        StopHitStreamAsync().GetAwaiter().GetResult();
+        // Cancel the CTS and clean up without blocking for the task to complete,
+        // avoiding potential deadlock if called on the UI thread (DI container shutdown).
+        var cts = _hitStreamCts;
+        _hitStreamCts = null;
+        _hitStreamTask = null;
+
+        if (cts is not null)
+        {
+            cts.Cancel();
+            cts.Dispose();
+        }
+
+        IsHitStreamRunning = false;
     }
 
     // ─── Helper: GetHitStreamAsync passthrough ──────────────────────

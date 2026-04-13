@@ -75,16 +75,23 @@ public sealed class LuaFormHostService : ILuaFormHost
 
     public void CloseAllForms()
     {
-        foreach (var (_, window) in _windows.ToList())
+        // Window.Close() and DispatcherTimer.Stop() must be called on the UI thread.
+        // Use synchronous Invoke (not BeginInvoke) so callers like Reset/Dispose
+        // can rely on forms being closed when this method returns.
+        _dispatcher.Invoke(() =>
         {
-            try { window.Close(); } catch { }
-        }
-        _windows.Clear();
-        foreach (var (_, timer) in _timers.ToList())
-        {
-            timer.Stop();
-        }
-        _timers.Clear();
+            foreach (var (_, window) in _windows.ToList())
+            {
+                try { window.Close(); }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { }
+            }
+            _windows.Clear();
+            foreach (var (_, timer) in _timers.ToList())
+            {
+                timer.Stop();
+            }
+            _timers.Clear();
+        });
     }
 
     public void UpdateElement(string formId, LuaFormElement element)

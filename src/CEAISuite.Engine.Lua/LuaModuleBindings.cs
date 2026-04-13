@@ -185,9 +185,12 @@ internal static class LuaModuleBindings
                 throw new ScriptRuntimeException("injectDLL: file must be a .dll");
             if (!File.Exists(dllPath))
                 throw new ScriptRuntimeException($"injectDLL: file not found: {dllPath}");
-            var fileInfo = new FileInfo(dllPath);
-            if (fileInfo.LinkTarget is not null)
-                throw new ScriptRuntimeException("injectDLL: symbolic links are not allowed");
+            // Check for symlinks, junctions, and other reparse points.
+            // FileInfo.LinkTarget only catches symbolic links; File.GetAttributes
+            // with ReparsePoint catches NTFS junctions and mount points too.
+            var attrs = File.GetAttributes(dllPath);
+            if (attrs.HasFlag(FileAttributes.ReparsePoint))
+                throw new ScriptRuntimeException("injectDLL: symbolic links and junctions are not allowed");
 
             var pid = RequireProcess(engine);
 

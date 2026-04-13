@@ -142,4 +142,48 @@ public sealed class AutoAssemblerConditionalTests
         // For unit testing, verify the command is registered and can be looked up.
         Assert.Contains("testCmd", _engine.GetCustomCommands());
     }
+
+    // ── aobreplace directive tests ──
+
+    [Fact]
+    public void AobReplace_ParsesValidSyntax()
+    {
+        var script = """
+            [ENABLE]
+            aobreplace(48 89 5C 24 ??, 90 90 90 90 90)
+            [DISABLE]
+            """;
+
+        var parsed = _engine.Parse(script);
+        Assert.True(parsed.IsValid, string.Join("; ", parsed.Errors));
+    }
+
+    [Fact]
+    public void AobReplaceModule_ParsesValidSyntax()
+    {
+        var script = """
+            [ENABLE]
+            aobreplacemodule(game.dll, 48 89 5C 24 ??, 90 90 90 90 90)
+            [DISABLE]
+            """;
+
+        var parsed = _engine.Parse(script);
+        Assert.True(parsed.IsValid, string.Join("; ", parsed.Errors));
+    }
+
+    [Fact]
+    public void AobReplace_RecognizedInStrictMode()
+    {
+        var script = """
+            [ENABLE]
+            {$strict}
+            aobreplace(48 8B 05 ?? ?? ?? ??, 90 90 90 90 90 90 90)
+            [DISABLE]
+            """;
+
+        // In strict mode, unrecognized directives cause errors.
+        // aobreplace should be recognized and NOT cause an error.
+        var parsed = _engine.Parse(script);
+        Assert.True(parsed.IsValid, string.Join("; ", parsed.Errors));
+    }
 }

@@ -996,6 +996,8 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 UnregisterSymbolRegex().IsMatch(trimmed) ||
                 AobScanModuleRegex().IsMatch(trimmed) ||
                 AobScanGlobalRegex().IsMatch(trimmed) ||
+                AobReplaceRegex().IsMatch(trimmed) ||
+                AobReplaceModuleRegex().IsMatch(trimmed) ||
                 LabelDefRegex().IsMatch(trimmed) ||
                 DbRegex().IsMatch(trimmed) ||
                 NopRegex().IsMatch(trimmed))
@@ -1469,6 +1471,12 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
     [GeneratedRegex(@"^aobscan\(\s*(\w+)\s*,\s*((?:[0-9A-Fa-f?]{1,2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
     private static partial Regex AobScanGlobalRegex();
+
+    [GeneratedRegex(@"^aobreplace\(\s*((?:[0-9A-Fa-f?]{1,2}\s*)+)\s*,\s*((?:[0-9A-Fa-f]{1,2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex AobReplaceRegex();
+
+    [GeneratedRegex(@"^aobreplacemodule\(\s*([^,]+?)\s*,\s*((?:[0-9A-Fa-f?]{1,2}\s*)+)\s*,\s*((?:[0-9A-Fa-f]{1,2}\s*)+)\s*\)$", RegexOptions.IgnoreCase)]
+    private static partial Regex AobReplaceModuleRegex();
 
     #endregion
 

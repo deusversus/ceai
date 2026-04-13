@@ -72,14 +72,51 @@ public sealed class LuaTrivialGapTests : IDisposable
     }
 
     [Fact]
-    public async Task InjectDLL_DelegatesToAA()
+    public async Task InjectDLL_RejectsNonExistentFile()
     {
         var result = await _engine.ExecuteAsync("""
-            injectDLL("C:\\test.dll")
+            injectDLL("C:\\nonexistent.dll")
             return true
             """, processId: 1234);
 
-        Assert.True(result.Success, result.Error);
+        Assert.False(result.Success);
+        Assert.Contains("file not found", result.Error ?? "");
+    }
+
+    [Fact]
+    public async Task InjectDLL_RejectsNonDllExtension()
+    {
+        var result = await _engine.ExecuteAsync("""
+            injectDLL("C:\\windows\\system32\\notepad.exe")
+            return true
+            """, processId: 1234);
+
+        Assert.False(result.Success);
+        Assert.Contains("must be a .dll", result.Error ?? "");
+    }
+
+    [Fact]
+    public async Task InjectDLL_RejectsUncPath()
+    {
+        var result = await _engine.ExecuteAsync("""
+            injectDLL("\\\\server\\share\\bad.dll")
+            return true
+            """, processId: 1234);
+
+        Assert.False(result.Success);
+        Assert.Contains("UNC", result.Error ?? "");
+    }
+
+    [Fact]
+    public async Task InjectDLL_RejectsEmptyPath()
+    {
+        var result = await _engine.ExecuteAsync("""
+            injectDLL("")
+            return true
+            """, processId: 1234);
+
+        Assert.False(result.Success);
+        Assert.Contains("cannot be empty", result.Error ?? "");
     }
 
     [Fact]
@@ -139,6 +176,7 @@ public sealed class LuaTrivialGapTests : IDisposable
         public event Action<string, string, string>? ElementTextChanged;
         public void ShowForm(LuaFormDescriptor form) { }
         public void CloseForm(string formId) { }
+        public void CloseAllForms() { }
         public void UpdateElement(string formId, LuaFormElement element) { }
         public void StartTimer(string formId, string timerId, int intervalMs) { }
         public void StopTimer(string formId, string timerId) { }

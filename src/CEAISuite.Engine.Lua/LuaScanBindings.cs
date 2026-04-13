@@ -174,7 +174,7 @@ internal static class LuaScanBindings
                     engineFacade.WriteBytesAsync(pid, result.Address, replaceBytes).GetAwaiter().GetResult();
                     count++;
                 }
-                catch { /* skip failed writes */ }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { /* skip failed writes */ }
             }
             return count;
         });
@@ -207,7 +207,7 @@ internal static class LuaScanBindings
                         engineFacade.WriteBytesAsync(pid, resolved.Value, replaceBytes).GetAwaiter().GetResult();
                         count++;
                     }
-                    catch { /* skip failed writes */ }
+                    catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException) { /* skip failed writes */ }
                 }
             }
             return count;

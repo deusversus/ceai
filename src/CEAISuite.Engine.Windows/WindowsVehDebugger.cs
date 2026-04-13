@@ -124,7 +124,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         public readonly int[] SlotHitCounts = new int[MaxDrSlots]; // per-slot hit count for conditions
         public int TotalHits;
         public int LastOverflowCount;       // track overflow count for delta detection
-        public bool StealthActive;          // stealth mode state
+        private volatile bool _stealthActive; // stealth mode state — volatile for cross-thread visibility
+        public bool StealthActive { get => _stealthActive; set => _stealthActive = value; }
         public string? TempAgentPath;       // temp copy of veh_agent.dll
 
         public void Dispose()
@@ -266,7 +267,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
         var ok = await Task.Run(() =>
         {
-            state.CommandLock.Wait();
+            state.CommandLock.Wait(ct);
             try
             {
                 Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
@@ -290,7 +291,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         if (!_states.TryGetValue(processId, out var state)) return false;
         return await Task.Run(() =>
         {
-            state.CommandLock.Wait();
+            state.CommandLock.Wait(ct);
             try
             {
                 Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
@@ -312,7 +313,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
         var ok = await Task.Run(() =>
         {
-            state.CommandLock.Wait();
+            state.CommandLock.Wait(ct);
             try
             {
                 Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
@@ -336,7 +337,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         if (!_states.TryGetValue(processId, out var state)) return false;
         return await Task.Run(() =>
         {
-            state.CommandLock.Wait();
+            state.CommandLock.Wait(ct);
             try
             {
                 Marshal.WriteInt64(state.SharedMemoryPtr + OffsetCommandArg0, unchecked((long)(ulong)address));
@@ -357,8 +358,15 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         int elapsed = 0;
         while (elapsed < timeoutMs)
         {
-            var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
-            if (result != int.MinValue) return result == 0;
+            try
+            {
+                var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+                if (result != int.MinValue) return result == 0;
+            }
+            catch (AccessViolationException)
+            {
+                return false; // target process likely exited
+            }
             Thread.Sleep(10);
             elapsed += 10;
         }
@@ -379,7 +387,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         // Send START_TRACE command: arg1 = maxSteps, arg2 = threadFilter
         var started = await Task.Run(() =>
         {
-            state.CommandLock.Wait();
+            state.CommandLock.Wait(ct);
             try
             {
                 Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg1, maxSteps);
@@ -742,6 +750,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             // Obfuscated filename — avoids "veh", "agent", "debug", "cheat" in the name
             var randomSuffix = Guid.NewGuid().ToString("N")[..8];
             var tempAgentPath = Path.Combine(tempDir, $"msvcrt_p140_{randomSuffix}.dll");
+            var agentHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(agentPath)));
+            if (_logger.IsEnabled(LogLevel.Information))
+                _logger.LogInformation("VEH agent DLL SHA256: {Hash}, source: {Path}", agentHash, agentPath);
             File.Copy(agentPath, tempAgentPath, overwrite: true);
             state.TempAgentPath = tempAgentPath;
 
@@ -1142,9 +1153,14 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
             return new VehHitEvent(address, threadId, bpType, dr6, regs, timestamp);
         }
-        catch
+        catch (AccessViolationException)
         {
-            // Corrupted entry — skip
+            // Shared memory corruption or process death — skip this entry
+            return null;
+        }
+        catch (Exception)
+        {
+            // Unexpected error parsing hit entry — skip
             return null;
         }
     }
@@ -1226,9 +1242,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
             if (threadHandle == IntPtr.Zero) return false;
 
-            _ = WaitForSingleObject(threadHandle, 5000);
-            _ = CloseHandle(threadHandle);
-            return true;
+            var waitResult = WaitForSingleObject(threadHandle, 5000);
+            CloseHandle(threadHandle);
+            return waitResult == 0; // WAIT_OBJECT_0
         }
         finally
         {

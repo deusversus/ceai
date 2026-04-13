@@ -30,6 +30,9 @@ public sealed class LuaFormHostService : ILuaFormHost
 
     public void ShowForm(LuaFormDescriptor form)
     {
+        if (_windows.Count >= 50)
+            throw new InvalidOperationException("Maximum form limit (50) reached");
+
         _dispatcher.BeginInvoke(() =>
         {
             if (_windows.TryGetValue(form.Id, out var existing))
@@ -68,6 +71,20 @@ public sealed class LuaFormHostService : ILuaFormHost
                 _windows.Remove(formId);
             }
         });
+    }
+
+    public void CloseAllForms()
+    {
+        foreach (var (_, window) in _windows.ToList())
+        {
+            try { window.Close(); } catch { }
+        }
+        _windows.Clear();
+        foreach (var (_, timer) in _timers.ToList())
+        {
+            timer.Stop();
+        }
+        _timers.Clear();
     }
 
     public void UpdateElement(string formId, LuaFormElement element)
@@ -206,6 +223,9 @@ public sealed class LuaFormHostService : ILuaFormHost
 
     public void StartTimer(string formId, string timerId, int intervalMs)
     {
+        if (_timers.Count >= 100)
+            throw new InvalidOperationException("Maximum timer limit (100) reached");
+
         _dispatcher.BeginInvoke(() =>
         {
             var key = $"{formId}:{timerId}";

@@ -469,24 +469,26 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
 
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
 {
-    LONG writeIdx, readIdx;
+    LONG readIdx;
     LONG slot;
 
-    /* Check for overflow before claiming a slot.
-     * Use interlocked reads to ensure compiler doesn't reorder these
-     * relative to the InterlockedIncrement below. */
-    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
-    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
-    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    /* CAS loop: atomically claim a slot only if the ring isn't full.
+     * Prevents TOCTOU race where concurrent VEH hits bypass the overflow check. */
     {
-        InterlockedIncrement(&g_shm->overflowCount);
-        return; /* ring full — drop this hit rather than overwrite unread data */
+        LONG claimed;
+        do {
+            claimed = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+            readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+            if ((DWORD)(claimed - readIdx) >= g_maxHits)
+            {
+                InterlockedIncrement(&g_shm->overflowCount);
+                return;
+            }
+        } while (InterlockedCompareExchange(&g_shm->hitWriteIndex, claimed + 1, claimed) != claimed);
+        slot = (LONG)((DWORD)claimed % g_maxHits);
     }
 
-    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
-
     {
-        slot = (LONG)((DWORD)writeIdx % g_maxHits);
         BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
         HitEntry* hit = (HitEntry*)base;
         LARGE_INTEGER ts;
@@ -533,25 +535,28 @@ static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
 
 static void WriteTraceEntry(PCONTEXT ctx)
 {
-    LONG writeIdx, readIdx;
+    LONG readIdx;
     LONG slot;
 
-    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
-    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
-    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    /* CAS loop: atomically claim a slot only if the ring isn't full. */
     {
-        InterlockedIncrement(&g_shm->overflowCount);
-        return;
+        LONG claimed;
+        do {
+            claimed = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+            readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+            if ((DWORD)(claimed - readIdx) >= g_maxHits)
+            {
+                InterlockedIncrement(&g_shm->overflowCount);
+                return;
+            }
+        } while (InterlockedCompareExchange(&g_shm->hitWriteIndex, claimed + 1, claimed) != claimed);
+        slot = (LONG)((DWORD)claimed % g_maxHits);
     }
-
-    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
 
     {
         BYTE* base;
         HitEntry* hit;
         LARGE_INTEGER ts;
-
-        slot = (LONG)((DWORD)writeIdx % g_maxHits);
         base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
         hit = (HitEntry*)base;
 
@@ -590,17 +595,22 @@ static void WriteTraceEntry(PCONTEXT ctx)
 
 static void WritePageGuardHit(PCONTEXT ctx, ULONG64 faultAddr, DWORD hitType)
 {
-    LONG writeIdx, readIdx, slot;
+    LONG readIdx, slot;
 
-    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
-    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
-    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    /* CAS loop: atomically claim a slot only if the ring isn't full. */
     {
-        InterlockedIncrement(&g_shm->overflowCount);
-        return;
+        LONG claimed;
+        do {
+            claimed = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+            readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+            if ((DWORD)(claimed - readIdx) >= g_maxHits)
+            {
+                InterlockedIncrement(&g_shm->overflowCount);
+                return;
+            }
+        } while (InterlockedCompareExchange(&g_shm->hitWriteIndex, claimed + 1, claimed) != claimed);
+        slot = (LONG)((DWORD)claimed % g_maxHits);
     }
-    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
-    slot = (LONG)((DWORD)writeIdx % g_maxHits);
     {
         BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
         HitEntry* hit = (HitEntry*)base;
@@ -637,17 +647,22 @@ static void WritePageGuardHit(PCONTEXT ctx, ULONG64 faultAddr, DWORD hitType)
 
 static void WriteInt3Hit(PCONTEXT ctx, ULONG64 bpAddr)
 {
-    LONG writeIdx, readIdx, slot;
+    LONG readIdx, slot;
 
-    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
-    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
-    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    /* CAS loop: atomically claim a slot only if the ring isn't full. */
     {
-        InterlockedIncrement(&g_shm->overflowCount);
-        return;
+        LONG claimed;
+        do {
+            claimed = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+            readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+            if ((DWORD)(claimed - readIdx) >= g_maxHits)
+            {
+                InterlockedIncrement(&g_shm->overflowCount);
+                return;
+            }
+        } while (InterlockedCompareExchange(&g_shm->hitWriteIndex, claimed + 1, claimed) != claimed);
+        slot = (LONG)((DWORD)claimed % g_maxHits);
     }
-    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
-    slot = (LONG)((DWORD)writeIdx % g_maxHits);
     {
         BYTE* base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
         HitEntry* hit = (HitEntry*)base;
@@ -757,8 +772,12 @@ static BOOL SetInt3Bp(ULONG64 address)
     }
     if (freeSlot == -1) return FALSE;
 
-    /* Read original byte */
-    origByte = *(BYTE*)(ULONG_PTR)address;
+    /* Read original byte — SEH-protected against unreadable pages */
+    __try {
+        origByte = *(BYTE*)(ULONG_PTR)address;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return FALSE; /* page not readable */
+    }
     if (origByte == 0xCC) return TRUE; /* already INT3 */
 
     /* Write 0xCC */

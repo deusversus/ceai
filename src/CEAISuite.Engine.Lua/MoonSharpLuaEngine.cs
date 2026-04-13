@@ -24,7 +24,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly ISymbolEngine? _symbolEngine;
     private readonly ILuaAddressListProvider? _addressListProvider;
     private readonly ILuaStructureProvider? _structureProvider;
-    private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
     private LuaHotReloadWatcher? _hotReloadWatcher;
@@ -192,11 +192,11 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         }
     }
 
-    private readonly HashSet<string> _breakpointCallbacks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _breakpointCallbacks = new(StringComparer.OrdinalIgnoreCase);
 
     public void RegisterBreakpointCallback(string functionName)
     {
-        _breakpointCallbacks.Add(functionName);
+        _breakpointCallbacks[functionName] = 0;
     }
 
     public async Task<LuaExecutionResult> InvokeBreakpointCallbackAsync(
@@ -225,6 +225,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _currentProcessId = null;
             _breakpointCallbacks.Clear();
             _moduleCache.Clear();
+            _formHost?.CloseAllForms();
             _script = CreateSandboxedScript();
         }
         finally
@@ -241,6 +242,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _currentProcessId = null;
             _breakpointCallbacks.Clear();
             _moduleCache.Clear();
+            _formHost?.CloseAllForms();
             _script = CreateSandboxedScript();
         }
         finally
@@ -265,16 +267,21 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     /// </summary>
     internal void ExecuteGuarded(Action action)
     {
-        _gate.Wait();
+        if (!_gate.Wait(TimeSpan.FromSeconds(30)))
+            throw new TimeoutException("Lua engine gate timeout — possible deadlock. A script or callback may be blocking the engine.");
         try { action(); }
         finally { _gate.Release(); }
     }
+
+    /// <summary>Raise output to subscribers (Lua console, output log). Thread-safe.</summary>
+    internal void RaiseOutput(string message) => OutputWritten?.Invoke(message);
 
     public void Dispose()
     {
         _hotReloadWatcher?.Dispose();
         _timerBindings?.Dispose();
         _formBindings?.Dispose();
+        _formHost?.CloseAllForms();
         _gate.Dispose();
     }
 
@@ -330,7 +337,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         {
             _formBindings?.Dispose(); // Unsubscribe old event handlers to prevent leak
             _formBindings = new CeFormBindings();
-            _formBindings.Register(script, _formHost);
+            _formBindings.Register(script, _formHost, this);
         }
 
         // Attach instruction-limit debugger when a limit is configured

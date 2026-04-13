@@ -280,6 +280,7 @@ public sealed class LuaFormExtendedTests : IDisposable
 
         public void ShowForm(LuaFormDescriptor form) => _forms[form.Id] = form;
         public void CloseForm(string formId) => _forms.Remove(formId);
+        public void CloseAllForms() => _forms.Clear();
 
         public void UpdateElement(string formId, LuaFormElement element)
         {

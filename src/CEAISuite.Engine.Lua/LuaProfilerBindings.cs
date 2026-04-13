@@ -86,8 +86,14 @@ internal sealed class LuaProfilerBindings
             _ => new ProfileEntry { CallCount = 1, TotalMs = elapsedMs },
             (_, existing) =>
             {
-                existing.CallCount++;
-                existing.TotalMs += elapsedMs;
+                Interlocked.Increment(ref existing.CallCount);
+                // Atomic add for double via Interlocked.Exchange CAS loop
+                double initial, computed;
+                do
+                {
+                    initial = existing.TotalMs;
+                    computed = initial + elapsedMs;
+                } while (Interlocked.CompareExchange(ref existing.TotalMs, computed, initial) != initial);
                 return existing;
             });
     }

@@ -23,6 +23,9 @@ internal sealed class LuaTimerBindings : IDisposable
             if (callback.Type != DataType.Function)
                 throw new ScriptRuntimeException("createNativeTimer: second argument must be a function");
 
+            if (_timers.Count >= 100)
+                throw new ScriptRuntimeException("Maximum native timer limit (100) reached");
+
             var timerId = $"ntimer_{Interlocked.Increment(ref _nextTimerId)}";
             var capped = Math.Max(intervalMs, 10); // minimum 10ms
 
@@ -84,9 +87,10 @@ internal sealed class LuaTimerBindings : IDisposable
                 {
                     engine.ExecuteGuarded(() => script.Call(func));
                 }
-                catch (ScriptRuntimeException)
+                catch (ScriptRuntimeException ex)
                 {
-                    // Script errors in threads are silently caught (matching CE behavior)
+                    // Log script errors to output (matching CE behavior of non-fatal thread errors)
+                    engine.RaiseOutput($"[Thread {threadId}] Script error: {ex.DecoratedMessage}");
                 }
                 catch (OperationCanceledException) { }
                 finally
@@ -124,9 +128,18 @@ internal sealed class LuaTimerBindings : IDisposable
             state.Dispose();
         _timers.Clear();
 
+        var tasks = new List<Task>();
         foreach (var (_, thread) in _threads)
+        {
             thread.Cts.Cancel();
+            if (thread.Task is not null)
+                tasks.Add(thread.Task);
+        }
         _threads.Clear();
+
+        // Wait for threads to complete (with timeout to prevent hangs)
+        if (tasks.Count > 0)
+            Task.WaitAll(tasks.ToArray(), TimeSpan.FromSeconds(2));
     }
 
     public void Dispose() => DisposeAll();
@@ -185,10 +198,10 @@ internal sealed class LuaTimerBindings : IDisposable
                 // concurrent access to MoonSharp's non-thread-safe Script instance
                 _engine.ExecuteGuarded(() => _script.Call(_callback));
             }
-            catch
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
             {
-                // Timer callback errors are silently swallowed to prevent timer death.
-                // In production, these should be logged.
+                // Log timer callback errors to output instead of silently swallowing them
+                _engine.RaiseOutput($"[Timer {_id}] Callback error: {ex.Message}");
             }
             finally
             {

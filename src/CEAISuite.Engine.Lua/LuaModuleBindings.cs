@@ -152,6 +152,9 @@ internal static class LuaModuleBindings
         });
 
         // executeCode(address) — create a remote thread at the given address
+        // WARNING: This is an inherently dangerous CE feature — it executes arbitrary code
+        // in the target process at the specified address. There is no sandboxing or validation
+        // of what the code at that address does. This matches CE's behavior by design.
         script.Globals["executeCode"] = (Action<DynValue>)(addrArg =>
         {
             var pid = RequireProcess(engine);
@@ -172,6 +175,20 @@ internal static class LuaModuleBindings
         // injectDLL(path) — load a DLL into the target process
         script.Globals["injectDLL"] = (Action<string>)(dllPath =>
         {
+            // Validate DLL path before interpolating into AA script.
+            // Order matters: reject obviously bad inputs first, then check filesystem.
+            if (string.IsNullOrWhiteSpace(dllPath))
+                throw new ScriptRuntimeException("injectDLL: path cannot be empty");
+            if (dllPath.StartsWith("\\\\", StringComparison.Ordinal))
+                throw new ScriptRuntimeException("injectDLL: UNC/network paths are not allowed");
+            if (!dllPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                throw new ScriptRuntimeException("injectDLL: file must be a .dll");
+            if (!File.Exists(dllPath))
+                throw new ScriptRuntimeException($"injectDLL: file not found: {dllPath}");
+            var fileInfo = new FileInfo(dllPath);
+            if (fileInfo.LinkTarget is not null)
+                throw new ScriptRuntimeException("injectDLL: symbolic links are not allowed");
+
             var pid = RequireProcess(engine);
 
             if (autoAssembler is not null)

@@ -187,6 +187,7 @@ public sealed class LuaFinalRoundTests : IDisposable
 
         public void ShowForm(LuaFormDescriptor form) { }
         public void CloseForm(string formId) { }
+        public void CloseAllForms() { }
         public void UpdateElement(string formId, LuaFormElement element) { }
         public void StartTimer(string formId, string timerId, int intervalMs) { }
         public void StopTimer(string formId, string timerId) { }

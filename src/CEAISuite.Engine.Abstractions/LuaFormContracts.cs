@@ -144,6 +144,7 @@ public interface ILuaFormHost
 {
     void ShowForm(LuaFormDescriptor form);
     void CloseForm(string formId);
+    void CloseAllForms();
     void UpdateElement(string formId, LuaFormElement element);
 
     // Timer lifecycle

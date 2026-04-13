@@ -11,9 +11,7 @@ namespace CEAISuite.Desktop.ViewModels;
 /// ViewModel for the VEH Debugger panel — agent lifecycle, breakpoint management,
 /// real-time hit stream, and stealth mode controls.
 /// </summary>
-#pragma warning disable CA1001 // CTS lifecycle managed by Start/StopHitStream commands
-public partial class VehDebugViewModel : ObservableObject
-#pragma warning restore CA1001
+public partial class VehDebugViewModel : ObservableObject, IDisposable
 {
     private readonly VehDebugService _service;
     private readonly IProcessContext _processContext;
@@ -106,6 +104,7 @@ public partial class VehDebugViewModel : ObservableObject
         catch (Exception ex)
         {
             _outputLog.Append("VEH", "Error", $"Injection error: {ex.Message}");
+            ErrorMessage = ex.Message;
         }
     }
 
@@ -329,7 +328,7 @@ public partial class VehDebugViewModel : ObservableObject
             {
                 var bp = Breakpoints.FirstOrDefault(b => b.DrSlot == i);
                 if (bp is not null)
-                    bp.HitCount++;
+                    bp.HitCount += 1;
                 break;
             }
         }
@@ -371,6 +370,13 @@ public partial class VehDebugViewModel : ObservableObject
         });
     }
 
+    // ─── IDisposable ─────────────────────────────────────────────────
+
+    public void Dispose()
+    {
+        StopHitStreamAsync().GetAwaiter().GetResult();
+    }
+
     // ─── Helper: GetHitStreamAsync passthrough ──────────────────────
 
     private static nuint ParseAddress(string s)
@@ -384,13 +390,15 @@ public partial class VehDebugViewModel : ObservableObject
 
 // ─── Display Items ──────────────────────────────────────────────────
 
-public sealed class VehBreakpointDisplayItem
+public sealed partial class VehBreakpointDisplayItem : ObservableObject
 {
     public int DrSlot { get; init; }
     public string Address { get; init; } = "";
     public string Type { get; init; } = "";
     public string DataSize { get; init; } = "";
-    public int HitCount { get; set; }
+
+    [ObservableProperty]
+    private int _hitCount;
 }
 
 public sealed class VehHitDisplayItem

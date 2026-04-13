@@ -30,12 +30,22 @@ After completing any implementation, do a self-audit: re-read the changed files,
 ### Self-Audit Checklist (run after EVERY feature, especially agent-produced code)
 1. **Read every new/changed file** — don't trust agent output blindly. Open and read the actual code.
 2. **Thread safety** — any event handler or callback from a background thread that touches ObservableProperty or ObservableCollection MUST be wrapped in `IDispatcherService.Invoke()` or `Dispatcher.Invoke()`. This is not optional.
-3. **Wiring completeness** — for every new command/event/bus, trace the full path: who raises it → who subscribes → what action is taken. Placeholder `_outputLog.Append("received")` is NOT wiring. Actually implement the behavior.
-4. **Security surface** — any code that downloads files, loads DLLs, or accepts URLs must enforce HTTPS and verify integrity (SHA256). Raw `HttpClient.GetByteArrayAsync` without checksum is a supply-chain vector.
-5. **DI lifetime** — singletons registered in the container must NOT be manually disposed by consumers. Only the container disposes them.
-6. **XAML resources** — if a dialog/panel uses a converter or style, verify the resource is declared or inherited. Missing `BoolToVisibilityConverter` = crash on open.
-7. **Test depth** — tests that only check nulls and defaults are not real tests. Verify actual behavior: side effects, state transitions, error paths.
-8. **Constructor changes** — when adding a parameter to any constructor, grep ALL call sites (production code AND tests) and update them. `dotnet build` catches production code; test compilation catches test code.
+3. **Async patterns** — no `async void` except event handlers. All Tasks observed or awaited. `ContinueWith` needs fault handlers. CTS disposal must not race with the running task.
+4. **Wiring completeness** — for every new command/event/bus, trace the full path: who raises it → who subscribes → what action is taken. Placeholder `_outputLog.Append("received")` is NOT wiring. Actually implement the behavior.
+5. **Security surface** — any code that downloads files, loads DLLs, or accepts URLs must enforce HTTPS and verify integrity (SHA256). Path traversal must be blocked (symlinks, junctions, UNC, `..`). No string interpolation into commands or scripts. See @SECURITY.md for the full threat model and trust boundaries.
+6. **Exception handling** — no silent `catch { }` without logging. User input parsing catches FormatException/OverflowException with friendly messages. Catch blocks must not swallow OutOfMemoryException or StackOverflowException.
+7. **Resource cleanup** — classes with timers, event subscriptions, CTS, or unmanaged resources implement IDisposable. Event += has matching -= in Dispose. Timers stopped/disposed on cleanup.
+8. **DI lifetime** — singletons registered in the container must NOT be manually disposed by consumers. Only the container disposes them.
+9. **XAML resources** — if a dialog/panel uses a converter or style, verify the resource is declared or inherited. Missing `BoolToVisibilityConverter` = crash on open.
+10. **Test depth** — tests that only check nulls and defaults are not real tests. Verify actual behavior: side effects, state transitions, error paths. Async tests use WaitAsync with generous timeouts for CI.
+11. **Constructor changes** — when adding a parameter to any constructor, grep ALL call sites (production code AND tests) and update them. `dotnet build` catches production code; test compilation catches test code.
+12. **Code duplication** — if the same logic appears 3+ times, extract to a helper (e.g., `LuaBindingHelpers.cs` pattern). Don't copy-paste validation or parsing.
+13. **Native code correctness** — register preservation in hooks/trampolines, 32-bit alias masking, instruction boundary validation via Iced, RIP-relative relocation, thread suspension during patching, prologue validation before hooking.
+14. **Event subscription lifecycle** — every `+=` has a matching `-=` in Dispose or uses the `EventSubscriptions` helper. Singleton publishers must not prevent GC of subscriber VMs.
+15. **CI compatibility** — async tests use `WaitAsync` with generous timeouts. No tight timing assertions, no percentage-based progress checks, no patterns that assume `SynchronizationContext`.
+
+For the full per-file/per-feature/per-phase checklist, see `wiki/definition-of-done.md`.
+For the structured audit process, see `wiki/verification-protocol.md`.
 
 ## Code Style
 - Never make methods static without updating all call sites
@@ -67,6 +77,18 @@ Use that full path (or glob `~/.claude/**/memory/wiki/*.md`) when reading wiki f
 - **Searching for a string in code?** Grep with a targeted path, not the whole repo. Use the code map to narrow to the right project directory.
 - **Exploring an unfamiliar area?** Read the architecture and code-map wiki pages first (same directory as above). Then read source files directly. Do not grep broadly hoping to stumble into the answer.
 - **Delegating to sub-agents?** Always pass relevant context from the wiki in the agent prompt. Sub-agents have no memory access — they'll waste tokens exploring from scratch unless you brief them.
+
+## Development Framework
+
+Three wiki pages define the full AI-assisted development process. Read them before starting any feature:
+
+- **Work Decomposition** (`wiki/work-decomposition.md`) — how to break features into agent-sized units (400-700 lines each, dependency-ordered, with threat surface analysis)
+- **Definition of Done** (`wiki/definition-of-done.md`) — per-file, per-feature, and per-phase completion checklists covering all 15 audit categories
+- **Verification Protocol** (`wiki/verification-protocol.md`) — 7 ordered sweep passes replacing ad-hoc audits, with ready-to-use agent prompt templates
+
+These live in the wiki directory: `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/wiki/`
+
+When delegating to sub-agents, brief them on the relevant framework pages. Agents don't know the DoD or verification protocol unless told.
 
 ## Wiki & Memory
 IMPORTANT: All memory and wiki files live at `~/.claude/projects/C--Users-admin-Downloads-CEAI/memory/` — NOT inside the repo. Do not look for them in the working directory.

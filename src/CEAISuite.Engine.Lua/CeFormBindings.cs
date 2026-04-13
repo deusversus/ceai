@@ -19,8 +19,12 @@ internal sealed class CeFormBindings : IDisposable
     private Action<string, string>? _clickHandler;
     private Action<string, string>? _timerHandler;
 
-    public void Register(Script script, ILuaFormHost formHost)
+    private MoonSharpLuaEngine? _engine;
+
+    public void Register(Script script, ILuaFormHost formHost, MoonSharpLuaEngine? engine = null)
     {
+        _engine = engine;
+
         // Unsubscribe from previous host to prevent handler stacking on Reset
         Unsubscribe();
         _forms.Clear();
@@ -477,18 +481,31 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        // Wire click events back to Lua callbacks (store delegates for unsubscribe)
+        // Wire click events back to Lua callbacks (store delegates for unsubscribe).
+        // CRITICAL: script.Call() must be gated by the engine's semaphore because
+        // MoonSharp Script is NOT thread-safe. These handlers fire from the WPF
+        // dispatcher thread while scripts may be executing on background threads.
         _clickHandler = (fId, eId) =>
         {
             var key = $"{fId}:{eId}:onClick";
             if (_callbacks.TryGetValue(key, out var callback))
-                script.Call(callback);
+            {
+                if (_engine is not null)
+                    _engine.ExecuteGuarded(() => script.Call(callback));
+                else
+                    script.Call(callback); // fallback for tests without engine
+            }
         };
         _timerHandler = (fId, tId) =>
         {
             var key = $"{fId}:{tId}:onTimer";
             if (_callbacks.TryGetValue(key, out var callback))
-                script.Call(callback);
+            {
+                if (_engine is not null)
+                    _engine.ExecuteGuarded(() => script.Call(callback));
+                else
+                    script.Call(callback); // fallback for tests without engine
+            }
         };
         _subscribedHost = formHost;
         formHost.ElementClicked += _clickHandler;

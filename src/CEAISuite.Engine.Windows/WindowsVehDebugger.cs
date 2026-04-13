@@ -16,15 +16,17 @@ namespace CEAISuite.Engine.Windows;
 public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 {
     private readonly ILogger<WindowsVehDebugger> _logger;
-    private readonly ILuaScriptEngine? _luaEngine;
+    private readonly Func<ILuaScriptEngine?>? _luaEngineFactory;
     private readonly ConcurrentDictionary<int, VehProcessState> _states = new();
     private bool _disposed;
 
-    public WindowsVehDebugger(ILogger<WindowsVehDebugger>? logger = null, ILuaScriptEngine? luaEngine = null)
+    public WindowsVehDebugger(ILogger<WindowsVehDebugger>? logger = null, Func<ILuaScriptEngine?>? luaEngineFactory = null)
     {
         _logger = logger ?? NullLoggerFactory.Instance.CreateLogger<WindowsVehDebugger>();
-        _luaEngine = luaEngine;
+        _luaEngineFactory = luaEngineFactory;
     }
+
+    private ILuaScriptEngine? LuaEngine => _luaEngineFactory?.Invoke();
 
     // ─── Shared Memory Constants (must match veh_agent.c exactly) ───
 
@@ -547,7 +549,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
 
                         // Fire Lua callback if registered (fires regardless of condition)
                         var luaCallback = state.LuaCallbacks[drSlot];
-                        if (luaCallback is not null && _luaEngine is not null)
+                        var luaEngine = LuaEngine;
+                        if (luaCallback is not null && luaEngine is not null)
                         {
                             try
                             {
@@ -560,7 +563,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                                     regDict);
                                 // Fire-and-forget with fault observation to prevent unobserved task exceptions
 #pragma warning disable CS4014
-                                _luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct)
+                                luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct)
                                     .ContinueWith(t =>
                                     {
                                         if (_logger.IsEnabled(LogLevel.Warning))

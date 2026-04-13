@@ -839,12 +839,12 @@ static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot, DWORD dataS
             if (GetThreadContext(hThread, &ctx)) {
                 /* Set DR[slot] to the target address */
                 switch (drSlot) {
-                    case 0: ctx.Dr0 = address; break;
-                    case 1: ctx.Dr1 = address; break;
-                    case 2: ctx.Dr2 = address; break;
-                    case 3: ctx.Dr3 = address; break;
+                    case 0: ctx.Dr0 = (DWORD_PTR)address; break;
+                    case 1: ctx.Dr1 = (DWORD_PTR)address; break;
+                    case 2: ctx.Dr2 = (DWORD_PTR)address; break;
+                    case 3: ctx.Dr3 = (DWORD_PTR)address; break;
                 }
-                ctx.Dr7 = EnableDr7Slot(ctx.Dr7, drSlot, type, dataSize);
+                ctx.Dr7 = (DWORD_PTR)EnableDr7Slot(ctx.Dr7, drSlot, type, dataSize);
                 ctx.Dr6 = 0;  /* clear pending status */
                 if (!SetThreadContext(hThread, &ctx))
                     ok = FALSE;
@@ -904,7 +904,7 @@ static BOOL RemoveHardwareBp(DWORD drSlot)
                     case 2: ctx.Dr2 = 0; break;
                     case 3: ctx.Dr3 = 0; break;
                 }
-                ctx.Dr7 = DisableDr7Slot(ctx.Dr7, drSlot);
+                ctx.Dr7 = (DWORD_PTR)DisableDr7Slot(ctx.Dr7, drSlot);
                 SetThreadContext(hThread, &ctx);
             }
 
@@ -972,12 +972,12 @@ static void RefreshThreadBreakpoints(void)
                         BOOL dr7Enabled = (ctx.Dr7 & (1ULL << (i * 2))) != 0;
                         if (currentDr != g_bpAddresses[i] || !dr7Enabled) {
                             switch (i) {
-                                case 0: ctx.Dr0 = g_bpAddresses[i]; break;
-                                case 1: ctx.Dr1 = g_bpAddresses[i]; break;
-                                case 2: ctx.Dr2 = g_bpAddresses[i]; break;
-                                case 3: ctx.Dr3 = g_bpAddresses[i]; break;
+                                case 0: ctx.Dr0 = (DWORD_PTR)g_bpAddresses[i]; break;
+                                case 1: ctx.Dr1 = (DWORD_PTR)g_bpAddresses[i]; break;
+                                case 2: ctx.Dr2 = (DWORD_PTR)g_bpAddresses[i]; break;
+                                case 3: ctx.Dr3 = (DWORD_PTR)g_bpAddresses[i]; break;
                             }
-                            ctx.Dr7 = EnableDr7Slot(ctx.Dr7, i, g_bpTypes[i], g_bpSizes[i]);
+                            ctx.Dr7 = (DWORD_PTR)EnableDr7Slot(ctx.Dr7, i, g_bpTypes[i], g_bpSizes[i]);
                             needsUpdate = TRUE;
                         }
                     }

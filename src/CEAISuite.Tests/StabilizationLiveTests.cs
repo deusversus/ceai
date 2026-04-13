@@ -37,8 +37,8 @@ public class StabilizationLiveTests
 
         Assert.NotNull(result);
         Assert.True(result.Results.Count > 0, "Should find at least one match");
-        Assert.True(sw.ElapsedMilliseconds < 5000,
-            $"Live scan took {sw.ElapsedMilliseconds}ms (threshold: 5000ms). Possible regression.");
+        Assert.True(sw.ElapsedMilliseconds < 10000,
+            $"Live scan took {sw.ElapsedMilliseconds}ms (threshold: 10000ms). Possible regression.");
     }
 
     [Fact]

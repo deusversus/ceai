@@ -114,6 +114,7 @@ typedef struct {
     ULONG64 pageBase;       /* page-aligned base address */
     DWORD   origProtection; /* original VirtualProtect flags */
     volatile BOOL active;
+    volatile BOOL pendingRearm; /* set when guard consumed, cleared after re-arm */
 } PageGuardEntry;
 
 typedef struct {
@@ -274,9 +275,10 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
         }
 
         /* PAGE_GUARD is one-shot — Windows already removed it on violation.
-         * Set TF to single-step past the faulting instruction, then re-arm
-         * the guard in the next EXCEPTION_SINGLE_STEP handler. We store
-         * the page index in DR6 field (unused for page guards) for re-arm. */
+         * Mark this specific page for re-arm, then set TF to single-step past
+         * the faulting instruction. The re-arm handler only re-arms pages with
+         * pendingRearm == TRUE, avoiding unnecessary VirtualProtect calls. */
+        g_pageGuards[i].pendingRearm = TRUE;
         ctx->EFlags |= 0x100; /* TF */
 
         if (g_hitEvent) SetEvent(g_hitEvent);
@@ -345,14 +347,15 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
         int i;
         BOOL rearmed = FALSE;
 
-        /* Re-arm any PAGE_GUARD entries (guard is one-shot, needs re-application) */
+        /* Re-arm only PAGE_GUARD entries that were consumed (pendingRearm) */
         for (i = 0; i < MAX_PAGE_GUARDS; i++)
         {
             DWORD oldProt;
-            if (!g_pageGuards[i].active) continue;
-            /* Re-apply PAGE_GUARD to the page */
+            if (!g_pageGuards[i].active || !g_pageGuards[i].pendingRearm) continue;
+            /* Re-apply PAGE_GUARD to the faulting page */
             VirtualProtect((LPVOID)(ULONG_PTR)g_pageGuards[i].pageBase, PAGE_SIZE,
                 g_pageGuards[i].origProtection | 0x100 /* PAGE_GUARD */, &oldProt);
+            g_pageGuards[i].pendingRearm = FALSE;
             rearmed = TRUE;
         }
 
@@ -725,6 +728,7 @@ static BOOL RemovePageGuardBp(ULONG64 address)
             /* Restore original protection (without PAGE_GUARD) */
             VirtualProtect((LPVOID)(ULONG_PTR)pageBase, PAGE_SIZE,
                 g_pageGuards[i].origProtection, &dummy);
+            g_pageGuards[i].pendingRearm = FALSE; /* prevent stale re-arm on slot reuse */
             InterlockedExchange((volatile LONG*)&g_pageGuards[i].active, FALSE);
             return TRUE;
         }
@@ -784,6 +788,7 @@ static BOOL RemoveInt3Bp(ULONG64 address)
                 FlushInstructionCache(GetCurrentProcess(), (LPCVOID)(ULONG_PTR)address, 1);
                 VirtualProtect((LPVOID)(ULONG_PTR)address, 1, oldProt, &oldProt);
             }
+            g_int3Bps[i].pendingRearm = FALSE; /* prevent stale re-arm on slot reuse */
             InterlockedExchange((volatile LONG*)&g_int3Bps[i].active, FALSE);
             return TRUE;
         }

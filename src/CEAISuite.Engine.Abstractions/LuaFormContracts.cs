@@ -104,6 +104,26 @@ public sealed class LuaPanelElement(string id, int x, int y, int width, int heig
 public sealed class LuaGroupBoxElement(string id, int x, int y, int width, int height)
     : LuaFormElement(id, "groupbox", x, y, width, height);
 
+public sealed class LuaRadioGroupElement(string id, int x, int y, int width, int height)
+    : LuaFormElement(id, "radiogroup", x, y, width, height)
+{
+    public List<string> Items { get; set; } = [];
+    public int SelectedIndex { get; set; } = -1;
+}
+
+public sealed class LuaTabControlElement(string id, int x, int y, int width, int height)
+    : LuaFormElement(id, "tabcontrol", x, y, width, height)
+{
+    public List<string> TabNames { get; set; } = [];
+    public int SelectedIndex { get; set; }
+}
+
+public sealed class LuaMenuItemElement(string id)
+    : LuaFormElement(id, "menuitem", 0, 0, 0, 0)
+{
+    public List<LuaMenuItemElement> SubItems { get; set; } = [];
+}
+
 /// <summary>
 /// Host interface for rendering Lua-created forms. Implemented by the WPF layer.
 /// The engine creates descriptors; the host renders and reports interactions.

@@ -24,6 +24,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly Dictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
+    private LuaHotReloadWatcher? _hotReloadWatcher;
     private Script _script;
     private int? _currentProcessId;
 
@@ -78,6 +79,10 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
+
+        // S6B: Start hot reload watcher for script modules
+        _hotReloadWatcher = new LuaHotReloadWatcher(this);
+        _hotReloadWatcher.Start(ModuleSearchPaths);
     }
 
     public async Task<LuaExecutionResult> ExecuteAsync(string luaCode, CancellationToken ct = default)
@@ -235,6 +240,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         }
     }
 
+    /// <summary>Invalidate the module cache so next require() reloads from disk. Used by hot reload.</summary>
+    internal void ClearModuleCache() => _moduleCache.Clear();
+
     /// <summary>Current attached process ID, set during <see cref="ExecuteAsync(string, int, CancellationToken)"/>.</summary>
     internal int? CurrentProcessId => _currentProcessId;
 
@@ -243,6 +251,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
     public void Dispose()
     {
+        _hotReloadWatcher?.Dispose();
         _timerBindings?.Dispose();
         _formBindings?.Dispose();
         _gate.Dispose();
@@ -264,6 +273,10 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _timerBindings?.DisposeAll();
         _timerBindings = new LuaTimerBindings();
         _timerBindings.Register(script, this);
+
+        // S6D: Script profiler
+        var profiler = new LuaProfilerBindings();
+        profiler.Register(script);
 
         if (_engineFacade is not null)
         {

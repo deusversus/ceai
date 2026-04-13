@@ -353,6 +353,84 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
+        script.Globals["createRadioGroup"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"rdg_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaRadioGroupElement(elementId, 10, 10, 150, 120) { Caption = "Options" };
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["addItem"] = (Action<string>)(item =>
+            {
+                element.Items.Add(item);
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["getSelectedIndex"] = (Func<double>)(() =>
+                formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex);
+            elemTable["setSelectedIndex"] = (Action<int>)(idx =>
+            {
+                element.SelectedIndex = idx;
+                formHost.UpdateElement(formId, element);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createTabControl"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"tab_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaTabControlElement(elementId, 10, 10, 300, 200);
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["addTab"] = (Action<string>)(name =>
+            {
+                element.TabNames.Add(name);
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["getSelectedIndex"] = (Func<double>)(() =>
+                formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex);
+            elemTable["setSelectedIndex"] = (Action<int>)(idx =>
+            {
+                element.SelectedIndex = idx;
+                formHost.UpdateElement(formId, element);
+            });
+            elemTable["getTabCount"] = (Func<double>)(() => element.TabNames.Count);
+            return DynValue.NewTable(elemTable);
+        });
+
+        script.Globals["createMainMenu"] = (Func<Table, DynValue>)(formTable =>
+        {
+            var formId = formTable.Get("_id").String;
+            var elementId = $"menu_{Interlocked.Increment(ref _nextElementId)}";
+            var element = new LuaMenuItemElement(elementId) { Caption = "Menu" };
+            AddElementToForm(formId, element);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            elemTable["addItem"] = (Func<string, DynValue>)(caption =>
+            {
+                var subId = $"mi_{Interlocked.Increment(ref _nextElementId)}";
+                var subItem = new LuaMenuItemElement(subId) { Caption = caption };
+                element.SubItems.Add(subItem);
+                formHost.UpdateElement(formId, element);
+
+                var subTable = new Table(script);
+                subTable["_id"] = subId;
+                subTable["_formId"] = formId;
+                subTable["setCaption"] = (Action<string>)(c => subItem.Caption = c);
+                // Callback via metatable
+                var cbs = _callbacks;
+                subTable.MetaTable = new Table(script);
+                subTable.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
+                {
+                    if (key.String is "onClick")
+                        cbs[$"{formId}:{subId}:onClick"] = value;
+                    else
+                        subTable.Set(key.String, value);
+                });
+                return DynValue.NewTable(subTable);
+            });
+            return DynValue.NewTable(elemTable);
+        });
+
         // Wire click events back to Lua callbacks (store delegates for unsubscribe)
         _clickHandler = (fId, eId) =>
         {

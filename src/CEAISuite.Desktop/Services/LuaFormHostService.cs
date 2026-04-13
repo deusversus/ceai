@@ -134,6 +134,28 @@ public sealed class LuaFormHostService : ILuaFormHost
                     case GroupBox gb:
                         gb.Header = element.Caption ?? "";
                         break;
+                    case StackPanel sp when element is LuaRadioGroupElement rdgElem:
+                        sp.Children.Clear();
+                        for (int idx = 0; idx < rdgElem.Items.Count; idx++)
+                        {
+                            var rb = new RadioButton
+                            {
+                                Content = rdgElem.Items[idx],
+                                IsChecked = idx == rdgElem.SelectedIndex,
+                                GroupName = element.Id
+                            };
+                            var capturedIdx = idx;
+                            rb.Checked += (_, _) => ElementClicked?.Invoke(
+                                fe.Tag is string fId ? fId : "", element.Id);
+                            sp.Children.Add(rb);
+                        }
+                        break;
+                    case TabControl tc when element is LuaTabControlElement tabElem:
+                        while (tc.Items.Count < tabElem.TabNames.Count)
+                            tc.Items.Add(new TabItem { Header = tabElem.TabNames[tc.Items.Count] });
+                        if (tabElem.SelectedIndex >= 0 && tabElem.SelectedIndex < tc.Items.Count)
+                            tc.SelectedIndex = tabElem.SelectedIndex;
+                        break;
                 }
 
                 // Apply common styling
@@ -416,6 +438,9 @@ public sealed class LuaFormHostService : ILuaFormHost
                 LuaTrackBarElement trk => CreateTrackBar(form.Id, trk),
                 LuaProgressBarElement prg => CreateProgressBar(prg),
                 LuaImageElement img => CreateImage(img),
+                LuaRadioGroupElement rdg => CreateRadioGroup(form.Id, rdg),
+                LuaTabControlElement tab => CreateTabControl(tab),
+                LuaMenuItemElement => null, // Menus are handled separately via window.Menu
                 LuaPanelElement => new Border { BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1) },
                 LuaGroupBoxElement grp => new GroupBox { Header = grp.Caption ?? "Group" },
                 LuaTimerElement => null, // Timers are non-visual; started separately
@@ -526,6 +551,33 @@ public sealed class LuaFormHostService : ILuaFormHost
             Maximum = element.Max,
             Value = element.Position
         };
+    }
+
+    private StackPanel CreateRadioGroup(string formId, LuaRadioGroupElement element)
+    {
+        var panel = new StackPanel();
+        for (int i = 0; i < element.Items.Count; i++)
+        {
+            var rb = new RadioButton
+            {
+                Content = element.Items[i],
+                IsChecked = i == element.SelectedIndex,
+                GroupName = element.Id
+            };
+            rb.Checked += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+            panel.Children.Add(rb);
+        }
+        return panel;
+    }
+
+    private static TabControl CreateTabControl(LuaTabControlElement element)
+    {
+        var tc = new TabControl();
+        foreach (var name in element.TabNames)
+            tc.Items.Add(new TabItem { Header = name });
+        if (element.SelectedIndex >= 0 && element.SelectedIndex < tc.Items.Count)
+            tc.SelectedIndex = element.SelectedIndex;
+        return tc;
     }
 
     private static Image CreateImage(LuaImageElement element)

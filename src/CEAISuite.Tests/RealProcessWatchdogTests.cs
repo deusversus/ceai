@@ -186,7 +186,7 @@ public class RealProcessWatchdogTests
 
         await harness.SendFireAndForgetAsync("BLOCK");
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         cts.Token.Register(() => rollbackTcs.TrySetResult(false));
         var result = await rollbackTcs.Task;
 

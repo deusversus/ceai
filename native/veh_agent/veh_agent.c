@@ -16,6 +16,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <tlhelp32.h>
+#include <stdio.h>
 
 /* ── Shared memory layout ── */
 
@@ -1538,9 +1539,9 @@ static DWORD WINAPI AgentInitThread(LPVOID param)
 
     (void)param;
 
-    wsprintfA(shmName, "Local\\CEAISuite_VEH_%u", pid);
-    wsprintfA(cmdName, "Local\\CEAISuite_VEH_Cmd_%u", pid);
-    wsprintfA(hitName, "Local\\CEAISuite_VEH_Hit_%u", pid);
+    _snprintf(shmName, sizeof(shmName), "Local\\CEAISuite_VEH_%u", (unsigned)pid);
+    _snprintf(cmdName, sizeof(cmdName), "Local\\CEAISuite_VEH_Cmd_%u", (unsigned)pid);
+    _snprintf(hitName, sizeof(hitName), "Local\\CEAISuite_VEH_Hit_%u", (unsigned)pid);
 
     /* Open shared memory (created by host before injection) */
     g_shmHandle = OpenFileMappingA(FILE_MAP_ALL_ACCESS, FALSE, shmName);

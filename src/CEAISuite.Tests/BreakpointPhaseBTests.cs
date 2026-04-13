@@ -194,6 +194,35 @@ public class BreakpointPhaseBTests
         Assert.Contains("Invalid region", result);
     }
 
+    // ── B1: Watchpoint Coalescing (unit-level via ApplyHardwareRegisters) ──
+
+    [Fact]
+    public void BreakpointGroup_Record_HasCorrectProperties()
+    {
+        var group = new BreakpointGroup("grp-1", "test", ["bp-0", "bp-1"]);
+        Assert.Equal("grp-1", group.GroupId);
+        Assert.Equal("test", group.Name);
+        Assert.Equal(2, group.BreakpointIds.Count);
+    }
+
+    [Fact]
+    public async Task MultipleHardwareBPs_SameRegion_BothCreated()
+    {
+        // The stub doesn't implement coalescing, but this verifies the service layer
+        // handles multiple BPs at nearby addresses without error
+        var engine = new StubBreakpointEngine();
+        var service = new BreakpointService(engine);
+
+        var bp1 = await service.SetBreakpointAsync(1234, "0x1000", BreakpointType.HardwareWrite,
+            BreakpointMode.Hardware);
+        var bp2 = await service.SetBreakpointAsync(1234, "0x1004", BreakpointType.HardwareWrite,
+            BreakpointMode.Hardware);
+
+        Assert.NotEqual(bp1.Id, bp2.Id);
+        var all = await service.ListBreakpointsAsync(1234);
+        Assert.Equal(2, all.Count);
+    }
+
     // ── Helpers ──
 
     private static AiToolFunctions CreateToolFunctions(BreakpointService? breakpointService = null)

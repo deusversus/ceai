@@ -159,13 +159,13 @@ public sealed class BreakpointService(
         var address = ParseAddress(addressText);
         var bp = await breakpointEngine!.SetBreakpointAsync(processId, address, type, mode, action, singleHit, cancellationToken).ConfigureAwait(false);
         if (singleHit)
-            _singleHitBreakpoints.Add(bp.Id);
+            _singleHitBreakpoints.TryAdd(bp.Id, 0);
         return ToOverview(bp);
     }
 
-    /// <summary>IDs of breakpoints that should auto-remove after first hit.</summary>
-    internal HashSet<string> SingleHitBreakpoints => _singleHitBreakpoints;
-    private readonly HashSet<string> _singleHitBreakpoints = new();
+    /// <summary>IDs of breakpoints that should auto-remove after first hit. Thread-safe.</summary>
+    internal ConcurrentDictionary<string, byte> SingleHitBreakpoints => _singleHitBreakpoints;
+    private readonly ConcurrentDictionary<string, byte> _singleHitBreakpoints = new();
 
     public async Task<bool> RemoveBreakpointAsync(
         int processId,

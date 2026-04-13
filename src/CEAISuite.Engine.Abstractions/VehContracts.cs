@@ -129,10 +129,13 @@ public sealed record VehTraceEntry(
     string? Disassembly = null);
 
 /// <summary>Register snapshot from the exception context.</summary>
+/// <remarks>B4: Extended with Rip, R12-R15, EFlags. Requires SHM_VERSION 3 agent.</remarks>
 public sealed record RegisterSnapshot(
     ulong Rax, ulong Rbx, ulong Rcx, ulong Rdx,
     ulong Rsi, ulong Rdi, ulong Rsp, ulong Rbp,
-    ulong R8, ulong R9, ulong R10, ulong R11);
+    ulong R8, ulong R9, ulong R10, ulong R11,
+    ulong Rip = 0, ulong R12 = 0, ulong R13 = 0, ulong R14 = 0, ulong R15 = 0,
+    ulong EFlags = 0);
 
 /// <summary>Current status of the VEH debugger for a process.</summary>
 public sealed record VehStatus(

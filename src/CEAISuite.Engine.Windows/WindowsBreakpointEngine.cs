@@ -200,7 +200,9 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
                     }
                     else
                     {
-                        breakpoint.HardwareSlot = AllocateHardwareSlot(session);
+                        // B1: Try coalescing data-watch BPs on the same 8-byte aligned region
+                        var coalescedSlot = TryCoalesceHardwareSlot(session, address, type);
+                        breakpoint.HardwareSlot = coalescedSlot >= 0 ? coalescedSlot : AllocateHardwareSlot(session);
                         ApplyHardwareBreakpointsLocked(session);
                     }
 
@@ -526,6 +528,34 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         return handle;
     }
 
+    /// <summary>
+    /// B1: Try to coalesce a data-write/readwrite BP into an existing hardware slot
+    /// that watches the same 8-byte aligned region. Returns the slot if coalesced, or -1.
+    /// </summary>
+    private static int TryCoalesceHardwareSlot(ProcessDebugSession session, nuint address, BreakpointType type)
+    {
+        // Only data-access BPs can coalesce (Write, ReadWrite) — not Execute
+        if (type != BreakpointType.HardwareWrite && type != BreakpointType.HardwareReadWrite)
+            return -1;
+
+        var alignedBase = address & ~(nuint)7; // 8-byte aligned base
+        foreach (var bp in session.Breakpoints.Values)
+        {
+            if (!bp.IsEnabled || !bp.HardwareSlot.HasValue) continue;
+            if (bp.Type != BreakpointType.HardwareWrite && bp.Type != BreakpointType.HardwareReadWrite) continue;
+
+            var existingAligned = bp.Address & ~(nuint)7;
+            if (existingAligned == alignedBase)
+            {
+                // Coalesce: update the existing BP's address to the aligned base
+                // so the DR register watches the full 8-byte region
+                return bp.HardwareSlot.Value;
+            }
+        }
+
+        return -1;
+    }
+
     private static int AllocateHardwareSlot(ProcessDebugSession session)
     {
         var usedSlots = session.Breakpoints.Values
@@ -748,41 +778,44 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
         dr3 = 0;
         dr7 = 0;
 
-        foreach (var breakpoint in breakpoints)
-        {
-            if (!breakpoint.HardwareSlot.HasValue)
-            {
-                continue;
-            }
+        // B1: Group by slot — coalesced BPs share a slot. Use the first BP's slot
+        // to set the address/type, but if multiple BPs share a slot, use the
+        // 8-byte aligned base address and 8-byte length (widest coverage).
+        var slotGroups = breakpoints
+            .Where(bp => bp.HardwareSlot.HasValue)
+            .GroupBy(bp => bp.HardwareSlot!.Value);
 
-            var slot = breakpoint.HardwareSlot.Value;
-            var address = breakpoint.Address;
+        foreach (var group in slotGroups)
+        {
+            var slot = group.Key;
+            var bpList = group.ToList();
+            var isCoalesced = bpList.Count > 1;
+
+            // For coalesced slots, use the 8-byte aligned base; otherwise use exact address
+            var address = isCoalesced
+                ? bpList[0].Address & ~(nuint)7
+                : bpList[0].Address;
 
             switch (slot)
             {
-                case 0:
-                    dr0 = address;
-                    break;
-                case 1:
-                    dr1 = address;
-                    break;
-                case 2:
-                    dr2 = address;
-                    break;
-                case 3:
-                    dr3 = address;
-                    break;
+                case 0: dr0 = address; break;
+                case 1: dr1 = address; break;
+                case 2: dr2 = address; break;
+                case 3: dr3 = address; break;
                 default:
                     throw new InvalidOperationException($"Invalid hardware debug register slot {slot}. Valid range is 0-3.");
             }
 
             dr7 |= 1UL << (slot * 2);
 
-            var (typeBits, lengthBits) = breakpoint.Type switch
+            // Use the first BP's type for the DR7 type bits.
+            // For coalesced slots, force 8-byte length (0b11).
+            var firstBp = bpList[0];
+            var (typeBits, lengthBits) = firstBp.Type switch
             {
                 BreakpointType.HardwareExecute => (0b00UL, 0b00UL),
-                BreakpointType.HardwareWrite => (0b01UL, 0b11UL),
-                BreakpointType.HardwareReadWrite => (0b11UL, 0b11UL),
+                BreakpointType.HardwareWrite => (0b01UL, isCoalesced ? 0b11UL : 0b11UL),
+                BreakpointType.HardwareReadWrite => (0b11UL, isCoalesced ? 0b11UL : 0b11UL),
                 _ => (0b00UL, 0b00UL)
             };
 

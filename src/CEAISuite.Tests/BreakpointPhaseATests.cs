@@ -177,7 +177,7 @@ public class BreakpointPhaseATests
         var hits = await service.GetHitLogAsync(bp.Id);
 
         Assert.Equal(2, hits.Count);
-        Assert.True(throwCount >= 1); // callback was attempted
+        Assert.Equal(2, throwCount); // callback attempted for each hit despite throwing
     }
 
     [Fact]
@@ -258,7 +258,7 @@ public class BreakpointPhaseATests
             .Select(_ => Task.Run(() => service.ListBreakpointsAsync(1234)))
             .ToArray();
 
-        var results = await Task.WhenAll(tasks);
+        var results = await Task.WhenAll(tasks).WaitAsync(TimeSpan.FromSeconds(30));
         Assert.All(results, list => Assert.True(list.Count > 0));
     }
 

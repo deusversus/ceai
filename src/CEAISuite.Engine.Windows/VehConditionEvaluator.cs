@@ -52,9 +52,11 @@ internal static partial class VehConditionEvaluator
                 _ => true
             };
         }
-        catch
+        catch (Exception)
         {
-            // Fail-open: if evaluation throws for any reason, pass the hit through
+            // Fail-open: if evaluation throws for any reason, pass the hit through.
+            // Intentionally not logging here — this runs in the hot debug loop path
+            // and condition failures are expected for malformed user expressions.
             return true;
         }
     }
@@ -222,6 +224,13 @@ internal static partial class VehConditionEvaluator
         "R9" => regs.R9,
         "R10" => regs.R10,
         "R11" => regs.R11,
+        // B4: Extended registers
+        "RIP" => regs.Rip,
+        "R12" => regs.R12,
+        "R13" => regs.R13,
+        "R14" => regs.R14,
+        "R15" => regs.R15,
+        "RFLAGS" or "EFLAGS" => regs.EFlags,
         // 32-bit aliases: mask to low 32 bits
         "EAX" => regs.Rax & 0xFFFFFFFF,
         "EBX" => regs.Rbx & 0xFFFFFFFF,

@@ -112,7 +112,7 @@ public sealed class LuaModuleLoaderTests : IDisposable
 
             Assert.False(result.Success);
             Assert.True(
-                result.Error!.Contains("not found") || result.Error.Contains("escapes"),
+                result.Error!.Contains("not found") || result.Error.Contains("escapes") || result.Error.Contains("invalid module name"),
                 $"Expected path security error, got: {result.Error}");
         }
         finally

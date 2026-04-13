@@ -315,6 +315,13 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             if (_moduleCache.TryGetValue(moduleName, out var cached))
                 return cached;
 
+            // Validate module name: reject path separators, UNC, and drive letters
+            if (string.IsNullOrWhiteSpace(moduleName)
+                || moduleName.Contains('\\') || moduleName.Contains('/')
+                || moduleName.Contains(':') || moduleName.Contains("..")
+                || moduleName.StartsWith('.'))
+                throw new ScriptRuntimeException($"invalid module name: '{moduleName}' — use dot notation (e.g., 'utils.math'), no path separators");
+
             // Circular require detection
             if (!_loadingModules.Add(moduleName))
                 throw new ScriptRuntimeException($"circular require detected: module '{moduleName}' is already being loaded");

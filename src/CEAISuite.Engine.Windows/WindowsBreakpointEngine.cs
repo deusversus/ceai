@@ -823,7 +823,10 @@ public sealed class WindowsBreakpointEngine : IBreakpointEngine
             dr7 |= 1UL << (slot * 2);
 
             // Use the first BP's type for the DR7 type bits.
-            // For coalesced slots, force 8-byte length (0b11).
+            // Length bits: Execute = 1 byte (0b00), Write/ReadWrite = 8 bytes (0b11).
+            // 8-byte default for data watches is intentional — game memory fields are
+            // typically DWORD/QWORD aligned, and 8-byte coverage catches both. The VEH
+            // path supports explicit dataSize via IVehDebugger.SetBreakpointAsync.
             var firstBp = bpList[0];
             var (typeBits, lengthBits) = firstBp.Type switch
             {

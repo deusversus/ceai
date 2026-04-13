@@ -108,14 +108,16 @@ public class BreakpointPhaseBTests
     }
 
     [Fact]
-    public async Task SetRegionBreakpoint_LargeRegion_MultipleBreakpoints()
+    public async Task SetRegionBreakpoint_LargeRegion_ServiceValidatesAndDelegates()
     {
         var engine = new StubBreakpointEngine();
+        using var service = new BreakpointService(engine);
 
-        // StubBreakpointEngine.SetRegionBreakpointAsync returns a single BP,
-        // but the real engine returns one per page. Test the service passthrough.
-        var bps = await engine.SetRegionBreakpointAsync(1234, (nuint)0x1000, 8192);
+        // Service validates length bounds then delegates to engine.
+        // Stub returns 1 BP; real engine returns one per page.
+        var bps = await service.SetRegionBreakpointAsync(1234, "0x1000", 8192);
         Assert.NotEmpty(bps);
+        Assert.All(bps, bp => Assert.Equal("PageGuard", bp.Mode));
     }
 
     [Fact]
@@ -206,12 +208,12 @@ public class BreakpointPhaseBTests
     }
 
     [Fact]
-    public async Task MultipleHardwareBPs_SameRegion_BothCreated()
+    public async Task MultipleHardwareBPs_NearbyAddresses_ServiceCreatesDistinctBPs()
     {
-        // The stub doesn't implement coalescing, but this verifies the service layer
-        // handles multiple BPs at nearby addresses without error
+        // Service-layer test: verifies multiple BPs at nearby addresses create
+        // distinct entries. Actual DR-slot coalescing is engine-internal behavior.
         var engine = new StubBreakpointEngine();
-        var service = new BreakpointService(engine);
+        using var service = new BreakpointService(engine);
 
         var bp1 = await service.SetBreakpointAsync(1234, "0x1000", BreakpointType.HardwareWrite,
             BreakpointMode.Hardware);
@@ -221,6 +223,8 @@ public class BreakpointPhaseBTests
         Assert.NotEqual(bp1.Id, bp2.Id);
         var all = await service.ListBreakpointsAsync(1234);
         Assert.Equal(2, all.Count);
+        Assert.Contains(all, b => b.Address == "0x1000");
+        Assert.Contains(all, b => b.Address == "0x1004");
     }
 
     // ── B4: Extended Register Snapshot ──

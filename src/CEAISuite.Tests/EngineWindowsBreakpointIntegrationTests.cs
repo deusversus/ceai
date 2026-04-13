@@ -45,16 +45,17 @@ public class EngineWindowsBreakpointIntegrationTests
         string breakpointId,
         int maxEntries = 50,
         int timeoutMs = 10_000,
-        int pollIntervalMs = 200)
+        int pollIntervalMs = 200,
+        CancellationToken ct = default)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (sw.ElapsedMilliseconds < timeoutMs)
+        while (sw.ElapsedMilliseconds < timeoutMs && !ct.IsCancellationRequested)
         {
-            var hits = await engine.GetHitLogAsync(breakpointId, maxEntries).ConfigureAwait(false);
+            var hits = await engine.GetHitLogAsync(breakpointId, maxEntries, ct).ConfigureAwait(false);
             if (hits.Count > 0) return hits;
-            await Task.Delay(pollIntervalMs).ConfigureAwait(false);
+            await Task.Delay(pollIntervalMs, ct).ConfigureAwait(false);
         }
-        return await engine.GetHitLogAsync(breakpointId, maxEntries).ConfigureAwait(false);
+        return await engine.GetHitLogAsync(breakpointId, maxEntries, ct).ConfigureAwait(false);
     }
 
     [Fact]

@@ -235,6 +235,24 @@ public class BreakpointPhaseATests
     }
 
     [Fact]
+    public void LifecycleStatus_ConcurrentUpdates_NoCorruption()
+    {
+        using var service = new BreakpointService(new StubBreakpointEngine());
+        var statuses = Enum.GetValues<BreakpointLifecycleStatus>();
+
+        // Concurrent updates to different BPs
+        Parallel.For(0, 100, i =>
+        {
+            var bpId = $"bp-{i}";
+            var status = statuses[i % statuses.Length];
+            service.UpdateLifecycleStatus(bpId, status);
+            var read = service.GetLifecycleStatus(bpId);
+            // Value should be one of the valid statuses (no corruption)
+            Assert.True(Enum.IsDefined(read), $"Got invalid lifecycle status: {read}");
+        });
+    }
+
+    [Fact]
     public void LifecycleStatus_UnknownBp_ReturnsArmed()
     {
         var service = new BreakpointService(new StubBreakpointEngine());

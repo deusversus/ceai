@@ -173,6 +173,70 @@ public class BreakpointPhaseCTests
     // ── C4: Breakpoint Persistence ──
 
     [Fact]
+    public async Task ExportHitLog_CsvFormat_WritesFile()
+    {
+        var engine = new StubBreakpointEngine();
+        using var service = new BreakpointService(engine);
+
+        var bp = await engine.SetBreakpointAsync(1234, (nuint)0x1000, BreakpointType.Software);
+        engine.AddCannedHits(bp.Id,
+            new BreakpointHitEvent(bp.Id, (nuint)0x1000, 1, DateTimeOffset.UtcNow, new Dictionary<string, string>()),
+            new BreakpointHitEvent(bp.Id, (nuint)0x2000, 2, DateTimeOffset.UtcNow, new Dictionary<string, string>()));
+
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var result = await service.ExportHitLogAsync(bp.Id, tempFile, HitLogExportFormat.Csv);
+            Assert.Contains("2 hits", result);
+
+            var csv = await File.ReadAllTextAsync(tempFile);
+            Assert.Contains("BreakpointId,Address,ThreadId,Timestamp", csv); // header
+            Assert.Contains("0x1000", csv);
+            Assert.Contains("0x2000", csv);
+        }
+        finally
+        {
+            File.Delete(tempFile);
+        }
+    }
+
+    [Fact]
+    public async Task ExportHitLog_PathTraversal_Rejected()
+    {
+        var engine = new StubBreakpointEngine();
+        using var service = new BreakpointService(engine);
+        var bp = await engine.SetBreakpointAsync(1234, (nuint)0x1000, BreakpointType.Software);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            service.ExportHitLogAsync(bp.Id, "../../../etc/passwd", HitLogExportFormat.Csv));
+    }
+
+    [Fact]
+    public async Task GetFilteredHitLog_FilterByTimestamp()
+    {
+        var engine = new StubBreakpointEngine();
+        using var service = new BreakpointService(engine);
+
+        var bp = await engine.SetBreakpointAsync(1234, (nuint)0x1000, BreakpointType.Software);
+        var t1 = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var t2 = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var t3 = DateTimeOffset.UtcNow;
+
+        engine.AddCannedHits(bp.Id,
+            new BreakpointHitEvent(bp.Id, (nuint)0x1000, 1, t1, new Dictionary<string, string>()),
+            new BreakpointHitEvent(bp.Id, (nuint)0x1000, 1, t2, new Dictionary<string, string>()),
+            new BreakpointHitEvent(bp.Id, (nuint)0x1000, 1, t3, new Dictionary<string, string>()));
+
+        // Filter: only hits after t2 (exclusive of t1, inclusive of t2 and t3)
+        var filtered = await service.GetFilteredHitLogAsync(bp.Id,
+            new HitLogFilter(MinTimestamp: t2.AddSeconds(-1)));
+
+        Assert.Equal(2, filtered.Count);
+    }
+
+    // ── C4: Breakpoint Persistence ──
+
+    [Fact]
     public async Task SaveAndLoadProfile_RoundTrip()
     {
         var engine = new StubBreakpointEngine();

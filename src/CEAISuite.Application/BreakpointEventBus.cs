@@ -26,10 +26,10 @@ public sealed class BreakpointEventBus : IBreakpointEventBus
             {
                 handler(evt);
             }
-            catch (Exception)
+            catch (Exception ex)
             {
                 // Don't let a failing subscriber crash the publisher (engine debug loop).
-                // Intentionally silent — subscribers are responsible for their own error handling.
+                System.Diagnostics.Debug.WriteLine($"[BreakpointEventBus] Subscriber threw: {ex.GetType().Name}: {ex.Message}");
             }
         }
     }

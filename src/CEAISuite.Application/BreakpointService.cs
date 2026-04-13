@@ -122,12 +122,14 @@ public sealed class BreakpointService : IDisposable
         var newHits = hits.Skip(lastProcessed).ToList();
         if (newHits.Count == 0) return;
 
+        var processed = 0;
         foreach (var hit in newHits)
         {
             try
             {
                 await luaScriptEngine.InvokeBreakpointCallbackAsync(funcName, hit, ct).ConfigureAwait(false);
                 _consecutiveCallbackFailures.AddOrUpdate(breakpointId, 0, (_, _) => 0); // atomic reset on success
+                processed++;
             }
             catch (OperationCanceledException)
             {
@@ -135,6 +137,7 @@ public sealed class BreakpointService : IDisposable
             }
             catch (Exception ex)
             {
+                processed++; // count the failed attempt so we don't re-invoke it
                 var failures = _consecutiveCallbackFailures.AddOrUpdate(breakpointId, 1, (_, v) => v + 1);
                 logger?.LogWarning(ex, "Lua callback '{FuncName}' for BP {BreakpointId} threw (failure {Count}/{Max})",
                     funcName, breakpointId, failures, MaxConsecutiveCallbackFailures);
@@ -148,7 +151,8 @@ public sealed class BreakpointService : IDisposable
                 }
             }
         }
-        _lastProcessedHitCount[breakpointId] = hits.Count;
+        // Track actual processed count, not total — prevents skipping unprocessed hits after early break
+        _lastProcessedHitCount[breakpointId] = lastProcessed + processed;
     }
 
     public void UpdateLifecycleStatus(string bpId, BreakpointLifecycleStatus status)
@@ -403,6 +407,7 @@ public sealed class BreakpointService : IDisposable
     /// <summary>Create a named group of breakpoints for atomic enable/disable.</summary>
     public BreakpointGroup CreateGroup(string name, IEnumerable<string> breakpointIds)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(name);
         var groupId = $"grp-{Guid.NewGuid().ToString("N")[..8]}";
         var group = new BreakpointGroup(groupId, name, breakpointIds.ToList());
         _groups[groupId] = group;
@@ -449,6 +454,9 @@ public sealed class BreakpointService : IDisposable
 
     /// <summary>Remove a group definition (does not remove the breakpoints themselves).</summary>
     public bool RemoveGroup(string groupId) => _groups.TryRemove(groupId, out _);
+
+    /// <summary>Remove all group definitions.</summary>
+    public void ClearGroups() => _groups.Clear();
 
     /// <summary>List all defined groups.</summary>
     public IReadOnlyList<BreakpointGroup> ListGroups() => _groups.Values.ToList();

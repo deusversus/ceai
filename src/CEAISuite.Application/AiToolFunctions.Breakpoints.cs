@@ -778,6 +778,7 @@ public sealed partial class AiToolFunctions
         return string.Join("\n", groups.Select(g => $"[{g.GroupId}] {g.Name}: {string.Join(", ", g.BreakpointIds)}"));
     }
 
+    [ConcurrencySafe]
     [Description("Remove a breakpoint group definition (does not remove the breakpoints themselves).")]
     public string RemoveBreakpointGroup([Description("Group ID")] string groupId)
     {

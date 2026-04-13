@@ -97,7 +97,9 @@ public class BreakpointPhaseDTests
             bus.Publish(new BreakpointHitOccurredEvent($"bp-{i}", "0x1000", 1, i));
         });
 
-        Assert.True(hitCount > 0, "At least some events should have been received");
+        // 10 subscribers × 100 publishes = up to 1000, but subscribers join mid-flight
+        // so we verify a meaningful fraction was received (not just > 0)
+        Assert.True(hitCount >= 100, $"Expected at least 100 events received, got {hitCount}");
 
         foreach (var sub in subs) sub.Dispose();
     }
@@ -108,10 +110,10 @@ public class BreakpointPhaseDTests
     public void BreakpointService_DoubleDispose_DoesNotThrow()
     {
         var bus = new BreakpointEventBus();
-        var service = new BreakpointService(new StubBreakpointEngine(), eventBus: bus);
+        using var service = new BreakpointService(new StubBreakpointEngine(), eventBus: bus);
 
-        service.Dispose();
-        service.Dispose(); // second dispose should be safe
+        service.Dispose(); // first explicit dispose
+        // second dispose via `using` at end of scope — should be safe
     }
 
     [Fact]

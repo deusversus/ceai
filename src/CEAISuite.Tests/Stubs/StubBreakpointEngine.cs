@@ -73,6 +73,8 @@ public sealed class StubBreakpointEngine : IBreakpointEngine
         BreakpointHitAction action = BreakpointHitAction.LogAndContinue,
         CancellationToken cancellationToken = default)
     {
+        if (length <= 0) throw new ArgumentOutOfRangeException(nameof(length), "Length must be positive.");
+        if (length > 64 * 1024) throw new ArgumentOutOfRangeException(nameof(length), $"Region size {length} exceeds maximum.");
         var bp = new BreakpointDescriptor($"bp-region-{_breakpoints.Count}", startAddress,
             BreakpointType.HardwareReadWrite, action, true, 0, BreakpointMode.PageGuard);
         _breakpoints.Add(bp);

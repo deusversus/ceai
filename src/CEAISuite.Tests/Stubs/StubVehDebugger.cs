@@ -109,6 +109,30 @@ public sealed class StubVehDebugger : IVehDebugger
         return Task.FromResult(true);
     }
 
+    public Task<VehTraceResult> TraceFromBreakpointAsync(
+        int processId, int maxSteps = 500, int threadFilter = 0, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(new VehTraceResult(false, [], Error: "Not injected"));
+
+        // Return canned trace entries from pending hits with Trace type
+        var traceHits = state.PendingHits
+            .Where(h => h.Type == VehBreakpointType.Trace)
+            .Take(maxSteps)
+            .Select(h => new VehTraceEntry(h.Address, h.ThreadId, h.Registers))
+            .ToList();
+        state.PendingHits.RemoveAll(h => h.Type == VehBreakpointType.Trace);
+
+        return Task.FromResult(new VehTraceResult(true, traceHits, traceHits.Count >= maxSteps));
+    }
+
+    public Task<bool> StopTraceAsync(int processId, CancellationToken ct = default)
+    {
+        if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)
+            return Task.FromResult(false);
+        return Task.FromResult(true);
+    }
+
     public Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default)
     {
         if (!_states.TryGetValue(processId, out var state) || !state.IsInjected)

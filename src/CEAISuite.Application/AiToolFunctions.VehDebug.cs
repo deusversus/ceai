@@ -94,6 +94,57 @@ public sealed partial class AiToolFunctions
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [Description("Start dynamic tracing from the next VEH hardware breakpoint hit. Single-steps instruction-by-instruction, collecting register state at each step. Returns trace entries with address + registers.")]
+    public async Task<string> TraceVehBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Maximum instruction steps to trace (1-10000, default 500)")] int maxSteps = 500,
+        [Description("Thread ID to trace (0 = all threads, default 0)")] int threadFilter = 0)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+
+        var result = await vehDebugService.TraceFromBreakpointAsync(processId, maxSteps, threadFilter).ConfigureAwait(false);
+        if (!result.Success)
+            return $"Trace failed: {result.Error}";
+
+        if (result.Entries.Count == 0)
+            return "Trace started but no steps captured (no breakpoint hit during timeout, or thread filter didn't match).";
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+            $"Trace: {result.Entries.Count} steps{(result.Truncated ? " (truncated)" : "")}").AppendLine();
+        sb.AppendLine("Address          | TID  | RAX              | RCX              | RSP");
+        sb.AppendLine(new string('-', 85));
+
+        foreach (var entry in result.Entries.Take(50)) // cap output for token budget
+        {
+            sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"0x{(ulong)entry.Address:X16} | {entry.ThreadId,4} | " +
+                $"0x{entry.Registers.Rax:X16} | 0x{entry.Registers.Rcx:X16} | 0x{entry.Registers.Rsp:X16}").AppendLine();
+        }
+
+        if (result.Entries.Count > 50)
+            sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                $"... and {result.Entries.Count - 50} more steps (use hit stream for full data)").AppendLine();
+
+        return sb.ToString();
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Stop an active VEH trace.")]
+    public async Task<string> StopVehTrace([Description("Process ID")] int processId)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var ok = await vehDebugService.StopTraceAsync(processId).ConfigureAwait(false);
+        return ok ? "Trace stopped." : "Failed to stop trace.";
+    }
+
+    [Destructive]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Register a Lua callback function to be invoked on VEH breakpoint hits for a specific DR slot.")]
     public Task<string> RegisterVehLuaCallback(

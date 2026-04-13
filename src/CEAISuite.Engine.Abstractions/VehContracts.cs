@@ -29,6 +29,12 @@ public interface IVehDebugger
     /// <summary>Unregister a Lua callback from a DR slot.</summary>
     void UnregisterLuaCallback(int processId, int drSlot);
 
+    /// <summary>Start dynamic tracing: single-step from the next hardware BP hit, collecting register state at each instruction.</summary>
+    Task<VehTraceResult> TraceFromBreakpointAsync(int processId, int maxSteps = 500, int threadFilter = 0, CancellationToken ct = default);
+
+    /// <summary>Stop an active trace.</summary>
+    Task<bool> StopTraceAsync(int processId, CancellationToken ct = default);
+
     /// <summary>Enable stealth mode: hook NtGetThreadContext to cloak DR registers, hide agent DLL from PEB.</summary>
     Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default);
 
@@ -50,7 +56,9 @@ public enum VehBreakpointType
     /// <summary>Break on data write (DR7 R/W = 01).</summary>
     Write = 1,
     /// <summary>Break on data read or write (DR7 R/W = 11).</summary>
-    ReadWrite = 2
+    ReadWrite = 2,
+    /// <summary>Dynamic trace step (Trap Flag single-step).</summary>
+    Trace = 3
 }
 
 /// <summary>Stealth mode state of the VEH agent.</summary>
@@ -87,6 +95,20 @@ public sealed record VehHitEvent(
     nuint Dr6,
     RegisterSnapshot Registers,
     long Timestamp);
+
+/// <summary>Result of a dynamic trace operation.</summary>
+public sealed record VehTraceResult(
+    bool Success,
+    IReadOnlyList<VehTraceEntry> Entries,
+    bool Truncated = false,
+    string? Error = null);
+
+/// <summary>A single instruction in a dynamic trace.</summary>
+public sealed record VehTraceEntry(
+    nuint Address,
+    int ThreadId,
+    RegisterSnapshot Registers,
+    string? Disassembly = null);
 
 /// <summary>Register snapshot from the exception context.</summary>
 public sealed record RegisterSnapshot(

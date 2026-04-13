@@ -583,6 +583,68 @@ public class VehDebugExtendedTests
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // Sub-phase E: Dynamic Tracing
+    // ══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task TraceVehBreakpoint_WithCannedTraceHits_ReturnSteps()
+    {
+        var engine = new StubVehDebugger();
+        var tools = CreateToolsWithVeh(AttachedPid, engine);
+        await tools.InjectVehAgent(AttachedPid);
+
+        // Add canned trace hits
+        var regs = new RegisterSnapshot(0x100, 0, 0x200, 0, 0, 0, 0x7FFE0000, 0, 0, 0, 0, 0);
+        engine.AddCannedHit(AttachedPid, new VehHitEvent(
+            (nuint)0x400000, 1234, VehBreakpointType.Trace, (nuint)0x4000, regs, 1));
+        engine.AddCannedHit(AttachedPid, new VehHitEvent(
+            (nuint)0x400004, 1234, VehBreakpointType.Trace, (nuint)0x4000, regs, 2));
+        engine.AddCannedHit(AttachedPid, new VehHitEvent(
+            (nuint)0x400008, 1234, VehBreakpointType.Trace, (nuint)0x4000, regs, 3));
+
+        var result = await tools.TraceVehBreakpoint(AttachedPid, 500);
+
+        Assert.Contains("3 steps", result);
+        Assert.Contains("0x0000000000400000", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TraceVehBreakpoint_NotInjected_Fails()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.TraceVehBreakpoint(AttachedPid);
+        Assert.Contains("failed", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TraceVehBreakpoint_WrongPid_Rejected()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        var result = await tools.TraceVehBreakpoint(WrongPid);
+        Assert.Contains("PID", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StopVehTrace_AfterInject_Succeeds()
+    {
+        var tools = CreateToolsWithVeh(AttachedPid);
+        await tools.InjectVehAgent(AttachedPid);
+        var result = await tools.StopVehTrace(AttachedPid);
+        Assert.Contains("stopped", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task TraceVehBreakpoint_NoHits_ReportsEmpty()
+    {
+        var engine = new StubVehDebugger();
+        var tools = CreateToolsWithVeh(AttachedPid, engine);
+        await tools.InjectVehAgent(AttachedPid);
+        // No canned hits
+        var result = await tools.TraceVehBreakpoint(AttachedPid, 10);
+        Assert.Contains("no steps", result, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // Sub-phase C: Stealth Mode
     // ══════════════════════════════════════════════════════════════════
 

@@ -32,6 +32,8 @@
 #define CMD_REFRESH_THREADS 4
 #define CMD_ENABLE_STEALTH  5
 #define CMD_DISABLE_STEALTH 6
+#define CMD_START_TRACE     7
+#define CMD_STOP_TRACE      8
 
 /* Agent status */
 #define STATUS_LOADING      0
@@ -43,6 +45,7 @@
 #define BP_EXECUTE          0
 #define BP_WRITE            1
 #define BP_READWRITE        2
+#define BP_TRACE            3   /* trace step entry */
 
 #pragma pack(push, 1)
 typedef struct {
@@ -93,6 +96,12 @@ static DWORD            g_bpTypes[4] = {0};
 static DWORD            g_bpSizes[4] = {0};
 static volatile BOOL    g_bpActive[4] = {FALSE, FALSE, FALSE, FALSE};
 
+/* ── Trace globals ── */
+
+static volatile BOOL    g_traceActive = FALSE;
+static volatile LONG    g_traceStepsRemaining = 0;
+static DWORD            g_traceThreadFilter = 0;  /* 0 = all threads */
+
 /* ── Stealth globals ── */
 
 static volatile BOOL    g_stealthActive = FALSE;
@@ -125,6 +134,7 @@ static BOOL SetHardwareBp(ULONG64 address, DWORD type, DWORD drSlot, DWORD dataS
 static BOOL RemoveHardwareBp(DWORD drSlot);
 static void RefreshThreadBreakpoints(void);
 static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6);
+static void WriteTraceEntry(PCONTEXT ctx);
 static BOOL EnableStealth(void);
 static BOOL DisableStealth(void);
 static BOOL InstallNtGetThreadContextHook(void);
@@ -185,20 +195,78 @@ static ULONG64 DisableDr7Slot(ULONG64 dr7, DWORD slot)
 
 static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
 {
+    PCONTEXT ctx;
+    ULONG64 dr6;
+
     if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP)
         return EXCEPTION_CONTINUE_SEARCH;
 
     if (!g_shm || g_shm->agentStatus != STATUS_READY)
         return EXCEPTION_CONTINUE_SEARCH;
 
-    PCONTEXT ctx = ep->ContextRecord;
-    ULONG64 dr6 = ctx->Dr6;
+    ctx = ep->ContextRecord;
+    dr6 = ctx->Dr6;
+
+    /* Check DR6 bit 14 (BS = single-step / Trap Flag) for trace mode */
+    if ((dr6 & 0x4000) && g_traceActive)
+    {
+        DWORD tid = GetCurrentThreadId();
+        /* Thread filter: if set, only trace on the specified thread */
+        if (g_traceThreadFilter != 0 && tid != g_traceThreadFilter)
+        {
+            /* Not our trace thread — clear BS and pass through */
+            ctx->Dr6 &= ~0x4000ULL;
+            return EXCEPTION_CONTINUE_SEARCH;
+        }
+
+        /* Record trace step as hitType = BP_TRACE */
+        WriteTraceEntry(ctx);
+
+        /* Decrement steps remaining */
+        if (InterlockedDecrement(&g_traceStepsRemaining) > 0)
+        {
+            /* More steps to go — keep TF set for next instruction */
+#ifdef _M_IX86
+            ctx->EFlags |= 0x100; /* TF = Trap Flag */
+#else
+            ctx->EFlags |= 0x100;
+#endif
+        }
+        else
+        {
+            /* Trace complete — clear TF */
+#ifdef _M_IX86
+            ctx->EFlags &= ~0x100UL;
+#else
+            ctx->EFlags &= ~0x100UL;
+#endif
+            g_traceActive = FALSE;
+        }
+
+        ctx->Dr6 = 0;
+        if (g_hitEvent) SetEvent(g_hitEvent);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
 
     /* Check if any of DR0-DR3 triggered (bits 0-3 of DR6) */
     if ((dr6 & 0xF) == 0)
         return EXCEPTION_CONTINUE_SEARCH;
 
     WriteHitEntry(ctx, dr6);
+
+    /* If trace is active and this is a hardware BP hit, start stepping */
+    if (g_traceActive && g_traceStepsRemaining > 0)
+    {
+        DWORD tid = GetCurrentThreadId();
+        if (g_traceThreadFilter == 0 || tid == g_traceThreadFilter)
+        {
+#ifdef _M_IX86
+            ctx->EFlags |= 0x100; /* Set TF to begin single-stepping */
+#else
+            ctx->EFlags |= 0x100;
+#endif
+        }
+    }
 
     /* Clear DR6 to acknowledge the hit */
     ctx->Dr6 = 0;
@@ -261,6 +329,63 @@ static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
         hit->threadId = GetCurrentThreadId();
         hit->hitType  = g_bpTypes[triggeredSlot];
         hit->dr6      = dr6;
+        hit->rax = ctx->Rax; hit->rbx = ctx->Rbx;
+        hit->rcx = ctx->Rcx; hit->rdx = ctx->Rdx;
+        hit->rsi = ctx->Rsi; hit->rdi = ctx->Rdi;
+        hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
+        hit->r8  = ctx->R8;  hit->r9  = ctx->R9;
+        hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+#endif
+        hit->timestamp = (ULONG64)ts.QuadPart;
+    }
+
+    InterlockedIncrement(&g_shm->hitCount);
+}
+
+/* ── Trace entry write (separate from BP hits — always uses hitType = BP_TRACE) ── */
+
+static void WriteTraceEntry(PCONTEXT ctx)
+{
+    LONG writeIdx, readIdx;
+    LONG slot;
+
+    writeIdx = InterlockedCompareExchange(&g_shm->hitWriteIndex, 0, 0);
+    readIdx = InterlockedCompareExchange(&g_shm->hitReadIndex, 0, 0);
+    if ((DWORD)(writeIdx - readIdx) >= g_maxHits)
+    {
+        InterlockedIncrement(&g_shm->overflowCount);
+        return;
+    }
+
+    writeIdx = InterlockedIncrement(&g_shm->hitWriteIndex) - 1;
+
+    {
+        BYTE* base;
+        HitEntry* hit;
+        LARGE_INTEGER ts;
+
+        slot = (LONG)((DWORD)writeIdx % g_maxHits);
+        base = (BYTE*)g_shm + SHM_HEADER_SIZE + slot * HIT_ENTRY_SIZE;
+        hit = (HitEntry*)base;
+
+        QueryPerformanceCounter(&ts);
+
+#ifdef _M_IX86
+        hit->address  = (ULONG64)ctx->Eip;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType  = BP_TRACE;
+        hit->dr6      = 0x4000; /* BS flag */
+        hit->rax = ctx->Eax; hit->rbx = ctx->Ebx;
+        hit->rcx = ctx->Ecx; hit->rdx = ctx->Edx;
+        hit->rsi = ctx->Esi; hit->rdi = ctx->Edi;
+        hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
+        hit->r8  = 0;        hit->r9  = 0;
+        hit->r10 = 0;        hit->r11 = 0;
+#else
+        hit->address  = ctx->Rip;
+        hit->threadId = GetCurrentThreadId();
+        hit->hitType  = BP_TRACE;
+        hit->dr6      = 0x4000; /* BS flag */
         hit->rax = ctx->Rax; hit->rbx = ctx->Rbx;
         hit->rcx = ctx->Rcx; hit->rdx = ctx->Rdx;
         hit->rsi = ctx->Rsi; hit->rdi = ctx->Rdi;
@@ -526,6 +651,22 @@ static DWORD WINAPI CommandThread(LPVOID param)
 
             case CMD_DISABLE_STEALTH:
                 result = DisableStealth() ? 0 : -1;
+                break;
+
+            case CMD_START_TRACE:
+                /* commandArg0 = unused (trace starts on next HW BP hit)
+                 * commandArg1 = maxSteps
+                 * commandArg2 = threadFilter (0 = all) */
+                g_traceThreadFilter = g_shm->commandArg2;
+                g_traceStepsRemaining = (LONG)g_shm->commandArg1;
+                InterlockedExchange((volatile LONG*)&g_traceActive, TRUE);
+                result = 0;
+                break;
+
+            case CMD_STOP_TRACE:
+                InterlockedExchange((volatile LONG*)&g_traceActive, FALSE);
+                g_traceStepsRemaining = 0;
+                result = 0;
                 break;
 
             case CMD_SHUTDOWN:

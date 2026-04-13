@@ -59,6 +59,19 @@ public sealed class VehDebugService
         return await _engine.RefreshThreadsAsync(processId, ct).ConfigureAwait(false);
     }
 
+    public async Task<VehTraceResult> TraceFromBreakpointAsync(
+        int processId, int maxSteps = 500, int threadFilter = 0, CancellationToken ct = default)
+    {
+        if (_engine is null) return new VehTraceResult(false, [], Error: "VEH debugger not available.");
+        return await _engine.TraceFromBreakpointAsync(processId, maxSteps, threadFilter, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> StopTraceAsync(int processId, CancellationToken ct = default)
+    {
+        if (_engine is null) return false;
+        return await _engine.StopTraceAsync(processId, ct).ConfigureAwait(false);
+    }
+
     public async Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default)
     {
         if (_engine is null) return false;

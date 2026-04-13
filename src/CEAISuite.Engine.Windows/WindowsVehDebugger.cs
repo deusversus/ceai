@@ -78,6 +78,8 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const int CmdRefreshThreads = 4;
     private const int CmdEnableStealth = 5;
     private const int CmdDisableStealth = 6;
+    private const int CmdStartTrace = 7;
+    private const int CmdStopTrace = 8;
 
     // Agent status
     private const int StatusLoading = 0;
@@ -250,6 +252,95 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             return false;
 
         return await Task.Run(() => SendSimpleCommand(state, CmdRefreshThreads), ct).ConfigureAwait(false);
+    }
+
+    public async Task<VehTraceResult> TraceFromBreakpointAsync(
+        int processId, int maxSteps = 500, int threadFilter = 0, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_states.TryGetValue(processId, out var state))
+            return new VehTraceResult(false, [], Error: "VEH agent not injected");
+
+        if (maxSteps is < 1 or > 10000)
+            return new VehTraceResult(false, [], Error: "maxSteps must be 1-10000");
+
+        // Send START_TRACE command: arg1 = maxSteps, arg2 = threadFilter
+        var started = await Task.Run(() =>
+        {
+            state.CommandLock.Wait();
+            try
+            {
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg1, maxSteps);
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandArg2, threadFilter);
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandResult, int.MinValue);
+                Thread.MemoryBarrier();
+                Marshal.WriteInt32(state.SharedMemoryPtr + OffsetCommandSlot, CmdStartTrace);
+                SetEvent(state.CommandEvent);
+
+                const int timeoutMs = 3000;
+                int elapsed = 0;
+                while (elapsed < timeoutMs)
+                {
+                    var result = Marshal.ReadInt32(state.SharedMemoryPtr + OffsetCommandResult);
+                    if (result != int.MinValue) return result == 0;
+                    Thread.Sleep(10);
+                    elapsed += 10;
+                }
+                return false;
+            }
+            finally
+            {
+                state.CommandLock.Release();
+            }
+        }, ct).ConfigureAwait(false);
+
+        if (!started)
+            return new VehTraceResult(false, [], Error: "Failed to start trace");
+
+        // Collect trace entries from the hit stream (type == Trace)
+        var entries = new List<VehTraceEntry>();
+        var timeout = TimeSpan.FromSeconds(Math.Max(5, maxSteps / 100.0)); // scale timeout with steps
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(timeout);
+
+        try
+        {
+            await foreach (var hit in GetHitStreamAsync(processId, timeoutCts.Token))
+            {
+                if (hit.Type == VehBreakpointType.Trace)
+                {
+                    entries.Add(new VehTraceEntry(hit.Address, hit.ThreadId, hit.Registers));
+                    if (entries.Count >= maxSteps)
+                        break;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout — return what we have
+        }
+
+        // Stop trace if still active
+        await Task.Run(() => SendSimpleCommand(state, CmdStopTrace), CancellationToken.None).ConfigureAwait(false);
+
+        var truncated = entries.Count >= maxSteps;
+
+        if (_logger.IsEnabled(LogLevel.Information))
+            _logger.LogInformation("VEH trace: {Count} steps collected (truncated={Truncated}, pid={ProcessId})",
+                entries.Count, truncated, processId);
+
+        return new VehTraceResult(true, entries, truncated);
+    }
+
+    public async Task<bool> StopTraceAsync(int processId, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
+        if (!_states.TryGetValue(processId, out var state))
+            return false;
+
+        return await Task.Run(() => SendSimpleCommand(state, CmdStopTrace), ct).ConfigureAwait(false);
     }
 
     public async Task<bool> EnableStealthAsync(int processId, CancellationToken ct = default)
@@ -931,6 +1022,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
             {
                 1 => VehBreakpointType.Write,
                 2 => VehBreakpointType.ReadWrite,
+                3 => VehBreakpointType.Trace,
                 _ => VehBreakpointType.Execute,
             };
 

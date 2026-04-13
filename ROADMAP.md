@@ -517,27 +517,78 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 ---
 
-### Phase 10E — VEH Debugging ✅ COMPLETE
+### Phase 10E — VEH Debugging ✅ COMPLETE (Overhauled)
 
 **Goal:** Add a Vectored Exception Handler-based debugger mode that intercepts hardware breakpoints (`EXCEPTION_SINGLE_STEP` via Trap Flag, `EXCEPTION_BREAKPOINT` via INT3) without `DebugActiveProcess` attachment — bypassing common anti-debug checks (`IsDebuggerPresent`, `NtQueryInformationProcess(ProcessDebugPort)`).
 
-**Approach:** Native C VEH agent DLL (398 LOC) injected via `loadlibrary`/`createthread` infrastructure. Communicates via shared memory (`MemoryMappedFile` IPC). `BreakpointMode` enum gains a `VEH` option. CI workflow compiles the agent with MSVC and embeds it as a resource.
+**Approach:** Native C VEH agent DLL injected via `loadlibrary`/`createthread` infrastructure. Communicates via shared memory IPC (V2 protocol). `BreakpointMode` enum gains a `VEH` option. CI workflow compiles both x64 and x86 agent DLLs with MSVC.
 
-**Result:** `WindowsVehDebugger` (797 LOC) manages agent injection, breakpoint set/remove, and hit streaming. `VehDebugService` adapts to `BreakpointService`. 20+ dedicated VEH tests. AI tools: `SetVehBreakpoint`, `GetVehStatus`.
+**Result:** Comprehensive VEH debugging system overhauled across 7 sub-phases (A–G), each independently audited and hardened. Native agent ~1,500 LOC, total VEH codebase ~5,000 LOC across 15 files. 100+ dedicated VEH tests.
 
 **Complexity:** High
 
+**Sub-phase A — Core Protocol Hardening ✅**
+
 | Item | Details |
 |------|---------|
-| `VehContracts.cs` (Abstractions) | `IVehDebugger`, `VehBreakpoint`, `VehHitEvent` records |
-| `VehAgent/` (Engine.Windows) | Native-AOT C# shim: calls `AddVectoredExceptionHandler`, communicates via `MemoryMappedFile` IPC |
-| `WindowsVehDebugger` (Engine.Windows) | Injects agent, manages breakpoint set/remove, exposes `IObservable<VehHitEvent> HitStream` |
-| `VehDebugService` (Application) | High-level service; `BreakpointService` delegates to `IVehDebugger` when `BreakpointMode.VEH` selected |
-| `AiToolFunctions.VehDebug.cs` | `SetVehBreakpoint(processId, address, type)` `[Destructive]`, `GetVehStatus(processId)` `[ReadOnly]` |
-| UI | `BreakpointMode` dropdown in Breakpoints panel gains `VEH` option; dedicated section in Debugger tab |
-| DI | `AddSingleton<IVehDebugger, WindowsVehDebugger>()`, `AddSingleton<VehDebugService>()` |
-| Tests | `VehDebugServiceTests.cs` — unit tests with mock; integration test against `TestHarnessProcess` with known trap address |
-| Dependencies | Shares injection infrastructure pattern with 10E (overlay); do after 10D |
+| IPC V2 protocol | Ring buffer expanded 256→4096 with overflow detection counter |
+| hitType bug fix | DR6-based slot lookup populates correct BP type (was always 0) |
+| Variable data watch sizes | 1/2/4/8 bytes via DR7 LEN encoding + `commandArg3` field |
+| WOW64 support | Conditional compilation for x86 registers; CI builds both x64 + x86 agent DLLs |
+| New thread detection | `CMD_REFRESH_THREADS` command + periodic 500ms auto-refresh for new threads |
+| Agent health monitoring | Heartbeat field in shared memory; Healthy/Unresponsive status |
+| Command serialization | Per-process `SemaphoreSlim(1,1)` prevents concurrent command corruption |
+
+**Sub-phase B — Conditional Breakpoints + Lua Callbacks ✅**
+
+| Item | Details |
+|------|---------|
+| `VehConditionEvaluator` | Host-side evaluation: register compare (`RAX == 0x100`), hit count (`> 10`, `% 100`), memory compare (`0x1000 == 0x42` via `ReadProcessMemory`) |
+| Lua integration | `ILuaScriptEngine` injected via DI; per-DR-slot callback registration; fire-and-forget with fault observation |
+| Condition filtering | Non-matching hits consumed but not yielded from `GetHitStreamAsync` |
+
+**Sub-phase C — Anti-Detection Stealth ✅**
+
+| Item | Details |
+|------|---------|
+| DR register cloaking | Inline hook on `NtGetThreadContext` (ntdll) zeros DR0-DR7 in returned CONTEXT; register-preserving `JMP [RIP+0]` trampoline; prologue validation before hooking; thread suspension during patch |
+| PEB module hiding | Unlinks agent from InLoadOrder/InMemoryOrder/InInitializationOrder lists with `LdrLockLoaderLock`; saved pointers for clean re-link before `FreeLibrary` |
+| DLL name obfuscation | Randomized innocuous filename (`msvcrt_p140_{guid}.dll`) |
+
+**Sub-phase D — VEH UI Panel ✅**
+
+| Item | Details |
+|------|---------|
+| `VehDebugViewModel` | ObservableObject with RelayCommands for all operations; background hit stream with `CancellationTokenSource` lifecycle |
+| `VehDebugPanel` | Dockable bottom panel: Inject/Eject/Stealth buttons, breakpoint DataGrid, real-time hit stream ListView (virtualized, capped at 500) |
+| Menu entries | Added hamburger menu entries for Speed Hack + VEH Debugger (were previously missing) |
+
+**Sub-phase E — Dynamic Tracing via Trap Flag ✅**
+
+| Item | Details |
+|------|---------|
+| Trace commands | `CMD_START_TRACE(maxSteps, threadFilter)` / `CMD_STOP_TRACE` |
+| VEH handler | DR6 bit 14 (BS) check for trace steps; TF re-armed until maxSteps exhausted; orphaned TF safely consumed |
+| Managed engine | `TraceFromBreakpointAsync` with adaptive timeout; `VehTraceResult`/`VehTraceEntry` records |
+
+**Sub-phase F — Unified Breakpoint Pipeline ✅**
+
+| Item | Details |
+|------|---------|
+| First-class VEH mode | `BreakpointMode.VectoredExceptionHandler` routes through `IVehDebugger` in `WindowsBreakpointEngine` |
+| Auto-inject | Agent injected automatically on first VEH breakpoint |
+| Auto-fallback chain | Hardware → VEH → PageGuard (VEH tried before PageGuard since it doesn't need debugger) |
+| Unified list/remove | VEH BPs appear in `ListBreakpointsAsync` and support standard `RemoveBreakpointAsync` |
+
+**Sub-phase G — Page Guard + INT3 through VEH ✅**
+
+| Item | Details |
+|------|---------|
+| PAGE_GUARD via VEH | `CMD_SET_PAGE_GUARD`/`CMD_REMOVE_PAGE_GUARD`; VEH catches `STATUS_GUARD_PAGE_VIOLATION`; per-entry `pendingRearm` for targeted re-arm; up to 64 concurrent |
+| INT3 via VEH | `CMD_SET_INT3`/`CMD_REMOVE_INT3`; VEH catches `EXCEPTION_BREAKPOINT`; original byte restore + IP backup + TF re-arm cycle; up to 64 concurrent |
+| No DR slot limit | Page Guard and INT3 breakpoints don't consume hardware debug register slots |
+
+**Audit results:** All 7 sub-phases independently audited. 30+ issues found (5 critical, 12 medium), all fixed: trampoline RAX clobber, command race condition, ring buffer overwrite, orphaned TF crash, stale re-arm on slot reuse, and more.
 
 ---
 
@@ -690,19 +741,22 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 **Goal:** Wire the stubbed Step In/Over/Out/Continue buttons in the Debugger tab to a real stepping engine. This is the last major CE parity gap that affects every user.
 
-**Why first:** Stepping is universal — every CE user expects it. VEH debugging (10E) ships the `EXCEPTION_SINGLE_STEP` exception infrastructure; this phase wires it into the Debugger UI. Without stepping, the Debugger tab is a read-only register viewer. With stepping, it becomes a real debugger.
+**Why first:** Stepping is universal — every CE user expects it. The VEH overhaul (10E Sub-phase E) already built the Trap Flag single-stepping infrastructure — `CMD_START_TRACE`/`CMD_STOP_TRACE` with DR6 bit 14 (BS) detection. This phase wraps that infrastructure in a higher-level `ISteppingEngine` interface and wires it into the Debugger UI. Without stepping, the Debugger tab is a read-only register viewer. With stepping, it becomes a real debugger.
+
+**Foundation from VEH overhaul:** Sub-phase E's `TraceFromBreakpointAsync` already does instruction-level TF stepping with register snapshots. Sub-phase F's unified pipeline routes `BreakpointMode.VEH` through `WindowsBreakpointEngine`. Phase 11A extends this from "trace N instructions in bulk" to "step one instruction interactively with UI feedback."
 
 **Complexity:** High
 
 | Item | Details |
 |------|---------|
 | `ISteppingEngine` (Abstractions) | `StepInAsync`, `StepOverAsync`, `StepOutAsync`, `ContinueAsync`; `StepCompleted` event with register snapshot |
-| `WindowsSteppingEngine` (Engine.Windows) | Sets Trap Flag (TF) in EFLAGS via `SetThreadContext` for step-in; temporary breakpoint at next instruction for step-over; stack frame return address breakpoint for step-out |
-| VEH integration | When `BreakpointMode.VEH` is active, stepping uses the VEH handler (10E) for `EXCEPTION_SINGLE_STEP` dispatch instead of `WaitForDebugEvent` |
+| `WindowsSteppingEngine` (Engine.Windows) | Step-in: single TF step via VEH trace (maxSteps=1); Step-over: disassemble current instruction, if CALL set temp BP at next instruction; Step-out: read return address from `[RSP]`, set temp BP there |
+| VEH integration | Uses existing `CMD_START_TRACE` with `maxSteps=1` for step-in; `SetBreakpointAsync` with `singleHit=true` for step-over/step-out targets |
 | `DebuggerViewModel` updates | Enable Step In/Over/Out/Continue buttons; bind to `ISteppingEngine` commands; update register view on each step completion |
 | Watch expressions | Evaluate user-defined expressions against current register/memory state at each step |
-| Trace window | Record instruction history during step sequences; display as scrollable trace log |
+| Trace window | Record instruction history during step sequences; display as scrollable trace log (leverages Sub-phase E trace infrastructure) |
 | AI tools | `StepIn(processId)`, `StepOver(processId)`, `StepOut(processId)`, `Continue(processId)` — all `[Destructive]` |
+| Lua globals | `debug_continueFromBreakpoint`, `debug_setLastChanceExceptionHandler` (deferred from Scripting S1B) |
 | Tests | Stepping tests against adversarial harness (10J); verify TF is cleared after single step; verify step-over doesn't step into calls |
 
 ### Phase 11B — Kernel-Mode Debugging
@@ -759,6 +813,7 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 | **Tier 2** (medium-term) | **10D** Speed Hack | ✅ Done | Rewritten from IAT patching to inline hooking; high user demand; no kernel required |
 | **Gate 2** | **10L** Stabilization Pass | ✅ Done | Regression benchmarks + memory leak checks + crash recovery stress before VEH injection |
 | **Tier 3** (long-term) | **10E** VEH Debugging | ✅ Done | Native C agent DLL + shared memory IPC; anti-debug bypass |
+| **VEH Overhaul** | **10E+ (A–G)** | ✅ Done | 7 sub-phases: protocol V2, conditions, stealth, UI, tracing, unified pipeline, PG+INT3; all audited |
 | **Phase 11A** | Debugger stepping | Planned | Last universal parity gap; builds on VEH from 10E; every user needs this |
 | **Phase 11B** | Kernel driver | Future | Niche but powerful; requires EV cert + dedicated kernel engineer |
 
@@ -768,32 +823,29 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 8 ✅ | After Ph 10 ✅ | After Scripting Sprint ✅ | Target |
-|----------|-----------|------------|------------------------|--------|
-| Process & Attachment | 45% | 50% | 50% | 80%* |
-| Memory Read/Write | 80% | 80% | 85% | 90% |
-| Scanning | 90% | 90% | 95% | 95% |
-| Disassembly & Analysis | 70% | 70% | 80% | 85% |
-| Breakpoints & Hooks | 90% | 95% | 95% | 95%** |
-| Address Table | 90% | 90% | 95% | 95% |
+| Category | After Ph 10 ✅ | After Scripting Sprint ✅ | After VEH Overhaul ✅ | Target |
+|----------|------------|------------------------|---------------------|--------|
+| Process & Attachment | 50% | 50% | 50% | 80%* |
+| Memory Read/Write | 80% | 85% | 85% | 90% |
+| Scanning | 90% | 95% | 95% | 95% |
+| Disassembly & Analysis | 70% | 80% | 80% | 85% |
+| Breakpoints & Hooks | 95% | 95% | 98% | 98%** |
+| Address Table | 90% | 95% | 95% | 95% |
 | Scripting (AA engine) | 95% | 95% | 95% | 95% |
-| Scripting (Lua API) | 25% | 25% | 90% | 95%*** |
+| Scripting (Lua API) | 25% | 90% | 90% | 95%*** |
 | Pointer Resolution | 70% | 70% | 70% | 80% |
 | Structure Discovery | 100% | 100% | 100% | 100% |
 | Snapshots | 100% | 100% | 100% | 100% |
 | Session & History | 75% | 75% | 75% | 80% |
-| Safety & Watchdog | 50% | 70% | 70% | 80% |
+| Safety & Watchdog | 70% | 70% | 75% | 80% |
 | Hotkeys | 100% | 100% | 100% | 100% |
-| **Overall** | **~88%** | **~91%** | **~93%** | **95%+** |
+| **Overall** | **~91%** | **~93%** | **~94%** | **95%+** |
 
 *Process & Attachment parity improves further with future engine enhancements (parent process, command line).
-**Breakpoints & Hooks reaches 95% with VEH debugging (10E) providing anti-debug bypass.
+**Breakpoints & Hooks raised to 98%: VEH overhaul adds conditional HW BPs, stealth DR cloaking, PAGE_GUARD + INT3 via VEH, dynamic tracing, unified pipeline with fallback chain. Remaining 2% = Phase 11A stepping commands (step in/over/out/continue).
 ***Scripting (Lua API) at 90%: ~150 globals registered, address list + structure APIs complete. Remaining 10% = Phase 11A-gated debugger stepping commands + mono introspection.
 
-*Process & Attachment parity improves further with future engine enhancements (parent process, command line).
-**Breakpoints & Hooks reaches 95% with VEH debugging (10E) providing anti-debug bypass. Target raised from 90% to 95%.
-
-Phase 10 parity changes: Breakpoints & Hooks +5% (VEH debugging mode), Safety & Watchdog +20% (security review, adversarial testing, stabilization gate, PID validation), Process & Attachment +5% (speed hack process interaction). Overall target raised to 95%+ reflecting achievable ceiling with Phase 11 stepping.
+VEH overhaul parity changes: Breakpoints & Hooks +3% (conditional VEH BPs, stealth, PAGE_GUARD/INT3 through VEH, unified pipeline, dynamic tracing). Safety & Watchdog +5% (7 independent audits, 30+ issues found and fixed). Target for Breakpoints raised from 95% to 98% reflecting near-complete coverage — only debugger stepping remains.
 
 *Full historical parity table (Phases 2–8) preserved in git history.*
 
@@ -835,6 +887,15 @@ Phase 1 ✅ (Foundation)
             ├── Tier 2 ✅: 10D Speed Hack (rewritten: IAT → inline hooking)
             ├── Gate 2 ✅: 10L Stabilization (benchmarks + leak detection + crash recovery)
             └── Tier 3 ✅: 10E VEH Debugging (native C agent + shared memory IPC)
+                    │
+                    VEH Overhaul ✅ (7 sub-phases, all audited)
+                    ├── A ✅: Protocol V2 (4096 ring buffer, data sizes, WOW64, heartbeat)
+                    ├── B ✅: Conditional BPs + Lua callbacks
+                    ├── C ✅: Stealth (DR cloaking, PEB hiding, name obfuscation)
+                    ├── D ✅: Dedicated UI panel with real-time hit stream
+                    ├── E ✅: Dynamic Trap Flag tracing
+                    ├── F ✅: Unified pipeline (Hardware→VEH→PageGuard fallback)
+                    └── G ✅: PAGE_GUARD + INT3 through VEH (no DR slot limit)
             │
     Phase 11 (Full Debugger & Kernel)
             ├── 11A Debugger Stepping (builds on 10E VEH; last universal parity gap)
@@ -853,6 +914,7 @@ Phase 1 ✅ (Foundation)
 9. ✅ Phase 9 — Done (CI/CD + Codecov, Serilog logging, crash telemetry opt-in, progress indicators, first-run wizard, UI lifecycle tests, benchmark hardening; 579 tests)
 10. ✅ Phase 8 — Done (MoonSharp Lua 5.2 engine, CE API, REPL, forms, BP scripting; 489 tests)
 11. ✅ Phase 10 — Done (Plugin UI, Co-Pilot, Trainers, Speed Hack, VEH Debug, Community Distribution, Adversarial Testing, Security Review, Stabilization; 2,558 tests)
+12. ✅ VEH Overhaul — Done (7 sub-phases: protocol hardening, conditional BPs, stealth, UI panel, dynamic tracing, unified pipeline, PAGE_GUARD+INT3; all audited; 2,809 tests)
 
 ---
 
@@ -871,4 +933,5 @@ Phase 1 ✅ (Foundation)
 | **8** | Lua | ✅ Complete | MoonSharp Lua 5.2 engine: CE API bindings (20+ functions), {$luacode}/LuaCall AA integration, REPL console, CT Lua execution, form designer, breakpoint scripting, 3 AI tools; 489 tests |
 | **9** | Infrastructure | ✅ Complete | CI/CD (GitHub Actions + Codecov), Serilog structured logging (file + Output panel), crash telemetry opt-in, breakpoint/snapshot progress indicators, first-run wizard (3-page onboarding), UI lifecycle smoke tests, benchmark hardening; 579 tests |
 | **10** | Advanced | ✅ Complete | Plugin UI (10A), AI Co-Pilot (10C), Trainer Generation (10B), Community Distribution (10G), Adversarial Testing (10J), Security Review (10K), Speed Hack (10D, inline hooking), Stabilization (10L), VEH Debugging (10E); 2,558 tests |
+| **10E+** | VEH Overhaul | ✅ Complete | 7 sub-phases (A–G), all independently audited: protocol V2, conditional BPs + Lua callbacks, stealth (DR cloaking + PEB hiding), UI panel, dynamic Trap Flag tracing, unified pipeline (Hardware→VEH→PageGuard), PAGE_GUARD + INT3 via VEH; 2,809 tests |
 | **11** | Debugger & Kernel | Planned | 11A Debugger Stepping (last universal parity gap) → 11B Kernel Driver (niche anti-debug bypass) |

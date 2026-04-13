@@ -207,45 +207,58 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
     ctx = ep->ContextRecord;
     dr6 = ctx->Dr6;
 
-    /* Check DR6 bit 14 (BS = single-step / Trap Flag) for trace mode */
+    /* M2 fix: Handle orphaned TF — if DR6 bit 14 (BS) is set but trace is NOT active,
+     * the trace was stopped mid-flight. Clear TF to prevent unhandled exception crash. */
+    if ((dr6 & 0x4000) && !g_traceActive)
+    {
+        ctx->EFlags &= ~0x100UL; /* Clear TF */
+        ctx->Dr6 &= ~0x4000ULL; /* Clear BS */
+        /* If hardware BP bits also set, fall through to handle them below */
+        if ((dr6 & 0xF) == 0)
+            return EXCEPTION_CONTINUE_EXECUTION; /* Pure orphaned TF — consume silently */
+        dr6 &= ~0x4000ULL; /* Strip BS for the hardware BP handler below */
+    }
+
+    /* Check DR6 bit 14 (BS = single-step / Trap Flag) for active trace mode */
     if ((dr6 & 0x4000) && g_traceActive)
     {
         DWORD tid = GetCurrentThreadId();
         /* Thread filter: if set, only trace on the specified thread */
         if (g_traceThreadFilter != 0 && tid != g_traceThreadFilter)
         {
-            /* Not our trace thread — clear BS and pass through */
+            /* Not our trace thread — clear TF and BS, consume silently */
+            ctx->EFlags &= ~0x100UL;
             ctx->Dr6 &= ~0x4000ULL;
-            return EXCEPTION_CONTINUE_SEARCH;
-        }
-
-        /* Record trace step as hitType = BP_TRACE */
-        WriteTraceEntry(ctx);
-
-        /* Decrement steps remaining */
-        if (InterlockedDecrement(&g_traceStepsRemaining) > 0)
-        {
-            /* More steps to go — keep TF set for next instruction */
-#ifdef _M_IX86
-            ctx->EFlags |= 0x100; /* TF = Trap Flag */
-#else
-            ctx->EFlags |= 0x100;
-#endif
+            /* If hardware BP bits also set, fall through */
+            if ((dr6 & 0xF) == 0)
+                return EXCEPTION_CONTINUE_EXECUTION;
         }
         else
         {
-            /* Trace complete — clear TF */
-#ifdef _M_IX86
-            ctx->EFlags &= ~0x100UL;
-#else
-            ctx->EFlags &= ~0x100UL;
-#endif
-            g_traceActive = FALSE;
-        }
+            /* Record trace step as hitType = BP_TRACE */
+            WriteTraceEntry(ctx);
 
-        ctx->Dr6 = 0;
-        if (g_hitEvent) SetEvent(g_hitEvent);
-        return EXCEPTION_CONTINUE_EXECUTION;
+            /* Decrement steps remaining */
+            if (InterlockedDecrement(&g_traceStepsRemaining) > 0)
+            {
+                ctx->EFlags |= 0x100; /* TF = keep stepping */
+            }
+            else
+            {
+                ctx->EFlags &= ~0x100UL; /* Trace complete — clear TF */
+                g_traceActive = FALSE;
+            }
+
+            /* C2 fix: If hardware BP bits are ALSO set (stepped onto a BP address),
+             * fall through to record the BP hit too instead of returning early. */
+            if ((dr6 & 0xF) == 0)
+            {
+                ctx->Dr6 = 0;
+                if (g_hitEvent) SetEvent(g_hitEvent);
+                return EXCEPTION_CONTINUE_EXECUTION;
+            }
+            /* else: both trace step AND hardware BP — continue to BP handler below */
+        }
     }
 
     /* Check if any of DR0-DR3 triggered (bits 0-3 of DR6) */
@@ -260,11 +273,7 @@ static LONG NTAPI VehHandler(PEXCEPTION_POINTERS ep)
         DWORD tid = GetCurrentThreadId();
         if (g_traceThreadFilter == 0 || tid == g_traceThreadFilter)
         {
-#ifdef _M_IX86
             ctx->EFlags |= 0x100; /* Set TF to begin single-stepping */
-#else
-            ctx->EFlags |= 0x100;
-#endif
         }
     }
 

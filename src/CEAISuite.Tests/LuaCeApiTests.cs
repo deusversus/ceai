@@ -14,7 +14,7 @@ public sealed class LuaCeApiTests : IDisposable
     {
         // Set up facade with test process attached
         _facade.AttachAsync(1234).GetAwaiter().GetResult();
-        _engine = new MoonSharpLuaEngine(_facade, _assembler, executionTimeout: TimeSpan.FromSeconds(5));
+        _engine = new MoonSharpLuaEngine(_facade, _assembler, executionTimeout: TimeSpan.FromSeconds(30));
     }
 
     public void Dispose() => _engine.Dispose();

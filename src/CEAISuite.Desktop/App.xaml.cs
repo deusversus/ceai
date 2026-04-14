@@ -288,6 +288,10 @@ public partial class App : System.Windows.Application
                 sp.GetService<IVehDebugger>(),
                 sp.GetService<IBreakpointEventBus>()));
         services.AddSingleton<ILuaFormHost, LuaFormHostService>();
+        services.AddSingleton<IMainFormProxy>(sp =>
+            new MainFormProxyService(
+                sp.GetRequiredService<INavigationService>(),
+                System.Windows.Application.Current.Dispatcher));
         services.AddSingleton<ILuaScriptEngine>(sp =>
             new MoonSharpLuaEngine(
                 sp.GetRequiredService<IEngineFacade>(),
@@ -301,7 +305,8 @@ public partial class App : System.Windows.Application
                 symbolEngine: sp.GetService<ISymbolEngine>(),
                 addressListProvider: sp.GetService<ILuaAddressListProvider>(),
                 structureProvider: sp.GetService<ILuaStructureProvider>(),
-                steppingEngine: sp.GetService<ISteppingEngine>()));
+                steppingEngine: sp.GetService<ISteppingEngine>(),
+                mainFormProxy: sp.GetService<IMainFormProxy>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();

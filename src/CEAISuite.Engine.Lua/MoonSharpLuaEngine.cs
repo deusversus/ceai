@@ -25,7 +25,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly ILuaAddressListProvider? _addressListProvider;
     private readonly ILuaStructureProvider? _structureProvider;
     private readonly ISteppingEngine? _steppingEngine;
+    private readonly IMainFormProxy? _mainFormProxy;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _mainFormCallbacks = new();
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
     private LuaHotReloadWatcher? _hotReloadWatcher;
@@ -74,7 +76,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         ISymbolEngine? symbolEngine = null,
         ILuaAddressListProvider? addressListProvider = null,
         ILuaStructureProvider? structureProvider = null,
-        ISteppingEngine? steppingEngine = null)
+        ISteppingEngine? steppingEngine = null,
+        IMainFormProxy? mainFormProxy = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
@@ -88,6 +91,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _addressListProvider = addressListProvider;
         _structureProvider = structureProvider;
         _steppingEngine = steppingEngine;
+        _mainFormProxy = mainFormProxy;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -228,6 +232,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _currentProcessId = null;
             _breakpointCallbacks.Clear();
             _moduleCache.Clear();
+            _mainFormCallbacks.Clear();
             _formHost?.CloseAllForms();
             _script = CreateSandboxedScript();
         }
@@ -245,6 +250,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _currentProcessId = null;
             _breakpointCallbacks.Clear();
             _moduleCache.Clear();
+            _mainFormCallbacks.Clear();
             _formHost?.CloseAllForms();
             _script = CreateSandboxedScript();
         }
@@ -341,6 +347,12 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _formBindings?.Dispose(); // Unsubscribe old event handlers to prevent leak
             _formBindings = new CeFormBindings();
             _formBindings.Register(script, _formHost, this);
+        }
+
+        // S6: Main form proxy — getMainForm() global for Lua↔host interaction
+        if (_mainFormProxy is not null)
+        {
+            CeMainFormBindings.Register(script, _mainFormProxy, _mainFormCallbacks, this);
         }
 
         // Attach instruction-limit debugger when a limit is configured

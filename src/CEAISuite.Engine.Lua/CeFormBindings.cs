@@ -23,6 +23,15 @@ internal sealed class CeFormBindings : IDisposable
 
     private MoonSharpLuaEngine? _engine;
 
+    /// <summary>Shared form descriptors — also used by <see cref="CeDockPanelBindings"/> for dock panels.</summary>
+    internal ConcurrentDictionary<string, LuaFormDescriptor> Forms => _forms;
+
+    /// <summary>Shared callback registry — also used by <see cref="CeDockPanelBindings"/> for dock panel events.</summary>
+    internal ConcurrentDictionary<string, DynValue> Callbacks => _callbacks;
+
+    /// <summary>Thread-safe element ID generator — shared with <see cref="CeDockPanelBindings"/>.</summary>
+    internal int NextElementId() => Interlocked.Increment(ref _nextElementId);
+
     /// <summary>
     /// Resolve the parent of an element. If parentTable is a form, returns (formId, null).
     /// If parentTable is a container element (groupbox, panel), returns (formId, parentElementId).
@@ -30,7 +39,7 @@ internal sealed class CeFormBindings : IDisposable
     private static (string formId, string? parentElementId) ResolveParent(Table parentTable)
     {
         var parentType = parentTable.Get("_type").String;
-        if (parentType == "form")
+        if (parentType is "form" or "dockpanel")
             return (parentTable.Get("_id").String, null);
         // Parent is a container element (groupbox, panel) — use its _formId and set ParentElementId
         return (parentTable.Get("_formId").String, parentTable.Get("_id").String);

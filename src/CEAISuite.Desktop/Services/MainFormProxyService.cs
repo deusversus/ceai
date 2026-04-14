@@ -15,7 +15,7 @@ public sealed class MainFormProxyService : IMainFormProxy, IDisposable
     private readonly Dispatcher _dispatcher;
     private readonly ConcurrentDictionary<string, (string Caption, Action Callback)> _menuItems = new();
     private int _nextMenuItemId;
-    private string _statusText = string.Empty;
+    private volatile string _statusText = string.Empty;
     private bool _disposed;
 
     /// <summary>All known panel/document ContentIds from MainWindow.xaml.</summary>

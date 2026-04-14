@@ -824,4 +824,111 @@ public sealed class LuaFormHostService : ILuaFormHost
         // Use FindElementInCanvas to search nested containers (GroupBox, Panel)
         return FindElementInCanvas(canvas, elementId);
     }
+
+    // ── S7: Dockable Script Panels ──
+
+    private readonly Dictionary<string, Window> _dockPanels = new();
+
+    public void CreateDockPanel(LuaDockPanelDescriptor panel)
+    {
+        if (_dockPanels.Count >= 20)
+            throw new InvalidOperationException("Maximum dock panel limit (20) reached");
+
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (_dockPanels.TryGetValue(panel.Id, out var existing))
+            {
+                existing.Activate();
+                return;
+            }
+
+            // Determine screen position based on panel.Position
+            var screenWidth = SystemParameters.PrimaryScreenWidth;
+            var screenHeight = SystemParameters.PrimaryScreenHeight;
+
+            int width, height;
+            double left, top;
+
+            switch (panel.Position)
+            {
+                case "left":
+                    width = 300;
+                    height = (int)(screenHeight * 0.6);
+                    left = 0;
+                    top = (screenHeight - height) / 2;
+                    break;
+                case "right":
+                    width = 300;
+                    height = (int)(screenHeight * 0.6);
+                    left = screenWidth - width;
+                    top = (screenHeight - height) / 2;
+                    break;
+                case "document":
+                    width = 500;
+                    height = 400;
+                    left = (screenWidth - width) / 2;
+                    top = (screenHeight - height) / 2;
+                    break;
+                default: // "bottom"
+                    width = 500;
+                    height = 250;
+                    left = (screenWidth - width) / 2;
+                    top = screenHeight - height - 50;
+                    break;
+            }
+
+            // Build the form descriptor to reuse BuildCanvas
+            var formDesc = new LuaFormDescriptor(panel.Id, panel.Title, width, height, panel.Elements);
+            var canvas = BuildCanvas(formDesc);
+
+            var window = new Window
+            {
+                Title = panel.Title,
+                Width = width,
+                Height = height,
+                WindowStyle = WindowStyle.ToolWindow,
+                WindowStartupLocation = WindowStartupLocation.Manual,
+                Left = left,
+                Top = top,
+                ShowInTaskbar = false,
+                Content = canvas
+            };
+
+            // Apply theme — match main window background
+            var mainWindow = System.Windows.Application.Current?.MainWindow;
+            if (mainWindow is not null)
+            {
+                window.Background = mainWindow.Background;
+                window.Foreground = mainWindow is Control mc ? mc.Foreground : window.Foreground;
+            }
+
+            window.Closed += (_, _) =>
+            {
+                _dockPanels.Remove(panel.Id);
+                _canvases.Remove(panel.Id);
+                StopAllTimersForForm(panel.Id);
+                FormClosed?.Invoke(panel.Id);
+            };
+
+            _dockPanels[panel.Id] = window;
+            // Also register in _windows so UpdateElement, GetElementText, etc. work
+            _windows[panel.Id] = window;
+            window.Show();
+        });
+    }
+
+    public void CloseDockPanel(string panelId)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            StopAllTimersForForm(panelId);
+            if (_dockPanels.TryGetValue(panelId, out var window))
+            {
+                window.Close();
+                _dockPanels.Remove(panelId);
+            }
+            _windows.Remove(panelId);
+            _canvases.Remove(panelId);
+        });
+    }
 }

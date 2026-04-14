@@ -315,6 +315,8 @@ public sealed class LuaFormExtendedTests : IDisposable
         public void SetFormProperty(string formId, string property, object? value) { }
         public object? GetFormProperty(string formId, string property) => null;
         public void SetFormTopMost(string formId, bool topMost) { }
+        public void CreateDockPanel(LuaDockPanelDescriptor panel) { }
+        public void CloseDockPanel(string panelId) { }
         public event Action<string, string, string>? ElementChanged;
         public event Action<string>? FormClosed;
 

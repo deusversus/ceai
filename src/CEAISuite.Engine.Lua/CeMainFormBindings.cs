@@ -18,14 +18,18 @@ internal static class CeMainFormBindings
     /// <param name="proxy">The host application proxy.</param>
     /// <param name="callbacks">Shared callback dictionary for property proxy events.</param>
     /// <param name="engine">Optional engine reference for guarded callback execution.</param>
-    public static void Register(
+    /// <summary>
+    /// Register the <c>getMainForm()</c> global. Returns an unsubscribe action
+    /// that MUST be called on engine Reset/Dispose to prevent event handler leaks.
+    /// </summary>
+    public static Action Register(
         Script script,
         IMainFormProxy proxy,
         ConcurrentDictionary<string, DynValue> callbacks,
         MoonSharpLuaEngine? engine = null)
     {
         // Subscribe to theme changes and fire stored Lua callbacks
-        proxy.ThemeChanged += themeName =>
+        Action<string> themeHandler = themeName =>
         {
             var cbKey = "mainform:onthemechanged";
             if (callbacks.TryGetValue(cbKey, out var cb) && cb.Type == DataType.Function)
@@ -49,6 +53,7 @@ internal static class CeMainFormBindings
                 }
             }
         };
+        proxy.ThemeChanged += themeHandler;
 
         script.Globals["getMainForm"] = (Func<DynValue>)(() =>
         {
@@ -128,5 +133,8 @@ internal static class CeMainFormBindings
 
             return DynValue.NewTable(table);
         });
+
+        // Return unsubscribe action — caller MUST invoke on Reset/Dispose
+        return () => proxy.ThemeChanged -= themeHandler;
     }
 }

@@ -363,6 +363,8 @@ public sealed class HardeningAuditTests : IDisposable
         public void SetFormProperty(string formId, string property, object? value) { }
         public object? GetFormProperty(string formId, string property) => null;
         public void SetFormTopMost(string formId, bool topMost) { }
+        public void CreateDockPanel(LuaDockPanelDescriptor panel) { }
+        public void CloseDockPanel(string panelId) { }
 
         /// <summary>Fire ElementClicked event to simulate WPF dispatcher callback.</summary>
         public void SimulateClick(string formId, string elementId) =>

@@ -28,8 +28,10 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly IMainFormProxy? _mainFormProxy;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _mainFormCallbacks = new();
+    private Action? _mainFormUnsubscribe;
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
+    private CeDockPanelBindings? _dockPanelBindings;
     private LuaHotReloadWatcher? _hotReloadWatcher;
     private Script _script;
     private int? _currentProcessId;
@@ -233,6 +235,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _breakpointCallbacks.Clear();
             _moduleCache.Clear();
             _mainFormCallbacks.Clear();
+            if (_formHost is not null && _formBindings is not null)
+                _dockPanelBindings?.CloseAll(_formHost, _formBindings.Forms);
             _formHost?.CloseAllForms();
             _script = CreateSandboxedScript();
         }
@@ -251,6 +255,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _breakpointCallbacks.Clear();
             _moduleCache.Clear();
             _mainFormCallbacks.Clear();
+            if (_formHost is not null && _formBindings is not null)
+                _dockPanelBindings?.CloseAll(_formHost, _formBindings.Forms);
             _formHost?.CloseAllForms();
             _script = CreateSandboxedScript();
         }
@@ -287,6 +293,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
     public void Dispose()
     {
+        _mainFormUnsubscribe?.Invoke();
+        _mainFormUnsubscribe = null;
         _hotReloadWatcher?.Dispose();
         _timerBindings?.Dispose();
         _formBindings?.Dispose();
@@ -347,12 +355,17 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _formBindings?.Dispose(); // Unsubscribe old event handlers to prevent leak
             _formBindings = new CeFormBindings();
             _formBindings.Register(script, _formHost, this);
+
+            // S7: Dockable script panels
+            _dockPanelBindings = new CeDockPanelBindings();
+            _dockPanelBindings.Register(script, _formHost, _formBindings, this);
         }
 
         // S6: Main form proxy — getMainForm() global for Lua↔host interaction
         if (_mainFormProxy is not null)
         {
-            CeMainFormBindings.Register(script, _mainFormProxy, _mainFormCallbacks, this);
+            _mainFormUnsubscribe?.Invoke(); // Detach previous handler before re-registering
+            _mainFormUnsubscribe = CeMainFormBindings.Register(script, _mainFormProxy, _mainFormCallbacks, this);
         }
 
         // Attach instruction-limit debugger when a limit is configured

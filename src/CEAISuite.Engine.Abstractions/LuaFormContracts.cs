@@ -193,6 +193,10 @@ public interface ILuaFormHost
 
     /// <summary>Fired when a form window is closed (by user clicking X or programmatic close).</summary>
     event Action<string>? FormClosed; // formId
+
+    // S7: Dockable Script Panels
+    void CreateDockPanel(LuaDockPanelDescriptor panel);
+    void CloseDockPanel(string panelId);
 }
 
 /// <summary>Describes a Lua-created dockable panel (AvalonDock anchorable or document tab).</summary>

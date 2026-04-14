@@ -52,7 +52,7 @@ public partial class MainWindow : Window, IDisposable
 
     // Bump this version whenever the default panel layout changes (e.g. new tabs added).
     // A mismatch auto-deletes the saved layout so XAML defaults apply cleanly.
-    private const int LayoutVersion = 22; // v22 = add VEH Debugger bottom panel
+    private const int LayoutVersion = 23; // v23 = S7 dockable script panels
 
     private static readonly string LayoutFilePath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),

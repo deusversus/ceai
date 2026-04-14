@@ -19,9 +19,13 @@ public sealed class LuaFormHostService : ILuaFormHost
     private readonly Dictionary<string, Canvas> _canvases = new();
     private readonly Dispatcher _dispatcher;
 
+    /// <summary>Re-entrancy guard: suppresses ElementChanged events during programmatic UpdateElement calls.</summary>
+    private bool _isUpdatingFromScript;
+
     public event Action<string, string>? ElementClicked;
     public event Action<string, string>? TimerFired;
     public event Action<string, string, string>? ElementTextChanged;
+    public event Action<string, string, string>? ElementChanged;
 
     public LuaFormHostService()
     {
@@ -101,129 +105,250 @@ public sealed class LuaFormHostService : ILuaFormHost
             if (!_windows.TryGetValue(formId, out var window)) return;
             if (window.Content is not Canvas canvas) return;
 
-            foreach (UIElement child in canvas.Children)
+            // Suppress ElementChanged events during programmatic updates to prevent re-entrancy
+            _isUpdatingFromScript = true;
+            try
             {
-                if (child is not FrameworkElement fe || fe.Tag is not string id || id != element.Id)
-                    continue;
-
-                // Update position
-                Canvas.SetLeft(fe, element.X);
-                Canvas.SetTop(fe, element.Y);
-                fe.Width = element.Width;
-                fe.Height = element.Height;
-
-                // Update content by type
-                switch (fe)
-                {
-                    case Button btn:
-                        btn.Content = element.Caption ?? "";
-                        break;
-                    case TextBlock lbl:
-                        lbl.Text = element.Caption ?? "";
-                        break;
-                    case TextBox tb when element is LuaEditElement edit:
-                        tb.Text = edit.Text ?? "";
-                        break;
-                    case TextBox tb when element is LuaMemoElement memo:
-                        tb.Text = memo.Text ?? "";
-                        tb.IsReadOnly = memo.ReadOnly;
-                        break;
-                    case CheckBox chk when element is LuaCheckBoxElement chkElem:
-                        chk.Content = element.Caption ?? "";
-                        chk.IsChecked = chkElem.IsChecked;
-                        break;
-                    case ListBox lb when element is LuaListBoxElement lstElem:
-                        lb.Items.Clear();
-                        foreach (var item in lstElem.Items) lb.Items.Add(item);
-                        break;
-                    case ComboBox cb when element is LuaComboBoxElement cmbElem:
-                        cb.Items.Clear();
-                        foreach (var item in cmbElem.Items) cb.Items.Add(item);
-                        if (cmbElem.SelectedIndex >= 0) cb.SelectedIndex = cmbElem.SelectedIndex;
-                        break;
-                    case Slider sl when element is LuaTrackBarElement trkElem:
-                        sl.Minimum = trkElem.Min;
-                        sl.Maximum = trkElem.Max;
-                        sl.Value = trkElem.Position;
-                        break;
-                    case ProgressBar pb when element is LuaProgressBarElement prgElem:
-                        pb.Minimum = prgElem.Min;
-                        pb.Maximum = prgElem.Max;
-                        pb.Value = prgElem.Position;
-                        break;
-                    case Image img when element is LuaImageElement imgElem && imgElem.ImagePath is not null:
-                        try { img.Source = new BitmapImage(new Uri(imgElem.ImagePath, UriKind.RelativeOrAbsolute)); }
-                        catch { /* invalid path; ignore */ }
-                        break;
-                    case GroupBox gb:
-                        gb.Header = element.Caption ?? "";
-                        break;
-                    case StackPanel sp when element is LuaRadioGroupElement rdgElem:
-                        sp.Children.Clear();
-                        for (int idx = 0; idx < rdgElem.Items.Count; idx++)
-                        {
-                            var rb = new RadioButton
-                            {
-                                Content = rdgElem.Items[idx],
-                                IsChecked = idx == rdgElem.SelectedIndex,
-                                GroupName = element.Id
-                            };
-                            var capturedIdx = idx;
-                            rb.Checked += (_, _) => ElementClicked?.Invoke(
-                                fe.Tag is string fId ? fId : "", element.Id);
-                            sp.Children.Add(rb);
-                        }
-                        break;
-                    case TabControl tc when element is LuaTabControlElement tabElem:
-                        while (tc.Items.Count < tabElem.TabNames.Count)
-                            tc.Items.Add(new TabItem { Header = tabElem.TabNames[tc.Items.Count] });
-                        if (tabElem.SelectedIndex >= 0 && tabElem.SelectedIndex < tc.Items.Count)
-                            tc.SelectedIndex = tabElem.SelectedIndex;
-                        break;
-                }
-
-                // Apply common styling
-                fe.Visibility = element.Visible ? Visibility.Visible : Visibility.Collapsed;
-                fe.IsEnabled = element.Enabled;
-
-                // Font — applies to both Control (buttons, textboxes) and TextBlock (labels)
-                if (element.FontName is not null)
-                {
-                    var family = new FontFamily(element.FontName);
-                    if (fe is Control c1) c1.FontFamily = family;
-                    else if (fe is TextBlock tb1) tb1.FontFamily = family;
-                }
-                if (element.FontSize is not null)
-                {
-                    if (fe is Control c2) c2.FontSize = element.FontSize.Value;
-                    else if (fe is TextBlock tb2) tb2.FontSize = element.FontSize.Value;
-                }
-
-                // Foreground color
-                if (element.FontColor is not null)
-                {
-                    try
-                    {
-                        var brush = new BrushConverter().ConvertFromString(element.FontColor) as Brush;
-                        if (brush is not null)
-                        {
-                            if (fe is Control fCtrl) fCtrl.Foreground = brush;
-                            else if (fe is TextBlock fTb) fTb.Foreground = brush;
-                        }
-                    }
-                    catch { /* invalid color; ignore */ }
-                }
-
-                // Background color (Control only — TextBlock has no Background)
-                if (element.BackColor is not null && fe is Control bCtrl)
-                {
-                    try { bCtrl.Background = new BrushConverter().ConvertFromString(element.BackColor) as Brush ?? bCtrl.Background; }
-                    catch { /* invalid color; ignore */ }
-                }
-
-                break;
+                UpdateElementCore(canvas, formId, element);
+            }
+            finally
+            {
+                _isUpdatingFromScript = false;
             }
         });
+    }
+
+    private void UpdateElementCore(Canvas canvas, string formId, LuaFormElement element)
+    {
+        // Also search inside container controls (GroupBox, Panel) for parented elements
+        var fe = FindElementInCanvas(canvas, element.Id);
+        if (fe is null) return;
+
+        // Update position
+        Canvas.SetLeft(fe, element.X);
+        Canvas.SetTop(fe, element.Y);
+        fe.Width = element.Width;
+        fe.Height = element.Height;
+
+        // Update content by type
+        switch (fe)
+        {
+            case Button btn:
+                btn.Content = element.Caption ?? "";
+                break;
+            case TextBlock lbl:
+                lbl.Text = element.Caption ?? "";
+                break;
+            case TextBox tb when element is LuaEditElement edit:
+                tb.Text = edit.Text ?? "";
+                break;
+            case TextBox tb when element is LuaMemoElement memo:
+                tb.Text = memo.Text ?? "";
+                tb.IsReadOnly = memo.ReadOnly;
+                break;
+            case CheckBox chk when element is LuaCheckBoxElement chkElem:
+                chk.Content = element.Caption ?? "";
+                chk.IsChecked = chkElem.IsChecked;
+                break;
+            case ListBox lb when element is LuaListBoxElement lstElem:
+                lb.Items.Clear();
+                foreach (var item in lstElem.Items) lb.Items.Add(item);
+                break;
+            case ComboBox cb when element is LuaComboBoxElement cmbElem:
+                cb.Items.Clear();
+                foreach (var item in cmbElem.Items) cb.Items.Add(item);
+                if (cmbElem.SelectedIndex >= 0) cb.SelectedIndex = cmbElem.SelectedIndex;
+                break;
+            case Slider sl when element is LuaTrackBarElement trkElem:
+                sl.Minimum = trkElem.Min;
+                sl.Maximum = trkElem.Max;
+                sl.Value = trkElem.Position;
+                break;
+            case ProgressBar pb when element is LuaProgressBarElement prgElem:
+                pb.Minimum = prgElem.Min;
+                pb.Maximum = prgElem.Max;
+                pb.Value = prgElem.Position;
+                break;
+            case Image img when element is LuaImageElement imgElem && imgElem.ImagePath is not null:
+                try { img.Source = new BitmapImage(new Uri(imgElem.ImagePath, UriKind.RelativeOrAbsolute)); }
+                catch { /* invalid path; ignore */ }
+                break;
+            case GroupBox gb:
+                gb.Header = element.Caption ?? "";
+                break;
+            case StackPanel sp when element is LuaRadioGroupElement rdgElem:
+                sp.Children.Clear();
+                for (int idx = 0; idx < rdgElem.Items.Count; idx++)
+                {
+                    var rb = new RadioButton
+                    {
+                        Content = rdgElem.Items[idx],
+                        IsChecked = idx == rdgElem.SelectedIndex,
+                        GroupName = element.Id
+                    };
+                    rb.Checked += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+                    sp.Children.Add(rb);
+                }
+                break;
+            case TabControl tc when element is LuaTabControlElement tabElem:
+                while (tc.Items.Count < tabElem.TabNames.Count)
+                    tc.Items.Add(new TabItem { Header = tabElem.TabNames[tc.Items.Count] });
+                if (tabElem.SelectedIndex >= 0 && tabElem.SelectedIndex < tc.Items.Count)
+                    tc.SelectedIndex = tabElem.SelectedIndex;
+                break;
+        }
+
+        // Apply common styling
+        fe.Visibility = element.Visible ? Visibility.Visible : Visibility.Collapsed;
+        fe.IsEnabled = element.Enabled;
+
+        // Font — applies to both Control (buttons, textboxes) and TextBlock (labels)
+        if (element.FontName is not null)
+        {
+            var family = new FontFamily(element.FontName);
+            if (fe is Control c1) c1.FontFamily = family;
+            else if (fe is TextBlock tb1) tb1.FontFamily = family;
+        }
+        if (element.FontSize is not null)
+        {
+            if (fe is Control c2) c2.FontSize = element.FontSize.Value;
+            else if (fe is TextBlock tb2) tb2.FontSize = element.FontSize.Value;
+        }
+
+        // Foreground color
+        if (element.FontColor is not null)
+        {
+            try
+            {
+                var brush = new BrushConverter().ConvertFromString(element.FontColor) as Brush;
+                if (brush is not null)
+                {
+                    if (fe is Control fCtrl) fCtrl.Foreground = brush;
+                    else if (fe is TextBlock fTb) fTb.Foreground = brush;
+                }
+            }
+            catch { /* invalid color; ignore */ }
+        }
+
+        // Background color (Control only — TextBlock has no Background)
+        if (element.BackColor is not null && fe is Control bCtrl)
+        {
+            try { bCtrl.Background = new BrushConverter().ConvertFromString(element.BackColor) as Brush ?? bCtrl.Background; }
+            catch { /* invalid color; ignore */ }
+        }
+    }
+
+    // ── S5: Form-Level Property Access ──
+
+    public void BringToFront(string formId)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_windows.TryGetValue(formId, out var window)) return;
+            window.Activate();
+            // Standard WPF bring-to-front pattern
+            window.Topmost = true;
+            window.Topmost = false;
+        });
+    }
+
+    public void SetFormProperty(string formId, string property, object? value)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!_windows.TryGetValue(formId, out var window)) return;
+            switch (property.ToLowerInvariant())
+            {
+                case "caption" or "title":
+                    window.Title = value?.ToString() ?? "";
+                    break;
+                case "width":
+                    if (value is double or int) window.Width = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                    break;
+                case "height":
+                    if (value is double or int) window.Height = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                    break;
+                case "left":
+                    if (value is double or int)
+                    {
+                        window.WindowStartupLocation = WindowStartupLocation.Manual;
+                        window.Left = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    break;
+                case "top":
+                    if (value is double or int)
+                    {
+                        window.WindowStartupLocation = WindowStartupLocation.Manual;
+                        window.Top = Convert.ToDouble(value, System.Globalization.CultureInfo.InvariantCulture);
+                    }
+                    break;
+                case "visible":
+                    if (value is true) window.Show();
+                    else if (value is false) window.Hide();
+                    break;
+                case "color" or "backcolor":
+                    if (value is string colorStr)
+                    {
+                        try { window.Background = new BrushConverter().ConvertFromString(colorStr) as Brush ?? window.Background; }
+                        catch { /* invalid color */ }
+                    }
+                    break;
+            }
+        });
+    }
+
+    public object? GetFormProperty(string formId, string property)
+    {
+        return _dispatcher.Invoke(() =>
+        {
+            if (!_windows.TryGetValue(formId, out var window)) return null;
+            return property.ToLowerInvariant() switch
+            {
+                "caption" or "title" => (object?)window.Title,
+                "width" => window.Width,
+                "height" => window.Height,
+                "left" => window.Left,
+                "top" => window.Top,
+                "visible" => window.IsVisible,
+                _ => null
+            };
+        });
+    }
+
+    public void SetFormTopMost(string formId, bool topMost)
+    {
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (_windows.TryGetValue(formId, out var window))
+                window.Topmost = topMost;
+        });
+    }
+
+    // ── S5: Element Search (supports nested containers) ──
+
+    /// <summary>Find an element by its Tag ID, searching both the root canvas and nested containers.</summary>
+    private static FrameworkElement? FindElementInCanvas(Canvas canvas, string elementId)
+    {
+        foreach (UIElement child in canvas.Children)
+        {
+            if (child is FrameworkElement fe && fe.Tag is string id && id == elementId)
+                return fe;
+
+            // Search inside GroupBox content (Canvas child)
+            if (child is GroupBox gb && gb.Content is Canvas groupCanvas)
+            {
+                var found = FindElementInCanvas(groupCanvas, elementId);
+                if (found is not null) return found;
+            }
+
+            // Search inside Panel/Border content (Canvas child)
+            if (child is Border border && border.Child is Canvas panelCanvas)
+            {
+                var found = FindElementInCanvas(panelCanvas, elementId);
+                if (found is not null) return found;
+            }
+        }
+        return null;
     }
 
     // ── Timer Lifecycle ──
@@ -451,6 +576,10 @@ public sealed class LuaFormHostService : ILuaFormHost
         var canvas = new Canvas();
         _canvases[form.Id] = canvas;
 
+        // Two-pass rendering for element parenting:
+        // Pass 1: Create all controls and register them by element ID
+        var controlMap = new Dictionary<string, FrameworkElement>();
+
         foreach (var element in form.Elements)
         {
             FrameworkElement? control = element switch
@@ -467,8 +596,8 @@ public sealed class LuaFormHostService : ILuaFormHost
                 LuaImageElement img => CreateImage(img),
                 LuaRadioGroupElement rdg => CreateRadioGroup(form.Id, rdg),
                 LuaTabControlElement tab => CreateTabControl(tab),
-                LuaMenuItemElement => null, // Menus are handled separately
-                LuaPopupMenuElement => null, // Popup menus are non-visual until shown
+                LuaMenuItemElement => null,
+                LuaPopupMenuElement => null,
                 LuaSplitterElement spl => new GridSplitter
                 {
                     Width = spl.IsVertical ? 5 : double.NaN,
@@ -479,21 +608,71 @@ public sealed class LuaFormHostService : ILuaFormHost
                 },
                 LuaPanelElement => new Border { BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1) },
                 LuaGroupBoxElement grp => new GroupBox { Header = grp.Caption ?? "Group" },
-                LuaTimerElement => null, // Timers are non-visual; started separately
+                LuaTimerElement => null,
                 _ => null
             };
 
             if (control is null) continue;
 
             control.Tag = element.Id;
-            Canvas.SetLeft(control, element.X);
-            Canvas.SetTop(control, element.Y);
             control.Width = element.Width;
             control.Height = element.Height;
-            canvas.Children.Add(control);
+            controlMap[element.Id] = control;
+        }
+
+        // Pass 2: Place each control into its parent container or the root canvas
+        foreach (var element in form.Elements)
+        {
+            if (!controlMap.TryGetValue(element.Id, out var control)) continue;
+
+            if (element.ParentElementId is not null
+                && controlMap.TryGetValue(element.ParentElementId, out var parentControl))
+            {
+                // Parent element to a container (GroupBox, Panel/Border)
+                var containerCanvas = GetOrCreateContainerCanvas(parentControl);
+                Canvas.SetLeft(control, element.X);
+                Canvas.SetTop(control, element.Y);
+                containerCanvas.Children.Add(control);
+            }
+            else
+            {
+                // Add to root canvas
+                Canvas.SetLeft(control, element.X);
+                Canvas.SetTop(control, element.Y);
+                canvas.Children.Add(control);
+            }
         }
 
         return canvas;
+    }
+
+    /// <summary>Get or create a Canvas inside a container control (GroupBox, Border/Panel).</summary>
+    private static Canvas GetOrCreateContainerCanvas(FrameworkElement container)
+    {
+        switch (container)
+        {
+            case GroupBox gb:
+                if (gb.Content is Canvas existingGb) return existingGb;
+                var gbCanvas = new Canvas();
+                gb.Content = gbCanvas;
+                return gbCanvas;
+            case Border border:
+                if (border.Child is Canvas existingBorder) return existingBorder;
+                var borderCanvas = new Canvas();
+                border.Child = borderCanvas;
+                return borderCanvas;
+            default:
+                // Fallback: wrap in a Canvas inside a ContentControl
+                if (container is ContentControl cc)
+                {
+                    if (cc.Content is Canvas existingCc) return existingCc;
+                    var ccCanvas = new Canvas();
+                    cc.Content = ccCanvas;
+                    return ccCanvas;
+                }
+                // Can't parent into this control type — return a detached canvas
+                return new Canvas();
+        }
     }
 
     private Button CreateButton(string formId, LuaButtonElement element)
@@ -528,6 +707,9 @@ public sealed class LuaFormHostService : ILuaFormHost
             IsChecked = element.IsChecked
         };
         chk.Click += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+        // Fire ElementChanged for OnChange callbacks (guarded against programmatic re-entrancy)
+        chk.Checked += (_, _) => { if (!_isUpdatingFromScript) ElementChanged?.Invoke(formId, element.Id, "Checked"); };
+        chk.Unchecked += (_, _) => { if (!_isUpdatingFromScript) ElementChanged?.Invoke(formId, element.Id, "Checked"); };
         return chk;
     }
 
@@ -561,7 +743,11 @@ public sealed class LuaFormHostService : ILuaFormHost
         var cb = new ComboBox();
         foreach (var item in element.Items) cb.Items.Add(item);
         if (element.SelectedIndex >= 0) cb.SelectedIndex = element.SelectedIndex;
-        cb.SelectionChanged += (_, _) => ElementClicked?.Invoke(formId, element.Id);
+        cb.SelectionChanged += (_, _) =>
+        {
+            ElementClicked?.Invoke(formId, element.Id);
+            if (!_isUpdatingFromScript) ElementChanged?.Invoke(formId, element.Id, "SelectedIndex");
+        };
         return cb;
     }
 

@@ -311,10 +311,16 @@ public sealed class LuaFormExtendedTests : IDisposable
         public void DrawEllipse(string formId, int x1, int y1, int x2, int y2, string color, bool fill) => DrawCallCount++;
         public void DrawText(string formId, int x, int y, string text, string color, string? fontName, int? fontSize) => DrawCallCount++;
         public void ClearCanvas(string formId) => DrawCallCount = 0;
+        public void BringToFront(string formId) { }
+        public void SetFormProperty(string formId, string property, object? value) { }
+        public object? GetFormProperty(string formId, string property) => null;
+        public void SetFormTopMost(string formId, bool topMost) { }
+        public event Action<string, string, string>? ElementChanged;
 
         // Suppress unused event warnings
         internal void FireClicked(string fId, string eId) => ElementClicked?.Invoke(fId, eId);
         internal void FireTimer(string fId, string tId) => TimerFired?.Invoke(fId, tId);
         internal void FireTextChanged(string fId, string eId, string t) => ElementTextChanged?.Invoke(fId, eId, t);
+        internal void FireElementChanged(string fId, string eId, string v) => ElementChanged?.Invoke(fId, eId, v);
     }
 }

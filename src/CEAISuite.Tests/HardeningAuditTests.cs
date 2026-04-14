@@ -327,6 +327,7 @@ public sealed class HardeningAuditTests : IDisposable
         public event Action<string, string>? TimerFired;
 #pragma warning disable CS0067 // Required by ILuaFormHost interface
         public event Action<string, string, string>? ElementTextChanged;
+        public event Action<string, string, string>? ElementChanged;
 #pragma warning restore CS0067
 
         public void ShowForm(LuaFormDescriptor form)
@@ -357,6 +358,10 @@ public sealed class HardeningAuditTests : IDisposable
         public void DrawEllipse(string formId, int x1, int y1, int x2, int y2, string color, bool fill) { }
         public void DrawText(string formId, int x, int y, string text, string color, string? font, int? size) { }
         public void ClearCanvas(string formId) { }
+        public void BringToFront(string formId) { }
+        public void SetFormProperty(string formId, string property, object? value) { }
+        public object? GetFormProperty(string formId, string property) => null;
+        public void SetFormTopMost(string formId, bool topMost) { }
 
         /// <summary>Fire ElementClicked event to simulate WPF dispatcher callback.</summary>
         public void SimulateClick(string formId, string elementId) =>

@@ -202,12 +202,18 @@ public sealed class LuaFinalRoundTests : IDisposable
         public void DrawEllipse(string formId, int x1, int y1, int x2, int y2, string color, bool fill) { }
         public void DrawText(string formId, int x, int y, string text, string color, string? fontName, int? fontSize) { }
         public void ClearCanvas(string formId) { }
+        public void BringToFront(string formId) { }
+        public void SetFormProperty(string formId, string property, object? value) { }
+        public object? GetFormProperty(string formId, string property) => null;
+        public void SetFormTopMost(string formId, bool topMost) { }
+        public event Action<string, string, string>? ElementChanged;
 
         internal void SuppressWarnings()
         {
             ElementClicked?.Invoke("", "");
             TimerFired?.Invoke("", "");
             ElementTextChanged?.Invoke("", "", "");
+            ElementChanged?.Invoke("", "", "");
         }
     }
 }

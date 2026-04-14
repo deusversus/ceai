@@ -19,6 +19,12 @@ public class LuaFormElement(string id, string type, int x, int y, int width, int
     public int Width { get; set; } = width;
     public int Height { get; set; } = height;
 
+    /// <summary>
+    /// If set, this element is a child of the specified parent element (e.g. a CheckBox inside a GroupBox).
+    /// The host renders this element inside the parent's content container with coordinates relative to the parent.
+    /// </summary>
+    public string? ParentElementId { get; set; }
+
     // S2: Common styling properties
     public bool Visible { get; set; } = true;
     public bool Enabled { get; set; } = true;
@@ -168,8 +174,27 @@ public interface ILuaFormHost
     void DrawText(string formId, int x, int y, string text, string color, string? fontName, int? fontSize);
     void ClearCanvas(string formId);
 
+    // S5: Form-level property access
+    void BringToFront(string formId);
+    void SetFormProperty(string formId, string property, object? value);
+    object? GetFormProperty(string formId, string property);
+    void SetFormTopMost(string formId, bool topMost);
+
     // Events
     event Action<string, string>? ElementClicked;  // formId, elementId
     event Action<string, string>? TimerFired;       // formId, timerId
     event Action<string, string, string>? ElementTextChanged; // formId, elementId, text
+
+    /// <summary>
+    /// Fired when an element's value changes (checkbox checked, combobox selection, etc.).
+    /// NOT fired during programmatic updates via UpdateElement (re-entrancy guard).
+    /// </summary>
+    event Action<string, string, string>? ElementChanged; // formId, elementId, propertyName
 }
+
+/// <summary>Describes a Lua-created dockable panel (AvalonDock anchorable or document tab).</summary>
+public sealed record LuaDockPanelDescriptor(
+    string Id,
+    string Title,
+    string Position, // "bottom", "left", "right", "document"
+    List<LuaFormElement> Elements);

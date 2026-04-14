@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Channels;
 using CEAISuite.Engine.Abstractions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -137,8 +138,26 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         public bool StealthActive { get => _stealthActive; set => _stealthActive = value; }
         public string? TempAgentPath;       // temp copy of veh_agent.dll
 
+        // ── Hit stream broadcast pump ──
+        // Single reader drains shared memory ring buffer; fans out to all subscribers.
+        public readonly object SubscriberLock = new();
+        public readonly List<Channel<VehHitEvent>> Subscribers = [];
+        public Task? PumpTask;
+        public CancellationTokenSource? PumpCts;
+
         public void Dispose()
         {
+            // Stop broadcast pump
+            PumpCts?.Cancel();
+            PumpCts?.Dispose();
+            PumpCts = null;
+            lock (SubscriberLock)
+            {
+                foreach (var ch in Subscribers)
+                    ch.Writer.TryComplete();
+                Subscribers.Clear();
+            }
+
             if (SharedMemoryPtr != IntPtr.Zero)
             {
                 UnmapViewOfFile(SharedMemoryPtr);
@@ -511,6 +530,77 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
         if (!_states.TryGetValue(processId, out var state))
             yield break;
 
+        // Create a per-subscriber channel and register with the broadcast pump
+        var channel = Channel.CreateBounded<VehHitEvent>(new BoundedChannelOptions(256)
+        {
+            FullMode = BoundedChannelFullMode.DropOldest, // prevent slow subscriber from blocking pump
+            SingleWriter = true
+        });
+
+        lock (state.SubscriberLock)
+        {
+            state.Subscribers.Add(channel);
+        }
+
+        // Start the pump if not already running
+        EnsurePumpRunning(state);
+
+        try
+        {
+            await foreach (var hit in channel.Reader.ReadAllAsync(ct))
+            {
+                yield return hit;
+            }
+        }
+        finally
+        {
+            // Unsubscribe on dispose/cancel
+            lock (state.SubscriberLock)
+            {
+                state.Subscribers.Remove(channel);
+            }
+            channel.Writer.TryComplete();
+        }
+    }
+
+    /// <summary>
+    /// Start the single-reader broadcast pump for a process if not already running.
+    /// The pump drains the shared memory ring buffer and fans out each hit to all
+    /// subscriber channels. Condition evaluation and Lua callbacks run in the pump
+    /// so they execute exactly once per hit regardless of subscriber count.
+    /// </summary>
+    private void EnsurePumpRunning(VehProcessState state)
+    {
+        lock (state.SubscriberLock)
+        {
+            if (state.PumpTask is not null && !state.PumpTask.IsCompleted)
+                return;
+
+            state.PumpCts?.Dispose();
+            state.PumpCts = new CancellationTokenSource();
+            var pumpCt = state.PumpCts.Token;
+
+            state.PumpTask = Task.Run(async () =>
+            {
+                try
+                {
+                    await RunHitPumpAsync(state, pumpCt).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) { /* normal shutdown */ }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "VEH hit pump crashed for process {ProcessId}", state.ProcessId);
+                }
+            }, pumpCt);
+        }
+    }
+
+    /// <summary>
+    /// Core hit pump: single reader of the shared memory ring buffer.
+    /// Evaluates conditions, fires Lua callbacks, then broadcasts to all subscribers.
+    /// </summary>
+    private async Task RunHitPumpAsync(VehProcessState state, CancellationToken ct)
+    {
         while (!ct.IsCancellationRequested)
         {
             // Check for overflow
@@ -521,7 +611,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 state.LastOverflowCount = overflowCount;
                 if (_logger.IsEnabled(LogLevel.Warning))
                     _logger.LogWarning("VEH ring buffer overflow: {Dropped} hits dropped (pid={ProcessId})",
-                        dropped, processId);
+                        dropped, state.ProcessId);
             }
 
             // Read hit indices from shared memory
@@ -541,7 +631,7 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                     var drSlot = DetermineTriggeredSlot((ulong)hit.Dr6);
 
                     // Evaluate condition if one is set for this slot
-                    var shouldYield = true;
+                    var shouldBroadcast = true;
                     if (drSlot >= 0 && drSlot < MaxDrSlots)
                     {
                         state.SlotHitCounts[drSlot]++;
@@ -549,52 +639,68 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                         var condition = state.Conditions[drSlot];
                         if (condition is not null)
                         {
-                            shouldYield = VehConditionEvaluator.Evaluate(
+                            shouldBroadcast = VehConditionEvaluator.Evaluate(
                                 condition, hit, state.SlotHitCounts[drSlot],
                                 (addr, size) => ReadTargetMemory(state.ProcessHandle, addr, size));
                         }
 
-                        // Fire Lua callback if registered (fires regardless of condition)
-                        var luaCallback = state.LuaCallbacks[drSlot];
-                        var luaEngine = LuaEngine;
-                        if (luaCallback is not null && luaEngine is not null)
+                        // P2 fix: Fire Lua callback ONLY when the condition passes
+                        if (shouldBroadcast)
                         {
-                            try
+                            var luaCallback = state.LuaCallbacks[drSlot];
+                            var luaEngine = LuaEngine;
+                            if (luaCallback is not null && luaEngine is not null)
                             {
-                                var regDict = RegisterSnapshotToDict(hit.Registers);
-                                var bpHit = new BreakpointHitEvent(
-                                    $"veh-dr{drSlot}",
-                                    hit.Address,
-                                    hit.ThreadId,
-                                    DateTimeOffset.UtcNow,
-                                    regDict);
-                                // Fire-and-forget with fault observation to prevent unobserved task exceptions
+                                try
+                                {
+                                    var regDict = RegisterSnapshotToDict(hit.Registers);
+                                    var bpHit = new BreakpointHitEvent(
+                                        $"veh-dr{drSlot}",
+                                        hit.Address,
+                                        hit.ThreadId,
+                                        DateTimeOffset.UtcNow,
+                                        regDict);
 #pragma warning disable CS4014
-                                luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct)
-                                    .ContinueWith(t =>
-                                    {
-                                        if (_logger.IsEnabled(LogLevel.Warning))
-                                            _logger.LogWarning(t.Exception?.InnerException,
-                                                "Lua callback '{Callback}' async fault for DR{DrSlot}",
-                                                luaCallback, drSlot);
-                                    }, TaskContinuationOptions.OnlyOnFaulted);
+                                    luaEngine.InvokeBreakpointCallbackAsync(luaCallback, bpHit, ct)
+                                        .ContinueWith(t =>
+                                        {
+                                            if (_logger.IsEnabled(LogLevel.Warning))
+                                                _logger.LogWarning(t.Exception?.InnerException,
+                                                    "Lua callback '{Callback}' async fault for DR{DrSlot}",
+                                                    luaCallback, drSlot);
+                                        }, TaskContinuationOptions.OnlyOnFaulted);
 #pragma warning restore CS4014
-                            }
-                            catch (Exception ex)
-                            {
-                                if (_logger.IsEnabled(LogLevel.Warning))
-                                    _logger.LogWarning(ex, "Lua callback '{Callback}' failed for DR{DrSlot}",
-                                        luaCallback, drSlot);
+                                }
+                                catch (Exception ex)
+                                {
+                                    if (_logger.IsEnabled(LogLevel.Warning))
+                                        _logger.LogWarning(ex, "Lua callback '{Callback}' failed for DR{DrSlot}",
+                                            luaCallback, drSlot);
+                                }
                             }
                         }
                     }
 
-                    if (shouldYield)
-                        yield return hit;
+                    // Broadcast to all subscribers
+                    if (shouldBroadcast)
+                    {
+                        lock (state.SubscriberLock)
+                        {
+                            foreach (var ch in state.Subscribers)
+                                ch.Writer.TryWrite(hit); // DropOldest on full — won't block
+                        }
+                    }
                 }
 
                 readIdx++;
                 Marshal.WriteInt32(state.SharedMemoryPtr + OffsetHitReadIndex, readIdx);
+            }
+
+            // Stop pump if no subscribers remain
+            lock (state.SubscriberLock)
+            {
+                if (state.Subscribers.Count == 0)
+                    return; // pump exits; will restart on next GetHitStreamAsync call
             }
 
             // Wait for hit event or timeout (50ms polling interval)

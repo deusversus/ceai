@@ -1190,10 +1190,10 @@
                                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="8,6,8,4">
                                         <TextBlock Text="DEBUGGER" FontWeight="SemiBold" FontSize="11"
                                                    Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="0,0,12,0" />
-                                        <Button Command="{Binding StepInCommand}" Content="Step In" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" />
-                                        <Button Command="{Binding StepOverCommand}" Content="Step Over" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" Margin="4,0,0,0" />
-                                        <Button Command="{Binding StepOutCommand}" Content="Step Out" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" Margin="4,0,0,0" />
-                                        <Button Command="{Binding ContinueCommand}" Content="Continue" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Phase 7" Margin="4,0,8,0" />
+                                        <Button Command="{Binding StepInCommand}" Content="Step In" Padding="8,2" Style="{StaticResource ToolbarButton}" ToolTip="Execute one instruction (F11)" />
+                                        <Button Content="Step Over" Padding="8,2" Style="{StaticResource ToolbarButton}" IsEnabled="False" ToolTip="Not yet implemented — requires CMD_GET_CONTEXT for CALL detection" Margin="4,0,0,0" />
+                                        <Button Command="{Binding StepOutCommand}" Content="Step Out" Padding="8,2" Style="{StaticResource ToolbarButton}" ToolTip="Run to return address (Shift+F11)" Margin="4,0,0,0" />
+                                        <Button Command="{Binding ContinueCommand}" Content="Continue" Padding="8,2" Style="{StaticResource ToolbarButton}" ToolTip="Resume until next breakpoint (F5)" Margin="4,0,8,0" />
                                         <Button Command="{Binding RefreshBreakpointsCommand}" Content="Refresh BPs" Padding="8,2" Style="{StaticResource ToolbarButton}" />
                                         <Button Command="{Binding LoadHitDetailsCommand}" Content="Hit Log" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />
                                         <Button Command="{Binding WalkCallStackCommand}" Content="Walk Stack" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0" />

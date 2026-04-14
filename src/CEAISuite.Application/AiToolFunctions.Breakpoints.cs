@@ -36,7 +36,8 @@ public sealed partial class AiToolFunctions
                     processId, address, type,
                     condition ?? "",
                     conditionType ?? "RegisterCompare",
-                    mode, threadFilter ?? 0).ConfigureAwait(false);
+                    mode, threadFilter ?? 0,
+                    hitAction, singleHit).ConfigureAwait(false);
             }
 
             var pidError = ValidateDestructiveProcessId(processId);
@@ -504,7 +505,9 @@ public sealed partial class AiToolFunctions
         [Description("Condition expression, e.g. 'RAX == 0x1000' or '[RBX+0x10] > 100' or 'hitcount >= 5'")] string expression,
         [Description("Condition type: RegisterCompare, MemoryCompare, HitCount")] string conditionType = "RegisterCompare",
         [Description("Breakpoint mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto",
-        [Description("Thread ID to filter (null = all threads)")] int? threadFilter = null)
+        [Description("Thread ID to filter (null = all threads)")] int? threadFilter = null,
+        [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue",
+        [Description("Auto-remove after first hit")] bool singleHit = false)
     {
         try
         {
@@ -515,15 +518,20 @@ public sealed partial class AiToolFunctions
 
             var bpType = Enum.Parse<BreakpointType>(type, ignoreCase: true);
             var bpMode = Enum.Parse<BreakpointMode>(mode, ignoreCase: true);
+            var bpAction = Enum.Parse<BreakpointHitAction>(hitAction, ignoreCase: true);
             var ct = Enum.Parse<BreakpointConditionType>(conditionType, ignoreCase: true);
             var condition = new BreakpointCondition(expression, ct);
 
             var bp = await breakpointService.SetConditionalBreakpointAsync(
-                processId, address, bpType, condition, bpMode, threadFilter: threadFilter).ConfigureAwait(false);
+                processId, address, bpType, condition, bpMode, bpAction, threadFilter).ConfigureAwait(false);
 
-            return $"Conditional breakpoint set: {bp.Id} at {bp.Address} ({bp.Mode})\n" +
-                   $"Condition: {expression} ({conditionType})" +
+            var result = $"Conditional breakpoint set: {bp.Id} at {bp.Address} ({bp.Mode})\n" +
+                   $"Condition: {expression} ({conditionType})\n" +
+                   $"Hit action: {bpAction}" +
                    (threadFilter.HasValue ? $"\nThread filter: {threadFilter}" : "");
+            if (singleHit)
+                result += "\nNote: singleHit is not supported on conditional breakpoints; use RemoveBreakpoint after the first match instead.";
+            return result;
         }
         catch (Exception ex)
         {

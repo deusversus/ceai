@@ -236,8 +236,11 @@ internal static class CeApiBindings
                     .GetAwaiter().GetResult();
                 return resolved.HasValue ? (double)(ulong)resolved.Value : 0;
             }
-            catch
+            catch (OutOfMemoryException) { throw; }
+            catch (StackOverflowException) { throw; }
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[getAddressSafe] Failed to resolve '{expr}': {ex.Message}");
                 return 0;
             }
         });

@@ -96,6 +96,7 @@ public sealed class LuaFormHostService : ILuaFormHost
                 timer.Stop();
             }
             _timers.Clear();
+            _canvases.Clear();
         });
     }
 
@@ -300,7 +301,9 @@ public sealed class LuaFormHostService : ILuaFormHost
 
     public object? GetFormProperty(string formId, string property)
     {
-        return _dispatcher.Invoke(() =>
+        // If already on the UI thread (e.g. called from a Lua callback dispatched on the UI thread),
+        // execute directly to avoid deadlock from synchronous Dispatcher.Invoke.
+        object? ReadProperty()
         {
             if (!_windows.TryGetValue(formId, out var window)) return null;
             return property.ToLowerInvariant() switch
@@ -313,7 +316,9 @@ public sealed class LuaFormHostService : ILuaFormHost
                 "visible" => window.IsVisible,
                 _ => null
             };
-        });
+        }
+
+        return _dispatcher.CheckAccess() ? ReadProperty() : _dispatcher.Invoke(ReadProperty);
     }
 
     public void SetFormTopMost(string formId, bool topMost)
@@ -400,40 +405,32 @@ public sealed class LuaFormHostService : ILuaFormHost
 
     public string? GetElementText(string formId, string elementId)
     {
-        return _dispatcher.Invoke(() =>
-        {
-            var fe = FindElement(formId, elementId);
-            return fe is TextBox tb ? tb.Text : null;
-        });
+        string? Read() { var fe = FindElement(formId, elementId); return fe is TextBox tb ? tb.Text : null; }
+        return _dispatcher.CheckAccess() ? Read() : _dispatcher.Invoke(Read);
     }
 
     public bool? GetElementChecked(string formId, string elementId)
     {
-        return _dispatcher.Invoke(() =>
-        {
-            var fe = FindElement(formId, elementId);
-            return fe is CheckBox chk ? chk.IsChecked : null;
-        });
+        bool? Read() { var fe = FindElement(formId, elementId); return fe is CheckBox chk ? chk.IsChecked : null; }
+        return _dispatcher.CheckAccess() ? Read() : _dispatcher.Invoke(Read);
     }
 
     public int? GetSelectedIndex(string formId, string elementId)
     {
-        return _dispatcher.Invoke(() =>
+        int? Read()
         {
             var fe = FindElement(formId, elementId);
             if (fe is ListBox lb) return lb.SelectedIndex;
             if (fe is ComboBox cb) return cb.SelectedIndex;
-            return (int?)null;
-        });
+            return null;
+        }
+        return _dispatcher.CheckAccess() ? Read() : _dispatcher.Invoke(Read);
     }
 
     public int? GetTrackBarPosition(string formId, string elementId)
     {
-        return _dispatcher.Invoke(() =>
-        {
-            var fe = FindElement(formId, elementId);
-            return fe is Slider sl ? (int?)sl.Value : null;
-        });
+        int? Read() { var fe = FindElement(formId, elementId); return fe is Slider sl ? (int?)sl.Value : null; }
+        return _dispatcher.CheckAccess() ? Read() : _dispatcher.Invoke(Read);
     }
 
     // ── Dialog Functions ──
@@ -671,7 +668,9 @@ public sealed class LuaFormHostService : ILuaFormHost
                     cc.Content = ccCanvas;
                     return ccCanvas;
                 }
-                // Can't parent into this control type — return a detached canvas
+                // Can't parent into this control type — detached canvas (children won't render)
+                System.Diagnostics.Debug.WriteLine(
+                    $"[LuaFormHost] Cannot parent elements into {container.GetType().Name} (Tag={container.Tag}). Children will not be visible.");
                 return new Canvas();
         }
     }

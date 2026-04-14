@@ -286,6 +286,50 @@ public sealed class CePropertyProxyTests
     }
 
     [Fact]
+    public void SetterException_DoesNotCrashScript()
+    {
+        var script = CreateScript();
+        var table = new Table(script);
+
+        var props = CePropertyProxy.CreatePropertyMap();
+        props["Broken"] = CePropertyProxy.ReadWrite(
+            () => DynValue.NewString("ok"),
+            _ => throw new InvalidOperationException("Intentional test failure"));
+
+        CePropertyProxy.ApplyProxy(script, table, props,
+            CePropertyProxy.CreateEventSet(), new ConcurrentDictionary<string, DynValue>(), "test:");
+
+        script.Globals["obj"] = table;
+
+        // Writing to a property whose setter throws should not crash the script
+        script.DoString("obj.Broken = 'crash'");
+
+        // Reading should still work
+        var result = script.DoString("return obj.Broken");
+        Assert.Equal("ok", result.String);
+    }
+
+    [Fact]
+    public void GetterException_ReturnsNil()
+    {
+        var script = CreateScript();
+        var table = new Table(script);
+
+        var props = CePropertyProxy.CreatePropertyMap();
+        props["Broken"] = CePropertyProxy.ReadOnly(
+            () => throw new InvalidOperationException("Intentional test failure"));
+
+        CePropertyProxy.ApplyProxy(script, table, props,
+            CePropertyProxy.CreateEventSet(), new ConcurrentDictionary<string, DynValue>(), "test:");
+
+        script.Globals["obj"] = table;
+
+        // Reading a property whose getter throws should return nil, not crash
+        var result = script.DoString("return obj.Broken");
+        Assert.True(result.IsNil());
+    }
+
+    [Fact]
     public void EventRead_ReturnsStoredCallback()
     {
         var script = CreateScript();

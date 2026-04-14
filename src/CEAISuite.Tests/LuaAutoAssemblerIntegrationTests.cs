@@ -21,10 +21,12 @@ public sealed class LuaAutoAssemblerIntegrationTests : IDisposable
 
     // ── Parse: Lua warnings ──
 
-    [Fact]
-    public void Parse_LuaCodeBlock_NoWarningWhenLuaAvailable()
+    [Theory]
+    [InlineData("{$luacode}")]
+    [InlineData("{$lua}")]
+    public void Parse_LuaBlock_NoWarningWhenLuaAvailable(string directive)
     {
-        var script = "[ENABLE]\n{$luacode}\nprint('hi')\n{$asm}\nnop\n[DISABLE]\nnop";
+        var script = $"[ENABLE]\n{directive}\nprint('hi')\n{{$asm}}\nnop\n[DISABLE]\nnop";
 
         var result = _aaWithLua.Parse(script);
 
@@ -32,10 +34,12 @@ public sealed class LuaAutoAssemblerIntegrationTests : IDisposable
         Assert.DoesNotContain(result.Warnings, w => w.Contains("Lua", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public void Parse_LuaCodeBlock_WarningWhenLuaUnavailable()
+    [Theory]
+    [InlineData("{$luacode}")]
+    [InlineData("{$lua}")]
+    public void Parse_LuaBlock_WarningWhenLuaUnavailable(string directive)
     {
-        var script = "[ENABLE]\n{$luacode}\nprint('hi')\n{$asm}\nnop\n[DISABLE]\nnop";
+        var script = $"[ENABLE]\n{directive}\nprint('hi')\n{{$asm}}\nnop\n[DISABLE]\nnop";
 
         var result = _aaWithoutLua.Parse(script);
 

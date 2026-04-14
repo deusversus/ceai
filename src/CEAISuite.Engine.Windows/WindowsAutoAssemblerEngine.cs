@@ -206,7 +206,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             }
 
             // {$luacode} / {$lua} ... {$asm} block handling
-            // CE uses {$lua} as the primary directive; {$luacode} is an alias
+            // CE's original directive is {$luacode}; {$lua} is a widely-used shorthand
             if (IsLuaBlockStart(trimmed))
             {
                 insideLuaBlock = true;
@@ -890,7 +890,8 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
     /// <summary>
     /// Check if a trimmed line starts a Lua code block.
-    /// CE uses {$lua} as the primary directive; {$luacode} is an alias.
+    /// CE's original directive is {$luacode}; {$lua} is a widely-used shorthand alias.
+    /// Both are supported for community CT compatibility.
     /// </summary>
     private static bool IsLuaBlockStart(string trimmedLine) =>
         trimmedLine.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase) ||

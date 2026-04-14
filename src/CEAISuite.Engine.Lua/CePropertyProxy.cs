@@ -64,8 +64,11 @@ internal static class CePropertyProxy
                 {
                     return binding.Getter(self);
                 }
-                catch
+                catch (OutOfMemoryException) { throw; }
+                catch (StackOverflowException) { throw; }
+                catch (Exception ex)
                 {
+                    System.Diagnostics.Debug.WriteLine($"[CePropertyProxy] Getter '{keyStr}' failed: {ex.Message}");
                     return DynValue.Nil;
                 }
             }
@@ -114,9 +117,11 @@ internal static class CePropertyProxy
                     {
                         binding.Setter(self, value);
                     }
-                    catch
+                    catch (OutOfMemoryException) { throw; }
+                    catch (StackOverflowException) { throw; }
+                    catch (Exception ex)
                     {
-                        // Setter failed — don't crash the script, just ignore
+                        System.Diagnostics.Debug.WriteLine($"[CePropertyProxy] Setter '{keyStr}' failed: {ex.Message}");
                     }
                 }
                 // Read-only property (getter but no setter): silently discard the write.

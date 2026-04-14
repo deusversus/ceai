@@ -56,16 +56,14 @@ internal sealed class CeFormBindings : IDisposable
 
             formTable["show"] = (Action)(() => formHost.ShowForm(_forms.GetValueOrDefault(formId) ?? form));
             formTable["hide"] = (Action)(() => formHost.CloseForm(formId));
-            formTable["close"] = (Action)(() =>
+            // close/destroy are identical in CE — share implementation with double-call guard
+            Action closeForm = () =>
             {
-                formHost.CloseForm(formId);
-                _forms.TryRemove(formId, out _);
-            });
-            formTable["destroy"] = (Action)(() =>
-            {
-                formHost.CloseForm(formId);
-                _forms.TryRemove(formId, out _);
-            });
+                if (_forms.TryRemove(formId, out _))
+                    formHost.CloseForm(formId);
+            };
+            formTable["close"] = closeForm;
+            formTable["destroy"] = closeForm;
             formTable["bringToFront"] = (Action)(() =>
             {
                 if (_forms.TryGetValue(formId, out var f))

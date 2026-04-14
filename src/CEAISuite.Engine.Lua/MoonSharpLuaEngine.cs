@@ -520,6 +520,10 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             if (processId.HasValue)
                 _currentProcessId = processId.Value;
 
+            // Preprocess Lua 5.3 bitwise operators (|, &, <<, >>) into function calls
+            // before MoonSharp (Lua 5.2) tries to parse the source.
+            code = Lua53BitwisePreprocessor.Preprocess(code);
+
             var outputLines = new List<string>();
             void CaptureOutput(string line) => outputLines.Add(line);
             OutputWritten += CaptureOutput;

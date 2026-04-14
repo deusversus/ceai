@@ -16,7 +16,11 @@
 #define WIN32_LEAN_AND_MEAN
 #define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
+#ifdef __TINYC__
+#include "compat/tlhelp32.h"
+#else
 #include <tlhelp32.h>
+#endif
 #include <stdio.h>
 
 /* ── Shared memory layout ── */
@@ -807,12 +811,18 @@ static BOOL SetInt3Bp(ULONG64 address)
     }
     if (freeSlot == -1) return FALSE;
 
-    /* Read original byte — SEH-protected against unreadable pages */
-    __try {
-        origByte = *(BYTE*)(ULONG_PTR)address;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return FALSE; /* page not readable */
+    /* Read original byte — pre-validate page is readable (TCC-compatible, no SEH) */
+    {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!VirtualQuery((LPCVOID)(ULONG_PTR)address, &mbi, sizeof(mbi)) ||
+            mbi.State != MEM_COMMIT ||
+            !(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                             PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)))
+        {
+            return FALSE; /* page not readable */
+        }
     }
+    origByte = *(BYTE*)(ULONG_PTR)address;
     if (origByte == 0xCC) return TRUE; /* already INT3 */
 
     /* Write 0xCC */
@@ -1437,9 +1447,17 @@ static PEB_LDR_DATA_INTERNAL* GetPebLdrData(void)
 {
     BYTE* peb;
 #ifdef _M_IX86
+  #ifdef __TINYC__
+    __asm__ __volatile__("movl %%fs:0x30, %0" : "=r"(peb));
+  #else
     peb = (BYTE*)__readfsdword(0x30);
+  #endif
 #else
+  #ifdef __TINYC__
+    __asm__ __volatile__("movq %%gs:0x60, %0" : "=r"(peb));
+  #else
     peb = (BYTE*)__readgsqword(0x60);
+  #endif
 #endif
     return *(PEB_LDR_DATA_INTERNAL**)(peb + PEB_LDR_OFFSET);
 }

@@ -49,7 +49,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     internal static readonly CoreModules SandboxModules =
         CoreModules.Preset_HardSandbox
         | CoreModules.Coroutine
-        | CoreModules.Bit32;
+        | CoreModules.Bit32
+        | CoreModules.ErrorHandling;  // pcall, xpcall, error — CE scripts use pcall extensively
 
     public event Action<string>? OutputWritten;
 

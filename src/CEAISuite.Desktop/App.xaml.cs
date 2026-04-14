@@ -288,6 +288,7 @@ public partial class App : System.Windows.Application
                 sp.GetService<IVehDebugger>(),
                 sp.GetService<IBreakpointEventBus>()));
         services.AddSingleton<ILuaFormHost, LuaFormHostService>();
+        services.AddSingleton<ILuaDataBindingHost, LuaDataBindingHostService>();
         services.AddSingleton<IMainFormProxy>(sp =>
             new MainFormProxyService(
                 sp.GetRequiredService<INavigationService>(),
@@ -306,7 +307,8 @@ public partial class App : System.Windows.Application
                 addressListProvider: sp.GetService<ILuaAddressListProvider>(),
                 structureProvider: sp.GetService<ILuaStructureProvider>(),
                 steppingEngine: sp.GetService<ISteppingEngine>(),
-                mainFormProxy: sp.GetService<IMainFormProxy>()));
+                mainFormProxy: sp.GetService<IMainFormProxy>(),
+                dataBindingHost: sp.GetService<ILuaDataBindingHost>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();

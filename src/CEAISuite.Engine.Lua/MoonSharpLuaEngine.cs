@@ -26,11 +26,14 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly ILuaStructureProvider? _structureProvider;
     private readonly ISteppingEngine? _steppingEngine;
     private readonly IMainFormProxy? _mainFormProxy;
+    private readonly ILuaDataBindingHost? _dataBindingHost;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _mainFormCallbacks = new();
     private Action? _mainFormUnsubscribe;
     private LuaTimerBindings? _timerBindings;
+    private CeMemoryWatchBindings? _memoryWatchBindings;
     private CeFormBindings? _formBindings;
+    private CeDataBindingBindings? _dataBindings;
     private CeDockPanelBindings? _dockPanelBindings;
     private LuaHotReloadWatcher? _hotReloadWatcher;
     private Script _script;
@@ -79,7 +82,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         ILuaAddressListProvider? addressListProvider = null,
         ILuaStructureProvider? structureProvider = null,
         ISteppingEngine? steppingEngine = null,
-        IMainFormProxy? mainFormProxy = null)
+        IMainFormProxy? mainFormProxy = null,
+        ILuaDataBindingHost? dataBindingHost = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
@@ -94,6 +98,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _structureProvider = structureProvider;
         _steppingEngine = steppingEngine;
         _mainFormProxy = mainFormProxy;
+        _dataBindingHost = dataBindingHost;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -297,6 +302,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _mainFormUnsubscribe = null;
         _hotReloadWatcher?.Dispose();
         _timerBindings?.Dispose();
+        _memoryWatchBindings?.Dispose();
+        _dataBindings?.Dispose();
         _formBindings?.Dispose();
         _formHost?.CloseAllForms();
         _gate.Dispose();
@@ -328,6 +335,11 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             CeApiBindings.Register(script, this, _engineFacade, _autoAssembler, _formHost);
             LuaModuleBindings.Register(script, this, _engineFacade, _scanEngine, _autoAssembler, _symbolEngine);
 
+            // S9: Memory watch bindings (reactive memory monitoring)
+            _memoryWatchBindings?.Dispose();
+            _memoryWatchBindings = new CeMemoryWatchBindings();
+            _memoryWatchBindings.Register(script, this, _engineFacade, _autoAssembler);
+
             if (_disassemblyEngine is not null)
                 LuaDisassemblyBindings.Register(script, this, _disassemblyEngine, _engineFacade, _autoAssembler);
 
@@ -353,7 +365,22 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         if (_formHost is not null)
         {
             _formBindings?.Dispose(); // Unsubscribe old event handlers to prevent leak
+            _dataBindings?.Dispose(); // Unsubscribe old data binding refresh handler
+
             _formBindings = new CeFormBindings();
+
+            // S8: Wire up reactive data bindings if both host and address list provider are available
+            if (_dataBindingHost is not null && _addressListProvider is not null)
+            {
+                _dataBindings = new CeDataBindingBindings();
+                _dataBindings.Register(_dataBindingHost, _addressListProvider, _formHost, _formBindings.Forms);
+                _formBindings.DataBindings = _dataBindings;
+            }
+            else
+            {
+                _dataBindings = null;
+            }
+
             _formBindings.Register(script, _formHost, this);
 
             // S7: Dockable script panels

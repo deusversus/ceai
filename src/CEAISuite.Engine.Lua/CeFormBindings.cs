@@ -23,6 +23,9 @@ internal sealed class CeFormBindings : IDisposable
 
     private MoonSharpLuaEngine? _engine;
 
+    /// <summary>Data binding engine for reactive element↔record bindings. Set by <see cref="MoonSharpLuaEngine"/>.</summary>
+    internal CeDataBindingBindings? DataBindings { get; set; }
+
     /// <summary>Shared form descriptors — also used by <see cref="CeDockPanelBindings"/> for dock panels.</summary>
     internal ConcurrentDictionary<string, LuaFormDescriptor> Forms => _forms;
 
@@ -684,6 +687,9 @@ internal sealed class CeFormBindings : IDisposable
         };
         _closeHandler = (fId) =>
         {
+            // S8: Clean up any data bindings for the closed form
+            DataBindings?.RemoveBindingsForForm(fId);
+
             var key = $"{fId}:onclose";
             if (_callbacks.TryGetValue(key, out var callback))
             {
@@ -878,6 +884,9 @@ internal sealed class CeFormBindings : IDisposable
 
         var events = CreateBaseElementEvents();
         CePropertyProxy.ApplyProxy(script, table, props, events, _callbacks, $"{formId}:{elementId}:");
+
+        // S8: Add reactive data binding methods (bind/unbind) if binding engine is available
+        DataBindings?.AddBindMethods(table, formId, elementId);
 
         return table;
     }

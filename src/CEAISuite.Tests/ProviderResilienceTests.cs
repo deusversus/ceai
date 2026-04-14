@@ -426,8 +426,9 @@ public class ProviderResilienceTests
         }
 
         // Should complete without deadlock (use timeout as safety)
+        // 30s gives CI runners (Windows, slow thread pool) ample headroom.
         var allTasks = Task.WhenAll(tasks);
-        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(10), ct);
+        var timeoutTask = Task.Delay(TimeSpan.FromSeconds(30), ct);
         var completed = await Task.WhenAny(allTasks, timeoutTask);
 
         Assert.True(completed == allTasks,

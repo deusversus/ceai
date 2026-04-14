@@ -4,7 +4,9 @@ namespace CEAISuite.Tests;
 
 public sealed class LuaEngineTests : IDisposable
 {
-    private readonly MoonSharpLuaEngine _engine = new(executionTimeout: TimeSpan.FromSeconds(5));
+    // 20s gives CI thread-pool starvation ample headroom; tests explicitly
+    // testing timeout behaviour live in LuaMemoryLimitTests with their own engine.
+    private readonly MoonSharpLuaEngine _engine = new(executionTimeout: TimeSpan.FromSeconds(20));
 
     public void Dispose() => _engine.Dispose();
 

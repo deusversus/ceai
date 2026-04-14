@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using CEAISuite.Engine.Abstractions;
 using MoonSharp.Interpreter;
 
@@ -94,18 +95,19 @@ internal static class LuaAddressListBindings
             provider.GetActive(mr.Get("_id").String));
     }
 
+    /// <summary>Shared empty callback registry for record proxies (records have no events).</summary>
+    private static readonly ConcurrentDictionary<string, DynValue> s_emptyCallbacks = new();
+    private static readonly HashSet<string> s_emptyEvents = CePropertyProxy.CreateEventSet();
+
     private static DynValue RecordToTable(Script script, LuaMemoryRecord record, ILuaAddressListProvider provider)
     {
         var table = new Table(script);
-        table["_id"] = record.Id;
-        table["Description"] = record.Description;
-        table["Address"] = record.Address;
-        table["Type"] = record.DataType;
-        table["Value"] = record.Value ?? "";
-        table["Active"] = record.IsActive;
-        table["IsGroupHeader"] = record.IsGroupHeader;
 
-        // Method-style accessors (CE scripts call mr.getValue() or mr.Value)
+        // Internal ID — always on raw table (not proxied)
+        table["_id"] = record.Id;
+
+        // Method-style accessors on raw table — backward compat for scripts that call mr.getValue()
+        // These take priority over proxy properties because __index checks raw table first.
         table["getValue"] = (Func<DynValue>)(() =>
         {
             var val = provider.GetValue(record.Id);
@@ -129,6 +131,51 @@ internal static class LuaAddressListBindings
 
         table["getActive"] = (Func<bool>)(() =>
             provider.GetActive(record.Id));
+
+        // CRITICAL: Do NOT set raw table entries for proxied properties (Value, Active, Description,
+        // Address, Type, IsGroupHeader). If these exist on the raw table, __index will return the
+        // stale snapshot instead of calling the live getter. See plan design note "Raw Table Trap".
+
+        // Apply CePropertyProxy for CE-style property access: record.Value, record.Active, etc.
+        var props = CePropertyProxy.CreatePropertyMap();
+
+        props["Value"] = CePropertyProxy.ReadWrite(
+            () =>
+            {
+                var val = provider.GetValue(record.Id);
+                return val is not null ? DynValue.NewString(val) : DynValue.NewString("");
+            },
+            v => provider.SetValue(record.Id, v.Type == DataType.String ? v.String : v.CastToString()));
+
+        props["Active"] = CePropertyProxy.ReadWrite(
+            () => DynValue.NewBoolean(provider.GetActive(record.Id)),
+            v => provider.SetActive(record.Id, CePropertyProxy.ToBool(v)));
+
+        props["Description"] = CePropertyProxy.ReadWrite(
+            () =>
+            {
+                var desc = provider.GetDescription(record.Id);
+                return desc is not null ? DynValue.NewString(desc) : DynValue.NewString(record.Description);
+            },
+            v => provider.SetDescription(record.Id, v.Type == DataType.String ? v.String : v.CastToString()));
+
+        props["Address"] = CePropertyProxy.ReadOnly(() =>
+        {
+            var addr = provider.GetAddress(record.Id);
+            return addr is not null ? DynValue.NewString(addr) : DynValue.NewString(record.Address);
+        });
+
+        // CE scripts also use CurrentAddress for the resolved address
+        props["CurrentAddress"] = CePropertyProxy.ReadOnly(() =>
+        {
+            var addr = provider.GetAddress(record.Id);
+            return addr is not null ? DynValue.NewString(addr) : DynValue.NewString(record.Address);
+        });
+
+        props["Type"] = CePropertyProxy.ReadOnly(() => DynValue.NewString(record.DataType));
+        props["IsGroupHeader"] = CePropertyProxy.ReadOnly(() => DynValue.NewBoolean(record.IsGroupHeader));
+
+        CePropertyProxy.ApplyProxy(script, table, props, s_emptyEvents, s_emptyCallbacks, "");
 
         return DynValue.NewTable(table);
     }

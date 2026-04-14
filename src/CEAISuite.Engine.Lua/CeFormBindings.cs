@@ -311,7 +311,15 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"memo_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaMemoElement(elementId, 10, 10, 200, 100) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["Text"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewString(formHost.GetElementText(formId, elementId) ?? element.Text ?? ""),
+                    v => { element.Text = v.String; formHost.UpdateElement(formId, element); });
+                props["ReadOnly"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewBoolean(element.ReadOnly),
+                    v => { element.ReadOnly = CePropertyProxy.ToBool(v); formHost.UpdateElement(formId, element); });
+            });
             elemTable["getText"] = (Func<DynValue>)(() =>
             {
                 var text = formHost.GetElementText(formId, elementId);
@@ -336,7 +344,14 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"lst_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaListBoxElement(elementId, 10, 10, 150, 120) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["Items"] = CePropertyProxy.ReadOnly(() => DynValue.NewNumber(element.Items.Count));
+                props["SelectedIndex"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex),
+                    v => { element.SelectedIndex = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["ItemCount"] = CePropertyProxy.ReadOnly(() => DynValue.NewNumber(element.Items.Count));
+            });
             elemTable["addItem"] = (Action<string>)(item =>
             {
                 element.Items.Add(item);
@@ -359,7 +374,20 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"cmb_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaComboBoxElement(elementId, 10, 10, 150, 25) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["SelectedIndex"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex),
+                    v => { element.SelectedIndex = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["Items"] = CePropertyProxy.ReadOnly(() => DynValue.NewNumber(element.Items.Count));
+                props["Text"] = CePropertyProxy.ReadOnly(() =>
+                {
+                    var idx = formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex;
+                    return idx >= 0 && idx < element.Items.Count
+                        ? DynValue.NewString(element.Items[idx])
+                        : DynValue.NewString(element.Caption ?? "");
+                });
+            });
             elemTable["addItem"] = (Action<string>)(item =>
             {
                 element.Items.Add(item);
@@ -386,7 +414,18 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"trk_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaTrackBarElement(elementId, 10, 10, 200, 30) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["Position"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(formHost.GetTrackBarPosition(formId, elementId) ?? element.Position),
+                    v => { element.Position = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["Min"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(element.Min),
+                    v => { element.Min = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["Max"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(element.Max),
+                    v => { element.Max = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+            });
             elemTable["setMin"] = (Action<int>)(v =>
             {
                 element.Min = v;
@@ -413,7 +452,18 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"prg_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaProgressBarElement(elementId, 10, 10, 200, 25) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["Position"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(element.Position),
+                    v => { element.Position = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["Min"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(element.Min),
+                    v => { element.Min = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["Max"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(element.Max),
+                    v => { element.Max = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+            });
             elemTable["setMin"] = (Action<int>)(v =>
             {
                 element.Min = v;
@@ -438,7 +488,11 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"img_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaImageElement(elementId, 10, 10, 100, 100) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["ImagePath"] = CePropertyProxy.WriteOnly(
+                    v => { element.ImagePath = v.String; formHost.UpdateElement(formId, element); });
+            });
             elemTable["loadFromFile"] = (Action<string>)(path =>
             {
                 element.ImagePath = path;
@@ -471,7 +525,12 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"rdg_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaRadioGroupElement(elementId, 10, 10, 150, 120) { Caption = "Options", ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["SelectedIndex"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex),
+                    v => { element.SelectedIndex = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+            });
             elemTable["addItem"] = (Action<string>)(item =>
             {
                 element.Items.Add(item);
@@ -493,7 +552,13 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"tab_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaTabControlElement(elementId, 10, 10, 300, 200) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["SelectedIndex"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(formHost.GetSelectedIndex(formId, elementId) ?? element.SelectedIndex),
+                    v => { element.SelectedIndex = CePropertyProxy.ToInt(v); formHost.UpdateElement(formId, element); });
+                props["TabCount"] = CePropertyProxy.ReadOnly(() => DynValue.NewNumber(element.TabNames.Count));
+            });
             elemTable["addTab"] = (Action<string>)(name =>
             {
                 element.TabNames.Add(name);
@@ -555,7 +620,12 @@ internal sealed class CeFormBindings : IDisposable
             var elementId = $"spl_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaSplitterElement(elementId, 10, 10, 5, 200) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                props["IsVertical"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewBoolean(element.IsVertical),
+                    v => { element.IsVertical = CePropertyProxy.ToBool(v); formHost.UpdateElement(formId, element); });
+            });
             elemTable["setVertical"] = (Action<bool>)(v =>
             {
                 element.IsVertical = v;

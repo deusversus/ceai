@@ -60,6 +60,9 @@ public sealed class SteppingService
         return await _engine!.ContinueAsync(processId, ct).ConfigureAwait(false);
     }
 
+    /// <summary>Clear stepping state for a process. Call on detach.</summary>
+    public void OnProcessDetached(int processId) => _engine?.ClearState(processId);
+
     private string? ValidatePid(int processId)
     {
         if (_engine is null) return "Stepping engine not available.";

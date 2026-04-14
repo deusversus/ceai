@@ -41,6 +41,9 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
     public SteppingState GetState(int processId) =>
         _states.GetValueOrDefault(processId, SteppingState.Idle);
 
+    public void ClearState(int processId) =>
+        _states.TryRemove(processId, out _);
+
     public Task<StepResult?> GetCurrentStateAsync(
         int processId, int threadId = 0, CancellationToken cancellationToken = default)
     {
@@ -146,7 +149,11 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
                 return FailResult(processId, ensureResult.Error ?? "Failed to inject VEH agent");
 
             // Step-out: We need the return address from the stack.
-            // First, do a single step to get the current RSP from the register snapshot.
+            // LIMITATION: We do a single step first to obtain RSP from the register snapshot.
+            // If the stepped instruction modifies RSP (push, sub rsp, call), the read address
+            // may be wrong. Proper fix requires CMD_GET_CONTEXT to read RSP without stepping.
+            // This is acceptable for most cases since step-out is typically called while
+            // suspended inside a function body, not at a stack-modifying instruction.
             var stepResult = await StepInAsync(processId, threadId, 5000, cancellationToken).ConfigureAwait(false);
             if (!stepResult.Success || stepResult.Registers is null)
                 return stepResult;

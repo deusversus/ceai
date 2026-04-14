@@ -35,6 +35,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
     private readonly IOutputLog _outputLog;
     private readonly IDialogService _dialogService;
     private readonly ScanService _scanService;
+    private readonly SteppingService? _steppingService;
 
     // Child ViewModels (injected, shared with MainWindow for DataContext wiring)
     private readonly AddressTableViewModel _addressTableVm;
@@ -74,7 +75,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
         ScriptGenerationService scriptGenerationService,
         UpdateService updateService,
         IDispatcherService dispatcher,
-        ILogger<MainViewModel> logger)
+        ILogger<MainViewModel> logger,
+        SteppingService? steppingService = null)
     {
         _logger = logger;
         _databasePath = Path.Combine(
@@ -101,6 +103,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _outputLog = outputLog;
         _dialogService = dialogService;
         _scanService = scanService;
+        _steppingService = steppingService;
 
         _addressTableVm = addressTableVm;
         _inspectionVm = inspectionVm;
@@ -286,6 +289,7 @@ public partial class MainViewModel : ObservableObject, IDisposable
             {
                 _outputLog.Append("Attach", "Info",
                     $"Detaching from previous process PID {dashboard.CurrentInspection.ProcessId} before attaching to PID {selectedProcess.Id}.");
+                _steppingService?.OnProcessDetached(dashboard.CurrentInspection.ProcessId);
                 _dashboardService.DetachProcess();
                 _processContext.Detach();
                 UiActionRequested?.Invoke("DetachCleanup", null);
@@ -416,7 +420,8 @@ public partial class MainViewModel : ObservableObject, IDisposable
                 _outputLog.Append("Detach", "Warning", $"Breakpoint cleanup failed (best-effort): {bpEx.GetType().Name}: {bpEx.Message}");
             }
 
-            // 3. Detach engine facade + clear dashboard state
+            // 3. Clear stepping state + detach engine facade + clear dashboard state
+            if (pid > 0) _steppingService?.OnProcessDetached(pid);
             _dashboardService.DetachProcess();
             _processContext.Detach();
             _outputLog.Append("Detach", "Info", "Engine facade detached, ProcessContext cleared.");

@@ -237,4 +237,142 @@ public class WindowsSteppingEngineTests
         var state = await engine.GetCurrentStateAsync(TestPid);
         Assert.Null(state);
     }
+
+    // ─── Cancellation Tests ────────────────────────────────────────────
+
+    [Fact]
+    public async Task StepIn_Cancelled_ReturnsTimeout()
+    {
+        var (engine, veh, _, _, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+        // No canned hits — the trace will return empty
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel(); // pre-cancel
+
+        var result = await engine.StepInAsync(TestPid, TestThreadId, cancellationToken: cts.Token);
+
+        Assert.False(result.Success);
+        Assert.True(result.Reason is StoppedReason.Timeout or StoppedReason.Error);
+    }
+
+    [Fact]
+    public async Task Continue_Cancelled_ReturnsTimeout()
+    {
+        var (engine, veh, _, _, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+        // No hits — continue will iterate empty stream then catch cancellation
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var result = await engine.ContinueAsync(TestPid, cts.Token);
+
+        Assert.False(result.Success);
+        Assert.Equal(StoppedReason.Timeout, result.Reason);
+    }
+
+    [Fact]
+    public async Task StepOut_Cancelled_ReturnsTimeout()
+    {
+        var (engine, veh, _, facade, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+
+        // Provide a trace hit for the initial step-in
+        veh.AddCannedHit(TestPid, new VehHitEvent(
+            0x00401010, TestThreadId, VehBreakpointType.Trace, 0x4000,
+            TestRegisters, 0));
+
+        // Set up a valid return address at RSP
+        facade.WriteMemoryDirect(0x7FFE0000, BitConverter.GetBytes((ulong)0x00402000));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        var result = await engine.StepOutAsync(TestPid, TestThreadId, cancellationToken: cts.Token);
+
+        Assert.False(result.Success);
+        Assert.True(result.Reason is StoppedReason.Timeout or StoppedReason.Error);
+    }
+
+    // ─── StepOut Edge Cases ────────────────────────────────────────────
+
+    [Fact]
+    public async Task StepOut_NullReturnAddress_ReturnsError()
+    {
+        var (engine, veh, _, facade, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+
+        // Provide a trace hit for the initial step-in
+        veh.AddCannedHit(TestPid, new VehHitEvent(
+            0x00401010, TestThreadId, VehBreakpointType.Trace, 0x4000,
+            TestRegisters, 0));
+
+        // Set RSP to point to zero (null return address)
+        facade.WriteMemoryDirect(0x7FFE0000, BitConverter.GetBytes((ulong)0));
+
+        var result = await engine.StepOutAsync(TestPid, TestThreadId);
+
+        Assert.False(result.Success);
+        Assert.Equal(StoppedReason.Error, result.Reason);
+        Assert.Contains("null", result.Error!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task StepOut_InitialStepFails_PropagatesError()
+    {
+        var (engine, veh, _, _, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+        // No canned trace hits — the initial step-in will fail
+
+        var result = await engine.StepOutAsync(TestPid, TestThreadId);
+
+        Assert.False(result.Success);
+        // Should propagate the step-in failure
+        Assert.True(result.Reason is StoppedReason.Timeout or StoppedReason.Error);
+    }
+
+    // ─── ClearState Tests ──────────────────────────────────────────────
+
+    [Fact]
+    public async Task ClearState_RemovesProcessEntry()
+    {
+        var (engine, veh, _, _, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+        veh.AddCannedHit(TestPid, new VehHitEvent(
+            0x00401001, TestThreadId, VehBreakpointType.Trace, 0x4000, TestRegisters, 0));
+
+        await engine.StepInAsync(TestPid, TestThreadId);
+        Assert.Equal(SteppingState.Suspended, engine.GetState(TestPid));
+
+        engine.ClearState(TestPid);
+        Assert.Equal(SteppingState.Idle, engine.GetState(TestPid));
+    }
+
+    [Fact]
+    public void ClearState_NonexistentProcess_DoesNotThrow()
+    {
+        var (engine, _, _, _, _, _) = CreateEngine();
+        engine.ClearState(99999); // Should not throw
+    }
+
+    // ─── Continue Stream Exhaustion ────────────────────────────────────
+
+    [Fact]
+    public async Task Continue_OnlyTraceEntries_ReturnsTimeout()
+    {
+        var (engine, veh, _, _, _, _) = CreateEngine();
+        await veh.InjectAsync(TestPid);
+        // Only trace entries, no execute/write hits
+        veh.AddCannedHit(TestPid, new VehHitEvent(
+            0x00401001, TestThreadId, VehBreakpointType.Trace, 0x4000, TestRegisters, 0));
+        veh.AddCannedHit(TestPid, new VehHitEvent(
+            0x00401002, TestThreadId, VehBreakpointType.Trace, 0x4000, TestRegisters, 0));
+
+        var result = await engine.ContinueAsync(TestPid);
+
+        // Stream exhausts after trace entries, returns timeout
+        Assert.False(result.Success);
+        Assert.Equal(StoppedReason.Timeout, result.Reason);
+    }
 }

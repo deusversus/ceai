@@ -119,4 +119,7 @@ public interface ISteppingEngine
         int processId,
         int threadId = 0,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Clear stepping state for a process (call on detach).</summary>
+    void ClearState(int processId);
 }

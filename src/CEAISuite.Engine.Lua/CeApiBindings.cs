@@ -223,6 +223,24 @@ internal static class CeApiBindings
             script.Globals[name] = DynValue.Nil;
             aa?.UnregisterSymbol(name);
         });
+
+        // getAddressSafe(expr) — defensive address resolution, returns 0 on failure instead of throwing
+        // CE scripts use this for optional address lookups that shouldn't halt execution
+        script.Globals["getAddressSafe"] = (Func<string, double>)(expr =>
+        {
+            try
+            {
+                var pid = engine.CurrentProcessId;
+                if (pid is null) return 0;
+                var resolved = LuaAddressResolver.ResolveAsync(expr, pid.Value, facade, aa)
+                    .GetAwaiter().GetResult();
+                return resolved.HasValue ? (double)(ulong)resolved.Value : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        });
     }
 
     // ── Auto Assembler Functions ──
@@ -250,6 +268,12 @@ internal static class CeApiBindings
 
     private static void RegisterUtilityFunctions(Script script, MoonSharpLuaEngine engine, ILuaFormHost? formHost)
     {
+        // CE syntaxcheck global — always false in our engine.
+        // In CE, this is set to true during AA syntax validation passes so scripts can skip side effects.
+        // Our AA engine skips Lua blocks entirely during validation, so this is never true.
+        // Registered so scripts that check `if syntaxcheck then return end` don't error on the undefined global.
+        script.Globals["syntaxcheck"] = false;
+
         script.Globals["sleep"] = (Action<int>)(ms =>
         {
             // Cap at 10 seconds to prevent hangs

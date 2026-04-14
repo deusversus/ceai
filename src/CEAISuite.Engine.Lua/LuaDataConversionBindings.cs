@@ -109,6 +109,32 @@ internal static class LuaDataConversionBindings
         script.Globals["bShl"] = (Func<double, double, double>)((a, b) => (long)a << (int)(long)b);
         script.Globals["bShr"] = (Func<double, double, double>)((a, b) => (long)a >> (int)(long)b);
         script.Globals["bNot"] = (Func<double, double>)(a => ~(long)a);
+
+        // ── LuaJIT 'bit' library compatibility shim ──
+        // CE scripts may use bit.bor(), bit.band() etc. from LuaJIT's bit library.
+        // Note: LuaJIT bit.rshift is a LOGICAL (unsigned) right shift, while our bShr is arithmetic.
+        // The bit table uses the correct logical shift; bShr remains arithmetic for CE legacy compat.
+        var bitTable = new Table(script);
+        bitTable["bor"] = script.Globals.Get("bOr");
+        bitTable["band"] = script.Globals.Get("bAnd");
+        bitTable["bxor"] = script.Globals.Get("bXor");
+        bitTable["bnot"] = script.Globals.Get("bNot");
+        bitTable["lshift"] = script.Globals.Get("bShl");
+        bitTable["rshift"] = DynValue.NewCallback((_, args) =>
+        {
+            var a = (long)args[0].Number;
+            var b = (int)(long)args[1].Number;
+            return DynValue.NewNumber((long)((ulong)a >> b));
+        });
+        bitTable["arshift"] = script.Globals.Get("bShr"); // arithmetic right shift
+        bitTable["tobit"] = DynValue.NewCallback((_, args) => DynValue.NewNumber((int)(long)args[0].Number));
+        bitTable["tohex"] = DynValue.NewCallback((_, args) =>
+        {
+            var val = (uint)(long)args[0].Number;
+            var n = args.Count > 1 && args[1].Type == MoonSharp.Interpreter.DataType.Number ? (int)args[1].Number : 8;
+            return DynValue.NewString(val.ToString(n > 0 ? $"X{n}" : $"x{-n}", System.Globalization.CultureInfo.InvariantCulture));
+        });
+        script.Globals["bit"] = bitTable;
     }
 
     private static DynValue BytesToTable(Script script, byte[] bytes)

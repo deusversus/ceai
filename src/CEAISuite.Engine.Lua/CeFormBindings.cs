@@ -47,6 +47,22 @@ internal sealed class CeFormBindings : IDisposable
                 formHost.CloseForm(formId);
                 _forms.TryRemove(formId, out _);
             });
+            formTable["destroy"] = (Action)(() =>
+            {
+                formHost.CloseForm(formId);
+                _forms.TryRemove(formId, out _);
+            });
+            formTable["bringToFront"] = (Action)(() =>
+            {
+                if (_forms.TryGetValue(formId, out var f))
+                    formHost.ShowForm(f);
+            });
+            formTable["setFocus"] = (Action)(() =>
+            {
+                // Stub — full focus management added in S5 via ILuaFormHost.BringToFront
+                if (_forms.TryGetValue(formId, out var f))
+                    formHost.ShowForm(f);
+            });
             formTable["setCaption"] = (Action<string>)(caption =>
             {
                 if (_forms.TryGetValue(formId, out var f))

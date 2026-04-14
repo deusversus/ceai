@@ -205,8 +205,9 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
                 continue;
             }
 
-            // {$luacode} ... {$asm} block handling
-            if (trimmed.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase))
+            // {$luacode} / {$lua} ... {$asm} block handling
+            // CE uses {$lua} as the primary directive; {$luacode} is an alias
+            if (IsLuaBlockStart(trimmed))
             {
                 insideLuaBlock = true;
                 luaBlockBuilder.Clear();
@@ -444,7 +445,7 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
             }
         }
 
-        // Execute any trailing {$luacode} block that wasn't closed with {$asm}
+        // Execute any trailing {$lua}/{$luacode} block that wasn't closed with {$asm}
         if (insideLuaBlock && luaBlockBuilder.Length > 0)
         {
             var luaEngine = _luaEngineFactory();
@@ -887,6 +888,14 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
 
     #region Parsing Helpers
 
+    /// <summary>
+    /// Check if a trimmed line starts a Lua code block.
+    /// CE uses {$lua} as the primary directive; {$luacode} is an alias.
+    /// </summary>
+    private static bool IsLuaBlockStart(string trimmedLine) =>
+        trimmedLine.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase) ||
+        trimmedLine.Equals("{$lua}", StringComparison.OrdinalIgnoreCase);
+
     private static (string? EnableSection, string? DisableSection) SplitSections(string script)
     {
         string? enableSection = null;
@@ -972,11 +981,28 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
     private static void ValidateSection(string section, string sectionName, List<string> errors, List<string> warnings, bool luaAvailable = false)
     {
         var lines = ParseLines(section);
+        var insideLuaBlock = false;
 
         foreach (var line in lines)
         {
             var trimmed = line.Trim();
             if (string.IsNullOrWhiteSpace(trimmed))
+                continue;
+
+            // Track {$lua}/{$luacode}...{$asm} blocks — skip Lua lines during AA validation
+            if (IsLuaBlockStart(trimmed))
+            {
+                insideLuaBlock = true;
+                if (!luaAvailable)
+                    warnings.Add($"{sectionName}: Lua code block will be skipped (Lua engine not available).");
+                continue;
+            }
+            if (trimmed.Equals("{$asm}", StringComparison.OrdinalIgnoreCase))
+            {
+                insideLuaBlock = false;
+                continue;
+            }
+            if (insideLuaBlock)
                 continue;
 
             if (trimmed.StartsWith("LuaCall(", StringComparison.OrdinalIgnoreCase))
@@ -1291,14 +1317,14 @@ public sealed partial class WindowsAutoAssemblerEngine : IAutoAssemblerEngine
         var sb = new StringBuilder();
         var stack = new Stack<(bool Active, bool ElseSeen)>();
         var active = true; // whether current lines should be included
-        var insideLuaBlock = false; // skip conditionals inside {$luacode} blocks
+        var insideLuaBlock = false; // skip conditionals inside {$lua}/{$luacode} blocks
 
         foreach (var line in script.Split('\n'))
         {
             var trimmed = line.Trim();
 
-            // Track {$luacode}...{$asm} boundaries — pass these through unchanged
-            if (trimmed.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase))
+            // Track {$lua}/{$luacode}...{$asm} boundaries — pass these through unchanged
+            if (IsLuaBlockStart(trimmed))
             {
                 insideLuaBlock = true;
                 if (active) sb.AppendLine(line);

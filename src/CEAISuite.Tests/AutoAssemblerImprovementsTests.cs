@@ -105,16 +105,19 @@ public class AutoAssemblerImprovementsTests
         Assert.Equal("{$strict}", line, ignoreCase: true);
     }
 
-    [Fact]
-    public void LuaCodePragma_DetectedByRegex()
+    [Theory]
+    [InlineData("{$luacode}")]
+    [InlineData("{$lua}")]
+    public void LuaCodePragma_DetectedByRegex(string directive)
     {
-        var lines = new[] { "{$luacode}", "print('hello')", "{$asm}" };
+        var lines = new[] { directive, "print('hello')", "{$asm}" };
         var insideLua = false;
         var skippedCount = 0;
 
         foreach (var line in lines)
         {
-            if (line.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase))
+            if (line.Equals("{$luacode}", StringComparison.OrdinalIgnoreCase)
+                || line.Equals("{$lua}", StringComparison.OrdinalIgnoreCase))
             { insideLua = true; continue; }
             if (line.Equals("{$asm}", StringComparison.OrdinalIgnoreCase))
             { insideLua = false; continue; }

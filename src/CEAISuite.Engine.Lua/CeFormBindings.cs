@@ -41,11 +41,23 @@ internal sealed class CeFormBindings : IDisposable
     /// </summary>
     private static (string formId, string? parentElementId) ResolveParent(Table parentTable)
     {
-        var parentType = parentTable.Get("_type").String;
+        var typeVal = parentTable.Get("_type");
+        var parentType = typeVal.IsNil() ? null : typeVal.String;
+
         if (parentType is "form" or "dockpanel")
-            return (parentTable.Get("_id").String, null);
+        {
+            var id = parentTable.Get("_id");
+            return (id.IsNil() ? throw new MoonSharp.Interpreter.ScriptRuntimeException(
+                "Parent table has _type='form' but no _id. Pass a form or container element returned by createForm/createGroupBox/etc.") : id.String, null);
+        }
+
         // Parent is a container element (groupbox, panel) — use its _formId and set ParentElementId
-        return (parentTable.Get("_formId").String, parentTable.Get("_id").String);
+        var formIdVal = parentTable.Get("_formId");
+        var elemIdVal = parentTable.Get("_id");
+        if (formIdVal.IsNil() || elemIdVal.IsNil())
+            throw new MoonSharp.Interpreter.ScriptRuntimeException(
+                $"Parent table (type='{parentType ?? "nil"}') is missing _formId or _id. Pass a form or container element returned by createForm/createGroupBox/etc.");
+        return (formIdVal.String, elemIdVal.String);
     }
 
     public void Register(Script script, ILuaFormHost formHost, MoonSharpLuaEngine? engine = null)

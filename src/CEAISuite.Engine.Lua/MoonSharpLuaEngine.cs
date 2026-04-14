@@ -304,6 +304,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _timerBindings?.Dispose();
         _memoryWatchBindings?.Dispose();
         _dataBindings?.Dispose();
+        if (_formHost is not null && _formBindings is not null)
+            _dockPanelBindings?.CloseAll(_formHost, _formBindings.Forms);
         _formBindings?.Dispose();
         _formHost?.CloseAllForms();
         _gate.Dispose();

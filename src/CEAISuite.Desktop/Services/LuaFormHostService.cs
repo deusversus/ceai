@@ -905,6 +905,7 @@ public sealed class LuaFormHostService : ILuaFormHost
             window.Closed += (_, _) =>
             {
                 _dockPanels.Remove(panel.Id);
+                _windows.Remove(panel.Id);
                 _canvases.Remove(panel.Id);
                 StopAllTimersForForm(panel.Id);
                 FormClosed?.Invoke(panel.Id);

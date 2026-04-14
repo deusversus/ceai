@@ -18,8 +18,22 @@ internal sealed class CeFormBindings : IDisposable
     private ILuaFormHost? _subscribedHost;
     private Action<string, string>? _clickHandler;
     private Action<string, string>? _timerHandler;
+    private Action<string, string, string>? _changeHandler;
 
     private MoonSharpLuaEngine? _engine;
+
+    /// <summary>
+    /// Resolve the parent of an element. If parentTable is a form, returns (formId, null).
+    /// If parentTable is a container element (groupbox, panel), returns (formId, parentElementId).
+    /// </summary>
+    private static (string formId, string? parentElementId) ResolveParent(Table parentTable)
+    {
+        var parentType = parentTable.Get("_type").String;
+        if (parentType == "form")
+            return (parentTable.Get("_id").String, null);
+        // Parent is a container element (groupbox, panel) — use its _formId and set ParentElementId
+        return (parentTable.Get("_formId").String, parentTable.Get("_id").String);
+    }
 
     public void Register(Script script, ILuaFormHost formHost, MoonSharpLuaEngine? engine = null)
     {
@@ -123,38 +137,99 @@ internal sealed class CeFormBindings : IDisposable
                 return DynValue.NewTable(canvas);
             });
 
+            // ── S3a: Apply CePropertyProxy to form table ──
+            var fId = formId; // capture for closures
+            var formProps = CePropertyProxy.CreatePropertyMap();
+
+            formProps["Caption"] = CePropertyProxy.ReadWrite(
+                () => _forms.TryGetValue(fId, out var f) ? DynValue.NewString(f.Title) : DynValue.Nil,
+                v => { if (_forms.TryGetValue(fId, out var f)) _forms[fId] = f with { Title = v.String }; formHost.SetFormProperty(fId, "caption", v.String); });
+            formProps["Title"] = formProps["Caption"];
+
+            formProps["Width"] = CePropertyProxy.ReadWrite(
+                () => _forms.TryGetValue(fId, out var f) ? DynValue.NewNumber(f.Width) : DynValue.Nil,
+                v => { if (_forms.TryGetValue(fId, out var f)) _forms[fId] = f with { Width = CePropertyProxy.ToInt(v) }; formHost.SetFormProperty(fId, "width", CePropertyProxy.ToInt(v)); });
+
+            formProps["Height"] = CePropertyProxy.ReadWrite(
+                () => _forms.TryGetValue(fId, out var f) ? DynValue.NewNumber(f.Height) : DynValue.Nil,
+                v => { if (_forms.TryGetValue(fId, out var f)) _forms[fId] = f with { Height = CePropertyProxy.ToInt(v) }; formHost.SetFormProperty(fId, "height", CePropertyProxy.ToInt(v)); });
+
+            formProps["Left"] = CePropertyProxy.ReadWrite(
+                () => { var val = formHost.GetFormProperty(fId, "left"); return val is int i ? DynValue.NewNumber(i) : val is double d ? DynValue.NewNumber(d) : DynValue.Nil; },
+                v => formHost.SetFormProperty(fId, "left", CePropertyProxy.ToInt(v)));
+
+            formProps["Top"] = CePropertyProxy.ReadWrite(
+                () => { var val = formHost.GetFormProperty(fId, "top"); return val is int i ? DynValue.NewNumber(i) : val is double d ? DynValue.NewNumber(d) : DynValue.Nil; },
+                v => formHost.SetFormProperty(fId, "top", CePropertyProxy.ToInt(v)));
+
+            formProps["Position"] = CePropertyProxy.WriteOnly(v =>
+            {
+                var pos = v.String;
+                if (pos is "poScreenCenter") formHost.SetFormProperty(fId, "position", "center");
+                else if (pos is "poDesigned") formHost.SetFormProperty(fId, "position", "designed");
+                else formHost.SetFormProperty(fId, "position", pos);
+            });
+
+            formProps["FormStyle"] = CePropertyProxy.WriteOnly(v =>
+            {
+                var style = v.String;
+                if (style is "fsStayOnTop") formHost.SetFormTopMost(fId, true);
+                else if (style is "fsNormal") formHost.SetFormTopMost(fId, false);
+            });
+
+            formProps["Visible"] = CePropertyProxy.ReadWrite(
+                () => { var val = formHost.GetFormProperty(fId, "visible"); return val is bool b ? DynValue.NewBoolean(b) : DynValue.NewBoolean(true); },
+                v => formHost.SetFormProperty(fId, "visible", CePropertyProxy.ToBool(v)));
+
+            formProps["Color"] = CePropertyProxy.WriteOnly(v => formHost.SetFormProperty(fId, "color", v.String));
+
+            var formEvents = CePropertyProxy.CreateEventSet();
+            formEvents.Add("OnClose");
+
+            CePropertyProxy.ApplyProxy(script, formTable, formProps, formEvents, _callbacks, $"{fId}:");
+
             var visible = visibleArg.IsNil() || visibleArg.Boolean;
             if (visible) formHost.ShowForm(form);
 
             return DynValue.NewTable(formTable);
         });
 
-        script.Globals["createButton"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createButton"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"btn_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaButtonElement(elementId, 10, 10, 100, 30) { Caption = "Button" };
+            var element = new LuaButtonElement(elementId, 10, 10, 100, 30) { Caption = "Button", ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        script.Globals["createLabel"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createLabel"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"lbl_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaLabelElement(elementId, 10, 10, 150, 20) { Caption = "Label" };
+            var element = new LuaLabelElement(elementId, 10, 10, 150, 20) { Caption = "Label", ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        script.Globals["createEdit"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createEdit"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"edit_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaEditElement(elementId, 10, 10, 150, 25);
+            var element = new LuaEditElement(elementId, 10, 10, 150, 25) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
-            // Edit-specific: getText / setText
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                // S3a: Type-specific property — Text (live read from host)
+                props["Text"] = CePropertyProxy.ReadWrite(
+                    () =>
+                    {
+                        var text = formHost.GetElementText(formId, elementId);
+                        return DynValue.NewString(text ?? element.Text ?? "");
+                    },
+                    v => { element.Text = v.String; formHost.UpdateElement(formId, element); });
+            });
+            // Edit-specific: getText / setText (backward compat methods)
             elemTable["getText"] = (Func<DynValue>)(() =>
             {
                 var text = formHost.GetElementText(formId, elementId);
@@ -168,14 +243,22 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createCheckBox"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createCheckBox"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"chk_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaCheckBoxElement(elementId, 10, 10, 150, 20) { Caption = "CheckBox" };
+            var element = new LuaCheckBoxElement(elementId, 10, 10, 150, 20) { Caption = "CheckBox", ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
-            // CheckBox-specific: getChecked / setChecked
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                // S3a: Type-specific properties — Checked / IsChecked (live read from host)
+                var checkedBinding = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewBoolean(formHost.GetElementChecked(formId, elementId) ?? element.IsChecked),
+                    v => { element.IsChecked = CePropertyProxy.ToBool(v); formHost.UpdateElement(formId, element); });
+                props["Checked"] = checkedBinding;
+                props["IsChecked"] = checkedBinding;
+            });
+            // CheckBox-specific: getChecked / setChecked (backward compat methods)
             elemTable["getChecked"] = (Func<bool>)(() =>
                 formHost.GetElementChecked(formId, elementId) ?? element.IsChecked);
             elemTable["setChecked"] = (Action<bool>)(val =>
@@ -186,14 +269,24 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createTimer"] = (Func<Table, DynValue, DynValue>)((formTable, intervalArg) =>
+        script.Globals["createTimer"] = (Func<Table, DynValue, DynValue>)((parentTable, intervalArg) =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"tmr_{Interlocked.Increment(ref _nextElementId)}";
             var interval = intervalArg.IsNil() ? 1000 : (int)intervalArg.Number;
-            var element = new LuaTimerElement(elementId, interval) { Enabled = true };
+            var element = new LuaTimerElement(elementId, interval) { Enabled = true, ParentElementId = parentElemId };
             AddElementToForm(formId, element);
-            var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
+            var elemTable = CreateElementTable(script, formId, elementId, element, formHost, props =>
+            {
+                // S3a: Type-specific properties — Interval and Enabled override for timer
+                props["Interval"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewNumber(element.IntervalMs),
+                    v => { element.IntervalMs = CePropertyProxy.ToInt(v); formHost.StopTimer(formId, elementId); formHost.StartTimer(formId, elementId, element.IntervalMs); });
+                // Override Enabled for timer (start/stop semantics instead of generic Visible toggle)
+                props["Enabled"] = CePropertyProxy.ReadWrite(
+                    () => DynValue.NewBoolean(element.Enabled),
+                    v => { var en = CePropertyProxy.ToBool(v); element.Enabled = en; if (en) formHost.StartTimer(formId, elementId, element.IntervalMs); else formHost.StopTimer(formId, elementId); });
+            });
             elemTable["setInterval"] = (Action<int>)(ms =>
             {
                 element.IntervalMs = ms;
@@ -213,11 +306,11 @@ internal sealed class CeFormBindings : IDisposable
 
         // ── S2: New element types ──
 
-        script.Globals["createMemo"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createMemo"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"memo_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaMemoElement(elementId, 10, 10, 200, 100);
+            var element = new LuaMemoElement(elementId, 10, 10, 200, 100) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["getText"] = (Func<DynValue>)(() =>
@@ -238,11 +331,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createListBox"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createListBox"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"lst_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaListBoxElement(elementId, 10, 10, 150, 120);
+            var element = new LuaListBoxElement(elementId, 10, 10, 150, 120) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["addItem"] = (Action<string>)(item =>
@@ -261,11 +354,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createComboBox"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createComboBox"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"cmb_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaComboBoxElement(elementId, 10, 10, 150, 25);
+            var element = new LuaComboBoxElement(elementId, 10, 10, 150, 25) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["addItem"] = (Action<string>)(item =>
@@ -288,11 +381,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createTrackBar"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createTrackBar"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"trk_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaTrackBarElement(elementId, 10, 10, 200, 30);
+            var element = new LuaTrackBarElement(elementId, 10, 10, 200, 30) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["setMin"] = (Action<int>)(v =>
@@ -315,11 +408,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createProgressBar"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createProgressBar"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"prg_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaProgressBarElement(elementId, 10, 10, 200, 25);
+            var element = new LuaProgressBarElement(elementId, 10, 10, 200, 25) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["setMin"] = (Action<int>)(v =>
@@ -340,11 +433,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createImage"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createImage"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"img_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaImageElement(elementId, 10, 10, 100, 100);
+            var element = new LuaImageElement(elementId, 10, 10, 100, 100) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["loadFromFile"] = (Action<string>)(path =>
@@ -355,29 +448,29 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createPanel"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createPanel"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"pnl_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaPanelElement(elementId, 10, 10, 200, 150);
+            var element = new LuaPanelElement(elementId, 10, 10, 200, 150) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        script.Globals["createGroupBox"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createGroupBox"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"grp_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaGroupBoxElement(elementId, 10, 10, 200, 150) { Caption = "Group" };
+            var element = new LuaGroupBoxElement(elementId, 10, 10, 200, 150) { Caption = "Group", ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             return DynValue.NewTable(CreateElementTable(script, formId, elementId, element, formHost));
         });
 
-        script.Globals["createRadioGroup"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createRadioGroup"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"rdg_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaRadioGroupElement(elementId, 10, 10, 150, 120) { Caption = "Options" };
+            var element = new LuaRadioGroupElement(elementId, 10, 10, 150, 120) { Caption = "Options", ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["addItem"] = (Action<string>)(item =>
@@ -395,11 +488,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createTabControl"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createTabControl"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"tab_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaTabControlElement(elementId, 10, 10, 300, 200);
+            var element = new LuaTabControlElement(elementId, 10, 10, 300, 200) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["addTab"] = (Action<string>)(name =>
@@ -418,9 +511,9 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createMainMenu"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createMainMenu"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var formId = parentTable.Get("_type").String == "form" ? parentTable.Get("_id").String : parentTable.Get("_formId").String;
             var elementId = $"menu_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaMenuItemElement(elementId) { Caption = "Menu" };
             AddElementToForm(formId, element);
@@ -442,7 +535,7 @@ internal sealed class CeFormBindings : IDisposable
                 subTable.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
                 {
                     if (key.String is "onClick")
-                        cbs[$"{formId}:{subId}:onClick"] = value;
+                        cbs[$"{formId}:{subId}:onclick"] = value;
                     else
                         subTable.Set(key.String, value);
                 });
@@ -451,9 +544,9 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createPopupMenu"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createPopupMenu"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var formId = parentTable.Get("_type").String == "form" ? parentTable.Get("_id").String : parentTable.Get("_formId").String;
             var elementId = $"popup_{Interlocked.Increment(ref _nextElementId)}";
             var element = new LuaPopupMenuElement(elementId);
             AddElementToForm(formId, element);
@@ -473,7 +566,7 @@ internal sealed class CeFormBindings : IDisposable
                 subTable.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
                 {
                     if (key.String is "onClick")
-                        cbs[$"{formId}:{subId}:onClick"] = value;
+                        cbs[$"{formId}:{subId}:onclick"] = value;
                     else
                         subTable.Set(key.String, value);
                 });
@@ -482,11 +575,11 @@ internal sealed class CeFormBindings : IDisposable
             return DynValue.NewTable(elemTable);
         });
 
-        script.Globals["createSplitter"] = (Func<Table, DynValue>)(formTable =>
+        script.Globals["createSplitter"] = (Func<Table, DynValue>)(parentTable =>
         {
-            var formId = formTable.Get("_id").String;
+            var (formId, parentElemId) = ResolveParent(parentTable);
             var elementId = $"spl_{Interlocked.Increment(ref _nextElementId)}";
-            var element = new LuaSplitterElement(elementId, 10, 10, 5, 200);
+            var element = new LuaSplitterElement(elementId, 10, 10, 5, 200) { ParentElementId = parentElemId };
             AddElementToForm(formId, element);
             var elemTable = CreateElementTable(script, formId, elementId, element, formHost);
             elemTable["setVertical"] = (Action<bool>)(v =>
@@ -503,7 +596,8 @@ internal sealed class CeFormBindings : IDisposable
         // dispatcher thread while scripts may be executing on background threads.
         _clickHandler = (fId, eId) =>
         {
-            var key = $"{fId}:{eId}:onClick";
+            // CePropertyProxy normalizes event names to lowercase
+            var key = $"{fId}:{eId}:onclick";
             if (_callbacks.TryGetValue(key, out var callback))
             {
                 if (_engine is not null)
@@ -514,7 +608,19 @@ internal sealed class CeFormBindings : IDisposable
         };
         _timerHandler = (fId, tId) =>
         {
-            var key = $"{fId}:{tId}:onTimer";
+            // CePropertyProxy normalizes event names to lowercase
+            var key = $"{fId}:{tId}:ontimer";
+            if (_callbacks.TryGetValue(key, out var callback))
+            {
+                if (_engine is not null)
+                    _engine.ExecuteGuarded(() => script.Call(callback));
+                else
+                    script.Call(callback); // fallback for tests without engine
+            }
+        };
+        _changeHandler = (fId, eId, prop) =>
+        {
+            var key = $"{fId}:{eId}:onchange";
             if (_callbacks.TryGetValue(key, out var callback))
             {
                 if (_engine is not null)
@@ -526,6 +632,7 @@ internal sealed class CeFormBindings : IDisposable
         _subscribedHost = formHost;
         formHost.ElementClicked += _clickHandler;
         formHost.TimerFired += _timerHandler;
+        formHost.ElementChanged += _changeHandler;
     }
 
     private void Unsubscribe()
@@ -534,9 +641,11 @@ internal sealed class CeFormBindings : IDisposable
         {
             if (_clickHandler is not null) _subscribedHost.ElementClicked -= _clickHandler;
             if (_timerHandler is not null) _subscribedHost.TimerFired -= _timerHandler;
+            if (_changeHandler is not null) _subscribedHost.ElementChanged -= _changeHandler;
             _subscribedHost = null;
             _clickHandler = null;
             _timerHandler = null;
+            _changeHandler = null;
         }
     }
 
@@ -548,14 +657,76 @@ internal sealed class CeFormBindings : IDisposable
             form.Elements.Add(element);
     }
 
+    /// <summary>
+    /// Creates the base element property map shared by all element types.
+    /// Callers can add type-specific properties to the returned map before calling ApplyProxy.
+    /// </summary>
+    private static Dictionary<string, CePropertyProxy.PropertyBinding> CreateBaseElementProperties(
+        string formId, LuaFormElement element, ILuaFormHost formHost)
+    {
+        void Update() => formHost.UpdateElement(formId, element);
+
+        var props = CePropertyProxy.CreatePropertyMap();
+        props["Caption"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewString(element.Caption ?? ""),
+            v => element.Caption = v.String, Update);
+        props["Left"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewNumber(element.X),
+            v => element.X = CePropertyProxy.ToInt(v), Update);
+        props["Top"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewNumber(element.Y),
+            v => element.Y = CePropertyProxy.ToInt(v), Update);
+        props["Width"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewNumber(element.Width),
+            v => element.Width = CePropertyProxy.ToInt(v), Update);
+        props["Height"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewNumber(element.Height),
+            v => element.Height = CePropertyProxy.ToInt(v), Update);
+        props["Visible"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewBoolean(element.Visible),
+            v => element.Visible = CePropertyProxy.ToBool(v), Update);
+        props["Enabled"] = CePropertyProxy.ModelProp(
+            () => DynValue.NewBoolean(element.Enabled),
+            v => element.Enabled = CePropertyProxy.ToBool(v), Update);
+        props["Color"] = CePropertyProxy.WriteOnly(v => { element.BackColor = v.String; Update(); });
+        props["BackColor"] = props["Color"];
+        props["FontColor"] = CePropertyProxy.WriteOnly(v => { element.FontColor = v.String; Update(); });
+        props["FontName"] = CePropertyProxy.WriteOnly(v => { element.FontName = v.String; Update(); });
+        props["FontSize"] = CePropertyProxy.WriteOnly(v => { element.FontSize = CePropertyProxy.ToInt(v); Update(); });
+
+        return props;
+    }
+
+    /// <summary>
+    /// Creates the shared event set for all element types.
+    /// </summary>
+    private static HashSet<string> CreateBaseElementEvents()
+    {
+        var events = CePropertyProxy.CreateEventSet();
+        events.Add("OnClick");
+        events.Add("OnChange");
+        events.Add("OnTimer");
+        events.Add("OnClose");
+        events.Add("OnKeyPress");
+        return events;
+    }
+
     private Table CreateElementTable(
         Script script, string formId, string elementId, LuaFormElement element, ILuaFormHost formHost)
+    {
+        return CreateElementTable(script, formId, elementId, element, formHost, null);
+    }
+
+    private Table CreateElementTable(
+        Script script, string formId, string elementId, LuaFormElement element, ILuaFormHost formHost,
+        Action<Dictionary<string, CePropertyProxy.PropertyBinding>>? addExtraProperties)
     {
         var table = new Table(script);
         table["_id"] = elementId;
         table["_formId"] = formId;
         table["_type"] = element.Type;
 
+        // ── Backward-compatible methods (remain as raw table entries) ──
         table["setCaption"] = (Action<string>)(caption =>
         {
             element.Caption = caption;
@@ -609,21 +780,12 @@ internal sealed class CeFormBindings : IDisposable
             formHost.UpdateElement(formId, element);
         });
 
-        // Callback registration via property assignment: element.onClick = function() ... end
-        var callbacks = _callbacks;
-        table.MetaTable = new Table(script);
-        table.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
-        {
-            var keyStr = key.String;
-            if (keyStr is "onClick" or "onTimer")
-            {
-                callbacks[$"{formId}:{elementId}:{keyStr}"] = value;
-            }
-            else
-            {
-                table.Set(key.String, value);
-            }
-        });
+        // ── S3a: Apply CePropertyProxy with base + type-specific element properties ──
+        var props = CreateBaseElementProperties(formId, element, formHost);
+        addExtraProperties?.Invoke(props);
+
+        var events = CreateBaseElementEvents();
+        CePropertyProxy.ApplyProxy(script, table, props, events, _callbacks, $"{formId}:{elementId}:");
 
         return table;
     }

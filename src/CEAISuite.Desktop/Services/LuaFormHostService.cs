@@ -74,6 +74,7 @@ public sealed class LuaFormHostService : ILuaFormHost
                 window.Close();
                 _windows.Remove(formId);
             }
+            _canvases.Remove(formId);
         });
     }
 
@@ -818,11 +819,7 @@ public sealed class LuaFormHostService : ILuaFormHost
         if (!_windows.TryGetValue(formId, out var window)) return null;
         if (window.Content is not Canvas canvas) return null;
 
-        foreach (UIElement child in canvas.Children)
-        {
-            if (child is FrameworkElement fe && fe.Tag is string id && id == elementId)
-                return fe;
-        }
-        return null;
+        // Use FindElementInCanvas to search nested containers (GroupBox, Panel)
+        return FindElementInCanvas(canvas, elementId);
     }
 }

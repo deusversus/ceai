@@ -214,7 +214,7 @@ public sealed class CePropertyProxyTests
     }
 
     [Fact]
-    public void ReadOnlyProperty_WritesFallThroughToRawTable()
+    public void ReadOnlyProperty_WritesAreSilentlyDiscarded()
     {
         var script = CreateScript();
         var table = new Table(script);
@@ -231,12 +231,12 @@ public sealed class CePropertyProxyTests
         var result = script.DoString("return obj.Type");
         Assert.Equal("Int32", result.String);
 
-        // Write to a read-only property: goes to raw table (no setter defined)
+        // Write to a read-only property: silently discarded, does NOT rawset
         script.DoString("obj.Type = 'Float'");
 
-        // Now raw table has "Type" = "Float", so __index won't fire — raw table takes priority
+        // Getter should still work — the raw table was NOT populated
         result = script.DoString("return obj.Type");
-        Assert.Equal("Float", result.String);
+        Assert.Equal("Int32", result.String);
     }
 
     [Fact]

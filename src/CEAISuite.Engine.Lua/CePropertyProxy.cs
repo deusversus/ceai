@@ -105,17 +105,23 @@ internal static class CePropertyProxy
                 return;
             }
 
-            // 2. Check property map with setter → call setter, do NOT rawset
-            if (properties.TryGetValue(keyStr, out var binding) && binding.Setter is not null)
+            // 2. Check property map → call setter if present, discard if read-only. NEVER rawset.
+            if (properties.TryGetValue(keyStr, out var binding))
             {
-                try
+                if (binding.Setter is not null)
                 {
-                    binding.Setter(self, value);
+                    try
+                    {
+                        binding.Setter(self, value);
+                    }
+                    catch
+                    {
+                        // Setter failed — don't crash the script, just ignore
+                    }
                 }
-                catch
-                {
-                    // Setter failed — don't crash the script, just ignore
-                }
+                // Read-only property (getter but no setter): silently discard the write.
+                // This prevents the raw table from being populated, which would permanently
+                // bypass the __index getter.
                 return;
             }
 

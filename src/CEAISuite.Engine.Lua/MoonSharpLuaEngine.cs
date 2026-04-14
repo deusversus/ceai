@@ -24,6 +24,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly ISymbolEngine? _symbolEngine;
     private readonly ILuaAddressListProvider? _addressListProvider;
     private readonly ILuaStructureProvider? _structureProvider;
+    private readonly ISteppingEngine? _steppingEngine;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private LuaTimerBindings? _timerBindings;
     private CeFormBindings? _formBindings;
@@ -72,7 +73,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         ILuaAiAssistant? aiAssistant = null,
         ISymbolEngine? symbolEngine = null,
         ILuaAddressListProvider? addressListProvider = null,
-        ILuaStructureProvider? structureProvider = null)
+        ILuaStructureProvider? structureProvider = null,
+        ISteppingEngine? steppingEngine = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
@@ -85,6 +87,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _symbolEngine = symbolEngine;
         _addressListProvider = addressListProvider;
         _structureProvider = structureProvider;
+        _steppingEngine = steppingEngine;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -315,7 +318,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
                 LuaDisassemblyBindings.Register(script, this, _disassemblyEngine, _engineFacade, _autoAssembler);
 
             if (_breakpointEngine is not null)
-                LuaDebuggerBindings.Register(script, this, _breakpointEngine, _engineFacade, _autoAssembler);
+                LuaDebuggerBindings.Register(script, this, _breakpointEngine, _engineFacade, _autoAssembler, _steppingEngine);
 
             if (_scanEngine is not null)
                 LuaScanBindings.Register(script, this, _scanEngine, _engineFacade, _autoAssembler);

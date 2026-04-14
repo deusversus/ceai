@@ -300,7 +300,8 @@ public partial class App : System.Windows.Application
                 aiAssistant: sp.GetService<ILuaAiAssistant>(),
                 symbolEngine: sp.GetService<ISymbolEngine>(),
                 addressListProvider: sp.GetService<ILuaAddressListProvider>(),
-                structureProvider: sp.GetService<ILuaStructureProvider>()));
+                structureProvider: sp.GetService<ILuaStructureProvider>(),
+                steppingEngine: sp.GetService<ISteppingEngine>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
@@ -308,6 +309,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<IScreenCaptureEngine, WindowsScreenCaptureEngine>();
         services.AddSingleton<ICallStackEngine, WindowsCallStackEngine>();
         services.AddSingleton<ISpeedHackEngine, WindowsSpeedHackEngine>();
+        services.AddSingleton<ISteppingEngine, WindowsSteppingEngine>();
         services.AddSingleton<IVehDebugger>(sp =>
             new WindowsVehDebugger(
                 sp.GetService<ILogger<WindowsVehDebugger>>(),
@@ -345,6 +347,7 @@ public partial class App : System.Windows.Application
         services.AddSingleton<UiCommandBus>(sp => new UiCommandBus(sp.GetRequiredService<AppSettingsService>()));
         services.AddSingleton<IUiCommandBus>(sp => sp.GetRequiredService<UiCommandBus>());
         services.AddSingleton<SpeedHackService>();
+        services.AddSingleton<SteppingService>();
         services.AddSingleton<VehDebugService>();
         services.AddSingleton<AutorunScriptService>();
         services.AddSingleton<ILuaAddressListProvider>(sp =>

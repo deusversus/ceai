@@ -48,6 +48,7 @@ public sealed partial class AiToolFunctions(
     IUiCommandBus? uiCommandBus = null,
     SpeedHackService? speedHackService = null,
     VehDebugService? vehDebugService = null,
+    SteppingService? steppingService = null,
     AutorunScriptService? autorunService = null,
     AppSettingsService? appSettingsService = null,
     ILogger<AiToolFunctions>? logger = null)

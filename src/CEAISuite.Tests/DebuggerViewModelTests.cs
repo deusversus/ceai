@@ -20,7 +20,8 @@ public class DebuggerViewModelTests
         var breakpointService = new BreakpointService(_breakpointEngine);
         return new DebuggerViewModel(
             breakpointService, _callStackEngine, _engineFacade,
-            _processContext, _outputLog, _navigationService);
+            _processContext, _outputLog, _navigationService,
+            new StubDispatcherService());
     }
 
     [Fact]

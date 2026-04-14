@@ -232,6 +232,8 @@ internal static class ToolCategories
             "PollVehBreakpointHits", "GetVehBreakpointSlotUsage" ],
         ["speed_hack"] = [
             "GetSpeedHackState", "SetSpeedMultiplier", "RemoveSpeedHack" ],
+        ["stepping"] = [
+            "GetSteppingState", "StepIn", "StepOver", "StepOut", "ContinueExecution" ],
         ["copilot"] = [
             "GetUiCommandWhitelist", "ExecuteUiCommand", "GetCurrentUiState" ],
         ["plugins"] = [

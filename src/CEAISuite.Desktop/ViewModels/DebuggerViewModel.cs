@@ -17,6 +17,8 @@ public partial class DebuggerViewModel : ObservableObject
     private readonly IProcessContext _processContext;
     private readonly IOutputLog _outputLog;
     private readonly INavigationService _navigationService;
+    private readonly IDispatcherService _dispatcherService;
+    private readonly SteppingService? _steppingService;
 
     public DebuggerViewModel(
         BreakpointService breakpointService,
@@ -24,7 +26,9 @@ public partial class DebuggerViewModel : ObservableObject
         IEngineFacade engineFacade,
         IProcessContext processContext,
         IOutputLog outputLog,
-        INavigationService navigationService)
+        INavigationService navigationService,
+        IDispatcherService dispatcherService,
+        SteppingService? steppingService = null)
     {
         _breakpointService = breakpointService;
         _callStackEngine = callStackEngine;
@@ -32,6 +36,8 @@ public partial class DebuggerViewModel : ObservableObject
         _processContext = processContext;
         _outputLog = outputLog;
         _navigationService = navigationService;
+        _dispatcherService = dispatcherService;
+        _steppingService = steppingService;
     }
 
     [ObservableProperty] private ObservableCollection<RegisterDisplayItem> _registers = new();
@@ -243,10 +249,127 @@ public partial class DebuggerViewModel : ObservableObject
         }
     }
 
-    // ── Placeholder commands — disabled until full stepping engine support ──
-    [RelayCommand(CanExecute = nameof(CanStep))] private void StepIn() { }
-    [RelayCommand(CanExecute = nameof(CanStep))] private void StepOver() { }
-    [RelayCommand(CanExecute = nameof(CanStep))] private void StepOut() { }
-    [RelayCommand(CanExecute = nameof(CanStep))] private void Continue() { }
-    private static bool CanStep() => false;
+    // ── Interactive Stepping ──
+
+    [ObservableProperty] private bool _isStepping;
+    [ObservableProperty] private string _steppingStatus = "";
+    [ObservableProperty] private ObservableCollection<TraceEntryDisplayItem> _stepHistory = new();
+
+    private bool CanStep() => !IsStepping && _processContext.AttachedProcessId.HasValue && _steppingService is not null;
+
+    [RelayCommand(CanExecute = nameof(CanStep))]
+    private Task StepInAsync() => ExecuteStepAsync("Step In", (pid, tid) =>
+        _steppingService!.StepInAsync(pid, tid));
+
+    [RelayCommand(CanExecute = nameof(CanStep))]
+    private Task StepOverAsync() => ExecuteStepAsync("Step Over", (pid, tid) =>
+        _steppingService!.StepOverAsync(pid, tid));
+
+    [RelayCommand(CanExecute = nameof(CanStep))]
+    private Task StepOutAsync() => ExecuteStepAsync("Step Out", (pid, tid) =>
+        _steppingService!.StepOutAsync(pid, tid));
+
+    [RelayCommand(CanExecute = nameof(CanStep))]
+    private Task ContinueAsync() => ExecuteStepAsync("Continue", (pid, _) =>
+        _steppingService!.ContinueAsync(pid));
+
+    private async Task ExecuteStepAsync(string operationName, Func<int, int, Task<StepResult>> stepAction)
+    {
+        var pid = _processContext.AttachedProcessId;
+        if (pid is null || _steppingService is null) return;
+
+        IsStepping = true;
+        SteppingStatus = $"{operationName}...";
+        StepInCommand.NotifyCanExecuteChanged();
+        StepOverCommand.NotifyCanExecuteChanged();
+        StepOutCommand.NotifyCanExecuteChanged();
+        ContinueCommand.NotifyCanExecuteChanged();
+
+        try
+        {
+            var threadId = SelectedHit?.ThreadId ?? 0;
+            var result = await stepAction(pid.Value, threadId).ConfigureAwait(false);
+
+            _dispatcherService.Invoke(() =>
+            {
+                if (result.Success)
+                {
+                    SteppingStatus = $"Suspended at 0x{result.NewRip:X} ({result.Reason})";
+
+                    // Update register display
+                    UpdateRegistersFromStepResult(result);
+
+                    // Add to step history
+                    StepHistory.Add(new TraceEntryDisplayItem
+                    {
+                        Address = $"0x{result.NewRip:X}",
+                        Disassembly = result.Disassembly ?? "(unknown)",
+                        ThreadId = result.ThreadId,
+                        IsCallInstruction = result.Disassembly?.StartsWith("call", StringComparison.OrdinalIgnoreCase) == true,
+                        IsRetInstruction = result.Disassembly?.StartsWith("ret", StringComparison.OrdinalIgnoreCase) == true
+                    });
+
+                    // Refresh call stack
+                    _ = WalkCallStackAsync();
+                }
+                else
+                {
+                    SteppingStatus = $"{operationName} failed: {result.Error ?? result.Reason.ToString()}";
+                    _outputLog.Append("Debugger", "Error", $"{operationName} failed: {result.Error}");
+                }
+            });
+        }
+        catch (Exception ex)
+        {
+            _dispatcherService.Invoke(() =>
+            {
+                SteppingStatus = $"{operationName} error: {ex.Message}";
+                _outputLog.Append("Debugger", "Error", $"{operationName} error: {ex.Message}");
+            });
+        }
+        finally
+        {
+            _dispatcherService.Invoke(() =>
+            {
+                IsStepping = false;
+                StepInCommand.NotifyCanExecuteChanged();
+                StepOverCommand.NotifyCanExecuteChanged();
+                StepOutCommand.NotifyCanExecuteChanged();
+                ContinueCommand.NotifyCanExecuteChanged();
+            });
+        }
+    }
+
+    private void UpdateRegistersFromStepResult(StepResult result)
+    {
+        var prevSnapshot = _previousRegisterSnapshot;
+        Registers.Clear();
+
+        if (result.Registers is null) return;
+
+        var r = result.Registers;
+        var regs = new (string Name, ulong Value)[]
+        {
+            ("RAX", r.Rax), ("RBX", r.Rbx), ("RCX", r.Rcx), ("RDX", r.Rdx),
+            ("RSI", r.Rsi), ("RDI", r.Rdi), ("RSP", r.Rsp), ("RBP", r.Rbp),
+            ("R8", r.R8), ("R9", r.R9), ("R10", r.R10), ("R11", r.R11),
+            ("R12", r.R12), ("R13", r.R13), ("R14", r.R14), ("R15", r.R15),
+            ("RIP", r.Rip), ("EFLAGS", r.EFlags)
+        };
+
+        var newSnapshot = new Dictionary<string, string>();
+        foreach (var (name, value) in regs)
+        {
+            var hexValue = $"0x{value:X}";
+            var isChanged = prevSnapshot is not null
+                && prevSnapshot.TryGetValue(name, out var prevVal)
+                && !string.Equals(prevVal, hexValue, StringComparison.OrdinalIgnoreCase);
+            Registers.Add(new RegisterDisplayItem { Name = name, Value = hexValue, IsChanged = isChanged });
+            newSnapshot[name] = hexValue;
+        }
+        _previousRegisterSnapshot = newSnapshot;
+    }
+
+    [RelayCommand]
+    private void ClearStepHistory() => StepHistory.Clear();
 }

@@ -43,3 +43,10 @@ public sealed record BreakpointStateChangedEvent(
 public sealed record BreakpointThrottledEvent(
     string BreakpointId,
     int HitsPerSecond) : BreakpointEvent(BreakpointId);
+
+/// <summary>A stepping operation completed (step-in, step-over, step-out, or continue).</summary>
+public sealed record StepCompletedEvent(
+    string BreakpointId,
+    nuint NewRip,
+    int ThreadId,
+    StoppedReason Reason) : BreakpointEvent(BreakpointId);

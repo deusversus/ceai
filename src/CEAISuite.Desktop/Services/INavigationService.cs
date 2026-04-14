@@ -11,4 +11,7 @@ public interface INavigationService
 
     /// <summary>Activate/restore a dockable anchorable panel by its ContentId.</summary>
     void ShowAnchorable(string contentId);
+
+    /// <summary>Check if a panel/document is currently visible (not hidden/closed) in the layout.</summary>
+    bool IsPanelVisible(string contentId);
 }

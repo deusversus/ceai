@@ -49,9 +49,11 @@ public sealed class MainFormProxyService : IMainFormProxy, IDisposable
 
     public bool IsPanelVisible(string panelId)
     {
-        // Panel visibility tracking would require AvalonDock layout queries.
-        // For now, return true for all known panels (they exist in the layout).
-        return KnownPanelIds.Contains(panelId);
+        if (string.IsNullOrWhiteSpace(panelId)) return false;
+        // Query actual AvalonDock layout visibility via NavigationService
+        return _dispatcher.CheckAccess()
+            ? _navigationService.IsPanelVisible(panelId)
+            : _dispatcher.Invoke(() => _navigationService.IsPanelVisible(panelId));
     }
 
     public void SetPanelVisible(string panelId, bool visible)

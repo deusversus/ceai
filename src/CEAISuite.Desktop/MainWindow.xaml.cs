@@ -127,7 +127,8 @@ public partial class MainWindow : Window, IDisposable
                 if (parameter is string addrStr && !string.IsNullOrWhiteSpace(addrStr))
                     RouteNavigationParameter(contentId, addrStr);
             },
-            contentId => ActivateAnchorable(contentId));
+            contentId => ActivateAnchorable(contentId),
+            contentId => IsPanelCurrentlyVisible(contentId));
 
         // Co-Pilot: wire NavigatePanel and AttachProcess commands
         uiCommandBus.CommandReceived += cmd =>
@@ -1539,6 +1540,23 @@ public partial class MainWindow : Window, IDisposable
             anc.IsVisible = true;
             anc.IsActive = true;
         }
+    }
+
+    private bool IsPanelCurrentlyVisible(string contentId)
+    {
+        // Check documents
+        var doc = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutDocument>()
+            .FirstOrDefault(d => d.ContentId == contentId);
+        if (doc is not null) return doc.IsVisible;
+
+        // Check anchorables
+        var anc = DockManager.Layout
+            .Descendents()
+            .OfType<LayoutAnchorable>()
+            .FirstOrDefault(a => a.ContentId == contentId);
+        return anc?.IsVisible ?? false;
     }
 
     private void ShowPanel(object sender, RoutedEventArgs e)

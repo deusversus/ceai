@@ -12,4 +12,6 @@ public sealed class StubNavigationService : INavigationService
 
     public void ShowAnchorable(string contentId) =>
         AnchorablesShown.Add(contentId);
+
+    public bool IsPanelVisible(string contentId) => true;
 }

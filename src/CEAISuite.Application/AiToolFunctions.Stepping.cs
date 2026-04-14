@@ -35,7 +35,7 @@ public sealed partial class AiToolFunctions
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
-    [Description("Step over the current instruction. If it's a CALL, executes the entire called function and stops at the next instruction. Otherwise same as StepIn.")]
+    [Description("Step over the current instruction. Note: in the current MVP implementation, this behaves identically to StepIn (CALL detection pending future CMD_GET_CONTEXT support).")]
     public async Task<string> StepOver(
         [Description("Process ID")] int processId,
         [Description("Thread ID to step (0 = any thread)")] int threadId = 0)

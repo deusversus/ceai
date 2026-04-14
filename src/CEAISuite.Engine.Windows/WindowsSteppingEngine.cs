@@ -22,9 +22,6 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
     // Per-process stepping state
     private readonly ConcurrentDictionary<int, SteppingState> _states = new();
 
-    // Mnemonic prefixes that represent CALL instructions (case-insensitive check)
-    private static readonly string[] CallMnemonics = ["call"];
-
     public WindowsSteppingEngine(
         IVehDebugger vehDebugger,
         IDisassemblyEngine disassemblyEngine,
@@ -44,29 +41,26 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
     public SteppingState GetState(int processId) =>
         _states.GetValueOrDefault(processId, SteppingState.Idle);
 
-    public async Task<StepResult?> GetCurrentStateAsync(
+    public Task<StepResult?> GetCurrentStateAsync(
         int processId, int threadId = 0, CancellationToken cancellationToken = default)
     {
         if (GetState(processId) != SteppingState.Suspended)
-            return null;
+            return Task.FromResult<StepResult?>(null);
 
-        // Disassemble one instruction at the suspended location
-        // We'd need the current RIP — but we don't track it here without a recent step result.
-        // Return a minimal result indicating we're suspended.
-        return new StepResult(
+        return Task.FromResult<StepResult?>(new StepResult(
             Success: true,
             NewRip: 0,
             Registers: null,
             ThreadId: threadId,
             Reason: StoppedReason.StepComplete,
-            Disassembly: null);
+            Disassembly: null));
     }
 
     public async Task<StepResult> StepInAsync(
         int processId, int threadId = 0, int timeoutMs = 5000,
         CancellationToken cancellationToken = default)
     {
-        var prevState = SetState(processId, SteppingState.Stepping);
+        SetState(processId, SteppingState.Stepping);
 
         try
         {
@@ -116,7 +110,7 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
         int processId, int threadId = 0, int timeoutMs = 10000,
         CancellationToken cancellationToken = default)
     {
-        var prevState = SetState(processId, SteppingState.Stepping);
+        SetState(processId, SteppingState.Stepping);
 
         try
         {
@@ -124,65 +118,8 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
             if (!ensureResult.Success)
                 return FailResult(processId, ensureResult.Error ?? "Failed to inject VEH agent");
 
-            // Read current instruction to determine if it's a CALL
-            // We need the current RIP. Get it from a single trace step first if we don't have it.
-            // For step-over, disassemble at the current location (passed via thread context).
-            // Since we're suspended, use disassembly engine to read the instruction.
-            //
-            // Approach: attempt to disassemble 1 instruction at the breakpoint address.
-            // We need the RIP — use a 1-step trace to get it, then check if it was a CALL.
-            // Actually, for step-over: if current instruction is CALL, set temp BP at next instruction.
-            // The challenge is we need the RIP before stepping.
-            //
-            // Strategy: Do a 1-step trace. If the instruction we just stepped from was CALL,
-            // that means we stepped INTO the call. To step OVER, we instead need to:
-            // 1. Read the instruction BEFORE stepping
-            // 2. If CALL: set temp BP at instruction_address + instruction_length, then continue
-            // 3. If not CALL: single step (same as step-in)
-            //
-            // But we don't know the current RIP without a context read. The VEH approach:
-            // We can use a trace with maxSteps=1 which gives us the address we stepped to.
-            // But we want to know the address we stepped FROM.
-            //
-            // Revised approach using VEH infrastructure:
-            // The target is suspended at a BP. The VEH agent has recorded the hit in the ring buffer
-            // with the RIP. We can look at recent hits or use GetStatus.
-            //
-            // Simplest correct approach:
-            // 1. Do a single-step (trace maxSteps=1) to get the CURRENT instruction address
-            //    (the address we step FROM is in the trace entry, which is the next instruction AFTER
-            //    the current RIP... wait, trace records the instruction it single-stepped TO.
-            //
-            // Actually — CMD_START_TRACE arms the Trap Flag. When TF fires on the next instruction,
-            // the VEH handler records that instruction's RIP. So trace entry address = the instruction
-            // AFTER the one we were suspended at.
-            //
-            // For step-over, we need a different approach:
-            // - Read the thread context to get current RIP (before any stepping)
-            // - Disassemble at RIP to check for CALL
-            // - If CALL: compute next_rip = RIP + instruction_length, set temp VEH BP, continue
-            // - If not CALL: do a single trace step
-
-            // For now, use a pragmatic approach:
-            // 1. Do single step (like step-in)
-            // 2. This works for non-CALL instructions
-            // For CALL instructions, we'd need to detect and skip over them.
-            // Since we can disassemble from process memory at the breakpoint address,
-            // we need the current RIP first.
-
-            // Attempt to get current instruction by reading memory at approximate location
-            // We need to determine the current RIP. The VEH hit stream may have the last hit's address.
-            // Since VEH trace with maxSteps=1 returns the NEXT instruction (the one TF fires on),
-            // we can use it, but the FROM address is what we need.
-
-            // Best available approach without adding a GetCurrentRip command to the VEH agent:
-            // Use the disassembly engine — but we need an address to start from.
-            // We'll just do step-in for now and check if we stepped into a call,
-            // then handle it. This is the fallback for MVP.
-
-            // MVP: Step-over = step-in for non-CALL, and for CALL we set a temp BP at return.
-            // The proper implementation needs a CMD_GET_CONTEXT command in the agent.
-            // For Phase 11A MVP, do a single step and detect post-facto.
+            // MVP: delegates to StepIn. Proper CALL detection needs CMD_GET_CONTEXT
+            // in the VEH agent to read RIP before stepping — planned for future iteration.
             return await StepInAsync(processId, threadId, timeoutMs, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -200,7 +137,7 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
         int processId, int threadId = 0, int timeoutMs = 30000,
         CancellationToken cancellationToken = default)
     {
-        var prevState = SetState(processId, SteppingState.Stepping);
+        SetState(processId, SteppingState.Stepping);
 
         try
         {
@@ -394,19 +331,6 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
         return await _vehDebugger.InjectAsync(processId, ct).ConfigureAwait(false);
     }
 
-    private static bool IsProcessAlive(int processId)
-    {
-        try
-        {
-            using var proc = System.Diagnostics.Process.GetProcessById(processId);
-            return !proc.HasExited;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
     private async Task<string?> DisassembleAtAsync(int processId, nuint address, CancellationToken ct)
     {
         try
@@ -447,9 +371,4 @@ public sealed class WindowsSteppingEngine : ISteppingEngine
         return new StepResult(false, 0, null, 0, StoppedReason.Timeout, Error: message);
     }
 
-    private StepResult ProcessExitedResult(int processId)
-    {
-        SetState(processId, SteppingState.Idle);
-        return new StepResult(false, 0, null, 0, StoppedReason.ProcessExited, Error: "Target process has exited");
-    }
 }

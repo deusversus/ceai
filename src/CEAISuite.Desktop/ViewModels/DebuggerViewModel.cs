@@ -309,8 +309,12 @@ public partial class DebuggerViewModel : ObservableObject
                         IsRetInstruction = result.Disassembly?.StartsWith("ret", StringComparison.OrdinalIgnoreCase) == true
                     });
 
-                    // Refresh call stack
-                    _ = WalkCallStackAsync();
+                    // Refresh call stack (fire-and-forget with fault observation)
+                    WalkCallStackCommand.ExecuteAsync(null).ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                            _outputLog.Append("Debugger", "Error", $"Call stack refresh failed: {t.Exception?.InnerException?.Message}");
+                    }, TaskContinuationOptions.OnlyOnFaulted);
                 }
                 else
                 {

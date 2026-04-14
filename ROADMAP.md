@@ -814,7 +814,7 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 | **Gate 2** | **10L** Stabilization Pass | ✅ Done | Regression benchmarks + memory leak checks + crash recovery stress before VEH injection |
 | **Tier 3** (long-term) | **10E** VEH Debugging | ✅ Done | Native C agent DLL + shared memory IPC; anti-debug bypass |
 | **VEH Overhaul** | **10E+ (A–G)** | ✅ Done | 7 sub-phases: protocol V2, conditions, stealth, UI, tracing, unified pipeline, PG+INT3; all audited |
-| **Phase 11A** | Debugger stepping | Planned | Last universal parity gap; builds on VEH from 10E; every user needs this |
+| **Phase 11A** | Debugger stepping | ✅ Done | ISteppingEngine via VEH TF; 5 AI tools, Lua globals, DebuggerViewModel wired |
 | **Phase 11B** | Kernel driver | Future | Niche but powerful; requires EV cert + dedicated kernel engineer |
 
 ---

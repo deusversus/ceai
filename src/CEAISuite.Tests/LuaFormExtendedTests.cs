@@ -316,11 +316,13 @@ public sealed class LuaFormExtendedTests : IDisposable
         public object? GetFormProperty(string formId, string property) => null;
         public void SetFormTopMost(string formId, bool topMost) { }
         public event Action<string, string, string>? ElementChanged;
+        public event Action<string>? FormClosed;
 
         // Suppress unused event warnings
         internal void FireClicked(string fId, string eId) => ElementClicked?.Invoke(fId, eId);
         internal void FireTimer(string fId, string tId) => TimerFired?.Invoke(fId, tId);
         internal void FireTextChanged(string fId, string eId, string t) => ElementTextChanged?.Invoke(fId, eId, t);
         internal void FireElementChanged(string fId, string eId, string v) => ElementChanged?.Invoke(fId, eId, v);
+        internal void FireFormClosed(string fId) => FormClosed?.Invoke(fId);
     }
 }

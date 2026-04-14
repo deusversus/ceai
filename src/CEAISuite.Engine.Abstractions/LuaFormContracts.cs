@@ -190,6 +190,9 @@ public interface ILuaFormHost
     /// NOT fired during programmatic updates via UpdateElement (re-entrancy guard).
     /// </summary>
     event Action<string, string, string>? ElementChanged; // formId, elementId, propertyName
+
+    /// <summary>Fired when a form window is closed (by user clicking X or programmatic close).</summary>
+    event Action<string>? FormClosed; // formId
 }
 
 /// <summary>Describes a Lua-created dockable panel (AvalonDock anchorable or document tab).</summary>

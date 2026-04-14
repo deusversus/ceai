@@ -26,6 +26,7 @@ public sealed class LuaFormHostService : ILuaFormHost
     public event Action<string, string>? TimerFired;
     public event Action<string, string, string>? ElementTextChanged;
     public event Action<string, string, string>? ElementChanged;
+    public event Action<string>? FormClosed;
 
     public LuaFormHostService()
     {
@@ -57,7 +58,9 @@ public sealed class LuaFormHostService : ILuaFormHost
             window.Closed += (_, _) =>
             {
                 _windows.Remove(form.Id);
+                _canvases.Remove(form.Id);
                 StopAllTimersForForm(form.Id);
+                FormClosed?.Invoke(form.Id);
             };
             _windows[form.Id] = window;
             window.Show();

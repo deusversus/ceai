@@ -207,6 +207,7 @@ public sealed class LuaFinalRoundTests : IDisposable
         public object? GetFormProperty(string formId, string property) => null;
         public void SetFormTopMost(string formId, bool topMost) { }
         public event Action<string, string, string>? ElementChanged;
+        public event Action<string>? FormClosed;
 
         internal void SuppressWarnings()
         {
@@ -214,6 +215,7 @@ public sealed class LuaFinalRoundTests : IDisposable
             TimerFired?.Invoke("", "");
             ElementTextChanged?.Invoke("", "", "");
             ElementChanged?.Invoke("", "", "");
+            FormClosed?.Invoke("");
         }
     }
 }

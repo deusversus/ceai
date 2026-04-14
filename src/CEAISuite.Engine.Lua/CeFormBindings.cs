@@ -19,6 +19,7 @@ internal sealed class CeFormBindings : IDisposable
     private Action<string, string>? _clickHandler;
     private Action<string, string>? _timerHandler;
     private Action<string, string, string>? _changeHandler;
+    private Action<string>? _closeHandler;
 
     private MoonSharpLuaEngine? _engine;
 
@@ -523,20 +524,7 @@ internal sealed class CeFormBindings : IDisposable
                 element.SubItems.Add(subItem);
                 formHost.UpdateElement(formId, element);
 
-                var subTable = new Table(script);
-                subTable["_id"] = subId;
-                subTable["_formId"] = formId;
-                subTable["setCaption"] = (Action<string>)(c => subItem.Caption = c);
-                // Callback via metatable
-                var cbs = _callbacks;
-                subTable.MetaTable = new Table(script);
-                subTable.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
-                {
-                    if (key.String is "onClick")
-                        cbs[$"{formId}:{subId}:onclick"] = value;
-                    else
-                        subTable.Set(key.String, value);
-                });
+                var subTable = CreateMenuSubItemTable(script, formId, subId, subItem);
                 return DynValue.NewTable(subTable);
             });
             return DynValue.NewTable(elemTable);
@@ -555,19 +543,7 @@ internal sealed class CeFormBindings : IDisposable
                 var subItem = new LuaMenuItemElement(subId) { Caption = caption };
                 element.Items.Add(subItem);
 
-                var subTable = new Table(script);
-                subTable["_id"] = subId;
-                subTable["_formId"] = formId;
-                subTable["setCaption"] = (Action<string>)(c => subItem.Caption = c);
-                var cbs = _callbacks;
-                subTable.MetaTable = new Table(script);
-                subTable.MetaTable["__newindex"] = (Action<Table, DynValue, DynValue>)((_, key, value) =>
-                {
-                    if (key.String is "onClick")
-                        cbs[$"{formId}:{subId}:onclick"] = value;
-                    else
-                        subTable.Set(key.String, value);
-                });
+                var subTable = CreateMenuSubItemTable(script, formId, subId, subItem);
                 return DynValue.NewTable(subTable);
             });
             return DynValue.NewTable(elemTable);
@@ -627,10 +603,22 @@ internal sealed class CeFormBindings : IDisposable
                     script.Call(callback); // fallback for tests without engine
             }
         };
+        _closeHandler = (fId) =>
+        {
+            var key = $"{fId}:onclose";
+            if (_callbacks.TryGetValue(key, out var callback))
+            {
+                if (_engine is not null)
+                    _engine.ExecuteGuarded(() => script.Call(callback));
+                else
+                    script.Call(callback);
+            }
+        };
         _subscribedHost = formHost;
         formHost.ElementClicked += _clickHandler;
         formHost.TimerFired += _timerHandler;
         formHost.ElementChanged += _changeHandler;
+        formHost.FormClosed += _closeHandler;
     }
 
     private void Unsubscribe()
@@ -640,14 +628,41 @@ internal sealed class CeFormBindings : IDisposable
             if (_clickHandler is not null) _subscribedHost.ElementClicked -= _clickHandler;
             if (_timerHandler is not null) _subscribedHost.TimerFired -= _timerHandler;
             if (_changeHandler is not null) _subscribedHost.ElementChanged -= _changeHandler;
+            if (_closeHandler is not null) _subscribedHost.FormClosed -= _closeHandler;
             _subscribedHost = null;
             _clickHandler = null;
             _timerHandler = null;
             _changeHandler = null;
+            _closeHandler = null;
         }
     }
 
     public void Dispose() => Unsubscribe();
+
+    /// <summary>
+    /// Creates a properly proxied table for a menu sub-item (main menu or popup menu item).
+    /// Supports Caption property and OnClick event via CePropertyProxy.
+    /// </summary>
+    private Table CreateMenuSubItemTable(Script script, string formId, string subId, LuaMenuItemElement subItem)
+    {
+        var subTable = new Table(script);
+        subTable["_id"] = subId;
+        subTable["_formId"] = formId;
+        subTable["_type"] = "menuitem";
+        // Backward-compat method
+        subTable["setCaption"] = (Action<string>)(c => subItem.Caption = c);
+
+        var props = CePropertyProxy.CreatePropertyMap();
+        props["Caption"] = CePropertyProxy.ReadWrite(
+            () => DynValue.NewString(subItem.Caption ?? ""),
+            v => subItem.Caption = v.String);
+
+        var events = CePropertyProxy.CreateEventSet();
+        events.Add("OnClick");
+
+        CePropertyProxy.ApplyProxy(script, subTable, props, events, _callbacks, $"{formId}:{subId}:");
+        return subTable;
+    }
 
     private void AddElementToForm(string formId, LuaFormElement element)
     {

@@ -196,6 +196,7 @@ public sealed class LuaTrivialGapTests : IDisposable
         public object? GetFormProperty(string formId, string property) => null;
         public void SetFormTopMost(string formId, bool topMost) { }
         public event Action<string, string, string>? ElementChanged;
-        internal void Suppress() { ElementClicked?.Invoke("",""); TimerFired?.Invoke("",""); ElementTextChanged?.Invoke("","",""); ElementChanged?.Invoke("","",""); }
+        public event Action<string>? FormClosed;
+        internal void Suppress() { ElementClicked?.Invoke("",""); TimerFired?.Invoke("",""); ElementTextChanged?.Invoke("","",""); ElementChanged?.Invoke("","",""); FormClosed?.Invoke(""); }
     }
 }

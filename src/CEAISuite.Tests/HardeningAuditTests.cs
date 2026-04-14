@@ -328,6 +328,7 @@ public sealed class HardeningAuditTests : IDisposable
 #pragma warning disable CS0067 // Required by ILuaFormHost interface
         public event Action<string, string, string>? ElementTextChanged;
         public event Action<string, string, string>? ElementChanged;
+        public event Action<string>? FormClosed;
 #pragma warning restore CS0067
 
         public void ShowForm(LuaFormDescriptor form)

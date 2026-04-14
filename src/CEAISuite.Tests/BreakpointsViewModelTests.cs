@@ -201,7 +201,7 @@ public class BreakpointsViewModelTests
 
         await vm.RefreshBreakpointsCommand.ExecuteAsync(null);
 
-        Assert.Equal("Active", vm.Breakpoints[0].Status);
+        Assert.Equal("Armed", vm.Breakpoints[0].Status);
     }
 
     [Fact]

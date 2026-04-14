@@ -31,9 +31,9 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     // ─── Shared Memory Constants (must match veh_agent.c exactly) ───
 
     private const uint ShmMagic = 0xCEAE;
-    private const uint ShmVersion = 2;
+    private const uint ShmVersion = 3; // V3: extended registers (Rip, R12-R15, EFlags)
     private const int ShmHeaderSize = 0x40;
-    private const int HitEntrySize = 128;
+    private const int HitEntrySize = 192; // V3: expanded from 128 for extended registers
     private const int DefaultMaxHits = 4096;
 
     // Header field offsets
@@ -71,6 +71,13 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
     private const int HitOffsetR10 = 0x68;
     private const int HitOffsetR11 = 0x70;
     private const int HitOffsetTimestamp = 0x78;
+    // V3: Extended register offsets
+    private const int HitOffsetRip = 0x80;
+    private const int HitOffsetR12 = 0x88;
+    private const int HitOffsetR13 = 0x90;
+    private const int HitOffsetR14 = 0x98;
+    private const int HitOffsetR15 = 0xA0;
+    private const int HitOffsetEFlags = 0xA8;
 
     // Commands (host -> agent)
     private const int CmdIdle = 0;
@@ -1141,7 +1148,14 @@ public sealed class WindowsVehDebugger : IVehDebugger, IDisposable
                 R8: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR8),
                 R9: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR9),
                 R10: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR10),
-                R11: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR11));
+                R11: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR11),
+                // V3: Extended registers
+                Rip: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetRip),
+                R12: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR12),
+                R13: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR13),
+                R14: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR14),
+                R15: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetR15),
+                EFlags: (ulong)Marshal.ReadInt64(entryPtr + HitOffsetEFlags));
 
             var bpType = hitType switch
             {

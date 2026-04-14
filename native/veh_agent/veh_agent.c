@@ -22,9 +22,9 @@
 /* ── Shared memory layout ── */
 
 #define SHM_MAGIC           0xCEAE
-#define SHM_VERSION         2
+#define SHM_VERSION         3
 #define SHM_HEADER_SIZE     0x40
-#define HIT_ENTRY_SIZE      128
+#define HIT_ENTRY_SIZE      192
 #define DEFAULT_MAX_HITS    4096
 
 /* Commands (host → agent) */
@@ -86,6 +86,11 @@ typedef struct {
     ULONG64 rsi, rdi, rsp, rbp;  /* 0x38-0x58 */
     ULONG64 r8, r9, r10, r11;    /* 0x58-0x78 */
     ULONG64 timestamp;     /* 0x78 */
+    /* V3: Extended registers */
+    ULONG64 rip;            /* 0x80 */
+    ULONG64 r12, r13, r14, r15;  /* 0x88-0xA8 */
+    ULONG64 eflags;         /* 0xA8 */
+    ULONG64 _reserved;      /* 0xB0 — pad to 192 bytes */
 } HitEntry;
 #pragma pack(pop)
 
@@ -513,6 +518,10 @@ static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
         hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
         hit->r8  = 0;        hit->r9  = 0;
         hit->r10 = 0;        hit->r11 = 0;
+        /* V3: Extended registers */
+        hit->rip = (ULONG64)ctx->Eip;
+        hit->r12 = 0; hit->r13 = 0; hit->r14 = 0; hit->r15 = 0;
+        hit->eflags = ctx->EFlags;
 #else
         hit->address  = ctx->Rip;
         hit->threadId = GetCurrentThreadId();
@@ -524,8 +533,14 @@ static void WriteHitEntry(PCONTEXT ctx, ULONG64 dr6)
         hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
         hit->r8  = ctx->R8;  hit->r9  = ctx->R9;
         hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+        /* V3: Extended registers */
+        hit->rip = ctx->Rip;
+        hit->r12 = ctx->R12; hit->r13 = ctx->R13;
+        hit->r14 = ctx->R14; hit->r15 = ctx->R15;
+        hit->eflags = ctx->EFlags;
 #endif
         hit->timestamp = (ULONG64)ts.QuadPart;
+        hit->_reserved = 0;
     }
 
     InterlockedIncrement(&g_shm->hitCount);
@@ -573,6 +588,9 @@ static void WriteTraceEntry(PCONTEXT ctx)
         hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
         hit->r8  = 0;        hit->r9  = 0;
         hit->r10 = 0;        hit->r11 = 0;
+        hit->rip = (ULONG64)ctx->Eip;
+        hit->r12 = 0; hit->r13 = 0; hit->r14 = 0; hit->r15 = 0;
+        hit->eflags = ctx->EFlags;
 #else
         hit->address  = ctx->Rip;
         hit->threadId = GetCurrentThreadId();
@@ -584,8 +602,13 @@ static void WriteTraceEntry(PCONTEXT ctx)
         hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
         hit->r8  = ctx->R8;  hit->r9  = ctx->R9;
         hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+        hit->rip = ctx->Rip;
+        hit->r12 = ctx->R12; hit->r13 = ctx->R13;
+        hit->r14 = ctx->R14; hit->r15 = ctx->R15;
+        hit->eflags = ctx->EFlags;
 #endif
         hit->timestamp = (ULONG64)ts.QuadPart;
+        hit->_reserved = 0;
     }
 
     InterlockedIncrement(&g_shm->hitCount);
@@ -626,6 +649,8 @@ static void WritePageGuardHit(PCONTEXT ctx, ULONG64 faultAddr, DWORD hitType)
         hit->rsi = ctx->Esi; hit->rdi = ctx->Edi;
         hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
         hit->r8 = 0; hit->r9 = 0; hit->r10 = 0; hit->r11 = 0;
+        hit->rip = (ULONG64)ctx->Eip; hit->r12 = 0; hit->r13 = 0; hit->r14 = 0; hit->r15 = 0;
+        hit->eflags = ctx->EFlags;
 #else
         hit->address = faultAddr;
         hit->threadId = GetCurrentThreadId();
@@ -637,8 +662,12 @@ static void WritePageGuardHit(PCONTEXT ctx, ULONG64 faultAddr, DWORD hitType)
         hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
         hit->r8 = ctx->R8; hit->r9 = ctx->R9;
         hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+        hit->rip = ctx->Rip; hit->r12 = ctx->R12; hit->r13 = ctx->R13;
+        hit->r14 = ctx->R14; hit->r15 = ctx->R15;
+        hit->eflags = ctx->EFlags;
 #endif
         hit->timestamp = (ULONG64)ts.QuadPart;
+        hit->_reserved = 0;
     }
     InterlockedIncrement(&g_shm->hitCount);
 }
@@ -678,6 +707,8 @@ static void WriteInt3Hit(PCONTEXT ctx, ULONG64 bpAddr)
         hit->rsi = ctx->Esi; hit->rdi = ctx->Edi;
         hit->rsp = ctx->Esp; hit->rbp = ctx->Ebp;
         hit->r8 = 0; hit->r9 = 0; hit->r10 = 0; hit->r11 = 0;
+        hit->rip = (ULONG64)ctx->Eip; hit->r12 = 0; hit->r13 = 0; hit->r14 = 0; hit->r15 = 0;
+        hit->eflags = ctx->EFlags;
 #else
         hit->address = bpAddr;
         hit->threadId = GetCurrentThreadId();
@@ -689,8 +720,12 @@ static void WriteInt3Hit(PCONTEXT ctx, ULONG64 bpAddr)
         hit->rsp = ctx->Rsp; hit->rbp = ctx->Rbp;
         hit->r8 = ctx->R8; hit->r9 = ctx->R9;
         hit->r10 = ctx->R10; hit->r11 = ctx->R11;
+        hit->rip = ctx->Rip; hit->r12 = ctx->R12; hit->r13 = ctx->R13;
+        hit->r14 = ctx->R14; hit->r15 = ctx->R15;
+        hit->eflags = ctx->EFlags;
 #endif
         hit->timestamp = (ULONG64)ts.QuadPart;
+        hit->_reserved = 0;
     }
     InterlockedIncrement(&g_shm->hitCount);
 }

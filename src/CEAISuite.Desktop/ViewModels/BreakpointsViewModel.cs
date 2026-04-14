@@ -49,6 +49,40 @@ public partial class BreakpointsViewModel : ObservableObject
     [ObservableProperty]
     private string _codeCaveAddress = "";
 
+    // ── Conditional breakpoint properties (C5) ──
+
+    [ObservableProperty]
+    private string _conditionExpression = "";
+
+    [ObservableProperty]
+    private string _conditionType = "RegisterCompare";
+
+    [ObservableProperty]
+    private string _threadFilterInput = "";
+
+    [ObservableProperty]
+    private string _conditionalAddress = "";
+
+    [RelayCommand]
+    private async Task SetConditionalBreakpointAsync()
+    {
+        if (_processContext.AttachedProcessId is not { } pid) return;
+        if (string.IsNullOrWhiteSpace(ConditionExpression)) return;
+        if (string.IsNullOrWhiteSpace(ConditionalAddress)) return;
+        try
+        {
+            var condType = Enum.TryParse<BreakpointConditionType>(ConditionType, out var ct)
+                ? ct : BreakpointConditionType.RegisterCompare;
+            var condition = new BreakpointCondition(ConditionExpression, condType);
+            int? tf = int.TryParse(ThreadFilterInput, out var t) ? t : null;
+            await _breakpointService.SetConditionalBreakpointAsync(
+                pid, ConditionalAddress, BreakpointType.HardwareExecute, condition, threadFilter: tf);
+            await RefreshBreakpointsAsync();
+            _outputLog.Append("System", "Info", $"Conditional BP set: {ConditionExpression}");
+        }
+        catch (Exception ex) { _outputLog.Append("System", "Error", $"Set conditional BP: {ex.Message}"); }
+    }
+
     [RelayCommand]
     private async Task RefreshBreakpointsAsync()
     {
@@ -63,7 +97,9 @@ public partial class BreakpointsViewModel : ObservableObject
                     Address = b.Address,
                     Type = b.Type,
                     HitCount = b.HitCount,
-                    Status = b.IsEnabled ? "Active" : "Disabled",
+                    Status = _breakpointService.GetLifecycleStatus(b.Id).ToString(),
+                    Condition = b.Condition ?? "",
+                    ThreadFilter = b.ThreadFilter?.ToString(CultureInfo.InvariantCulture) ?? "",
                     Mode = b.Mode
                 }));
         }

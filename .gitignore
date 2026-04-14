@@ -9,6 +9,9 @@
 # Local scratch files
 LOG.md
 
+# Claude Code project instructions (local only)
+CLAUDE.md
+
 # User-specific files
 *.rsuser
 *.suo

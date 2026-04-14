@@ -115,19 +115,46 @@ public sealed partial class AiToolFunctions
         var sb = new System.Text.StringBuilder();
         sb.Append(System.Globalization.CultureInfo.InvariantCulture,
             $"Trace: {result.Entries.Count} steps{(result.Truncated ? " (truncated)" : "")}").AppendLine();
-        sb.AppendLine("Address          | TID  | RAX              | RCX              | RSP");
-        sb.AppendLine(new string('-', 85));
 
-        foreach (var entry in result.Entries.Take(50)) // cap output for token budget
+        var maxStepsDisplay = _limits.MaxTraceSteps;
+        // Compact JSON format for large traces, table format for small
+        if (result.Entries.Count > 20)
         {
-            sb.Append(System.Globalization.CultureInfo.InvariantCulture,
-                $"0x{(ulong)entry.Address:X16} | {entry.ThreadId,4} | " +
-                $"0x{entry.Registers.Rax:X16} | 0x{entry.Registers.Rcx:X16} | 0x{entry.Registers.Rsp:X16}").AppendLine();
+            var entries = result.Entries.Take(maxStepsDisplay).Select(e => new
+            {
+                addr = $"0x{(ulong)e.Address:X}",
+                tid = e.ThreadId,
+                rip = $"0x{e.Registers.Rip:X}",
+                rax = $"0x{e.Registers.Rax:X}",
+                rcx = $"0x{e.Registers.Rcx:X}",
+                rsp = $"0x{e.Registers.Rsp:X}",
+                eflags = $"0x{e.Registers.EFlags:X}"
+            });
+            sb.Append(ToJson(new { entries, shown = Math.Min(result.Entries.Count, maxStepsDisplay), total = result.Entries.Count }));
+        }
+        else
+        {
+            sb.AppendLine("Address          | TID  | RIP              | RAX              | RCX              | RSP              | EFlags");
+            sb.AppendLine(new string('-', 120));
+
+            foreach (var entry in result.Entries)
+            {
+                var r = entry.Registers;
+                sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                    $"0x{(ulong)entry.Address:X16} | {entry.ThreadId,4} | " +
+                    $"0x{r.Rip:X16} | 0x{r.Rax:X16} | 0x{r.Rcx:X16} | 0x{r.Rsp:X16} | 0x{r.EFlags:X8}").AppendLine();
+                // Extended registers on second line when non-zero
+                if (r.R12 != 0 || r.R13 != 0 || r.R14 != 0 || r.R15 != 0)
+                {
+                    sb.Append(System.Globalization.CultureInfo.InvariantCulture,
+                        $"                   {'|',4}   R12=0x{r.R12:X16} R13=0x{r.R13:X16} R14=0x{r.R14:X16} R15=0x{r.R15:X16}").AppendLine();
+                }
+            }
         }
 
-        if (result.Entries.Count > 50)
+        if (result.Entries.Count > maxStepsDisplay)
             sb.Append(System.Globalization.CultureInfo.InvariantCulture,
-                $"... and {result.Entries.Count - 50} more steps (use hit stream for full data)").AppendLine();
+                $"... and {result.Entries.Count - maxStepsDisplay} more steps (use PollVehBreakpointHits for streaming)").AppendLine();
 
         return sb.ToString();
     }
@@ -221,5 +248,139 @@ public sealed partial class AiToolFunctions
         return Task.FromResult(
             $"VEH agent: ACTIVE ({status.AgentHealth}{stealthStr}). {status.ActiveBreakpoints}/4 breakpoints, " +
             $"{status.TotalHits} total hits, {status.OverflowCount} overflows.");
+    }
+
+    // ── PAGE_GUARD breakpoints (no DR slot limit) ──
+
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("page guard", "guard", "unlimited breakpoint", "page access")]
+    [Description("Set a PAGE_GUARD breakpoint via VEH agent. Triggers on any access to the memory page containing the address. Does NOT consume a DR slot — unlimited count.")]
+    public async Task<string> SetVehPageGuardBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex)")] string address)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var addr = ParseAddress(address);
+        var result = await vehDebugService.SetPageGuardBreakpointAsync(processId, addr).ConfigureAwait(false);
+        return result.Success
+            ? $"PAGE_GUARD breakpoint set at 0x{addr:X}. No DR slot consumed."
+            : $"Failed: {result.Error}";
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Remove a PAGE_GUARD breakpoint set via VEH agent.")]
+    public async Task<string> RemoveVehPageGuardBreakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex)")] string address)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var addr = ParseAddress(address);
+        var ok = await vehDebugService.RemovePageGuardBreakpointAsync(processId, addr).ConfigureAwait(false);
+        return ok ? $"PAGE_GUARD breakpoint removed at 0x{addr:X}." : $"Failed to remove PAGE_GUARD at 0x{addr:X}.";
+    }
+
+    // ── INT3 software breakpoints (no DR slot limit) ──
+
+    [Destructive]
+    [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("int3", "software breakpoint", "0xCC", "unlimited")]
+    [Description("Set an INT3 (0xCC) software breakpoint via VEH agent. Triggers on execution. Does NOT consume a DR slot — unlimited count.")]
+    public async Task<string> SetVehInt3Breakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex)")] string address)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var addr = ParseAddress(address);
+        var result = await vehDebugService.SetInt3BreakpointAsync(processId, addr).ConfigureAwait(false);
+        return result.Success
+            ? $"INT3 breakpoint set at 0x{addr:X}. No DR slot consumed."
+            : $"Failed: {result.Error}";
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Remove an INT3 software breakpoint set via VEH agent.")]
+    public async Task<string> RemoveVehInt3Breakpoint(
+        [Description("Process ID")] int processId,
+        [Description("Memory address (hex)")] string address)
+    {
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var addr = ParseAddress(address);
+        var ok = await vehDebugService.RemoveInt3BreakpointAsync(processId, addr).ConfigureAwait(false);
+        return ok ? $"INT3 breakpoint removed at 0x{addr:X}." : $"Failed to remove INT3 at 0x{addr:X}.";
+    }
+
+    // ── Hit stream polling ──
+
+    [ReadOnlyTool]
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [SearchHint("hit stream", "poll", "monitor", "real-time", "breakpoint hits")]
+    [Description("Poll real-time breakpoint hits from VEH agent. Collects up to maxEvents hits within timeoutMs, then returns. Use for monitoring active breakpoints.")]
+    public async Task<string> PollVehBreakpointHits(
+        [Description("Process ID")] int processId,
+        [Description("Maximum events to collect (default 50)")] int maxEvents = 50,
+        [Description("Timeout in milliseconds to wait for hits (default 2000)")] int timeoutMs = 2000)
+    {
+        if (vehDebugService is null) return "VEH debugger not available.";
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return pidError;
+        if (maxEvents is < 1 or > 500) maxEvents = _limits.MaxVehPollHits;
+        if (timeoutMs is < 100 or > 30000) timeoutMs = 2000;
+
+        using var cts = new CancellationTokenSource(timeoutMs);
+        var hits = new List<object>();
+        try
+        {
+            await foreach (var hit in vehDebugService.GetHitStreamAsync(processId, cts.Token))
+            {
+                hits.Add(new
+                {
+                    address = $"0x{(ulong)hit.Address:X}",
+                    threadId = hit.ThreadId,
+                    type = hit.Type.ToString(),
+                    rip = $"0x{hit.Registers.Rip:X}",
+                    rax = $"0x{hit.Registers.Rax:X}",
+                    rcx = $"0x{hit.Registers.Rcx:X}",
+                    rsp = $"0x{hit.Registers.Rsp:X}"
+                });
+                if (hits.Count >= maxEvents) break;
+            }
+        }
+        catch (OperationCanceledException) { /* timeout — return what we have */ }
+
+        return ToJson(new { hits, count = hits.Count, timedOut = hits.Count < maxEvents });
+    }
+
+    // ── DR slot usage ──
+
+    [ReadOnlyTool]
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("slot", "DR", "debug register", "hardware slot", "capacity")]
+    [Description("Get VEH hardware breakpoint DR slot usage (DR0-DR3) and counts of PAGE_GUARD and INT3 breakpoints (which don't consume DR slots).")]
+    public Task<string> GetVehBreakpointSlotUsage([Description("Process ID")] int processId)
+    {
+        if (vehDebugService is null) return Task.FromResult("VEH debugger not available.");
+        var pidError = ValidateDestructiveProcessId(processId);
+        if (pidError is not null) return Task.FromResult(pidError);
+        var status = vehDebugService.GetStatus(processId);
+        if (!status.IsInjected) return Task.FromResult("VEH agent not injected.");
+        return Task.FromResult(
+            $"DR slots: {status.ActiveBreakpoints}/4 in use. " +
+            $"Total hits: {status.TotalHits}, overflows: {status.OverflowCount}. " +
+            $"PAGE_GUARD and INT3 breakpoints do not consume DR slots.");
     }
 }

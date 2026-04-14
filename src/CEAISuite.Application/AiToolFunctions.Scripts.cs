@@ -398,8 +398,50 @@ public sealed partial class AiToolFunctions
         return Task.FromResult($"{name} = 0x{addr.Value:X}");
     }
 
+    // ── Manual Symbol Registration ──
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("symbol", "register", "label", "named address")]
+    [Description("Register a named symbol pointing to a memory address. Other scripts and tools can then use this symbol name instead of raw addresses.")]
+    public Task<string> RegisterSymbol(
+        [Description("Symbol name to register")] string name,
+        [Description("Memory address (hex)")] string address)
+    {
+        if (autoAssemblerEngine is null) return Task.FromResult("Auto Assembler engine not available.");
+        if (string.IsNullOrWhiteSpace(name)) return Task.FromResult("Symbol name is required.");
+
+        var existing = autoAssemblerEngine.ResolveSymbol(name);
+        var addr = ParseAddress(address);
+        autoAssemblerEngine.RegisterSymbol(name, addr);
+        return Task.FromResult(existing is not null
+            ? $"Symbol '{name}' updated: 0x{existing.Value:X} → 0x{addr:X}."
+            : $"Symbol '{name}' registered at 0x{addr:X}.");
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("symbol", "unregister", "remove symbol")]
+    [Description("Unregister a previously registered symbol by name.")]
+    public Task<string> UnregisterSymbol(
+        [Description("Symbol name to unregister")] string name)
+    {
+        if (autoAssemblerEngine is null) return Task.FromResult("Auto Assembler engine not available.");
+        if (string.IsNullOrWhiteSpace(name)) return Task.FromResult("Symbol name is required.");
+
+        var existing = autoAssemblerEngine.ResolveSymbol(name);
+        if (existing is null)
+            return Task.FromResult($"Symbol '{name}' not found. Use ListRegisteredSymbols to see available symbols.");
+
+        autoAssemblerEngine.UnregisterSymbol(name);
+        return Task.FromResult($"Symbol '{name}' (was 0x{existing.Value:X}) unregistered.");
+    }
+
+    // ── Script Execution ──
+
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Execute an Auto Assembler script directly without creating an address table entry. Runs the [ENABLE] section. Use DisableAutoAssemblerScript to run the [DISABLE] section.")]
     public async Task<string> ExecuteAutoAssemblerScript(
         [Description("Process ID to execute the script against")] int processId,
@@ -432,6 +474,7 @@ public sealed partial class AiToolFunctions
 
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Execute the [DISABLE] section of an Auto Assembler script to undo its changes.")]
     public async Task<string> DisableAutoAssemblerScript(
         [Description("Process ID to execute the script against")] int processId,

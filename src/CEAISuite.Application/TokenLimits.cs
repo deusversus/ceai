@@ -54,6 +54,21 @@ public sealed class TokenLimits
     /// <summary>Max snapshots compared in CompareSnapshots.</summary>
     public int MaxSnapshotDiffEntries { get; init; } = 50;
 
+    /// <summary>Max VEH breakpoint hit events returned by PollVehBreakpointHits.</summary>
+    public int MaxVehPollHits { get; init; } = 25;
+
+    /// <summary>Max results for SearchMemoryPattern.</summary>
+    public int MaxPatternSearchResults { get; init; } = 10;
+
+    /// <summary>Max bookmarks returned by ListBookmarks.</summary>
+    public int MaxBookmarkResults { get; init; } = 50;
+
+    /// <summary>Max chars for export tools (ExportReport, ExportChat, ExportAddressTableJson).</summary>
+    public int MaxExportChars { get; init; } = 5000;
+
+    /// <summary>Max trace steps shown in TraceVehBreakpoint output.</summary>
+    public int MaxTraceSteps { get; init; } = 50;
+
     // ── Compaction pipeline ──
 
     /// <summary>Collapse old tool-call groups after this many messages.</summary>
@@ -93,6 +108,11 @@ public sealed class TokenLimits
         MaxInspectModules = 20,
         MaxListProcesses = 20,
         MaxSnapshotDiffEntries = 25,
+        MaxVehPollHits = 10,
+        MaxPatternSearchResults = 5,
+        MaxBookmarkResults = 25,
+        MaxExportChars = 2000,
+        MaxTraceSteps = 20,
         CompactionToolResultMessages = 8,
         CompactionSummarizationTokens = 16_000,
         CompactionSlidingWindowTurns = 8,
@@ -122,6 +142,11 @@ public sealed class TokenLimits
         MaxInspectModules = 40,
         MaxListProcesses = 30,
         MaxSnapshotDiffEntries = 50,
+        MaxVehPollHits = 25,
+        MaxPatternSearchResults = 10,
+        MaxBookmarkResults = 50,
+        MaxExportChars = 5000,
+        MaxTraceSteps = 50,
         CompactionToolResultMessages = 12,
         CompactionSummarizationTokens = 32_000,
         CompactionSlidingWindowTurns = 15,
@@ -151,6 +176,11 @@ public sealed class TokenLimits
         MaxInspectModules = 80,
         MaxListProcesses = 50,
         MaxSnapshotDiffEntries = 100,
+        MaxVehPollHits = 50,
+        MaxPatternSearchResults = 20,
+        MaxBookmarkResults = 100,
+        MaxExportChars = 10000,
+        MaxTraceSteps = 100,
         CompactionToolResultMessages = 20,
         CompactionSummarizationTokens = 64_000,
         CompactionSlidingWindowTurns = 30,

@@ -11,6 +11,7 @@ public partial class AiToolFunctions
     /// (readInteger, writeFloat, getAddress, etc.) when a process is attached.
     /// </summary>
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
     [Description("Execute a Lua script. Use for complex automation, CE table scripts, or multi-step memory operations.")]
     public async Task<string> ExecuteLuaScript(
         [Description("Lua script code to execute")] string code,
@@ -37,6 +38,7 @@ public partial class AiToolFunctions
 
     /// <summary>Validate Lua script syntax without executing it.</summary>
     [CEAISuite.Application.AgentLoop.ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Validate Lua script syntax without executing. Returns valid/invalid with error details.")]
     public Task<string> ValidateLuaScript(
         [Description("Lua script code to validate")] string code)
@@ -52,6 +54,7 @@ public partial class AiToolFunctions
 
     /// <summary>Evaluate a single Lua expression and return its result.</summary>
     [CEAISuite.Application.AgentLoop.ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Evaluate a Lua expression and return the result. Useful for quick calculations or reading values.")]
     public async Task<string> EvaluateLuaExpression(
         [Description("Lua expression to evaluate (e.g., 'readInteger(getAddress(\"game.exe+0x1234\"))')")] string expression)
@@ -63,5 +66,53 @@ public partial class AiToolFunctions
         return result.Success
             ? result.ReturnValue ?? "nil"
             : $"Lua error: {result.Error}";
+    }
+
+    /// <summary>Set a global variable in the Lua state.</summary>
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("global", "variable", "lua state", "set variable")]
+    [Description("Set a global variable in the Lua state. Useful for configuring Lua scripts before execution.")]
+    public async Task<string> SetLuaGlobal(
+        [Description("Variable name")] string name,
+        [Description("Value to set")] string value,
+        [Description("Value type: string, number, boolean, nil")] string type = "string")
+    {
+        if (luaEngine is null) return "Lua engine is not available.";
+        if (string.IsNullOrWhiteSpace(name)) return "Variable name is required.";
+
+        object? parsed = type.ToLowerInvariant() switch
+        {
+            "number" => double.TryParse(value, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null,
+            "boolean" or "bool" => bool.TryParse(value, out var b) ? b : null,
+            "nil" => null,
+            _ => value // string
+        };
+
+        if (type.ToLowerInvariant() is "number" && parsed is null)
+            return $"Cannot parse '{value}' as a number.";
+        if (type.ToLowerInvariant() is "boolean" or "bool" && parsed is null)
+            return $"Cannot parse '{value}' as a boolean. Use 'true' or 'false'.";
+
+        await luaEngine.SetGlobalAsync(name, parsed).ConfigureAwait(false);
+        return $"Lua global '{name}' set to {(parsed is null ? "nil" : $"{parsed} ({parsed.GetType().Name})")}.";
+    }
+
+    /// <summary>Get a global variable from the Lua state.</summary>
+    [CEAISuite.Application.AgentLoop.ReadOnlyTool]
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("global", "variable", "lua state", "get variable")]
+    [Description("Get a global variable from the Lua state. Returns its value and type.")]
+    public async Task<string> GetLuaGlobal(
+        [Description("Variable name")] string name)
+    {
+        if (luaEngine is null) return "Lua engine is not available.";
+        if (string.IsNullOrWhiteSpace(name)) return "Variable name is required.";
+
+        var value = await luaEngine.GetGlobalAsync(name).ConfigureAwait(false);
+        if (value is null)
+            return $"'{name}' = nil";
+        return $"'{name}' = {value} ({value.GetType().Name})";
     }
 }

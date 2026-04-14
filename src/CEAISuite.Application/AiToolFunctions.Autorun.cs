@@ -7,6 +7,7 @@ public sealed partial class AiToolFunctions
 {
     /// <summary>List all autorun Lua scripts and their enabled/disabled status.</summary>
     [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("List autorun Lua scripts from the scripts/autorun/ directory with their enabled status.")]
     public Task<string> ListAutorunScripts()
     {
@@ -23,6 +24,7 @@ public sealed partial class AiToolFunctions
 
     /// <summary>Enable or disable an autorun script.</summary>
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Enable or disable an autorun Lua script by filename.")]
     public Task<string> SetAutorunEnabled(
         [Description("Script filename (e.g., '01_init.lua')")] string scriptName,

@@ -49,6 +49,7 @@ public sealed partial class AiToolFunctions(
     SpeedHackService? speedHackService = null,
     VehDebugService? vehDebugService = null,
     AutorunScriptService? autorunService = null,
+    AppSettingsService? appSettingsService = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;
@@ -1101,6 +1102,7 @@ public sealed partial class AiToolFunctions(
 
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Toggle a script entry on/off via the AA engine.")]
     public async Task<string> ToggleScript([Description("Node ID or label of the script entry")] string nodeId)
     {
@@ -1527,6 +1529,177 @@ public sealed partial class AiToolFunctions(
         return Task.FromResult($"Moved '{node.Label}' to {(string.IsNullOrWhiteSpace(groupId) ? "top level" : $"group '{groupId}'")}.");
     }
 
+    // ── Address table extras ──
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("color", "highlight", "visual", "tag", "categorize")]
+    [Description("Set a color for an address table entry for visual categorization. Use hex color like '#FF4444' or named: red, green, blue, yellow, purple, orange, cyan. Empty string clears.")]
+    public Task<string> SetEntryColor(
+        [Description("Node ID or label")] string nodeId,
+        [Description("Color: hex '#FF4444', named 'red'/'green'/'blue'/'yellow'/'purple'/'orange'/'cyan', or '' to clear")] string color)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+
+        var resolved = color.Trim().ToLowerInvariant() switch
+        {
+            "" or "none" or "clear" => (string?)null,
+            "red" => "#FF4444",
+            "green" => "#44AA44",
+            "blue" => "#4488FF",
+            "yellow" => "#DDAA00",
+            "purple" => "#AA44CC",
+            "orange" => "#FF8800",
+            "cyan" => "#00AACC",
+            _ when color.StartsWith('#') && (color.Length == 7 || color.Length == 9) => color,
+            _ => "INVALID"
+        };
+        if (resolved == "INVALID")
+            return Task.FromResult($"Invalid color '{color}'. Use hex (#RRGGBB) or named: red, green, blue, yellow, purple, orange, cyan, none.");
+
+        node.UserColor = resolved;
+        return Task.FromResult(resolved is null
+            ? $"Color cleared on '{node.Label}'."
+            : $"Color set to {resolved} on '{node.Label}'.");
+    }
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("duplicate", "copy", "clone", "entry")]
+    [Description("Duplicate an address table entry, creating an independent copy with a new ID.")]
+    public Task<string> DuplicateEntry([Description("Node ID or label to duplicate")] string nodeId)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+
+        var entry = addressTableService.AddEntry(node.Address, node.DataType, node.CurrentValue ?? "", node.Label + " (copy)");
+        var copy = addressTableService.FindNode(entry.Id);
+        if (copy is not null)
+        {
+            copy.AssemblerScript = node.AssemblerScript;
+            copy.UserColor = node.UserColor;
+            copy.ShowAsHex = node.ShowAsHex;
+            copy.ShowAsSigned = node.ShowAsSigned;
+            if (node.DropDownList is not null)
+                copy.DropDownList = new Dictionary<int, string>(node.DropDownList);
+        }
+        return Task.FromResult($"Duplicated '{node.Label}' as '{entry.Label}' (ID: {entry.Id}).");
+    }
+
+    [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("dropdown", "enum", "value list", "mapping", "item names")]
+    [Description("Configure a dropdown value list for an address table entry. Maps integer values to display names (e.g., item IDs to names).")]
+    public Task<string> ConfigureDropDown(
+        [Description("Node ID or label")] string nodeId,
+        [Description("JSON object mapping integer values to names, e.g. {\"0\":\"Off\",\"1\":\"On\",\"2\":\"Auto\"}")] string optionsJson)
+    {
+        var node = ResolveNode(nodeId);
+        if (node is null) return Task.FromResult($"Node '{nodeId}' not found.");
+
+        try
+        {
+            var parsed = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(optionsJson);
+            if (parsed is null || parsed.Count == 0)
+                return Task.FromResult("Options JSON must be a non-empty object.");
+
+            var dropdown = new Dictionary<int, string>();
+            foreach (var (key, val) in parsed)
+            {
+                if (!int.TryParse(key, out var intKey))
+                    return Task.FromResult($"Key '{key}' is not a valid integer.");
+                dropdown[intKey] = val;
+            }
+
+            node.DropDownList = dropdown;
+            return Task.FromResult($"Dropdown configured on '{node.Label}' with {dropdown.Count} options.");
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return Task.FromResult($"Invalid JSON: {ex.Message}");
+        }
+    }
+
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Large)]
+    [SearchHint("export", "json", "address table", "serialize")]
+    [Description("Export the entire address table as JSON. Optionally write to a file.")]
+    public Task<string> ExportAddressTableJson(
+        [Description("File path to write JSON (optional, if omitted returns content)")] string? filePath = null)
+    {
+        var entries = addressTableService.Roots.ToList();
+        if (entries.Count == 0) return Task.FromResult("Address table is empty.");
+
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            entries.Select(SerializeNode), _jsonOptsIndented);
+
+        if (!string.IsNullOrWhiteSpace(filePath))
+        {
+            if (filePath.Contains("..")) return Task.FromResult("Path traversal not allowed.");
+            System.IO.File.WriteAllText(filePath, json);
+            return Task.FromResult($"Address table exported to {filePath} ({entries.Count} root entries).");
+        }
+        return Task.FromResult(json.Length > _limits.MaxExportChars
+            ? TokenLimits.Truncate(json, _limits.MaxExportChars)
+            : json);
+    }
+
+    private static object SerializeNode(AddressTableNode node) => new
+    {
+        node.Id, node.Label, node.Address, type = node.DataType.ToString(),
+        node.UserColor, node.ShowAsHex, node.ShowAsSigned,
+        isGroup = node.IsGroup, isScript = node.IsScriptEntry,
+        dropDown = node.DropDownList,
+        children = node.Children.Select(SerializeNode).ToList()
+    };
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [SearchHint("import", "json", "address table", "load entries")]
+    [Description("Import address table entries from JSON. By default merges with existing entries; set merge=false to replace all.")]
+    public Task<string> ImportAddressTableJson(
+        [Description("JSON array of address table entries")] string json,
+        [Description("Merge with existing entries (true) or replace all (false)")] bool merge = true)
+    {
+        try
+        {
+            var entries = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(json);
+            if (entries.ValueKind != System.Text.Json.JsonValueKind.Array)
+                return Task.FromResult("JSON must be an array of entries.");
+
+            if (!merge)
+                addressTableService.ClearAll();
+
+            int imported = 0;
+            foreach (var entry in entries.EnumerateArray())
+            {
+                var label = entry.TryGetProperty("label", out var lbl) ? lbl.GetString() ?? "" : "";
+                var address = entry.TryGetProperty("address", out var addr) ? addr.GetString() ?? "" : "";
+
+                var dataType = MemoryDataType.Int32;
+                if (entry.TryGetProperty("type", out var dt) && Enum.TryParse<MemoryDataType>(dt.GetString(), true, out var parsed))
+                    dataType = parsed;
+
+                var added = addressTableService.AddEntry(address, dataType, "", label);
+                var node = addressTableService.FindNode(added.Id);
+                if (node is not null)
+                {
+                    node.UserColor = entry.TryGetProperty("userColor", out var clr) ? clr.GetString() : null;
+                    node.ShowAsHex = entry.TryGetProperty("showAsHex", out var hex) && hex.GetBoolean();
+                    node.ShowAsSigned = entry.TryGetProperty("showAsSigned", out var sgn) && sgn.GetBoolean();
+                }
+                imported++;
+            }
+
+            return Task.FromResult($"Imported {imported} entries{(merge ? " (merged)" : " (replaced)")}.");
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            return Task.FromResult($"Invalid JSON: {ex.Message}");
+        }
+    }
+
     // ── Session management tools ──
 
     [ConcurrencySafe]
@@ -1727,6 +1900,7 @@ public sealed partial class AiToolFunctions(
 
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Change memory page protection for a region.")]
     public async Task<string> ChangeMemoryProtection(
         [Description("Process ID")] int processId,
@@ -1750,6 +1924,7 @@ public sealed partial class AiToolFunctions(
 
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.RequiresCleanup)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Allocate memory in the target process.")]
     public async Task<string> AllocateMemory(
         [Description("Process ID")] int processId,
@@ -1772,6 +1947,7 @@ public sealed partial class AiToolFunctions(
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Free previously allocated memory in the target process.")]
     public async Task<string> FreeMemory(
         [Description("Process ID")] int processId,
@@ -2092,6 +2268,7 @@ public sealed partial class AiToolFunctions(
 
     [Destructive]
     [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Rollback all operations in a transaction group, restoring original state in reverse order.")]
     public async Task<string> RollbackTransaction([Description("Transaction group ID")] string groupId)
     {
@@ -2226,6 +2403,12 @@ public sealed partial class AiToolFunctions(
     private static readonly JsonSerializerOptions _jsonOpts = new()
     {
         WriteIndented = false,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
+    private static readonly JsonSerializerOptions _jsonOptsIndented = new()
+    {
+        WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
 

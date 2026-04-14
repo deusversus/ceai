@@ -22,10 +22,23 @@ public sealed partial class AiToolFunctions
         [Description("Type: Software, HardwareExecute, HardwareWrite, HardwareReadWrite")] string type = "Software",
         [Description("Hit action: Break, Log, LogAndContinue")] string hitAction = "LogAndContinue",
         [Description("Mode: Auto, Stealth, PageGuard, Hardware, Software")] string mode = "Auto",
-        [Description("Auto-remove after first hit")] bool singleHit = false)
+        [Description("Auto-remove after first hit")] bool singleHit = false,
+        [Description("Condition expression (e.g., 'RAX == 0x100', '> 10' for hit count). Omit for unconditional.")] string? condition = null,
+        [Description("Condition type: RegisterCompare, MemoryCompare, HitCount (default RegisterCompare)")] string? conditionType = null,
+        [Description("Thread ID filter — only break on this thread (0 or omit for all threads)")] int? threadFilter = null)
     {
         try
         {
+            // If a condition or threadFilter is provided, delegate to conditional breakpoint path
+            if (!string.IsNullOrWhiteSpace(condition) || (threadFilter.HasValue && threadFilter.Value != 0))
+            {
+                return await SetConditionalBreakpoint(
+                    processId, address, type,
+                    condition ?? "",
+                    conditionType ?? "RegisterCompare",
+                    mode, threadFilter ?? 0).ConfigureAwait(false);
+            }
+
             var pidError = ValidateDestructiveProcessId(processId);
             if (pidError is not null) return pidError;
             if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
@@ -182,6 +195,7 @@ public sealed partial class AiToolFunctions
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Remove a breakpoint by its ID.")]
     public async Task<string> RemoveBreakpoint(
         [Description("Process ID")] int processId,
@@ -195,6 +209,7 @@ public sealed partial class AiToolFunctions
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("EMERGENCY: Restore page guard protections for hung target.")]
     public async Task<string> EmergencyRestorePageProtection(
         [Description("Process ID of the hung process")] int processId)
@@ -209,6 +224,7 @@ public sealed partial class AiToolFunctions
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("EMERGENCY: Force detach debugger, clean up all BPs.")]
     public async Task<string> ForceDetachAndCleanup(
         [Description("Process ID of the hung process")] int processId)
@@ -238,7 +254,9 @@ public sealed partial class AiToolFunctions
                 b.Mode,
                 b.HitCount,
                 b.IsEnabled,
-                lifecycleStatus = breakpointService.GetLifecycleStatus(b.Id).ToString()
+                lifecycleStatus = breakpointService.GetLifecycleStatus(b.Id).ToString(),
+                condition = b.Condition,
+                threadFilter = b.ThreadFilter
             }),
             count = bps.Count
         });
@@ -555,6 +573,7 @@ public sealed partial class AiToolFunctions
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Register a Lua function to be called when a breakpoint is hit. The Lua function receives the register snapshot as a table.")]
     public string RegisterBreakpointLuaCallback(
         [Description("Breakpoint ID")] string breakpointId,
@@ -566,6 +585,7 @@ public sealed partial class AiToolFunctions
     }
 
     [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Remove a previously registered Lua callback from a breakpoint.")]
     public string UnregisterBreakpointLuaCallback(
         [Description("Breakpoint ID")] string breakpointId)
@@ -779,6 +799,7 @@ public sealed partial class AiToolFunctions
     }
 
     [ConcurrencySafe]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Remove a breakpoint group definition (does not remove the breakpoints themselves).")]
     public string RemoveBreakpointGroup([Description("Group ID")] string groupId)
     {

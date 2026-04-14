@@ -67,6 +67,7 @@ public sealed partial class AiToolFunctions
     }
 
     [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Remove a stealth code cave hook, restoring original bytes.")]
     public async Task<string> RemoveCodeCaveHook(
         [Description("Process ID")] int processId,

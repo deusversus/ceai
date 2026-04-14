@@ -614,4 +614,54 @@ public class AiToolFunctionsDeepTests
         var result = await tools.ResolveSymbol(Pid, "unknown.dll+0x100");
         Assert.Contains("not found", result);
     }
+
+    // ── Attribute coverage tests ──
+
+    [Fact]
+    public void AllToolMethods_HaveMaxResultSizeAttribute()
+    {
+        var toolType = typeof(AiToolFunctions);
+        var toolMethods = toolType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly)
+            .Where(m => m.GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), false).Length > 0)
+            .Where(m => m.ReturnType == typeof(Task<string>) || m.ReturnType == typeof(string))
+            .ToList();
+
+        var missing = toolMethods
+            .Where(m => m.GetCustomAttributes(typeof(MaxResultSizeAttribute), false).Length == 0)
+            .Select(m => m.Name)
+            .ToList();
+
+        Assert.True(missing.Count == 0,
+            $"These tool methods are missing [MaxResultSize]: {string.Join(", ", missing)}. " +
+            $"Every tool must declare a result size hint for the token budget pipeline.");
+    }
+
+    [Fact]
+    public void AllToolMethods_AreInToolCategories()
+    {
+        var toolType = typeof(AiToolFunctions);
+        var toolMethods = toolType.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.DeclaredOnly)
+            .Where(m => m.GetCustomAttributes(typeof(System.ComponentModel.DescriptionAttribute), false).Length > 0)
+            .Where(m => m.ReturnType == typeof(Task<string>) || m.ReturnType == typeof(string))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Collect all tool names from Core + all Categories
+        var categorized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in ToolCategories.Core)
+            categorized.Add(name);
+        foreach (var (_, names) in ToolCategories.Categories)
+            foreach (var name in names)
+                categorized.Add(name);
+
+        var uncategorized = toolMethods
+            .Where(name => !categorized.Contains(name))
+            .ToList();
+
+        // Allow some internal/helper methods that aren't real tools
+        // (e.g., methods that are only called by other tools)
+        Assert.True(uncategorized.Count == 0,
+            $"These tool methods are not in any ToolCategories category or Core: {string.Join(", ", uncategorized)}. " +
+            $"Add them to a category in AiOperatorService.ToolCategories so request_tools() can discover them.");
+    }
 }

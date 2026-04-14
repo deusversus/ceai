@@ -416,7 +416,8 @@ public partial class App : System.Windows.Application
                 pluginHost: sp.GetRequiredService<PluginHost>(),
                 uiCommandBus: sp.GetRequiredService<IUiCommandBus>(),
                 speedHackService: sp.GetRequiredService<SpeedHackService>(),
-                vehDebugService: sp.GetRequiredService<VehDebugService>());
+                vehDebugService: sp.GetRequiredService<VehDebugService>(),
+                appSettingsService: sp.GetRequiredService<AppSettingsService>());
         });
 
         // ── AI operator service (starts with null IChatClient — MainWindow hot-swaps it) ──

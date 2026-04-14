@@ -149,7 +149,8 @@ internal static class ToolCategories
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
             "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript",
             "ModifyAddressTableEntry", "AdjustValue",
-            "RemoveFromAddressTable", "RefreshAddressTable" ],
+            "RemoveFromAddressTable", "RefreshAddressTable",
+            "SetEntryColor", "DuplicateEntry", "ConfigureDropDown", "SummarizeCheatTable" ],
         ["scanning_advanced"] = [
             "ScanForPointers", "RescanPointerPath", "ValidatePointerPaths",
             "UndoScan", "GroupedScan", "ResumePointerScan", "RescanAllPointerPaths",
@@ -160,7 +161,11 @@ internal static class ToolCategories
             "GetBreakpointHitLog", "GetBreakpointHealth", "GetBreakpointModeCapabilities",
             "ProbeTargetRisk", "EmergencyRestorePageProtection", "ForceDetachAndCleanup",
             "SetConditionalBreakpoint", "TraceFromAddress",
-            "RegisterBreakpointLuaCallback", "UnregisterBreakpointLuaCallback" ],
+            "RegisterBreakpointLuaCallback", "UnregisterBreakpointLuaCallback",
+            "SetRegionBreakpoint", "CreateBreakpointGroup", "EnableBreakpointGroup",
+            "DisableBreakpointGroup", "RemoveBreakpointGroup", "ListBreakpointGroups",
+            "GetBreakpointHitStatistics", "ExportBreakpointHitLog",
+            "GetFilteredBreakpointHitLog", "SaveBreakpointProfile", "LoadBreakpointProfile" ],
         ["disassembly"] = [
             "Disassemble", "FindWritersToOffset", "FindFunctionBoundaries", "GetCallerGraph",
             "SearchInstructionPattern", "FindByMemoryOperand",
@@ -177,7 +182,8 @@ internal static class ToolCategories
             "EditScript", "CreateScriptEntry",
             "GenerateAutoAssemblerScript", "GenerateLuaScript", "GenerateTrainerScript",
             "ExecuteAutoAssemblerScript", "DisableAutoAssemblerScript",
-            "ListRegisteredSymbols", "ResolveRegisteredSymbol" ],
+            "ListRegisteredSymbols", "ResolveRegisteredSymbol",
+            "RegisterSymbol", "UnregisterSymbol" ],
         ["snapshots"] = [
             "CaptureSnapshot", "CompareSnapshots", "CompareSnapshotWithLive",
             "ListSnapshots", "DeleteSnapshot" ],
@@ -197,7 +203,8 @@ internal static class ToolCategories
         ["vision"] = [
             "CaptureProcessWindow" ],
         ["lua"] = [
-            "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression", "ResetLuaEngine" ],
+            "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression", "ResetLuaEngine",
+            "SetLuaGlobal", "GetLuaGlobal" ],
         ["utility"] = [
             "IdentifyArtifact" ],
         // Demoted from core — loaded on-demand
@@ -214,6 +221,31 @@ internal static class ToolCategories
         ["session_management"] = [
             "switch_model", "schedule_task", "list_tasks", "cancel_task",
             "get_session_info", "search_sessions" ],
+        // ── Phase 10+ tools ──
+        ["veh_debug"] = [
+            "InjectVehAgent", "EjectVehAgent", "SetVehBreakpoint", "RemoveVehBreakpoint",
+            "RefreshVehThreads", "TraceVehBreakpoint", "StopVehTrace", "GetVehStatus",
+            "RegisterVehLuaCallback", "UnregisterVehLuaCallback",
+            "EnableVehStealth", "DisableVehStealth",
+            "SetVehPageGuardBreakpoint", "RemoveVehPageGuardBreakpoint",
+            "SetVehInt3Breakpoint", "RemoveVehInt3Breakpoint",
+            "PollVehBreakpointHits", "GetVehBreakpointSlotUsage" ],
+        ["speed_hack"] = [
+            "GetSpeedHackState", "SetSpeedMultiplier", "RemoveSpeedHack" ],
+        ["copilot"] = [
+            "GetUiCommandWhitelist", "ExecuteUiCommand", "GetCurrentUiState" ],
+        ["plugins"] = [
+            "ListPlugins", "GetPluginTools" ],
+        ["autorun"] = [
+            "ListAutorunScripts", "SetAutorunEnabled" ],
+        ["settings"] = [
+            "GetSettings", "UpdateSetting" ],
+        ["memory_browser"] = [
+            "SearchMemoryPattern", "FollowPointer",
+            "AddBookmark", "RemoveBookmark", "ListBookmarks" ],
+        ["export"] = [
+            "ExportReport", "ExportChat",
+            "ExportAddressTableJson", "ImportAddressTableJson" ],
     };
 
     /// <summary>Extra tools added to core for Full-tier models (Claude, GPT-4, etc.).</summary>
@@ -242,6 +274,8 @@ internal static class ToolCategories
         ("hooks", "disassembly"),
         ("disassembly", "symbols"),
         ("lua", "scripts"),
+        ("veh_debug", "breakpoints"),
+        ("speed_hack", "hooks"),
     ];
 }
 

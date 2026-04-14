@@ -90,6 +90,34 @@ public sealed class VehDebugService
         return _engine.GetHitStreamAsync(processId, ct);
     }
 
+    public async Task<VehBreakpointResult> SetPageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (_engine is null) return new VehBreakpointResult(false, Error: "VEH debugger not available.");
+        var status = _engine.GetStatus(processId);
+        if (!status.IsInjected) return new VehBreakpointResult(false, Error: "VEH agent not injected. Call InjectVehAgent first.");
+        return await _engine.SetPageGuardBreakpointAsync(processId, address, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> RemovePageGuardBreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (_engine is null) return false;
+        return await _engine.RemovePageGuardBreakpointAsync(processId, address, ct).ConfigureAwait(false);
+    }
+
+    public async Task<VehBreakpointResult> SetInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (_engine is null) return new VehBreakpointResult(false, Error: "VEH debugger not available.");
+        var status = _engine.GetStatus(processId);
+        if (!status.IsInjected) return new VehBreakpointResult(false, Error: "VEH agent not injected. Call InjectVehAgent first.");
+        return await _engine.SetInt3BreakpointAsync(processId, address, ct).ConfigureAwait(false);
+    }
+
+    public async Task<bool> RemoveInt3BreakpointAsync(int processId, nuint address, CancellationToken ct = default)
+    {
+        if (_engine is null) return false;
+        return await _engine.RemoveInt3BreakpointAsync(processId, address, ct).ConfigureAwait(false);
+    }
+
     public VehStatus GetStatus(int processId)
     {
         if (_engine is null) return new VehStatus(false, 0, 0);

@@ -218,6 +218,114 @@ public class BreakpointsViewModelTests
         Assert.Equal("HardwareWrite", vm.Breakpoints[0].Type);
     }
 
+    // ── C5: Conditional breakpoint command ──
+
+    [Fact]
+    public async Task SetConditionalBreakpoint_ValidInput_CreatesBreakpoint()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.ConditionalAddress = "0x7FF00100";
+        vm.ConditionExpression = "RAX == 0x100";
+        vm.ConditionType = "RegisterCompare";
+        vm.ThreadFilterInput = "";
+
+        await vm.SetConditionalBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.Breakpoints);
+        Assert.Equal("RAX == 0x100", vm.Breakpoints[0].Condition);
+        Assert.Contains(_outputLog.LoggedMessages, m => m.Level == "Info" && m.Message.Contains("Conditional BP set"));
+    }
+
+    [Fact]
+    public async Task SetConditionalBreakpoint_WithThreadFilter_CreatesBreakpoint()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.ConditionalAddress = "0x7FF00200";
+        vm.ConditionExpression = "RCX > 0";
+        vm.ConditionType = "RegisterCompare";
+        vm.ThreadFilterInput = "42";
+
+        await vm.SetConditionalBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.Breakpoints);
+        Assert.Equal("42", vm.Breakpoints[0].ThreadFilter);
+    }
+
+    [Fact]
+    public async Task SetConditionalBreakpoint_EmptyExpression_DoesNothing()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.ConditionalAddress = "0x7FF00100";
+        vm.ConditionExpression = "";
+
+        await vm.SetConditionalBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.Breakpoints);
+    }
+
+    [Fact]
+    public async Task SetConditionalBreakpoint_EmptyAddress_DoesNothing()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.ConditionalAddress = "";
+        vm.ConditionExpression = "RAX == 0x1";
+
+        await vm.SetConditionalBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.Breakpoints);
+    }
+
+    [Fact]
+    public async Task SetConditionalBreakpoint_NoProcess_DoesNothing()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = null;
+        vm.ConditionalAddress = "0x1000";
+        vm.ConditionExpression = "RAX == 0x1";
+
+        await vm.SetConditionalBreakpointCommand.ExecuteAsync(null);
+
+        Assert.Empty(vm.Breakpoints);
+    }
+
+    [Fact]
+    public async Task SetConditionalBreakpoint_InvalidConditionType_DefaultsToRegisterCompare()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        vm.ConditionalAddress = "0x7FF00100";
+        vm.ConditionExpression = "RAX > 0";
+        vm.ConditionType = "NotARealType";
+
+        await vm.SetConditionalBreakpointCommand.ExecuteAsync(null);
+
+        // Should still create — defaults to RegisterCompare
+        Assert.Single(vm.Breakpoints);
+    }
+
+    // ── C2: Lifecycle status in refresh ──
+
+    [Fact]
+    public async Task RefreshBreakpoints_ConditionAndThreadFilter_Populated()
+    {
+        var vm = CreateVm();
+        _processContext.AttachedProcessId = 1234;
+        var cond = new BreakpointCondition("RBX != 0", BreakpointConditionType.RegisterCompare);
+        _breakpointEngine.AddCannedBreakpoint(new BreakpointDescriptor(
+            "bp-cond", 0x7FF00100, BreakpointType.HardwareExecute,
+            BreakpointHitAction.LogAndContinue, true, 0, BreakpointMode.Hardware, cond, 99));
+
+        await vm.RefreshBreakpointsCommand.ExecuteAsync(null);
+
+        Assert.Single(vm.Breakpoints);
+        Assert.Equal("RBX != 0", vm.Breakpoints[0].Condition);
+        Assert.Equal("99", vm.Breakpoints[0].ThreadFilter);
+    }
+
     // ── Code cave hooks ──
 
     [Fact]

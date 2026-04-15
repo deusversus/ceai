@@ -65,12 +65,18 @@ public sealed class PointerScannerService(IEngineFacade engine)
     /// <summary>
     /// Scan for single-level pointers to a target address within loaded modules.
     /// </summary>
+    /// <summary>
+    /// Scan for pointer chains to a target address within loaded modules.
+    /// </summary>
+    /// <param name="perDepthMaxOffset">Optional per-depth offset limits (index 0 = level 1, etc.).
+    /// Falls back to <paramref name="maxOffset"/> for any depth not covered.</param>
     public async Task<IReadOnlyList<PointerPath>> ScanForPointersAsync(
         int processId,
         nuint targetAddress,
         int maxDepth = 3,
         long maxOffset = 0x2000,
         IReadOnlyList<string>? moduleFilter = null,
+        IReadOnlyList<long>? perDepthMaxOffset = null,
         CancellationToken ct = default)
     {
         // Clear resume state on new scan
@@ -88,7 +94,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
         _lastModules = modules;
         _lastProcessId = processId;
 
-        return await ScanFromModuleIndex(processId, modules, targetAddress, maxDepth, maxOffset, 0, ct).ConfigureAwait(false);
+        return await ScanFromModuleIndex(processId, modules, targetAddress, maxDepth, maxOffset, 0, ct, perDepthMaxOffset).ConfigureAwait(false);
     }
 
     /// <summary>Resume a cancelled pointer scan from where it left off.</summary>
@@ -107,6 +113,14 @@ public sealed class PointerScannerService(IEngineFacade engine)
         return _partialResults;
     }
 
+    /// <summary>Resolve the max offset for a given depth level, using per-depth overrides when available.</summary>
+    private static long GetMaxOffsetForDepth(int depthLevel, long defaultMaxOffset, IReadOnlyList<long>? perDepthMaxOffset)
+    {
+        if (perDepthMaxOffset is not null && depthLevel < perDepthMaxOffset.Count)
+            return perDepthMaxOffset[depthLevel];
+        return defaultMaxOffset;
+    }
+
     private async Task<IReadOnlyList<PointerPath>> ScanFromModuleIndex(
         int processId,
         IReadOnlyList<ModuleDescriptor> modules,
@@ -114,14 +128,16 @@ public sealed class PointerScannerService(IEngineFacade engine)
         int maxDepth,
         long maxOffset,
         int startModuleIndex,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<long>? perDepthMaxOffset = null)
     {
         var results = new List<PointerPath>();
 
         try
         {
             // Phase 1: Find all single-level pointers
-            var level1 = await FindPointersToAddress(processId, modules, targetAddress, maxOffset, startModuleIndex, ct).ConfigureAwait(false);
+            var level1Offset = GetMaxOffsetForDepth(0, maxOffset, perDepthMaxOffset);
+            var level1 = await FindPointersToAddress(processId, modules, targetAddress, level1Offset, startModuleIndex, ct).ConfigureAwait(false);
             foreach (var (addr, offset, mod) in level1)
             {
                 results.Add(new PointerPath(mod.Name, mod.BaseAddress,
@@ -131,10 +147,11 @@ public sealed class PointerScannerService(IEngineFacade engine)
             if (maxDepth < 2 || results.Count > 500) return results;
 
             // Phase 2: For each level-1 pointer, find pointers to IT
+            var level2Offset = GetMaxOffsetForDepth(1, maxOffset, perDepthMaxOffset);
             foreach (var (l1Addr, l1Offset, l1Mod) in level1)
             {
                 ct.ThrowIfCancellationRequested();
-                var level2 = await FindPointersToAddress(processId, modules, l1Addr, maxOffset, 0, ct).ConfigureAwait(false);
+                var level2 = await FindPointersToAddress(processId, modules, l1Addr, level2Offset, 0, ct).ConfigureAwait(false);
                 foreach (var (l2Addr, l2Offset, l2Mod) in level2)
                 {
                     results.Add(new PointerPath(l2Mod.Name, l2Mod.BaseAddress,

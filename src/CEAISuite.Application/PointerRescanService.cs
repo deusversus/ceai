@@ -104,15 +104,41 @@ public sealed class PointerRescanService(IEngineFacade engine)
 
     /// <summary>
     /// Re-resolve multiple pointer paths and rank by stability.
+    /// When <paramref name="skipUnchangedModules"/> is true, paths whose module base
+    /// matches the current load address are fast-tracked as "Stable" without re-walking.
     /// </summary>
     public async Task<IReadOnlyList<PointerRescanResult>> RescanAllAsync(
         int processId, IReadOnlyList<PointerPath> paths, nuint? expectedValue = null,
-        CancellationToken ct = default)
+        bool skipUnchangedModules = false, CancellationToken ct = default)
     {
+        // Pre-fetch current module bases for smart rescan
+        Dictionary<string, nuint>? currentModuleBases = null;
+        if (skipUnchangedModules)
+        {
+            try
+            {
+                var attachment = await engine.AttachAsync(processId, ct).ConfigureAwait(false);
+                currentModuleBases = attachment.Modules
+                    .ToDictionary(m => m.Name, m => m.BaseAddress, StringComparer.OrdinalIgnoreCase);
+            }
+            catch { /* fall through to full rescan */ }
+        }
+
         var results = new List<PointerRescanResult>();
         foreach (var path in paths)
         {
             ct.ThrowIfCancellationRequested();
+
+            // Smart rescan: if module base hasn't changed and we recorded the original base,
+            // the path is very likely still valid — skip the expensive re-walk.
+            if (currentModuleBases is not null &&
+                currentModuleBases.TryGetValue(path.ModuleName, out var currentBase) &&
+                currentBase == path.ModuleBase)
+            {
+                results.Add(new PointerRescanResult(path, path.ResolvedAddress, true, 1.0, "Unchanged (module base identical)"));
+                continue;
+            }
+
             results.Add(await RescanPathAsync(processId, path, expectedValue, ct).ConfigureAwait(false));
         }
 
@@ -128,7 +154,7 @@ public sealed class PointerRescanService(IEngineFacade engine)
         int processId, IReadOnlyList<PointerPath> existingPaths, nuint originalTarget,
         CancellationToken ct = default)
     {
-        var results = await RescanAllAsync(processId, existingPaths, originalTarget, ct).ConfigureAwait(false);
+        var results = await RescanAllAsync(processId, existingPaths, originalTarget, ct: ct).ConfigureAwait(false);
         var validPaths = results.Where(r => r.IsValid).ToList();
 
         // If no paths are still valid, caller should run a fresh pointer scan

@@ -77,7 +77,7 @@ public partial class PointerScannerViewModel : ObservableObject, IDisposable
             CanResume = false;
             var modFilter = ParseModuleFilter(ModuleFilter);
             var paths = await _scannerService.ScanForPointersAsync(
-                pid.Value, addr, MaxDepth, maxOff, modFilter, _scanCts.Token);
+                pid.Value, addr, MaxDepth, maxOff, modFilter, ct: _scanCts.Token);
 
             foreach (var p in paths)
             {
@@ -279,6 +279,12 @@ public partial class PointerScannerViewModel : ObservableObject, IDisposable
         for (int i = 0; i < items.Count; i++)
         {
             items[i].Status = statuses[i].Status;
+            items[i].StabilityScore = statuses[i].Status switch
+            {
+                "Stable" => 1.0,
+                "Drifted" => 0.5,
+                _ => 0.0
+            };
             switch (statuses[i].Status)
             {
                 case "Stable": stable++; break;
@@ -293,6 +299,26 @@ public partial class PointerScannerViewModel : ObservableObject, IDisposable
     {
         var (status, _) = await _scannerService.ValidatePathAsync(pid, path);
         return (status, index);
+    }
+
+    [RelayCommand]
+    private void SortByStability()
+    {
+        if (Results.Count == 0) { StatusText = "No results to sort."; return; }
+
+        var sorted = Results
+            .OrderByDescending(r => r.Status switch
+            {
+                "Stable" or "Unchanged" => 3,
+                "Drifted" => 2,
+                "Found" or "Loaded" or "Common" => 1,
+                _ => 0 // Broken
+            })
+            .ThenByDescending(r => r.StabilityScore)
+            .ToList();
+
+        Results = new ObservableCollection<PointerPathDisplayItem>(sorted);
+        StatusText = $"{Results.Count} results sorted by stability.";
     }
 
     [RelayCommand]

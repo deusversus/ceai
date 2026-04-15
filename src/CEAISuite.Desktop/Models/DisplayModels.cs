@@ -286,9 +286,23 @@ public sealed partial class PointerPathDisplayItem : ObservableObject
     public string ModuleName { get; init; } = "";
     public CEAISuite.Application.PointerPath? Source { get; init; }
 
-    /// <summary>Validation status: Found, Stable, Drifted, Broken.</summary>
+    /// <summary>Validation status: Found, Stable, Drifted, Broken, Unchanged, Loaded, Common.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StabilityColor))]
     private string _status = "Found";
+
+    /// <summary>Stability score from rescan (0.0–1.0). -1 means not yet validated.</summary>
+    [ObservableProperty]
+    private double _stabilityScore = -1;
+
+    /// <summary>Color for stability display: green = Stable/Unchanged, yellow = Drifted, red = Broken, gray = unvalidated.</summary>
+    public string StabilityColor => Status switch
+    {
+        "Stable" or "Unchanged" => "#22AA22",
+        "Drifted" => "#CCAA00",
+        "Broken" => "#CC2222",
+        _ => "#888888"
+    };
 }
 
 public sealed partial class DisassemblyLineDisplayItem : ObservableObject

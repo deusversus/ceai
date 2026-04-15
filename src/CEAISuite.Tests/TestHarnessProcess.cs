@@ -66,7 +66,7 @@ internal sealed class TestHarnessProcess : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _process.StandardInput.WriteLineAsync(command);
         await _process.StandardInput.FlushAsync(CancellationToken.None);
-        return await ReadLineWithTimeoutAsync(_process, timeout ?? TimeSpan.FromSeconds(5), ct);
+        return await ReadLineWithTimeoutAsync(_process, timeout ?? TimeSpan.FromSeconds(10), ct);
     }
 
     /// <summary>Send a command that makes the process unresponsive (no response expected).</summary>

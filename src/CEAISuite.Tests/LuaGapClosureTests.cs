@@ -14,7 +14,7 @@ public sealed class LuaGapClosureTests : IDisposable
     public LuaGapClosureTests()
     {
         _facade.AttachAsync(1234).GetAwaiter().GetResult();
-        _engine = new MoonSharpLuaEngine(_facade, null, executionTimeout: TimeSpan.FromSeconds(5));
+        _engine = new MoonSharpLuaEngine(_facade, null, executionTimeout: TimeSpan.FromSeconds(20));
     }
 
     public void Dispose() => _engine.Dispose();

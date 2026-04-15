@@ -168,12 +168,24 @@ public sealed class WindowsEngineFacade : IEngineFacade
                                 module => new ModuleDescriptor(
                                     module.ModuleName,
                                     unchecked((nuint)module.BaseAddress.ToInt64()),
-                                    module.ModuleMemorySize))
+                                    module.ModuleMemorySize,
+                                    module.FileName))
                             .OrderBy(module => module.Name, StringComparer.OrdinalIgnoreCase)
                             .ToArray();
                         Trace($"AttachAsync: enumerated {modules.Length} modules successfully.");
 
-                        var attachment = new EngineAttachment(process.Id, process.ProcessName, modules);
+                        var arch = TryGetArchitectureCached(process.Id);
+                        int? parentPid = null;
+                        string? cmdLine = null;
+                        string? exePath = null;
+                        bool elevated = false;
+                        try { parentPid = TryGetParentProcessId(process.Id); } catch { /* best-effort */ }
+                        try { cmdLine = TryGetCommandLine(process); } catch { /* best-effort */ }
+                        try { exePath = TryGetExecutablePath(process.Id); } catch { /* best-effort */ }
+                        try { elevated = TryGetIsElevated(process.Id); } catch { /* best-effort */ }
+
+                        var attachment = new EngineAttachment(process.Id, process.ProcessName, modules,
+                            arch, parentPid, cmdLine, exePath, elevated);
                         lock (_attachLock)
                         {
                             _cachedAttachment = attachment;
@@ -451,7 +463,21 @@ public sealed class WindowsEngineFacade : IEngineFacade
     private ProcessDescriptor CreateDescriptor(Process process)
     {
         var architecture = TryGetArchitectureCached(process.Id);
-        return new ProcessDescriptor(process.Id, process.ProcessName, architecture);
+
+        int? parentPid = null;
+        string? exePath = null;
+        string? commandLine = null;
+        string? windowTitle = null;
+        bool isElevated = false;
+
+        try { parentPid = TryGetParentProcessId(process.Id); } catch (Exception ex) { if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug)) _logger.LogDebug(ex, "Failed to get parent PID for {Pid}", process.Id); }
+        try { exePath = TryGetExecutablePath(process.Id); } catch (Exception ex) { if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug)) _logger.LogDebug(ex, "Failed to get executable path for {Pid}", process.Id); }
+        try { commandLine = TryGetCommandLine(process); } catch (Exception ex) { if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug)) _logger.LogDebug(ex, "Failed to get command line for {Pid}", process.Id); }
+        try { windowTitle = TryGetWindowTitle(process); } catch (Exception ex) { if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug)) _logger.LogDebug(ex, "Failed to get window title for {Pid}", process.Id); }
+        try { isElevated = TryGetIsElevated(process.Id); } catch (Exception ex) { if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug)) _logger.LogDebug(ex, "Failed to get elevation status for {Pid}", process.Id); }
+
+        return new ProcessDescriptor(process.Id, process.ProcessName, architecture,
+            parentPid, exePath, commandLine, windowTitle, isElevated);
     }
 
     // 4D: Cache architecture per attached process
@@ -575,6 +601,110 @@ public sealed class WindowsEngineFacade : IEngineFacade
         return System.Text.Encoding.UTF8.GetString(bytes, 0, length);
     }
 
+    // ──────────────────────────────────────────────────────────
+    // Process information helpers (Phase 12A)
+    // ──────────────────────────────────────────────────────────
+
+    private static int? TryGetParentProcessId(int processId)
+    {
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (handle == IntPtr.Zero) return null;
+        try
+        {
+            var info = new PROCESS_BASIC_INFORMATION();
+            int status = NtQueryInformationProcess(handle, 0 /* ProcessBasicInformation */, ref info,
+                Marshal.SizeOf<PROCESS_BASIC_INFORMATION>(), out _);
+            if (status != 0) return null;
+            var ppid = checked((int)info.InheritedFromUniqueProcessId);
+            return ppid > 0 ? ppid : null;
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    private static string? TryGetExecutablePath(int processId)
+    {
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (handle == IntPtr.Zero) return null;
+        try
+        {
+            var buffer = new char[1024];
+            uint size = (uint)buffer.Length;
+            return QueryFullProcessImageName(handle, 0, buffer, ref size) ? new string(buffer, 0, (int)size) : null;
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    private static string? TryGetCommandLine(Process process)
+    {
+        // .NET 9+ exposes Environment.ProcessPath but not command line of another process.
+        // Use WMI-free approach: the Process class exposes StartInfo only for self-launched
+        // processes, so fall back to the executable path for external processes.
+        // Full command-line via NtQueryInformationProcess(ProcessCommandLineInformation=60)
+        // is available on Win 8.1+ and avoids WMI overhead.
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, process.Id);
+        if (handle == IntPtr.Zero) return null;
+        try
+        {
+            // ProcessCommandLineInformation = 60 (Win 8.1+)
+            const int ProcessCommandLineInformation = 60;
+            int status = NtQueryInformationProcess(handle, ProcessCommandLineInformation, IntPtr.Zero, 0, out int needed);
+            if (needed <= 0) return null;
+
+            var buffer = Marshal.AllocHGlobal(needed);
+            try
+            {
+                status = NtQueryInformationProcess(handle, ProcessCommandLineInformation, buffer, needed, out _);
+                if (status != 0) return null;
+                // UNICODE_STRING: ushort Length, ushort MaxLength, IntPtr Buffer
+                var length = Marshal.ReadInt16(buffer);
+                var stringPtr = Marshal.ReadIntPtr(buffer + IntPtr.Size);
+                return length > 0 ? Marshal.PtrToStringUni(stringPtr, length / 2) : null;
+            }
+            finally { Marshal.FreeHGlobal(buffer); }
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    private static string? TryGetWindowTitle(Process process)
+    {
+        try
+        {
+            var title = process.MainWindowTitle;
+            return string.IsNullOrWhiteSpace(title) ? null : title;
+        }
+        catch { return null; }
+    }
+
+    private static bool TryGetIsElevated(int processId)
+    {
+        var handle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        if (handle == IntPtr.Zero) return false;
+        try
+        {
+            if (!OpenProcessToken(handle, TokenQuery, out var tokenHandle)) return false;
+            try
+            {
+                var elevationSize = Marshal.SizeOf<TOKEN_ELEVATION>();
+                var buffer = Marshal.AllocHGlobal(elevationSize);
+                try
+                {
+                    if (!GetTokenInformation(tokenHandle, TOKEN_INFORMATION_CLASS.TokenElevation,
+                            buffer, (uint)elevationSize, out _))
+                        return false;
+                    var elevation = Marshal.PtrToStructure<TOKEN_ELEVATION>(buffer);
+                    return elevation.TokenIsElevated != 0;
+                }
+                finally { Marshal.FreeHGlobal(buffer); }
+            }
+            finally { CloseHandle(tokenHandle); }
+        }
+        finally { CloseHandle(handle); }
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // P/Invoke declarations
+    // ──────────────────────────────────────────────────────────
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, int processId);
 
@@ -603,4 +733,50 @@ public sealed class WindowsEngineFacade : IEngineFacade
     [DllImport("kernel32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool CloseHandle(IntPtr handle);
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool QueryFullProcessImageName(IntPtr hProcess, uint dwFlags,
+        [Out] char[] lpExeName, ref uint lpdwSize);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass,
+        ref PROCESS_BASIC_INFORMATION processInformation, int processInformationLength, out int returnLength);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass,
+        IntPtr processInformation, int processInformationLength, out int returnLength);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetTokenInformation(IntPtr tokenHandle, TOKEN_INFORMATION_CLASS tokenInformationClass,
+        IntPtr tokenInformation, uint tokenInformationLength, out uint returnLength);
+
+    private const uint TokenQuery = 0x0008;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PROCESS_BASIC_INFORMATION
+    {
+        public IntPtr ExitStatus;
+        public IntPtr PebBaseAddress;
+        public IntPtr AffinityMask;
+        public IntPtr BasePriority;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct TOKEN_ELEVATION
+    {
+        public uint TokenIsElevated;
+    }
+
+    private enum TOKEN_INFORMATION_CLASS
+    {
+        TokenElevation = 20
+    }
 }

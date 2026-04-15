@@ -3,9 +3,19 @@ using CEAISuite.Engine.Abstractions;
 
 namespace CEAISuite.Application;
 
-public sealed record RunningProcessOverview(int Id, string Name, string Architecture);
+public sealed record RunningProcessOverview(
+    int Id,
+    string Name,
+    string Architecture,
+    string? ExecutablePath = null,
+    string? WindowTitle = null,
+    bool IsElevated = false);
 
-public sealed record ModuleOverview(string Name, string BaseAddress, string Size);
+public sealed record ModuleOverview(
+    string Name,
+    string BaseAddress,
+    string Size,
+    string? FullPath = null);
 
 public sealed record MemorySampleOverview(
     string Address,
@@ -27,7 +37,13 @@ public sealed record ProcessInspectionOverview(
     MemorySampleOverview? Sample,
     ManualMemoryProbeOverview? ManualProbe,
     string? LastWriteMessage,
-    string StatusMessage);
+    string StatusMessage,
+    int? ParentProcessId = null,
+    string? ParentProcessName = null,
+    string? CommandLine = null,
+    string? ExecutablePath = null,
+    string? WindowTitle = null,
+    bool IsElevated = false);
 
 public sealed record RecentSessionOverview(
     string Id,

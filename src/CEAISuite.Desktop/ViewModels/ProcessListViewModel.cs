@@ -61,13 +61,16 @@ public partial class ProcessListViewModel : ObservableObject, IDisposable
         IsAttached = _processContext.AttachedProcessId is not null;
         AttachedProcessName = _processContext.AttachedProcessName;
 
-        // Phase 4: populate process details from inspection
+        // Phase 4 + 12A: populate process details from inspection
         var inspection = _processContext.CurrentInspection;
         if (inspection is not null)
         {
             Architecture = inspection.Architecture;
             ModuleCount = inspection.Modules.Count;
-            ProcessDetails = $"{inspection.Architecture} | {inspection.Modules.Count} modules";
+            var details = $"{inspection.Architecture} | {inspection.Modules.Count} modules";
+            if (inspection.IsElevated) details += " | Admin";
+            if (inspection.ParentProcessName is not null) details += $" | Parent: {inspection.ParentProcessName}";
+            ProcessDetails = details;
         }
         else
         {

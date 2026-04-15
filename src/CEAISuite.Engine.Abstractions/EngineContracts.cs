@@ -24,14 +24,31 @@ public enum MemoryDataType
     ByteArray
 }
 
-public sealed record ProcessDescriptor(int Id, string Name, string Architecture);
+public sealed record ProcessDescriptor(
+    int Id,
+    string Name,
+    string Architecture,
+    int? ParentProcessId = null,
+    string? ExecutablePath = null,
+    string? CommandLine = null,
+    string? WindowTitle = null,
+    bool IsElevated = false);
 
-public sealed record ModuleDescriptor(string Name, nuint BaseAddress, long SizeBytes);
+public sealed record ModuleDescriptor(
+    string Name,
+    nuint BaseAddress,
+    long SizeBytes,
+    string? FullPath = null);
 
 public sealed record EngineAttachment(
     int ProcessId,
     string ProcessName,
-    IReadOnlyList<ModuleDescriptor> Modules);
+    IReadOnlyList<ModuleDescriptor> Modules,
+    string? Architecture = null,
+    int? ParentProcessId = null,
+    string? CommandLine = null,
+    string? ExecutablePath = null,
+    bool IsElevated = false);
 
 public sealed record MemoryReadResult(
     int ProcessId,

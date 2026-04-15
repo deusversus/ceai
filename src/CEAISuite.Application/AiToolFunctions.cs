@@ -121,16 +121,30 @@ public sealed partial class AiToolFunctions(
 
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
-    [Description("Inspect process by PID. Returns modules and architecture.")]
+    [Description("Inspect process by PID. Returns architecture, parent process, command line, modules, and elevation status.")]
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
         var inspection = await dashboardService.InspectProcessAsync(processId).ConfigureAwait(false);
         var cap = _limits.MaxInspectModules;
         var modules = inspection.Modules.Take(cap)
-            .Select(m => $"  {m.Name} @ {m.BaseAddress} ({m.Size})");
+            .Select(m => m.FullPath is not null
+                ? $"  {m.Name} @ {m.BaseAddress} ({m.Size}, {m.FullPath})"
+                : $"  {m.Name} @ {m.BaseAddress} ({m.Size})");
         var extra = inspection.Modules.Count > cap ? $"\n  ... and {inspection.Modules.Count - cap} more modules" : "";
-        return $"Process: {inspection.ProcessName} (PID {inspection.ProcessId})\n" +
-               $"Modules ({inspection.Modules.Count} total, showing {Math.Min(cap, inspection.Modules.Count)}):\n{string.Join('\n', modules)}{extra}";
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("Process: ").Append(inspection.ProcessName).Append(" (PID ").Append(inspection.ProcessId).Append(", ").Append(inspection.Architecture).AppendLine(")");
+        if (inspection.ParentProcessId is { } ppid)
+            sb.Append("Parent: ").Append(inspection.ParentProcessName ?? "unknown").Append(" (PID ").Append(ppid).AppendLine(")");
+        if (inspection.ExecutablePath is not null)
+            sb.Append("Path: ").AppendLine(inspection.ExecutablePath);
+        if (inspection.CommandLine is not null)
+            sb.Append("Command line: ").AppendLine(inspection.CommandLine);
+        if (inspection.WindowTitle is not null)
+            sb.Append("Window: ").AppendLine(inspection.WindowTitle);
+        sb.Append("Elevated: ").AppendLine(inspection.IsElevated ? "Yes" : "No");
+        sb.Append("Modules (").Append(inspection.Modules.Count).Append(" total, showing ").Append(Math.Min(cap, inspection.Modules.Count)).Append("):\n").Append(string.Join('\n', modules)).Append(extra);
+        return sb.ToString();
     }
 
     [ReadOnlyTool]

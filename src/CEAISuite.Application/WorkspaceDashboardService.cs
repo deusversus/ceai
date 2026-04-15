@@ -30,7 +30,8 @@ public sealed class WorkspaceDashboardService(
         return CurrentDashboard = new WorkspaceDashboard(
             WorkspaceBootstrap.CreateOverview(),
             processes
-                .Select(process => new RunningProcessOverview(process.Id, process.Name, process.Architecture))
+                .Select(process => new RunningProcessOverview(process.Id, process.Name, process.Architecture,
+                    process.ExecutablePath, process.WindowTitle, process.IsElevated))
                 .ToArray(),
             recentSessions
                 .Select(
@@ -74,7 +75,8 @@ public sealed class WorkspaceDashboardService(
                 module => new ModuleOverview(
                     module.Name,
                     $"0x{module.BaseAddress:X}",
-                    $"{module.SizeBytes:N0} bytes"))
+                    $"{module.SizeBytes:N0} bytes",
+                    module.FullPath))
             .ToArray();
 
         MemorySampleOverview? sample = null;
@@ -101,6 +103,18 @@ public sealed class WorkspaceDashboardService(
             }
         }
 
+        // Resolve parent process name (best-effort)
+        string? parentName = null;
+        if (inspection.ParentProcessId is { } ppid)
+        {
+            try
+            {
+                using var parentProc = System.Diagnostics.Process.GetProcessById(ppid);
+                parentName = parentProc.ProcessName;
+            }
+            catch { /* parent may have exited */ }
+        }
+
         var overview = new ProcessInspectionOverview(
             inspection.ProcessId,
             inspection.ProcessName,
@@ -109,7 +123,13 @@ public sealed class WorkspaceDashboardService(
             sample,
             null,
             null,
-            statusMessage);
+            statusMessage,
+            inspection.ParentProcessId,
+            parentName,
+            inspection.CommandLine,
+            inspection.ExecutablePath,
+            process.WindowTitle,
+            inspection.IsElevated);
 
         // Keep CurrentDashboard in sync so AI tools see the attached process
         if (CurrentDashboard is not null)

@@ -667,14 +667,19 @@ public sealed class WindowsEngineFacade : IEngineFacade
         finally { CloseHandle(handle); }
     }
 
-    private static string? TryGetWindowTitle(Process process)
+    private string? TryGetWindowTitle(Process process)
     {
         try
         {
             var title = process.MainWindowTitle;
             return string.IsNullOrWhiteSpace(title) ? null : title;
         }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            if (_logger.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug))
+                _logger.LogDebug(ex, "Failed to get window title for {Pid}", process.Id);
+            return null;
+        }
     }
 
     private static bool TryGetIsElevated(int processId)

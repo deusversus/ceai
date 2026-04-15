@@ -320,7 +320,14 @@ public partial class MainWindow : Window, IDisposable
             () => Dispatcher.BeginInvoke(() => _aiOperatorVm.RefreshChatSwitcher()));
 
         _subs.Subscribe(h => _appSettingsService.SettingsChanged += h, h => _appSettingsService.SettingsChanged -= h,
-            () => Dispatcher.InvokeAsync(async () => await _mainVm.HandleSettingsChangedAsync()));
+            () => Dispatcher.InvokeAsync(async () =>
+            {
+                await _mainVm.HandleSettingsChangedAsync();
+                // L11: Dynamically update auto-save timer interval when settings change
+                var newInterval = Math.Max(1, _appSettingsService.Settings.AutoSaveIntervalMinutes);
+                if (_autoSaveTimer is not null && _autoSaveTimer.Interval != TimeSpan.FromMinutes(newInterval))
+                    _autoSaveTimer.Interval = TimeSpan.FromMinutes(newInterval);
+            }));
 
         // Wire MainViewModel UI action requests
         _subs.Add(() => _mainVm.UiActionRequested += OnMainVmUiAction, () => _mainVm.UiActionRequested -= OnMainVmUiAction);
@@ -407,7 +414,7 @@ public partial class MainWindow : Window, IDisposable
         }
         catch (Exception ex)
         {
-            _logger?.LogDebug(ex, "Auto-save failed");
+            _logger?.LogWarning(ex, "Auto-save failed — address table recovery may be stale");
         }
         finally
         {

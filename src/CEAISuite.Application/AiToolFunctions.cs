@@ -121,7 +121,7 @@ public sealed partial class AiToolFunctions(
 
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
-    [Description("Inspect process by PID. Returns architecture, parent process, command line, modules, and elevation status.")]
+    [Description("Inspect process by PID. Returns architecture, parent process, executable path, command line, window title, modules, and elevation status.")]
     public async Task<string> InspectProcess([Description("Process ID to inspect")] int processId)
     {
         var inspection = await dashboardService.InspectProcessAsync(processId).ConfigureAwait(false);

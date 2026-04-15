@@ -164,6 +164,11 @@ internal static class LuaDisassemblyBindings
                 return DynValue.NewTable(table);
             });
         }
+        else
+        {
+            script.Globals["getSourceLine"] = (Func<string, DynValue>)(_ =>
+                throw new ScriptRuntimeException("getSourceLine requires a symbol engine (PDB loading). No symbol engine is available in this session."));
+        }
     }
 
     private static int RequireProcess(MoonSharpLuaEngine engine)

@@ -77,8 +77,24 @@ public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null)
                             operands = spaceIdx >= 0 ? formatted[(spaceIdx + 1)..].TrimStart() : "";
                         }
 
-                        var symbolName = symbolEngine?.ResolveAddress((nuint)instr.IP)?.DisplayName;
-                        var lineInfo = symbolEngine?.ResolveSourceLine((nuint)instr.IP);
+                        // Use combined resolution when available (single lock acquisition per instruction)
+                        string? symbolName = null;
+                        string? sourceFile = null;
+                        int? sourceLine = null;
+                        if (symbolEngine is WindowsSymbolEngine wse)
+                        {
+                            var (sym, line) = wse.ResolveAddressAndLine((nuint)instr.IP);
+                            symbolName = sym?.DisplayName;
+                            sourceFile = line?.FileName;
+                            sourceLine = line?.LineNumber;
+                        }
+                        else if (symbolEngine is not null)
+                        {
+                            symbolName = symbolEngine.ResolveAddress((nuint)instr.IP)?.DisplayName;
+                            var lineInfo = symbolEngine.ResolveSourceLine((nuint)instr.IP);
+                            sourceFile = lineInfo?.FileName;
+                            sourceLine = lineInfo?.LineNumber;
+                        }
 
                         instructions.Add(new DisassembledInstruction(
                             (nuint)instr.IP,
@@ -87,8 +103,8 @@ public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null)
                             operands,
                             instr.Length,
                             symbolName,
-                            lineInfo?.FileName,
-                            lineInfo?.LineNumber));
+                            sourceFile,
+                            sourceLine));
 
                         totalBytes += instr.Length;
                     }

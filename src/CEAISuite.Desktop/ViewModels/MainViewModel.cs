@@ -94,6 +94,9 @@ public partial class MainViewModel : ObservableObject, IDisposable
         _aiOperatorService = aiOperatorService;
         _appSettingsService = appSettingsService;
         _patchUndoService = patchUndoService;
+        _patchUndoService.UndoDepthWarning += count =>
+            dispatcher.InvokeAsync(() => outputLog.Append("Safety", "Warn",
+                $"Undo stack approaching capacity ({count}/{500}). Oldest patches will be trimmed."));
         _engineFacade = engineFacade;
         // Wire engine diagnostic trace to Output panel (marshal to UI thread — Trace fires from Task.Run)
         if (engineFacade is CEAISuite.Engine.Windows.WindowsEngineFacade winFacade)

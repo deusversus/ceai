@@ -70,6 +70,23 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
         }
     }
 
+    /// <summary>Resolve both symbol and source line in a single lock acquisition (reduces lock overhead per instruction).</summary>
+    public (SymbolInfo? Symbol, SourceLineInfo? Line) ResolveAddressAndLine(nuint address)
+    {
+        lock (_lock)
+        {
+            SymbolInfo? symbol = null;
+            SourceLineInfo? line = null;
+            foreach (var (_, handle) in _initializedProcesses)
+            {
+                symbol ??= ResolveWithHandle(handle, address);
+                line ??= ResolveLineWithHandle(handle, address);
+                if (symbol is not null && line is not null) break;
+            }
+            return (symbol, line);
+        }
+    }
+
     public void Cleanup(int processId)
     {
         lock (_lock)

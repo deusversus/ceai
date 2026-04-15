@@ -128,7 +128,7 @@ public sealed class WorkspaceDashboardService(
             parentName,
             inspection.CommandLine,
             inspection.ExecutablePath,
-            process.WindowTitle,
+            inspection.WindowTitle ?? process.WindowTitle,
             inspection.IsElevated);
 
         // Keep CurrentDashboard in sync so AI tools see the attached process

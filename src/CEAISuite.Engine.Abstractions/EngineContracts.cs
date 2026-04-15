@@ -48,6 +48,7 @@ public sealed record EngineAttachment(
     int? ParentProcessId = null,
     string? CommandLine = null,
     string? ExecutablePath = null,
+    string? WindowTitle = null,
     bool IsElevated = false);
 
 public sealed record MemoryReadResult(

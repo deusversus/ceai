@@ -179,7 +179,7 @@ public sealed partial class AiToolFunctions
                 protection = protectionString,
                 resolved = symbolicNote,
                 startAddress = overview.StartAddress,
-                instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands, l.SymbolName }),
+                instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands, l.SymbolName, l.SourceFile, l.SourceLine }),
                 count = overview.Lines.Count,
                 returned = capped.Count,
                 truncated = wasTruncated,
@@ -191,7 +191,7 @@ public sealed partial class AiToolFunctions
         {
             resolved = symbolicNote,
             startAddress = overview.StartAddress,
-            instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands, l.SymbolName }),
+            instructions = capped.Select(l => new { l.Address, l.HexBytes, l.Mnemonic, l.Operands, l.SymbolName, l.SourceFile, l.SourceLine }),
             count = overview.Lines.Count,
             returned = capped.Count,
             truncated = wasTruncated,
@@ -202,20 +202,21 @@ public sealed partial class AiToolFunctions
     [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Get source file and line number for an address (requires PDB symbols). Returns null fields if no debug info available.")]
-    public Task<string> GetSourceLine(
+    public async Task<string> GetSourceLine(
         [Description("Process ID")] int processId,
         [Description("Address (hex or symbolic like module+offset)")] string address)
     {
         try
         {
-            if (!IsProcessAlive(processId)) return Task.FromResult($"Process {processId} is no longer running.");
-            var addr = ParseAddress(address);
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            var resolvedAddress = await TryResolveToHex(processId, address).ConfigureAwait(false);
+            var addr = ParseAddress(resolvedAddress);
             var lineInfo = symbolEngine?.ResolveSourceLine(addr);
             if (lineInfo is null)
-                return Task.FromResult(ToJson(new { address = $"0x{(ulong)addr:X}", sourceFile = (string?)null, line = (int?)null, note = "No PDB line info available for this address." }));
-            return Task.FromResult(ToJson(new { address = $"0x{(ulong)addr:X}", sourceFile = lineInfo.FileName, line = lineInfo.LineNumber }));
+                return ToJson(new { address = $"0x{(ulong)addr:X}", sourceFile = (string?)null, line = (int?)null, note = "No PDB line info available for this address." });
+            return ToJson(new { address = $"0x{(ulong)addr:X}", sourceFile = lineInfo.FileName, line = lineInfo.LineNumber });
         }
-        catch (Exception ex) { return Task.FromResult($"GetSourceLine failed: {ex.Message}"); }
+        catch (Exception ex) { return $"GetSourceLine failed: {ex.Message}"; }
     }
 
     [ReadOnlyTool]

@@ -178,14 +178,16 @@ public sealed class WindowsEngineFacade : IEngineFacade
                         int? parentPid = null;
                         string? cmdLine = null;
                         string? exePath = null;
+                        string? winTitle = null;
                         bool elevated = false;
-                        try { parentPid = TryGetParentProcessId(process.Id); } catch { /* best-effort */ }
-                        try { cmdLine = TryGetCommandLine(process); } catch { /* best-effort */ }
-                        try { exePath = TryGetExecutablePath(process.Id); } catch { /* best-effort */ }
-                        try { elevated = TryGetIsElevated(process.Id); } catch { /* best-effort */ }
+                        try { parentPid = TryGetParentProcessId(process.Id); } catch (Exception ex) { Trace($"AttachAsync: TryGetParentProcessId failed: {ex.Message}"); }
+                        try { cmdLine = TryGetCommandLine(process); } catch (Exception ex) { Trace($"AttachAsync: TryGetCommandLine failed: {ex.Message}"); }
+                        try { exePath = TryGetExecutablePath(process.Id); } catch (Exception ex) { Trace($"AttachAsync: TryGetExecutablePath failed: {ex.Message}"); }
+                        try { winTitle = TryGetWindowTitle(process); } catch (Exception ex) { Trace($"AttachAsync: TryGetWindowTitle failed: {ex.Message}"); }
+                        try { elevated = TryGetIsElevated(process.Id); } catch (Exception ex) { Trace($"AttachAsync: TryGetIsElevated failed: {ex.Message}"); }
 
                         var attachment = new EngineAttachment(process.Id, process.ProcessName, modules,
-                            arch, parentPid, cmdLine, exePath, elevated);
+                            arch, parentPid, cmdLine, exePath, winTitle, elevated);
                         lock (_attachLock)
                         {
                             _cachedAttachment = attachment;
@@ -656,7 +658,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 status = NtQueryInformationProcess(handle, ProcessCommandLineInformation, buffer, needed, out _);
                 if (status != 0) return null;
                 // UNICODE_STRING: ushort Length, ushort MaxLength, IntPtr Buffer
-                var length = Marshal.ReadInt16(buffer);
+                var length = (ushort)Marshal.ReadInt16(buffer);
                 var stringPtr = Marshal.ReadIntPtr(buffer + IntPtr.Size);
                 return length > 0 ? Marshal.PtrToStringUni(stringPtr, length / 2) : null;
             }

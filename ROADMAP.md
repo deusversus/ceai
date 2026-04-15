@@ -759,15 +759,46 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 | Watch expressions | ⏳ Future | Planned stretch goal — deferred to keep scope tight |
 | `debug_setLastChanceExceptionHandler` | ⏳ Future | Needs exception handler infrastructure beyond stepping |
 
-### Phase 11B — Kernel-Mode Debugging
+### Scripting Compatibility Sprint (S1–S9) ✅ COMPLETE
+
+**Goal:** Close the CE Lua API compatibility gap by implementing the Delphi-style property proxy system, form extensions, reactive data binding, and host app interop that real-world CT scripts depend on.
+
+**Result:** 9 sub-phases shipping CE property proxies for all 18 element types, reactive data binding (`element:bind()`), reactive memory watches (`createMemoryWatch()`), `getMainForm()` host interop, dockable script panels, and ILuaFormHost extensions. Lua API parity rose from ~93% to ~96%. Additional fixes: Lua 5.3 bitwise operator preprocessor (fixes BDFFHD scripts), `pcall`/`xpcall`/`error` enabled in sandbox, VEH V3 protocol, 24 new AI tools with lazy loading, TCC build support for VEH agent. 3,000 total tests.
+
+| Sprint | Feature | Status |
+|--------|---------|--------|
+| S1 | CE script compat — `{$lua}` alias, CE globals, bit library shim | ✅ Done |
+| S2 | CePropertyProxy factory — universal CE property metatable pattern | ✅ Done |
+| S3a | CE property proxies — form/element/record Delphi-style `.Caption`, `.Checked`, etc. | ✅ Done |
+| S3b | Remaining element property proxies — all 18 element types complete | ✅ Done |
+| S4 | CE property proxies for form/element/record (extended) | ✅ Done |
+| S5 | ILuaFormHost extensions — form properties, parenting, ElementChanged | ✅ Done |
+| S6 | `getMainForm()` proxy — Lua scripts can interact with host app | ✅ Done |
+| S7 | Dockable script panels — script-created UI integrates with AvalonDock | ✅ Done |
+| S8 | Reactive data binding — `element:bind("Caption", record, "Value")` | ✅ Done |
+| S9 | `createMemoryWatch()` — reactive memory monitoring with OnChange | ✅ Done |
+
+**Additional work completed alongside the sprint:**
+
+| Item | Details |
+|------|---------|
+| Lua 5.3 bitwise operator preprocessor | Transpiles `a & b`, `a \| b`, `~a` to `bit.band()` etc. for MoonSharp (Lua 5.2) compat |
+| `pcall`/`xpcall`/`error` in sandbox | Required by CE scripts for error handling; previously blocked by sandbox preset |
+| VEH V3 protocol | Protocol version bump with lifecycle and conditional BP UI improvements |
+| 24 new AI tools | Lazy loading tool categories for token budget compliance |
+| TCC build support | VEH native agent compiles with TCC (no Visual Studio Build Tools required) |
+
+---
+
+### Phase 11B — Kernel-Mode Debugging ⏸ SHELVED INDEFINITELY
 
 **Goal:** A signed Windows kernel driver (`CEAISuiteKm.sys`) providing ring-0 capabilities: bypass `ObRegisterCallbacks`-based process access restrictions and anti-debug checks at the kernel level.
 
-**Why second:** Kernel access is powerful but niche. Most games CE users target don't have kernel-level anti-debug. Games protected by EAC/BattlEye/Vanguard are a subset of the user base, and those users already know they need kernel tools. Stepping helps *everyone*; kernel helps the advanced minority.
+**Why shelved:** Kernel access is powerful but niche. Most games CE users target don't have kernel-level anti-debug. Games protected by EAC/BattlEye/Vanguard are a subset of the user base, and those users already know they need kernel tools. The hard external prerequisites (EV cert, WDK, kernel engineer) make this impractical without dedicated resources. Will revisit if demand materializes.
 
 **Complexity:** Very High
 
-**Prerequisites:**
+**Prerequisites (unchanged):**
 - EV code signing certificate (~$500/year + hardware token)
 - Dedicated kernel developer familiar with WDK and Windows internals
 - Per-Windows-version offset tables for SSDT/`DbgkpXxx` structures
@@ -815,7 +846,8 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 | **Tier 3** (long-term) | **10E** VEH Debugging | ✅ Done | Native C agent DLL + shared memory IPC; anti-debug bypass |
 | **VEH Overhaul** | **10E+ (A–G)** | ✅ Done | 7 sub-phases: protocol V2, conditions, stealth, UI, tracing, unified pipeline, PG+INT3; all audited |
 | **Phase 11A** | Debugger stepping | ✅ Done | ISteppingEngine via VEH TF; 5 AI tools, Lua globals, DebuggerViewModel wired |
-| **Phase 11B** | Kernel driver | Future | Niche but powerful; requires EV cert + dedicated kernel engineer |
+| **Compat Sprint** | S1–S9 | ✅ Done | CE property proxies, reactive binding, memory watches, getMainForm(), Lua 5.3 compat |
+| **Phase 11B** | Kernel driver | ⏸ Shelved | Niche; requires EV cert + dedicated kernel engineer |
 
 ---
 
@@ -823,28 +855,28 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 10 ✅ | After Scripting Sprint ✅ | After VEH Overhaul ✅ | After 11A ✅ | Target |
-|----------|------------|------------------------|---------------------|------------|--------|
+| Category | After Ph 10 ✅ | After VEH Overhaul ✅ | After 11A ✅ | After Compat Sprint ✅ | Target |
+|----------|------------|---------------------|------------|----------------------|--------|
 | Process & Attachment | 50% | 50% | 50% | 50% | 80%* |
 | Memory Read/Write | 80% | 85% | 85% | 85% | 90% |
 | Scanning | 90% | 95% | 95% | 95% | 95% |
 | Disassembly & Analysis | 70% | 80% | 80% | 80% | 85% |
-| Breakpoints & Hooks | 95% | 95% | 98% | 100% | 100% |
+| Breakpoints & Hooks | 95% | 98% | 100% | 100% | 100% |
 | Address Table | 90% | 95% | 95% | 95% | 95% |
 | Scripting (AA engine) | 95% | 95% | 95% | 95% | 95% |
-| Scripting (Lua API) | 25% | 90% | 90% | 93% | 95%** |
+| Scripting (Lua API) | 25% | 90% | 93% | 96%** | 95%** |
 | Pointer Resolution | 70% | 70% | 70% | 70% | 80% |
 | Structure Discovery | 100% | 100% | 100% | 100% | 100% |
 | Snapshots | 100% | 100% | 100% | 100% | 100% |
 | Session & History | 75% | 75% | 75% | 75% | 80% |
-| Safety & Watchdog | 70% | 70% | 75% | 75% | 80% |
+| Safety & Watchdog | 70% | 75% | 75% | 75% | 80% |
 | Hotkeys | 100% | 100% | 100% | 100% | 100% |
-| **Overall** | **~91%** | **~93%** | **~94%** | **~95%** | **95%+** |
+| **Overall** | **~91%** | **~94%** | **~95%** | **~96%** | **95%+** |
 
 *Process & Attachment parity improves further with future engine enhancements (parent process, command line).
-**Scripting (Lua API) at 93%: ~155 globals registered, stepping commands added. Remaining 7% = mono introspection. Real-world CT testing (BDFFHD v4) showed 3 of 4 scripts depend on mono introspection — Unity titles dominate the CT ecosystem, making this the highest-impact remaining Lua API gap.
+**Scripting (Lua API) at 96%: ~170+ globals registered. CE property proxies, reactive binding, memory watches, getMainForm(), Lua 5.3 bitwise compat, pcall/xpcall/error. Remaining 4% = mono/.NET introspection bridge (~30 globals). Real-world CT testing (BDFFHD v4) showed 3 of 4 scripts depend on mono introspection — Unity titles dominate the CT ecosystem, making this the highest-impact remaining Lua API gap.
 
-Phase 11A parity changes: Breakpoints & Hooks 98% → 100% (step in/over/out/continue wired). Scripting (Lua API) 90% → 93% (5 stepping globals added). Overall ~94% → ~95%.
+Compat Sprint parity changes: Scripting (Lua API) 93% → 96% (property proxies, reactive binding, memory watches, host interop). Overall ~95% → ~96%. Now exceeds 95%+ target for all categories except Process & Attachment (50%), Pointer Resolution (70%), Session & History (75%), Safety & Watchdog (75%), and Disassembly & Analysis (80%).
 
 *Full historical parity table (Phases 2–8) preserved in git history.*
 
@@ -896,9 +928,16 @@ Phase 1 ✅ (Foundation)
                     ├── F ✅: Unified pipeline (Hardware→VEH→PageGuard fallback)
                     └── G ✅: PAGE_GUARD + INT3 through VEH (no DR slot limit)
             │
-    Phase 11 (Full Debugger & Kernel)
-            ├── 11A Debugger Stepping (builds on 10E VEH; last universal parity gap)
-            └── 11B Kernel Driver (EV cert + WDK; niche anti-debug bypass)
+    Phase 11 (Debugger & Kernel)
+            ├── 11A ✅ Debugger Stepping (builds on 10E VEH; last universal parity gap)
+            └── 11B ⏸ Kernel Driver (shelved — EV cert + WDK required)
+                    │
+                    Scripting Compat Sprint ✅ (S1–S9)
+                    ├── S1–S4 ✅: CE property proxies (Delphi-style access for all 18 element types)
+                    ├── S5–S6 ✅: Form extensions + getMainForm() host interop
+                    ├── S7 ✅: Dockable script panels
+                    ├── S8 ✅: Reactive data binding
+                    └── S9 ✅: createMemoryWatch() reactive memory monitoring
 ```
 
 **Highest-impact order (updated):**
@@ -914,6 +953,8 @@ Phase 1 ✅ (Foundation)
 10. ✅ Phase 8 — Done (MoonSharp Lua 5.2 engine, CE API, REPL, forms, BP scripting; 489 tests)
 11. ✅ Phase 10 — Done (Plugin UI, Co-Pilot, Trainers, Speed Hack, VEH Debug, Community Distribution, Adversarial Testing, Security Review, Stabilization; 2,558 tests)
 12. ✅ VEH Overhaul — Done (7 sub-phases: protocol hardening, conditional BPs, stealth, UI panel, dynamic tracing, unified pipeline, PAGE_GUARD+INT3; all audited; 2,809 tests)
+13. ✅ Phase 11A — Done (Debugger stepping via VEH TF; 5 AI tools, Lua globals; 2,947 tests)
+14. ✅ Scripting Compat Sprint — Done (S1–S9: property proxies, reactive binding, memory watches, host interop; 3,000 tests)
 
 ---
 
@@ -934,4 +975,5 @@ Phase 1 ✅ (Foundation)
 | **10** | Advanced | ✅ Complete | Plugin UI (10A), AI Co-Pilot (10C), Trainer Generation (10B), Community Distribution (10G), Adversarial Testing (10J), Security Review (10K), Speed Hack (10D, inline hooking), Stabilization (10L), VEH Debugging (10E); 2,558 tests |
 | **10E+** | VEH Overhaul | ✅ Complete | 7 sub-phases (A–G), all independently audited: protocol V2, conditional BPs + Lua callbacks, stealth (DR cloaking + PEB hiding), UI panel, dynamic Trap Flag tracing, unified pipeline (Hardware→VEH→PageGuard), PAGE_GUARD + INT3 via VEH; 2,809 tests |
 | **11A** | Debugger Stepping | ✅ Complete | ISteppingEngine + WindowsSteppingEngine via VEH TF, 5 AI tools, DebuggerViewModel wired, Lua stepping globals, step history; 2,947 tests |
-| **11B** | Kernel Driver | Future | Kernel-mode anti-debug bypass (EV cert + WDK required) |
+| **S1–S9** | Scripting Compat Sprint | ✅ Complete | CE property proxies (18 element types), CePropertyProxy factory, reactive data binding, createMemoryWatch(), getMainForm() host interop, dockable script panels, Lua 5.3 bitwise preprocessor, pcall/xpcall/error; 3,000 tests |
+| **11B** | Kernel Driver | ⏸ Shelved | Kernel-mode anti-debug bypass — shelved indefinitely (EV cert + WDK + kernel engineer required) |

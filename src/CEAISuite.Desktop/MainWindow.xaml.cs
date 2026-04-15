@@ -359,8 +359,10 @@ public partial class MainWindow : Window, IDisposable
         Loaded += OnLoaded;
         PreviewKeyUp += OnPreviewKeyUp;
 
-        // ── Crash recovery: auto-save every 5 minutes ──
-        _autoSaveTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(5) };
+        // ── Crash recovery: periodic auto-save using configured interval ──
+        var settingsService = App.Services.GetService<AppSettingsService>();
+        var intervalMinutes = settingsService?.Settings.AutoSaveIntervalMinutes ?? 5;
+        _autoSaveTimer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMinutes(Math.Max(1, intervalMinutes)) };
         _autoSaveTimer.Tick += AutoSaveTimer_Tick;
         _autoSaveTimer.Start();
     }
@@ -376,6 +378,24 @@ public partial class MainWindow : Window, IDisposable
             var roots = tableService.Roots;
             if (roots.Count > 0)
                 await exportService.ExportRecoveryAsync(roots, RecoveryFilePath);
+
+            // Also save a full session snapshot to SQLite when a process is attached
+            var processContext = App.Services.GetService<IProcessContext>();
+            var sessionService = App.Services.GetService<SessionService>();
+            if (processContext?.AttachedProcessId is not null && sessionService is not null && roots.Count > 0)
+            {
+                var entries = tableService.Entries;
+                if (entries.Count > 0)
+                {
+                    await sessionService.SaveSessionAsync(
+                        processContext.AttachedProcessName,
+                        processContext.AttachedProcessId,
+                        entries,
+                        Array.Empty<AiActionLogEntry>());
+                    if (_logger?.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug) == true)
+                        _logger.LogDebug("Auto-save: session snapshot saved to database ({EntryCount} entries)", entries.Count);
+                }
+            }
         }
         catch (Exception ex)
         {

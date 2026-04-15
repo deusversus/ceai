@@ -176,6 +176,28 @@ public partial class App : System.Windows.Application
             try { File.Delete(recoveryPath); } catch { /* best-effort */ }
         }
 
+        // ── Surface orphaned operations from previous crash ──
+        try
+        {
+            var journal = Services.GetService<OperationJournal>();
+            if (journal is not null)
+            {
+                var orphaned = journal.GetOrphanedEntries();
+                if (orphaned.Count > 0)
+                {
+                    Log.Warning("Found {Count} orphaned operations from previous session", orphaned.Count);
+                    var recoveryLog = Services.GetService<CEAISuite.Desktop.Services.IOutputLog>();
+                    foreach (var entry in orphaned)
+                        recoveryLog?.Append("Recovery", "Warn",
+                            $"Orphaned {entry.OperationType} at {entry.Address} ({entry.Mode}) from {entry.Timestamp:g} — may need manual cleanup");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "Failed to check orphaned operations");
+        }
+
         Diag("Handling protocol args...");
         // ── Handle ceai:// protocol URLs from command line ──
         HandleProtocolArgs(e.Args);

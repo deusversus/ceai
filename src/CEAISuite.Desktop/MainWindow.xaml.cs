@@ -367,8 +367,12 @@ public partial class MainWindow : Window, IDisposable
         _autoSaveTimer.Start();
     }
 
+    private bool _autoSaveBusy;
+
     private async void AutoSaveTimer_Tick(object? sender, EventArgs e)
     {
+        if (_autoSaveBusy) return;
+        _autoSaveBusy = true;
         try
         {
             var tableService = App.Services.GetService<AddressTableService>();
@@ -387,11 +391,15 @@ public partial class MainWindow : Window, IDisposable
                 var entries = tableService.Entries;
                 if (entries.Count > 0)
                 {
+                    // Use a stable session ID so auto-saves overwrite each other
+                    // rather than creating unbounded entries in the database
+                    var autoSaveId = $"autosave-{processContext.AttachedProcessName ?? "unknown"}";
                     await sessionService.SaveSessionAsync(
                         processContext.AttachedProcessName,
                         processContext.AttachedProcessId,
                         entries,
-                        Array.Empty<AiActionLogEntry>());
+                        Array.Empty<AiActionLogEntry>(),
+                        overrideSessionId: autoSaveId);
                     if (_logger?.IsEnabled(Microsoft.Extensions.Logging.LogLevel.Debug) == true)
                         _logger.LogDebug("Auto-save: session snapshot saved to database ({EntryCount} entries)", entries.Count);
                 }
@@ -400,6 +408,10 @@ public partial class MainWindow : Window, IDisposable
         catch (Exception ex)
         {
             _logger?.LogDebug(ex, "Auto-save failed");
+        }
+        finally
+        {
+            _autoSaveBusy = false;
         }
     }
 

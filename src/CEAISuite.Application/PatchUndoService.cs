@@ -21,8 +21,9 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
     private readonly List<Patch> _redoStack = new();
     private const int MaxHistory = 500;
     private const int DepthWarningThreshold = 450;
+    private bool _depthWarningFired;
 
-    /// <summary>Fires when the undo stack approaches the maximum depth (450/500). Argument is current count.</summary>
+    /// <summary>Fires once when the undo stack crosses the warning threshold (450/500). Resets when count drops below. Argument is current count.</summary>
     public event Action<int>? UndoDepthWarning;
 
     /// <summary>Number of patches available to undo.</summary>
@@ -53,9 +54,16 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
             if (_undoStack.Count > MaxHistory)
                 _undoStack.RemoveAt(0);
 
-            // Warn when approaching the limit
-            if (_undoStack.Count >= DepthWarningThreshold)
+            // Warn once when crossing the threshold; reset when count drops below
+            if (_undoStack.Count >= DepthWarningThreshold && !_depthWarningFired)
+            {
+                _depthWarningFired = true;
                 UndoDepthWarning?.Invoke(_undoStack.Count);
+            }
+            else if (_undoStack.Count < DepthWarningThreshold)
+            {
+                _depthWarningFired = false;
+            }
         }
         return result;
     }

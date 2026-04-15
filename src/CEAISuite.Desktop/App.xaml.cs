@@ -368,7 +368,9 @@ public partial class App : System.Windows.Application
         services.AddSingleton<PointerRescanService>();
         services.AddSingleton<SignatureGeneratorService>();
         services.AddSingleton<ProcessWatchdogService>();
-        services.AddSingleton<OperationJournal>();
+        services.AddSingleton(_ => new OperationJournal(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "CEAISuite", "journal")));
         services.AddSingleton<AiChatStore>();
         services.AddSingleton<UpdateService>();
         services.AddSingleton<PluginHost>(sp => new PluginHost());

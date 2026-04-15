@@ -6,15 +6,18 @@ namespace CEAISuite.Application;
 public sealed class SessionService(IInvestigationSessionRepository repository)
 {
     private static readonly string[] s_lockedTags = ["locked"];
+    /// <param name="overrideSessionId">When non-null, uses this ID instead of generating a timestamped one.
+    /// Used for auto-save to overwrite the same entry instead of creating unbounded entries.</param>
     public async Task<string> SaveSessionAsync(
         string? processName,
         int? processId,
         IReadOnlyList<AddressTableEntry> addressEntries,
         IReadOnlyList<AiActionLogEntry> actionLog,
         string? chatId = null,
+        string? overrideSessionId = null,
         CancellationToken cancellationToken = default)
     {
-        var sessionId = $"session-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
+        var sessionId = overrideSessionId ?? $"session-{DateTimeOffset.UtcNow:yyyyMMdd-HHmmss}";
 
         var domainEntries = addressEntries.Select(e => new AddressEntry(
             e.Id,

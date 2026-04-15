@@ -57,6 +57,19 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
         }
     }
 
+    public SourceLineInfo? ResolveSourceLine(nuint address)
+    {
+        lock (_lock)
+        {
+            foreach (var (_, handle) in _initializedProcesses)
+            {
+                var info = ResolveLineWithHandle(handle, address);
+                if (info is not null) return info;
+            }
+            return null;
+        }
+    }
+
     public void Cleanup(int processId)
     {
         lock (_lock)
@@ -175,6 +188,19 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
         }
     }
 
+    private static SourceLineInfo? ResolveLineWithHandle(IntPtr handle, nuint address)
+    {
+        var line = new IMAGEHLP_LINE64();
+        line.SizeOfStruct = (uint)Marshal.SizeOf<IMAGEHLP_LINE64>();
+        if (!SymGetLineFromAddr64(handle, (ulong)address, out _, ref line))
+            return null;
+
+        var fileName = line.FileName != IntPtr.Zero ? Marshal.PtrToStringAnsi(line.FileName) : null;
+        if (string.IsNullOrEmpty(fileName)) return null;
+
+        return new SourceLineInfo(fileName, (int)line.LineNumber, (nuint)line.Address);
+    }
+
     // ── DbgHelp P/Invoke ──
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi)]
@@ -221,6 +247,21 @@ public sealed class WindowsSymbolEngine : ISymbolEngine, IDisposable
     [DllImport("dbghelp.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SymCleanup(IntPtr hProcess);
+
+    [DllImport("dbghelp.dll", SetLastError = true, CharSet = CharSet.Ansi)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SymGetLineFromAddr64(IntPtr hProcess, ulong dwAddr,
+        out uint pdwDisplacement, ref IMAGEHLP_LINE64 line);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct IMAGEHLP_LINE64
+    {
+        public uint SizeOfStruct;
+        public IntPtr Key;
+        public uint LineNumber;
+        public IntPtr FileName;  // PCHAR — ANSI string pointer
+        public ulong Address;
+    }
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern IntPtr OpenProcess(uint desiredAccess, bool inheritHandle, int processId);

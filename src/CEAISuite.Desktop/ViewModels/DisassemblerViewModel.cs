@@ -352,7 +352,9 @@ public partial class DisassemblerViewModel : ObservableObject
                     IsCallOrJump = isCallJmp,
                     SymbolName = instr.SymbolName,
                     ModuleOffset = instr.SymbolName ?? ResolveModuleOffset(instr.Address, modules),
-                    XrefLabel = isCallJmp ? ResolveXrefTarget(instr.Operands, modules) : null
+                    XrefLabel = isCallJmp ? ResolveXrefTarget(instr.Operands, modules) : null,
+                    SourceFile = instr.SourceFile,
+                    SourceLine = instr.SourceLine
                 };
 
                 // Restore user comments/labels

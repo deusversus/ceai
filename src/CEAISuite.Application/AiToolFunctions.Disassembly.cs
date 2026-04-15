@@ -200,6 +200,25 @@ public sealed partial class AiToolFunctions
     }
 
     [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Get source file and line number for an address (requires PDB symbols). Returns null fields if no debug info available.")]
+    public Task<string> GetSourceLine(
+        [Description("Process ID")] int processId,
+        [Description("Address (hex or symbolic like module+offset)")] string address)
+    {
+        try
+        {
+            if (!IsProcessAlive(processId)) return Task.FromResult($"Process {processId} is no longer running.");
+            var addr = ParseAddress(address);
+            var lineInfo = symbolEngine?.ResolveSourceLine(addr);
+            if (lineInfo is null)
+                return Task.FromResult(ToJson(new { address = $"0x{(ulong)addr:X}", sourceFile = (string?)null, line = (int?)null, note = "No PDB line info available for this address." }));
+            return Task.FromResult(ToJson(new { address = $"0x{(ulong)addr:X}", sourceFile = lineInfo.FileName, line = lineInfo.LineNumber }));
+        }
+        catch (Exception ex) { return Task.FromResult($"GetSourceLine failed: {ex.Message}"); }
+    }
+
+    [ReadOnlyTool]
     [MaxResultSize(MaxResultSizeAttribute.Unbounded)]
     [Description("List memory regions. Shows address, size, R/W/X flags.")]
     public async Task<string> ListMemoryRegions(

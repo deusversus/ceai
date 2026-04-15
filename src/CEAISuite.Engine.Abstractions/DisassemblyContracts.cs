@@ -6,7 +6,9 @@ public sealed record DisassembledInstruction(
     string Mnemonic,
     string Operands,
     int Length,
-    string? SymbolName = null);
+    string? SymbolName = null,
+    string? SourceFile = null,
+    int? SourceLine = null);
 
 public sealed record DisassemblyResult(
     nuint StartAddress,

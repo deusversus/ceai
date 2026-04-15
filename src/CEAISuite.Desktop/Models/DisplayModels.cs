@@ -302,6 +302,13 @@ public sealed partial class DisassemblyLineDisplayItem : ObservableObject
     public string? XrefLabel { get; init; }
     public string? ModuleOffset { get; init; }
     public string? SymbolName { get; init; }
+    public string? SourceFile { get; init; }
+    public int? SourceLine { get; init; }
+
+    /// <summary>Short source location for display: "file.cs:42" (filename only).</summary>
+    public string? SourceLocation => SourceFile is not null && SourceLine is not null
+        ? $"{System.IO.Path.GetFileName(SourceFile)}:{SourceLine}"
+        : null;
 
     [ObservableProperty]
     private string _comment = "";

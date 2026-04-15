@@ -173,7 +173,7 @@ internal static class ToolCategories
             "TraceFieldWriters",
             "AssembleInstruction", "NopRegion" ],
         ["symbols"] = [
-            "LoadSymbolsForModule", "ResolveAddressToSymbol" ],
+            "LoadSymbolsForModule", "ResolveAddressToSymbol", "GetSourceLine" ],
         ["hooks"] = [
             "InstallCodeCaveHook", "RemoveCodeCaveHook", "ListCodeCaveHooks",
             "GetCodeCaveHookHits", "DryRunHookInstall" ],

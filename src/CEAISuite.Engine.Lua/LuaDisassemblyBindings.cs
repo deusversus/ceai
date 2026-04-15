@@ -15,7 +15,8 @@ internal static class LuaDisassemblyBindings
         MoonSharpLuaEngine engine,
         IDisassemblyEngine disassemblyEngine,
         IEngineFacade engineFacade,
-        IAutoAssemblerEngine? autoAssembler)
+        IAutoAssemblerEngine? autoAssembler,
+        ISymbolEngine? symbolEngine = null)
     {
         // disassemble(address) → table {address, bytes, opcode, extra, size}
         script.Globals["disassemble"] = (Func<string, DynValue>)(addrExpr =>
@@ -143,6 +144,24 @@ internal static class LuaDisassemblyBindings
 
                 // Return success indicator — full byte extraction requires executing
                 return DynValue.True;
+            });
+        }
+
+        // getSourceLine(address) → table {file, line, address} or nil
+        if (symbolEngine is not null)
+        {
+            script.Globals["getSourceLine"] = (Func<string, DynValue>)(addrExpr =>
+            {
+                var pid = RequireProcess(engine);
+                var address = ResolveAddress(addrExpr, pid, engineFacade, autoAssembler);
+                var lineInfo = symbolEngine.ResolveSourceLine(address);
+                if (lineInfo is null) return DynValue.Nil;
+
+                var table = new Table(script);
+                table["file"] = lineInfo.FileName;
+                table["line"] = (double)lineInfo.LineNumber;
+                table["address"] = FormatAddress(lineInfo.Address);
+                return DynValue.NewTable(table);
             });
         }
     }

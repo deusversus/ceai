@@ -78,6 +78,7 @@ public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null)
                         }
 
                         var symbolName = symbolEngine?.ResolveAddress((nuint)instr.IP)?.DisplayName;
+                        var lineInfo = symbolEngine?.ResolveSourceLine((nuint)instr.IP);
 
                         instructions.Add(new DisassembledInstruction(
                             (nuint)instr.IP,
@@ -85,7 +86,9 @@ public sealed class WindowsDisassemblyEngine(ISymbolEngine? symbolEngine = null)
                             mnemonic,
                             operands,
                             instr.Length,
-                            symbolName));
+                            symbolName,
+                            lineInfo?.FileName,
+                            lineInfo?.LineNumber));
 
                         totalBytes += instr.Length;
                     }

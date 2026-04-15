@@ -12,6 +12,12 @@ public sealed record SymbolInfo(
         : $"{ModuleName}!{FunctionName}";
 }
 
+/// <summary>Source file and line number for an address (from PDB debug info).</summary>
+public sealed record SourceLineInfo(
+    string FileName,
+    int LineNumber,
+    nuint Address);
+
 /// <summary>Engine for loading debug symbols and resolving addresses to function names.</summary>
 public interface ISymbolEngine
 {
@@ -20,6 +26,9 @@ public interface ISymbolEngine
 
     /// <summary>Resolve an address to a symbol. Returns null if no symbol found.</summary>
     SymbolInfo? ResolveAddress(nuint address);
+
+    /// <summary>Resolve an address to a source file and line number. Returns null if no line info available.</summary>
+    SourceLineInfo? ResolveSourceLine(nuint address);
 
     /// <summary>Release symbol resources for a process.</summary>
     void Cleanup(int processId);

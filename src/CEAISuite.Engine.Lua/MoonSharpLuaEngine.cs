@@ -344,7 +344,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
             _memoryWatchBindings.Register(script, this, _engineFacade, _autoAssembler);
 
             if (_disassemblyEngine is not null)
-                LuaDisassemblyBindings.Register(script, this, _disassemblyEngine, _engineFacade, _autoAssembler);
+                LuaDisassemblyBindings.Register(script, this, _disassemblyEngine, _engineFacade, _autoAssembler, _symbolEngine);
 
             if (_breakpointEngine is not null)
                 LuaDebuggerBindings.Register(script, this, _breakpointEngine, _engineFacade, _autoAssembler, _steppingEngine);

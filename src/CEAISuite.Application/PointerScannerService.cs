@@ -56,6 +56,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
     private int _lastMaxDepth;
     private long _lastMaxOffset;
     private IReadOnlyList<string>? _lastModuleFilter;
+    private IReadOnlyList<long>? _lastPerDepthMaxOffset;
     private IReadOnlyList<ModuleDescriptor> _lastModules = Array.Empty<ModuleDescriptor>();
     private int _lastProcessId;
 
@@ -91,6 +92,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
         _lastMaxDepth = maxDepth;
         _lastMaxOffset = maxOffset;
         _lastModuleFilter = moduleFilter;
+        _lastPerDepthMaxOffset = perDepthMaxOffset;
         _lastModules = modules;
         _lastProcessId = processId;
 
@@ -106,7 +108,7 @@ public sealed class PointerScannerService(IEngineFacade engine)
 
         var additionalResults = await ScanFromModuleIndex(
             processId, _lastModules, _lastTargetAddress, _lastMaxDepth, _lastMaxOffset,
-            _lastModuleIndex, ct).ConfigureAwait(false);
+            _lastModuleIndex, ct, _lastPerDepthMaxOffset).ConfigureAwait(false);
 
         // Merge partial + new
         _partialResults.AddRange(additionalResults);

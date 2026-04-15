@@ -205,6 +205,10 @@ internal static class ToolCategories
         ["lua"] = [
             "ExecuteLuaScript", "ValidateLuaScript", "EvaluateLuaExpression", "ResetLuaEngine",
             "SetLuaGlobal", "GetLuaGlobal" ],
+        ["mono"] = [
+            "InjectMonoAgent", "EjectMonoAgent", "GetMonoStatus",
+            "EnumMonoDomains", "EnumMonoAssemblies", "FindMonoClass",
+            "EnumMonoFields", "EnumMonoMethods", "InvokeMonoMethod" ],
         ["utility"] = [
             "IdentifyArtifact" ],
         // Demoted from core — loaded on-demand

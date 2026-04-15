@@ -51,6 +51,7 @@ public sealed partial class AiToolFunctions(
     SteppingService? steppingService = null,
     AutorunScriptService? autorunService = null,
     AppSettingsService? appSettingsService = null,
+    IMonoEngine? monoEngine = null,
     ILogger<AiToolFunctions>? logger = null)
 {
     private readonly TokenLimits _limits = tokenLimits ?? TokenLimits.Balanced;

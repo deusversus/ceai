@@ -330,7 +330,8 @@ public partial class App : System.Windows.Application
                 structureProvider: sp.GetService<ILuaStructureProvider>(),
                 steppingEngine: sp.GetService<ISteppingEngine>(),
                 mainFormProxy: sp.GetService<IMainFormProxy>(),
-                dataBindingHost: sp.GetService<ILuaDataBindingHost>()));
+                dataBindingHost: sp.GetService<ILuaDataBindingHost>(),
+                monoEngine: sp.GetService<IMonoEngine>()));
         services.AddSingleton<IAutoAssemblerEngine>(sp =>
             new WindowsAutoAssemblerEngine(() => sp.GetService<ILuaScriptEngine>()));
         services.AddSingleton<IMemoryProtectionEngine, WindowsMemoryProtectionEngine>();
@@ -343,6 +344,8 @@ public partial class App : System.Windows.Application
             new WindowsVehDebugger(
                 sp.GetService<ILogger<WindowsVehDebugger>>(),
                 () => sp.GetService<ILuaScriptEngine>()));
+        services.AddSingleton<IMonoEngine>(sp =>
+            new WindowsMonoEngine(sp.GetService<ILogger<WindowsMonoEngine>>()));
 
         // ── Persistence ──
         services.AddSingleton<IInvestigationSessionRepository>(

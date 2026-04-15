@@ -27,6 +27,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
     private readonly ISteppingEngine? _steppingEngine;
     private readonly IMainFormProxy? _mainFormProxy;
     private readonly ILuaDataBindingHost? _dataBindingHost;
+    private readonly IMonoEngine? _monoEngine;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _moduleCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, DynValue> _mainFormCallbacks = new();
     private Action? _mainFormUnsubscribe;
@@ -84,7 +85,8 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         ILuaStructureProvider? structureProvider = null,
         ISteppingEngine? steppingEngine = null,
         IMainFormProxy? mainFormProxy = null,
-        ILuaDataBindingHost? dataBindingHost = null)
+        ILuaDataBindingHost? dataBindingHost = null,
+        IMonoEngine? monoEngine = null)
     {
         _engineFacade = engineFacade;
         _autoAssembler = autoAssembler;
@@ -100,6 +102,7 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
         _steppingEngine = steppingEngine;
         _mainFormProxy = mainFormProxy;
         _dataBindingHost = dataBindingHost;
+        _monoEngine = monoEngine;
         _executionTimeout = executionTimeout ?? TimeSpan.FromSeconds(30);
         MaxInstructions = maxInstructions;
         _script = CreateSandboxedScript();
@@ -357,6 +360,9 @@ public sealed class MoonSharpLuaEngine : ILuaScriptEngine, IDisposable
 
             if (_aiAssistant is not null)
                 LuaAiBindings.Register(script, this, _aiAssistant, _engineFacade, _autoAssembler);
+
+            if (_monoEngine is not null && _engineFacade is not null)
+                LuaMonoBindings.Register(script, this, _monoEngine, _engineFacade);
         }
 
         if (_addressListProvider is not null)

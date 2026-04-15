@@ -1,0 +1,32 @@
+name: Build Mono Agent
+
+on:
+  push:
+    paths:
+      - 'native/mono_agent/**'
+  workflow_dispatch:
+
+jobs:
+  build-agent-x64:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup MSVC (x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Compile mono_agent.dll (x64)
+        working-directory: native/mono_agent
+        run: |
+          cl.exe /LD /O2 /W4 /WX mono_agent.c /link /DLL /OUT:mono_agent.dll kernel32.lib advapi32.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          dir mono_agent.dll
+
+      - name: Upload artifact (x64)
+        uses: actions/upload-artifact@v5
+        with:
+          name: mono-agent-dll-x64
+          path: native/mono_agent/mono_agent.dll

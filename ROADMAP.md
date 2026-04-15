@@ -823,7 +823,7 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 | **`debug_setLastChanceExceptionHandler`** | Scripting S1B | Requires exception handler infrastructure from Phase 11A stepping engine. |
 | **Lua form anchor/dock layout** | Scripting S2 | Resize-aware element positioning for script-created forms (`element:setAnchors()`). Low ROI — most CE trainers use fixed-size forms. Canvas uses absolute positioning. |
 | **Full coroutine `await(promise)` pattern** | Scripting S4 | MoonSharp coroutine integration for true async Lua. `createThread` + `createNativeTimer` cover primary use cases today. |
-| **Mono/.NET introspection bridge** | Scripting S6C | CE's most impactful scripting subsystem for modern games. Unity (Mono/IL2CPP) titles dominate the CT community — tested with BDFFHD CT which uses `mono_enumDomains`, `mono_findMethod`, `mono_invoke_method`, `LaunchMonoDataCollector`, and `monopipe`. CE implements this as a native agent DLL injected into the target that hooks the Mono C API (`mono_domain_get`, `mono_class_from_name`, `mono_runtime_invoke`, etc.) and communicates back via named pipe IPC. Our implementation needs: (1) `IMonoEngine` abstraction in Engine.Abstractions, (2) native C agent DLL (similar to VEH agent pattern) that links against Mono runtime exports, (3) named pipe or shared memory IPC channel, (4) ~30 Lua globals (`mono_enumDomains`, `mono_enumAssemblies`, `mono_findClass`, `mono_class_enumFields`, `mono_class_enumMethods`, `mono_findMethod`, `mono_invoke_method`, `mono_getStaticFieldValue`, `mono_setStaticFieldValue`, `LaunchMonoDataCollector`, etc.), (5) `getAddressSafe()` helper (pcall wrapper around `getAddress`), (6) `syntaxcheck` global set by AA engine during validation passes. High value for Unity targets, Very High effort. Could reuse the VEH agent's injection + IPC infrastructure (10E) to reduce bootstrap work. |
+| **Mono/.NET introspection bridge** | Phase 12E | ✅ Done — `IMonoEngine` + `WindowsMonoEngine` (named pipe IPC), `LuaMonoBindings` (~20 globals), 9 AI tools, native `mono_agent.c` (~600 LOC). Resolves Mono C API exports at runtime, serves JSON commands via `\\.\pipe\CEAISuite_Mono_{pid}`. CI build via `build-mono-agent.yml`. |
 | **Integrated Lua script debugger** | Scripting S6E | Set breakpoints in Lua code, step through scripts in Script Editor, variable inspector. Needs MoonSharp `IDebugger` rework. |
 | **`assemble()` byte extraction** | Scripting audit | Currently returns `true` not assembled bytes. Needs Keystone byte extraction without full AA execution context. |
 | **`AOBScanModule` range-constrained scan** | Scripting audit | Currently scans all memory then filters. Needs `IScanEngine` start/end address constraint support for performance. |
@@ -864,17 +864,17 @@ Current → Target parity by category after each phase:
 | Breakpoints & Hooks | 95% | 98% | 100% | 100% | 100% |
 | Address Table | 90% | 95% | 95% | 95% | 95% |
 | Scripting (AA engine) | 95% | 95% | 95% | 95% | 95% |
-| Scripting (Lua API) | 25% | 90% | 93% | 96%** | 95%** |
+| Scripting (Lua API) | 25% | 90% | 93% | 99%** | 95%** |
 | Pointer Resolution | 70% | 70% | 70% | 70% | 80% |
 | Structure Discovery | 100% | 100% | 100% | 100% | 100% |
 | Snapshots | 100% | 100% | 100% | 100% | 100% |
 | Session & History | 75% | 75% | 75% | 75% | 80% |
 | Safety & Watchdog | 70% | 75% | 75% | 75% | 80% |
 | Hotkeys | 100% | 100% | 100% | 100% | 100% |
-| **Overall** | **~91%** | **~94%** | **~95%** | **~96%** | **95%+** |
+| **Overall** | **~91%** | **~94%** | **~95%** | **~98%** | **95%+** |
 
 *Process & Attachment parity improves further with future engine enhancements (parent process, command line).
-**Scripting (Lua API) at 96%: ~170+ globals registered. CE property proxies, reactive binding, memory watches, getMainForm(), Lua 5.3 bitwise compat, pcall/xpcall/error. Remaining 4% = mono/.NET introspection bridge (~30 globals). Real-world CT testing (BDFFHD v4) showed 3 of 4 scripts depend on mono introspection — Unity titles dominate the CT ecosystem, making this the highest-impact remaining Lua API gap.
+**Scripting (Lua API) at 99%: ~190+ globals registered. Phase 12E added Mono introspection (~20 globals: LaunchMonoDataCollector, mono_enumDomains, mono_findClass, etc.). Remaining 1% = mono_signature_get_params (per-parameter type enumeration), assemble() byte extraction, AOBScanModule range constraint. Real-world CT testing (BDFFHD v4) showed 3 of 4 scripts depend on mono introspection — Unity titles dominate the CT ecosystem, making this the highest-impact remaining Lua API gap.
 
 Compat Sprint parity changes: Scripting (Lua API) 93% → 96% (property proxies, reactive binding, memory watches, host interop). Overall ~95% → ~96%. Now exceeds 95%+ target for all categories except Process & Attachment (50%), Pointer Resolution (70%), Session & History (75%), Safety & Watchdog (75%), and Disassembly & Analysis (80%).
 
@@ -976,4 +976,9 @@ Phase 1 ✅ (Foundation)
 | **10E+** | VEH Overhaul | ✅ Complete | 7 sub-phases (A–G), all independently audited: protocol V2, conditional BPs + Lua callbacks, stealth (DR cloaking + PEB hiding), UI panel, dynamic Trap Flag tracing, unified pipeline (Hardware→VEH→PageGuard), PAGE_GUARD + INT3 via VEH; 2,809 tests |
 | **11A** | Debugger Stepping | ✅ Complete | ISteppingEngine + WindowsSteppingEngine via VEH TF, 5 AI tools, DebuggerViewModel wired, Lua stepping globals, step history; 2,947 tests |
 | **S1–S9** | Scripting Compat Sprint | ✅ Complete | CE property proxies (18 element types), CePropertyProxy factory, reactive data binding, createMemoryWatch(), getMainForm() host interop, dockable script panels, Lua 5.3 bitwise preprocessor, pcall/xpcall/error; 3,000 tests |
+| **12A** | Process & Attachment | ✅ Complete | Parent PID, command line, executable path, window title, elevation status, module paths; 50% → 80% parity |
+| **12B** | PDB Symbols | ✅ Complete | SymGetLineFromAddr64 wired end-to-end; GetSourceLine AI tool + getSourceLine Lua binding; 80% → 85% parity |
+| **12C** | Session & Safety | ✅ Complete | Settings-driven auto-save, SQLite session snapshots, orphaned op recovery, undo depth warning; 75% → 80% parity |
+| **12D** | Pointer Polish | ✅ Complete | Per-depth offset limits, smart rescan, stability colors, sort by stability; 70% → 80% parity |
+| **12E** | Mono Bridge | ✅ Complete | IMonoEngine, WindowsMonoEngine (named pipe IPC), mono_agent.c (~600 LOC), LuaMonoBindings (~20 globals), 9 AI tools; Lua API 96% → 99% |
 | **11B** | Kernel Driver | ⏸ Shelved | Kernel-mode anti-debug bypass — shelved indefinitely (EV cert + WDK + kernel engineer required) |

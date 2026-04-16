@@ -70,6 +70,7 @@ public partial class ProcessListViewModel : ObservableObject, IDisposable
             var details = $"{inspection.Architecture} | {inspection.Modules.Count} modules";
             if (inspection.IsElevated) details += " | Admin";
             if (inspection.ParentProcessName is not null) details += $" | Parent: {inspection.ParentProcessName}";
+            if (inspection.ExecutablePath is not null) details += $" | {inspection.ExecutablePath}";
             ProcessDetails = details;
         }
         else

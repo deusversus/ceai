@@ -303,16 +303,25 @@
                                           PreviewMouseMove="ProcessList_PreviewMouseMove">
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
-                                            <Grid Margin="0,2,0,2">
+                                            <Grid Margin="0,2,0,2" ToolTip="{Binding ExecutablePath}">
                                                 <Grid.ColumnDefinitions>
                                                     <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
                                                     <ColumnDefinition Width="Auto" />
                                                 </Grid.ColumnDefinitions>
                                                 <StackPanel>
                                                     <TextBlock FontWeight="SemiBold" Text="{Binding Name}" FontSize="12" />
-                                                    <TextBlock Text="{Binding Id, StringFormat=PID {0}}" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding Id, StringFormat=PID {0}}" Foreground="{DynamicResource SecondaryForeground}" FontSize="11" />
+                                                        <TextBlock Text="{Binding WindowTitle}" Foreground="{DynamicResource SecondaryForeground}" FontSize="10" Margin="6,0,0,0"
+                                                                   Visibility="{Binding WindowTitle, Converter={StaticResource NullToCollapsed}}" />
+                                                    </StackPanel>
                                                 </StackPanel>
-                                                <Border Grid.Column="1" Padding="4,1" Background="{DynamicResource InputBackground}" CornerRadius="3">
+                                                <Border Grid.Column="1" Padding="4,1" Background="#44CC2222" CornerRadius="3" Margin="4,0"
+                                                        Visibility="{Binding IsElevated, Converter={StaticResource BoolToVisibility}}">
+                                                    <TextBlock FontSize="9" Text="ADMIN" Foreground="#FFCC4444" FontWeight="Bold" />
+                                                </Border>
+                                                <Border Grid.Column="2" Padding="4,1" Background="{DynamicResource InputBackground}" CornerRadius="3">
                                                     <TextBlock FontSize="10" Text="{Binding Architecture}" Foreground="{DynamicResource SecondaryForeground}" />
                                                 </Border>
                                             </Grid>
@@ -925,6 +934,7 @@
                                                 <GridViewColumn Header="Mnemonic" Width="80" DisplayMemberBinding="{Binding Mnemonic}" />
                                                 <GridViewColumn Header="Operands" Width="200" DisplayMemberBinding="{Binding Operands}" />
                                                 <GridViewColumn Header="Xref" Width="100" DisplayMemberBinding="{Binding XrefLabel}" />
+                                                <GridViewColumn Header="Source" Width="120" DisplayMemberBinding="{Binding SourceLocation}" />
                                                 <GridViewColumn Header="Comment" Width="160" DisplayMemberBinding="{Binding Comment}" />
                                             </GridView>
                                         </ListView.View>

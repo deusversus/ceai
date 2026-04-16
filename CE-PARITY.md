@@ -37,6 +37,90 @@ Based on commit history, our actual pace for various feature sizes:
 
 ---
 
+## Release Planning
+
+### The product is not a CE clone. The product is an AI game hacking tool.
+
+CE parity is the engineering backlog. The thing that makes this worth sharing is the thing CE doesn't have: **you can talk to it.** A natural-language interface to game memory editing, backed by 50+ AI tools, a streaming agent loop, and multi-provider AI support. That's the story. Not "I rebuilt CE in C#" but "I built a game hacking tool you can have a conversation with."
+
+The parity work matters because the AI needs working tools behind it — an AI that can't scan properly or step through code is a demo, not a product. But the release gate isn't "match CE." It's "the AI demo is compelling and the core workflow doesn't break."
+
+### Release Gates
+
+#### Gate 0: Demo-Ready (target: after Tier 0 sprint)
+
+**What it unlocks:** A video demo. A Reddit post. First public visibility.
+
+**Requirements:**
+- [ ] Disk-backed scan results work on a real game (Unknown Initial Value → narrow down → found it)
+- [ ] IncreasedBy/DecreasedBy scan types work
+- [ ] String scanning works
+- [ ] Step Over actually works
+- [ ] Can scroll up in the disassembler
+- [ ] Hotkeys from community CT files execute
+- [ ] AI agent can perform the entire scan → find → freeze workflow via natural language
+- [ ] 60-second screen recording showing the AI finding and freezing a health value
+
+**Where to post:**
+- r/ReverseEngineering — technical audience, appreciates novel tools
+- r/GameHacking — direct target audience
+- r/dotnet — "built in .NET 10 / WPF" angle
+- r/LocalLLaMA or r/ClaudeAI — "AI-powered desktop app" angle
+- GitHub README with demo GIF
+
+**The pitch:** "I'm a solo developer. I built an AI-powered game memory editor in 5 weeks using Claude as my pair programmer. You can talk to it in plain English and it finds and modifies game values for you. Here's a 60-second demo."
+
+That framing is honest, interesting, and hits multiple audiences. The autism + AI-assisted development angle is genuine and compelling — people are fascinated by what solo developers can build with AI tools.
+
+#### Gate 1: Usable Tool (target: after Tier 1 sprint)
+
+**What it unlocks:** GitHub release with binary. People can actually download and use it.
+
+**Requirements:**
+- [ ] Everything from Gate 0
+- [ ] Code analysis engine works (xrefs, string references)
+- [ ] Jump lines visible in disassembler
+- [ ] Register modification on BP hit works
+- [ ] FPU/XMM registers display
+- [ ] At least 10 community CT files load and partially function (hotkeys, scripts, basic entries)
+- [ ] First-run experience is smooth (welcome wizard works, settings page makes sense)
+- [ ] README has installation instructions, screenshots, feature list
+- [ ] GitHub Release with a .zip containing the Debug build
+
+**Where to post:**
+- All Gate 0 venues again with "v0.1 release"
+- Cheat Engine forums — respectful introduction, "inspired by CE, not a replacement"
+- YouTube — longer walkthrough video (5-10 min)
+
+#### Gate 2: Community-Ready (target: after Tier 2 progress, ~60% CE parity)
+
+**What it unlocks:** Patreon / GitHub Sponsors. Recurring supporters.
+
+**Requirements:**
+- [ ] Everything from Gate 1
+- [ ] Form designer handles most community CT files
+- [ ] Grouped scan works correctly
+- [ ] Pointer scanner is multi-threaded and goes to depth 5+
+- [ ] Trace visualization works
+- [ ] At least 50% of top-100 CE forum CT files load correctly
+- [ ] Active GitHub Issues with community bug reports being addressed
+- [ ] Documentation site or wiki
+
+**Monetization angle:** Patreon with tiers:
+- Free: open source, full tool, community support
+- $5/month: early access to new features, priority bug fixes
+- $20/month: direct feature requests, monthly dev stream
+
+The open-source-with-Patreon model works for developer tools. The key is that the free version is genuinely useful — Patreon supporters are paying for velocity and influence, not access.
+
+### Why Not Wait
+
+The "build it until it's perfect, then release" pattern is a trap — especially for a solo developer. The feedback loop from real users is more valuable than the next 50 features. Someone using the tool and saying "this crashes when I load my CT file" tells you more about priorities than any source comparison audit.
+
+The risk of sharing early is zero. The risk of never sharing is that this becomes another impressive thing that nobody knows about.
+
+---
+
 ## Executive Summary
 
 | Metric | Value |

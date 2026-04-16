@@ -208,7 +208,9 @@ internal static class ToolCategories
         ["mono"] = [
             "InjectMonoAgent", "EjectMonoAgent", "GetMonoStatus",
             "EnumMonoDomains", "EnumMonoAssemblies", "FindMonoClass",
-            "EnumMonoFields", "EnumMonoMethods", "InvokeMonoMethod" ],
+            "EnumMonoFields", "EnumMonoMethods",
+            "ReadMonoStaticField", "WriteMonoStaticField",
+            "InvokeMonoMethod" ],
         ["utility"] = [
             "IdentifyArtifact" ],
         // Demoted from core — loaded on-demand

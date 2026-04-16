@@ -181,6 +181,62 @@ public sealed partial class AiToolFunctions
         catch (Exception ex) { return $"EnumMonoMethods failed: {ex.Message}"; }
     }
 
+    [ReadOnlyTool]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Read a static field value from a Mono class. Returns the raw value as a number.")]
+    public async Task<string> ReadMonoStaticField(
+        [Description("Process ID")] int processId,
+        [Description("Class handle (hex)")] string classHandle,
+        [Description("Field handle (hex)")] string fieldHandle,
+        [Description("Size in bytes (1, 2, 4, or 8)")] int size = 4)
+    {
+        if (monoEngine is null) return "Mono engine not available.";
+        try
+        {
+            var cls = ParseAddress(classHandle);
+            var field = ParseAddress(fieldHandle);
+            var data = await monoEngine.GetStaticFieldValueAsync(processId, cls, field, size).ConfigureAwait(false);
+            if (data is null) return ToJson(new { success = false, error = "Field read returned null" });
+            var value = size switch
+            {
+                1 => (long)data[0],
+                2 => BitConverter.ToInt16(data, 0),
+                4 => BitConverter.ToInt32(data, 0),
+                _ => BitConverter.ToInt64(data, 0)
+            };
+            return ToJson(new { success = true, value, hex = $"0x{value:X}", size });
+        }
+        catch (Exception ex) { return $"ReadMonoStaticField failed: {ex.Message}"; }
+    }
+
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [Description("Write a static field value on a Mono class.")]
+    public async Task<string> WriteMonoStaticField(
+        [Description("Process ID")] int processId,
+        [Description("Class handle (hex)")] string classHandle,
+        [Description("Field handle (hex)")] string fieldHandle,
+        [Description("Value to write (integer)")] long value,
+        [Description("Size in bytes (1, 2, 4, or 8)")] int size = 4)
+    {
+        if (monoEngine is null) return "Mono engine not available.";
+        if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+        try
+        {
+            var cls = ParseAddress(classHandle);
+            var field = ParseAddress(fieldHandle);
+            var bytes = size switch
+            {
+                1 => new[] { (byte)value },
+                2 => BitConverter.GetBytes((short)value),
+                4 => BitConverter.GetBytes((int)value),
+                _ => BitConverter.GetBytes(value)
+            };
+            var result = await monoEngine.SetStaticFieldValueAsync(processId, cls, field, bytes).ConfigureAwait(false);
+            return result ? ToJson(new { success = true }) : ToJson(new { success = false, error = "Write failed" });
+        }
+        catch (Exception ex) { return $"WriteMonoStaticField failed: {ex.Message}"; }
+    }
+
     [MaxResultSize(MaxResultSizeAttribute.Small)]
     [Description("Invoke a Mono method. Use with caution — can crash the target process if arguments are wrong.")]
     public async Task<string> InvokeMonoMethod(

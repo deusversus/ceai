@@ -855,26 +855,27 @@ Interactive debugging view — CE's full debugger interface. Stepping commands a
 
 Current → Target parity by category after each phase:
 
-| Category | After Ph 10 ✅ | After VEH Overhaul ✅ | After 11A ✅ | After Compat Sprint ✅ | Target |
-|----------|------------|---------------------|------------|----------------------|--------|
-| Process & Attachment | 50% | 50% | 50% | 50% | 80%* |
-| Memory Read/Write | 80% | 85% | 85% | 85% | 90% |
-| Scanning | 90% | 95% | 95% | 95% | 95% |
-| Disassembly & Analysis | 70% | 80% | 80% | 80% | 85% |
-| Breakpoints & Hooks | 95% | 98% | 100% | 100% | 100% |
-| Address Table | 90% | 95% | 95% | 95% | 95% |
-| Scripting (AA engine) | 95% | 95% | 95% | 95% | 95% |
-| Scripting (Lua API) | 25% | 90% | 93% | 99%** | 95%** |
-| Pointer Resolution | 70% | 70% | 70% | 70% | 80% |
-| Structure Discovery | 100% | 100% | 100% | 100% | 100% |
-| Snapshots | 100% | 100% | 100% | 100% | 100% |
-| Session & History | 75% | 75% | 75% | 75% | 80% |
-| Safety & Watchdog | 70% | 75% | 75% | 75% | 80% |
-| Hotkeys | 100% | 100% | 100% | 100% | 100% |
-| **Overall** | **~91%** | **~94%** | **~95%** | **~98%** | **95%+** |
+| Category | After Ph 10 ✅ | After VEH Overhaul ✅ | After 11A ✅ | After Compat Sprint ✅ | After Phase 12 ✅ | Target |
+|----------|------------|---------------------|------------|----------------------|------------------|--------|
+| Process & Attachment | 50% | 50% | 50% | 50% | **80%** | 80% ✅ |
+| Memory Read/Write | 80% | 85% | 85% | 85% | 85% | 90% |
+| Scanning | 90% | 95% | 95% | 95% | 95% | 95% ✅ |
+| Disassembly & Analysis | 70% | 80% | 80% | 80% | **85%** | 85% ✅ |
+| Breakpoints & Hooks | 95% | 98% | 100% | 100% | 100% | 100% ✅ |
+| Address Table | 90% | 95% | 95% | 95% | 95% | 95% ✅ |
+| Scripting (AA engine) | 95% | 95% | 95% | 95% | 95% | 95% ✅ |
+| Scripting (Lua API) | 25% | 90% | 93% | 96% | **99%** | 95% ✅ |
+| Pointer Resolution | 70% | 70% | 70% | 70% | **80%** | 80% ✅ |
+| Structure Discovery | 100% | 100% | 100% | 100% | 100% | 100% ✅ |
+| Snapshots | 100% | 100% | 100% | 100% | 100% | 100% ✅ |
+| Session & History | 75% | 75% | 75% | 75% | **80%** | 80% ✅ |
+| Safety & Watchdog | 70% | 75% | 75% | 75% | **80%** | 80% ✅ |
+| Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% ✅ |
+| **Overall** | **~91%** | **~94%** | **~95%** | **~96%** | **~97%** | **95%+ ✅** |
 
-*Process & Attachment parity improves further with future engine enhancements (parent process, command line).
-**Scripting (Lua API) at 99%: ~190+ globals registered. Phase 12E added Mono introspection (~20 globals: LaunchMonoDataCollector, mono_enumDomains, mono_findClass, etc.). Remaining 1% = mono_signature_get_params (per-parameter type enumeration), assemble() byte extraction, AOBScanModule range constraint. Real-world CT testing (BDFFHD v4) showed 3 of 4 scripts depend on mono introspection — Unity titles dominate the CT ecosystem, making this the highest-impact remaining Lua API gap.
+Phase 12 parity changes: Process 50→80%, Disassembly 80→85%, Pointer 70→80%, Session 75→80%, Safety 75→80%, Lua API 96→99%. 12 of 14 categories now at or above target. Remaining gaps: Memory Read/Write (85% vs 90% target).
+
+*Scripting (Lua API) at 99%: ~190+ globals registered. Phase 12E added Mono introspection (~20 globals: LaunchMonoDataCollector, mono_enumDomains, mono_findClass, etc.). Remaining 1% = assemble() byte extraction, AOBScanModule range constraint.
 
 Compat Sprint parity changes: Scripting (Lua API) 93% → 96% (property proxies, reactive binding, memory watches, host interop). Overall ~95% → ~96%. Now exceeds 95%+ target for all categories except Process & Attachment (50%), Pointer Resolution (70%), Session & History (75%), Safety & Watchdog (75%), and Disassembly & Analysis (80%).
 

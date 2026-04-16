@@ -133,13 +133,7 @@ public sealed class PatchUndoService(IEngineFacade engineFacade)
 
     private async Task WriteRawBytesAsync(int processId, nuint address, byte[] data, CancellationToken ct)
     {
-        // Write raw bytes by converting to appropriate type writes
-        // For simplicity, write as individual bytes
-        for (int i = 0; i < data.Length; i++)
-        {
-            await engineFacade.WriteValueAsync(processId, address + (nuint)i,
-                MemoryDataType.Byte, data[i].ToString(CultureInfo.InvariantCulture), ct).ConfigureAwait(false);
-        }
+        await engineFacade.WriteBytesAsync(processId, address, data, ct).ConfigureAwait(false);
     }
 
     private static int GetDataTypeSize(MemoryDataType type) => type switch

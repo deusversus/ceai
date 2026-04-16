@@ -858,7 +858,7 @@ Current → Target parity by category after each phase:
 | Category | After Ph 10 ✅ | After VEH Overhaul ✅ | After 11A ✅ | After Compat Sprint ✅ | After Phase 12 ✅ | Target |
 |----------|------------|---------------------|------------|----------------------|------------------|--------|
 | Process & Attachment | 50% | 50% | 50% | 50% | **80%** | 80% ✅ |
-| Memory Read/Write | 80% | 85% | 85% | 85% | 85% | 90% |
+| Memory Read/Write | 80% | 85% | 85% | 85% | **90%** | 90% ✅ |
 | Scanning | 90% | 95% | 95% | 95% | 95% | 95% ✅ |
 | Disassembly & Analysis | 70% | 80% | 80% | 80% | **85%** | 85% ✅ |
 | Breakpoints & Hooks | 95% | 98% | 100% | 100% | 100% | 100% ✅ |
@@ -871,9 +871,9 @@ Current → Target parity by category after each phase:
 | Session & History | 75% | 75% | 75% | 75% | **80%** | 80% ✅ |
 | Safety & Watchdog | 70% | 75% | 75% | 75% | **80%** | 80% ✅ |
 | Hotkeys | 100% | 100% | 100% | 100% | 100% | 100% ✅ |
-| **Overall** | **~91%** | **~94%** | **~95%** | **~96%** | **~97%** | **95%+ ✅** |
+| **Overall** | **~91%** | **~94%** | **~95%** | **~96%** | **~98%** | **95%+ ✅** |
 
-Phase 12 parity changes: Process 50→80%, Disassembly 80→85%, Pointer 70→80%, Session 75→80%, Safety 75→80%, Lua API 96→99%. 12 of 14 categories now at or above target. Remaining gaps: Memory Read/Write (85% vs 90% target).
+Phase 12 parity changes: Process 50→80%, Memory R/W 85→90%, Disassembly 80→85%, Pointer 70→80%, Session 75→80%, Safety 75→80%, Lua API 96→99%. **All 14 categories now at or above target.** Memory R/W closed with auto-VirtualProtect, unsigned types, WideString encoding, freeze modes, BatchWrite, and FillMemory.
 
 *Scripting (Lua API) at 99%: ~190+ globals registered. Phase 12E added Mono introspection (~20 globals: LaunchMonoDataCollector, mono_enumDomains, mono_findClass, etc.). Remaining 1% = assemble() byte extraction, AOBScanModule range constraint.
 

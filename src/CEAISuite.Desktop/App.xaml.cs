@@ -454,7 +454,11 @@ public partial class App : System.Windows.Application
                 uiCommandBus: sp.GetRequiredService<IUiCommandBus>(),
                 speedHackService: sp.GetRequiredService<SpeedHackService>(),
                 vehDebugService: sp.GetRequiredService<VehDebugService>(),
-                appSettingsService: sp.GetRequiredService<AppSettingsService>());
+                steppingService: sp.GetService<SteppingService>(),
+                autorunService: sp.GetService<AutorunScriptService>(),
+                symbolEngine: sp.GetService<ISymbolEngine>(),
+                appSettingsService: sp.GetRequiredService<AppSettingsService>(),
+                monoEngine: sp.GetService<IMonoEngine>());
         });
 
         // ── AI operator service (starts with null IChatClient — MainWindow hot-swaps it) ──

@@ -483,7 +483,56 @@ static void HandleGetStaticField(ULONG64 classHandle, ULONG64 fieldHandle, int s
     json_append("\"}\n");
 }
 
-static void HandleInvokeMethod(ULONG64 methodHandle, ULONG64 instanceHandle)
+/* C2 audit fix: set_static_field handler */
+static void HandleSetStaticField(ULONG64 classHandle, ULONG64 fieldHandle, const char* b64Data)
+{
+    json_reset();
+    MonoClass* klass = (MonoClass*)(uintptr_t)classHandle;
+    MonoClassField* field = (MonoClassField*)(uintptr_t)fieldHandle;
+
+    if (!mono.class_vtable || !mono.vtable_get_static_field_data || !mono.domain_get) {
+        json_append("{\"ok\":false,\"error\":\"static field write not available\"}\n");
+        return;
+    }
+
+    MonoDomain* domain = mono.domain_get();
+    MonoVTable* vtable = mono.class_vtable(domain, klass);
+    if (!vtable) { json_append("{\"ok\":false,\"error\":\"vtable not found\"}\n"); return; }
+
+    void* staticData = mono.vtable_get_static_field_data(vtable);
+    if (!staticData) { json_append("{\"ok\":false,\"error\":\"no static data\"}\n"); return; }
+
+    int offset = mono.field_get_offset ? mono.field_get_offset(field) : 0;
+    unsigned char* ptr = (unsigned char*)staticData + offset;
+
+    /* Base64-decode the data */
+    static const unsigned char b64d[256] = {
+        ['A']=0,['B']=1,['C']=2,['D']=3,['E']=4,['F']=5,['G']=6,['H']=7,
+        ['I']=8,['J']=9,['K']=10,['L']=11,['M']=12,['N']=13,['O']=14,['P']=15,
+        ['Q']=16,['R']=17,['S']=18,['T']=19,['U']=20,['V']=21,['W']=22,['X']=23,
+        ['Y']=24,['Z']=25,['a']=26,['b']=27,['c']=28,['d']=29,['e']=30,['f']=31,
+        ['g']=32,['h']=33,['i']=34,['j']=35,['k']=36,['l']=37,['m']=38,['n']=39,
+        ['o']=40,['p']=41,['q']=42,['r']=43,['s']=44,['t']=45,['u']=46,['v']=47,
+        ['w']=48,['x']=49,['y']=50,['z']=51,['0']=52,['1']=53,['2']=54,['3']=55,
+        ['4']=56,['5']=57,['6']=58,['7']=59,['8']=60,['9']=61,['+']=62,['/']=63
+    };
+    int len = (int)strlen(b64Data);
+    int outLen = 0;
+    for (int i = 0; i < len && outLen < 64; i += 4) {
+        unsigned int n = (b64d[(unsigned char)b64Data[i]] << 18) |
+                         (b64d[(unsigned char)b64Data[i+1]] << 12) |
+                         (b64d[(unsigned char)b64Data[i+2]] << 6) |
+                          b64d[(unsigned char)b64Data[i+3]];
+        ptr[outLen++] = (unsigned char)(n >> 16);
+        if (b64Data[i+2] != '=' && outLen < 64) ptr[outLen++] = (unsigned char)(n >> 8);
+        if (b64Data[i+3] != '=' && outLen < 64) ptr[outLen++] = (unsigned char)n;
+    }
+
+    json_append("{\"ok\":true}\n");
+}
+
+static void HandleInvokeMethod(ULONG64 methodHandle, ULONG64 instanceHandle,
+                               const char* cmdLine)
 {
     json_reset();
     if (!mono.runtime_invoke) {
@@ -495,7 +544,31 @@ static void HandleInvokeMethod(ULONG64 methodHandle, ULONG64 instanceHandle)
     void* instance = (void*)(uintptr_t)instanceHandle;
     MonoObject* exc = NULL;
 
-    MonoObject* result = mono.runtime_invoke(method, instance, NULL, &exc);
+    /* C3 audit fix: Parse args array from command JSON.
+     * Format: "args":[123,456,...] — each element is a pointer-sized value.
+     * We pass them as void** to mono_runtime_invoke. */
+    void* argPtrs[16] = {0};
+    void** argsParam = NULL;
+    {
+        const char* argsStart = strstr(cmdLine, "\"args\":[");
+        if (argsStart) {
+            argsStart += 8; /* skip "args":[ */
+            int argCount = 0;
+            while (*argsStart && *argsStart != ']' && argCount < 16) {
+                while (*argsStart == ' ' || *argsStart == ',') argsStart++;
+                if (*argsStart == ']') break;
+                ULONG64 v = 0;
+                while (*argsStart >= '0' && *argsStart <= '9') {
+                    v = v * 10 + (*argsStart - '0');
+                    argsStart++;
+                }
+                argPtrs[argCount++] = (void*)(uintptr_t)v;
+            }
+            if (argCount > 0) argsParam = argPtrs;
+        }
+    }
+
+    MonoObject* result = mono.runtime_invoke(method, instance, argsParam, &exc);
     if (exc) {
         json_append("{\"ok\":false,\"error\":\"managed exception thrown\"}\n");
         return;
@@ -588,11 +661,19 @@ static void DispatchCommand(const char* cmdLine, HANDLE hPipe)
         ParseInt(cmdLine, "size", &size);
         HandleGetStaticField(klass, field, size);
     }
+    else if (strcmp(cmdName, "set_static_field") == 0) {
+        ULONG64 klass = 0, field = 0;
+        char b64Data[512] = "";
+        ParseU64(cmdLine, "class", &klass);
+        ParseU64(cmdLine, "field", &field);
+        ParseString(cmdLine, "data", b64Data, sizeof(b64Data));
+        HandleSetStaticField(klass, field, b64Data);
+    }
     else if (strcmp(cmdName, "invoke_method") == 0) {
         ULONG64 method = 0, instance = 0;
         ParseU64(cmdLine, "method", &method);
         ParseU64(cmdLine, "instance", &instance);
-        HandleInvokeMethod(method, instance);
+        HandleInvokeMethod(method, instance, cmdLine);
     }
     else if (strcmp(cmdName, "shutdown") == 0) {
         json_reset();

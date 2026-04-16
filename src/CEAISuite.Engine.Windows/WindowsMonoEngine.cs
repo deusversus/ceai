@@ -107,14 +107,14 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     public async Task<IReadOnlyList<MonoDomain>> EnumDomainsAsync(int processId, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "enum_domains" }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "enum_domains" }, ct).ConfigureAwait(false);
         return DeserializeList<MonoDomain>(response, "domains");
     }
 
     public async Task<IReadOnlyList<MonoAssembly>> EnumAssembliesAsync(int processId, nuint domainHandle, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "enum_assemblies", domain = (ulong)domainHandle }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "enum_assemblies", domain = (ulong)domainHandle }, ct).ConfigureAwait(false);
         return DeserializeList<MonoAssembly>(response, "assemblies");
     }
 
@@ -123,7 +123,7 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     public async Task<MonoClass?> FindClassAsync(int processId, nuint imageHandle, string namespaceName, string className, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "find_class", image = (ulong)imageHandle, ns = namespaceName, name = className }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "find_class", image = (ulong)imageHandle, ns = namespaceName, name = className }, ct).ConfigureAwait(false);
         return response.RootElement.TryGetProperty("class", out var classProp) && classProp.ValueKind != JsonValueKind.Null
             ? classProp.Deserialize<MonoClass>(JsonOptions)
             : null;
@@ -132,14 +132,14 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     public async Task<IReadOnlyList<MonoField>> EnumFieldsAsync(int processId, nuint classHandle, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "enum_fields", @class = (ulong)classHandle }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "enum_fields", @class = (ulong)classHandle }, ct).ConfigureAwait(false);
         return DeserializeList<MonoField>(response, "fields");
     }
 
     public async Task<IReadOnlyList<MonoMethod>> EnumMethodsAsync(int processId, nuint classHandle, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "enum_methods", @class = (ulong)classHandle }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "enum_methods", @class = (ulong)classHandle }, ct).ConfigureAwait(false);
         return DeserializeList<MonoMethod>(response, "methods");
     }
 
@@ -148,7 +148,7 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     public async Task<byte[]?> GetStaticFieldValueAsync(int processId, nuint classHandle, nuint fieldHandle, int size, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "get_static_field", @class = (ulong)classHandle, field = (ulong)fieldHandle, size }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "get_static_field", @class = (ulong)classHandle, field = (ulong)fieldHandle, size }, ct).ConfigureAwait(false);
         if (response.RootElement.TryGetProperty("data", out var dataProp) && dataProp.ValueKind == JsonValueKind.String)
             return Convert.FromBase64String(dataProp.GetString()!);
         return null;
@@ -157,7 +157,7 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     public async Task<bool> SetStaticFieldValueAsync(int processId, nuint classHandle, nuint fieldHandle, byte[] value, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "set_static_field", @class = (ulong)classHandle, field = (ulong)fieldHandle, data = Convert.ToBase64String(value) }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "set_static_field", @class = (ulong)classHandle, field = (ulong)fieldHandle, data = Convert.ToBase64String(value) }, ct).ConfigureAwait(false);
         return response.RootElement.TryGetProperty("ok", out var ok) && ok.GetBoolean();
     }
 
@@ -167,7 +167,7 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
         nuint[]? args = null, CancellationToken ct = default)
     {
         var state = GetState(processId);
-        var response = await SendCommandAsync(state, new { cmd = "invoke_method", method = (ulong)methodHandle, instance = (ulong)instanceHandle, args = args?.Select(a => (ulong)a).ToArray() }, ct).ConfigureAwait(false);
+        using var response = await SendCommandAsync(state, new { cmd = "invoke_method", method = (ulong)methodHandle, instance = (ulong)instanceHandle, args = args?.Select(a => (ulong)a).ToArray() }, ct).ConfigureAwait(false);
 
         if (response.RootElement.TryGetProperty("ok", out var ok) && ok.GetBoolean())
         {
@@ -257,10 +257,13 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
             {
                 pipe.Connect(timeout: 5000);
             }
-            catch (TimeoutException)
+            catch (Exception pipeEx)
             {
                 pipe.Dispose();
-                return new MonoInjectResult(false, Error: $"Mono agent injected but named pipe '{pipeName}' did not appear within 5 seconds. The target process may not have Mono loaded.");
+                var reason = pipeEx is TimeoutException
+                    ? "did not appear within 5 seconds. The target process may not have Mono loaded."
+                    : $"connection failed: {pipeEx.Message}";
+                return new MonoInjectResult(false, Error: $"Mono agent injected but named pipe '{pipeName}' {reason}");
             }
 
             var reader = new StreamReader(pipe, Encoding.UTF8);

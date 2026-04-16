@@ -11,6 +11,10 @@ namespace CEAISuite.Engine.Lua;
 ///
 /// All functions require the Mono agent to be injected first (via InjectMonoAgent AI tool
 /// or LaunchMonoDataCollector() Lua call).
+///
+/// NOTE: Mono handles are passed as Lua doubles (IEEE 754, 53-bit mantissa). Handles above
+/// 2^53 (~9 PB) will lose precision. This matches CE's limitation and is not a practical
+/// issue on Windows where user-mode addresses are below 2^48.
 /// </summary>
 internal static class LuaMonoBindings
 {

@@ -71,6 +71,7 @@ typedef MonoType*     (*fn_mono_method_get_return_type)(void* sig);  /* MonoMeth
 typedef void*         (*fn_mono_method_signature)(MonoMethod* method);
 typedef int           (*fn_mono_signature_get_param_count)(void* sig);
 
+typedef MonoType*     (*fn_mono_signature_get_params)(void* sig, void** iter);
 typedef const char*   (*fn_mono_type_get_name)(MonoType* type);
 
 typedef MonoVTable*   (*fn_mono_class_vtable)(MonoDomain* domain, MonoClass* klass);
@@ -108,6 +109,7 @@ static struct {
     fn_mono_method_signature         method_signature;
     fn_mono_method_get_return_type   method_get_return_type;  /* actually signature_get_return_type */
     fn_mono_signature_get_param_count signature_get_param_count;
+    fn_mono_signature_get_params     signature_get_params;
     fn_mono_type_get_name            type_get_name;
     fn_mono_class_vtable             class_vtable;
     fn_mono_vtable_get_static_field_data vtable_get_static_field_data;
@@ -184,6 +186,7 @@ static BOOL ResolveMono(HMODULE hMono)
     RESOLVE(hMono, method_signature,   mono_method_signature);
     mono.method_get_return_type = (fn_mono_method_get_return_type)GetProcAddress(hMono, "mono_signature_get_return_type");
     RESOLVE(hMono, signature_get_param_count, mono_signature_get_param_count);
+    RESOLVE(hMono, signature_get_params,     mono_signature_get_params);
 
     /* Type names */
     RESOLVE(hMono, type_get_name,      mono_type_get_name);
@@ -203,14 +206,17 @@ static BOOL ResolveMono(HMODULE hMono)
 #define JSON_BUF_SIZE 65536
 static char g_jsonBuf[JSON_BUF_SIZE];
 static int  g_jsonLen;
+static BOOL g_jsonTruncated; /* M2: detect buffer overflow */
 
-static void json_reset(void) { g_jsonLen = 0; g_jsonBuf[0] = '\0'; }
+static void json_reset(void) { g_jsonLen = 0; g_jsonBuf[0] = '\0'; g_jsonTruncated = FALSE; }
 static void json_append(const char* s) {
     int len = (int)strlen(s);
     if (g_jsonLen + len < JSON_BUF_SIZE - 1) {
         memcpy(g_jsonBuf + g_jsonLen, s, len);
         g_jsonLen += len;
         g_jsonBuf[g_jsonLen] = '\0';
+    } else {
+        g_jsonTruncated = TRUE;
     }
 }
 static void json_append_str(const char* s) {
@@ -278,7 +284,10 @@ static void HandleEnumDomains(void)
 static void HandleEnumAssemblies(ULONG64 domainHandle)
 {
     MonoDomain* domain = (MonoDomain*)(uintptr_t)domainHandle;
-    (void)domain; /* domain_foreach iterates all assemblies globally */
+    /* L4: Mono's assembly_foreach enumerates all assemblies globally regardless of domain.
+     * The Mono C API does not offer a domain-scoped assembly enumeration function.
+     * This matches CE's behavior — mono_enumAssemblies returns all loaded assemblies. */
+    (void)domain;
 
     json_reset();
     json_append("{\"ok\":true,\"assemblies\":[");
@@ -426,7 +435,21 @@ static void HandleEnumMethods(ULONG64 classHandle)
             json_append(",\"is_static\":");
             json_append(isStatic ? "true" : "false");
             json_append(",\"parameter_types\":[");
-            /* Parameter type enumeration requires mono_signature_get_params — simplified here */
+            /* L5: enumerate parameter types via mono_signature_get_params */
+            if (mono.method_signature && mono.signature_get_params && mono.type_get_name) {
+                void* sig2 = mono.method_signature(method);
+                if (sig2) {
+                    void* piter = NULL;
+                    MonoType* ptype;
+                    int pfirst = 1;
+                    while ((ptype = mono.signature_get_params(sig2, &piter)) != NULL) {
+                        const char* ptname = mono.type_get_name(ptype);
+                        if (!pfirst) json_append(",");
+                        pfirst = 0;
+                        json_append_str(ptname ? ptname : "?");
+                    }
+                }
+            }
             json_append("]");
             json_append("}");
         }
@@ -460,6 +483,13 @@ static void HandleGetStaticField(ULONG64 classHandle, ULONG64 fieldHandle, int s
     }
 
     int offset = mono.field_get_offset ? mono.field_get_offset(field) : 0;
+    /* M3: bounds check — cap size and reject obviously invalid offsets */
+    if (size < 1) size = 1;
+    if (size > 64) size = 64;
+    if (offset < 0 || offset > 0x7FFFFFFF) {
+        json_append("{\"ok\":false,\"error\":\"invalid field offset\"}\n");
+        return;
+    }
     unsigned char* ptr = (unsigned char*)staticData + offset;
 
     /* Base64-encode the raw bytes */
@@ -690,6 +720,12 @@ static void DispatchCommand(const char* cmdLine, HANDLE hPipe)
         json_append("\"}\n");
     }
 
+    /* M2: If response was truncated, replace with an error to avoid malformed JSON */
+    if (g_jsonTruncated) {
+        json_reset();
+        json_append("{\"ok\":false,\"error\":\"response truncated (exceeded 64KB buffer)\"}\n");
+    }
+
     WriteFile(hPipe, g_jsonBuf, (DWORD)g_jsonLen, &written, NULL);
     FlushFileBuffers(hPipe);
 }
@@ -729,17 +765,28 @@ static DWORD WINAPI AgentInitThread(LPVOID param)
         }
     }
 
-    /* 4. Create named pipe server */
+    /* 4. Create named pipe server with security DACL (M1: restrict to current user) */
     char pipeName[128];
     _snprintf(pipeName, sizeof(pipeName), "\\\\.\\pipe\\CEAISuite_Mono_%u", GetCurrentProcessId());
 
+    /* Build a SECURITY_ATTRIBUTES that restricts pipe access to the current process owner.
+     * The SDDL string "D:(A;;GA;;;OW)" grants Generic All to the Owner only. */
+    SECURITY_ATTRIBUTES sa = {0};
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = FALSE;
+    BOOL saOk = ConvertStringSecurityDescriptorToSecurityDescriptorA(
+        "D:(A;;GA;;;OW)", 1 /* SDDL_REVISION_1 */, &sa.lpSecurityDescriptor, NULL);
+
     HANDLE hPipe = CreateNamedPipeA(
         pipeName,
-        PIPE_ACCESS_DUPLEX,
+        PIPE_ACCESS_DUPLEX | 0x00080000 /* FILE_FLAG_FIRST_PIPE_INSTANCE — prevent squatting */,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
         1,       /* max instances */
         JSON_BUF_SIZE, JSON_BUF_SIZE,
-        0, NULL);
+        0, saOk ? &sa : NULL);
+
+    if (saOk && sa.lpSecurityDescriptor)
+        LocalFree(sa.lpSecurityDescriptor);
 
     if (hPipe == INVALID_HANDLE_VALUE) {
         g_running = FALSE;

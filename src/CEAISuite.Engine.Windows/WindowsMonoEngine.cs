@@ -39,6 +39,7 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
         public IntPtr ProcessHandle { get; init; }
         public string PipeName { get; init; } = "";
         public string? MonoVersion { get; set; }
+        public int LastKnownDomainCount { get; set; }
         public NamedPipeClientStream? Pipe { get; set; }
         public StreamReader? PipeReader { get; set; }
         public StreamWriter? PipeWriter { get; set; }
@@ -65,10 +66,21 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
-        if (_states.ContainsKey(processId))
+        // M5: Use TryAdd with a sentinel to prevent concurrent injection for the same PID
+        var sentinel = new MonoProcessState { ProcessId = processId };
+        if (!_states.TryAdd(processId, sentinel))
             return new MonoInjectResult(false, Error: $"Mono agent already injected into process {processId}");
 
-        return await Task.Run(() => InjectCore(processId, ct), ct).ConfigureAwait(false);
+        try
+        {
+            return await Task.Run(() => InjectCore(processId, ct), ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Remove sentinel on failure so retry is possible
+            _states.TryRemove(processId, out _);
+            throw;
+        }
     }
 
     public async Task<bool> EjectAsync(int processId, CancellationToken ct = default)
@@ -99,7 +111,7 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
             return new MonoStatus(false, null, 0, MonoAgentHealth.Unknown);
 
         var health = state.Pipe?.IsConnected == true ? MonoAgentHealth.Healthy : MonoAgentHealth.Unresponsive;
-        return new MonoStatus(true, state.MonoVersion, 0, health);
+        return new MonoStatus(true, state.MonoVersion, state.LastKnownDomainCount, health);
     }
 
     // ── Domain & Assembly Enumeration ──
@@ -108,7 +120,9 @@ public sealed class WindowsMonoEngine : IMonoEngine, IDisposable
     {
         var state = GetState(processId);
         using var response = await SendCommandAsync(state, new { cmd = "enum_domains" }, ct).ConfigureAwait(false);
-        return DeserializeList<MonoDomain>(response, "domains");
+        var domains = DeserializeList<MonoDomain>(response, "domains");
+        state.LastKnownDomainCount = domains.Count; // L6: cache for GetStatus
+        return domains;
     }
 
     public async Task<IReadOnlyList<MonoAssembly>> EnumAssembliesAsync(int processId, nuint domainHandle, CancellationToken ct = default)

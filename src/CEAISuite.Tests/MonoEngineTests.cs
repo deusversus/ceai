@@ -161,7 +161,6 @@ public class MonoEngineTests
     [Fact]
     public void IMonoEngine_AllMethodsImplemented()
     {
-        // Verify StubMonoEngine implements all IMonoEngine methods
         var interfaceMethods = typeof(IMonoEngine).GetMethods()
             .Select(m => m.Name)
             .ToHashSet();
@@ -173,5 +172,88 @@ public class MonoEngineTests
 
         var missing = interfaceMethods.Where(m => !stubMethods.Contains(m)).ToList();
         Assert.Empty(missing);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // L8: Lua binding coverage (via MoonSharpLuaEngine integration)
+    // ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task LuaMonoBindings_LaunchMonoDataCollector_InjectsViaStub()
+    {
+        var facade = new StubEngineFacade();
+        var monoStub = new StubMonoEngine();
+        using var lua = new CEAISuite.Engine.Lua.MoonSharpLuaEngine(
+            engineFacade: facade, monoEngine: monoStub);
+
+        var result = await lua.ExecuteAsync("return LaunchMonoDataCollector()", 1000);
+        Assert.True(result.Success, result.Error);
+        Assert.True(monoStub.IsInjected);
+    }
+
+    [Fact]
+    public async Task LuaMonoBindings_EnumDomains_ReturnsTable()
+    {
+        var facade = new StubEngineFacade();
+        var monoStub = new StubMonoEngine();
+        monoStub.Domains.Add(new MonoDomain(0x100, "root", 3));
+        using var lua = new CEAISuite.Engine.Lua.MoonSharpLuaEngine(
+            engineFacade: facade, monoEngine: monoStub);
+
+        var result = await lua.ExecuteAsync("local d = mono_enumDomains(); return d[1].name", 1000);
+        Assert.True(result.Success, result.Error);
+        Assert.Contains("root", result.ReturnValue ?? "");
+    }
+
+    [Fact]
+    public async Task LuaMonoBindings_FindClass_ReturnsNilForMissing()
+    {
+        var facade = new StubEngineFacade();
+        var monoStub = new StubMonoEngine();
+        using var lua = new CEAISuite.Engine.Lua.MoonSharpLuaEngine(
+            engineFacade: facade, monoEngine: monoStub);
+
+        var result = await lua.ExecuteAsync("return mono_findClass(0, 'UnityEngine', 'Nope')", 1000);
+        Assert.True(result.Success, result.Error);
+        // nil return → empty ReturnValue
+        Assert.True(string.IsNullOrEmpty(result.ReturnValue) || result.ReturnValue == "nil");
+    }
+
+    [Fact]
+    public async Task LuaMonoBindings_GetAddressSafe_ReturnNilOnBadExpr()
+    {
+        var facade = new StubEngineFacade();
+        using var lua = new CEAISuite.Engine.Lua.MoonSharpLuaEngine(
+            engineFacade: facade);
+
+        // getAddressSafe should return 0 (not throw) for unresolvable expressions
+        var result = await lua.ExecuteAsync("return getAddressSafe('totally_bogus_module+0x999')", 1000);
+        Assert.True(result.Success, result.Error);
+    }
+
+    // ──────────────────────────────────────────────────────────
+    // L8: AI tool coverage
+    // ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AiToolMonoCategory_ContainsAllMonoTools()
+    {
+        // Verify the "mono" category exists in ToolCategories
+        var categories = typeof(CEAISuite.Application.AiOperatorService)
+            .Assembly.GetTypes()
+            .First(t => t.Name == "ToolCategories");
+
+        var categoriesField = categories.GetField("Categories",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(categoriesField);
+
+        var dict = (Dictionary<string, string[]>)categoriesField!.GetValue(null)!;
+        Assert.True(dict.ContainsKey("mono"), "ToolCategories should have a 'mono' category");
+
+        var monoTools = dict["mono"];
+        Assert.Contains("InjectMonoAgent", monoTools);
+        Assert.Contains("EnumMonoDomains", monoTools);
+        Assert.Contains("FindMonoClass", monoTools);
+        Assert.Contains("InvokeMonoMethod", monoTools);
     }
 }

@@ -118,8 +118,9 @@ public sealed class PointerRescanService(IEngineFacade engine)
             try
             {
                 var attachment = await engine.AttachAsync(processId, ct).ConfigureAwait(false);
-                currentModuleBases = attachment.Modules
-                    .ToDictionary(m => m.Name, m => m.BaseAddress, StringComparer.OrdinalIgnoreCase);
+                currentModuleBases = new Dictionary<string, nuint>(StringComparer.OrdinalIgnoreCase);
+                foreach (var m in attachment.Modules)
+                    currentModuleBases.TryAdd(m.Name, m.BaseAddress); // first-wins on duplicate names
             }
             catch { /* fall through to full rescan */ }
         }
@@ -129,8 +130,10 @@ public sealed class PointerRescanService(IEngineFacade engine)
         {
             ct.ThrowIfCancellationRequested();
 
-            // Smart rescan: if module base hasn't changed and we recorded the original base,
-            // the path is very likely still valid — skip the expensive re-walk.
+            // Smart rescan: if module base hasn't changed, ASSUME the chain is still valid.
+            // NOTE: This is a performance optimization, NOT a correctness guarantee.
+            // In-memory data can change even without module rebasing (e.g., game state updates).
+            // Use skipUnchangedModules=false for a full verification when accuracy matters.
             if (currentModuleBases is not null &&
                 currentModuleBases.TryGetValue(path.ModuleName, out var currentBase) &&
                 currentBase == path.ModuleBase)

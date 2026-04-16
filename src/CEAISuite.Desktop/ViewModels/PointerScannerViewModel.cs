@@ -245,6 +245,12 @@ public partial class PointerScannerViewModel : ObservableObject, IDisposable
             .Where(s => s.Length > 0).ToList();
     }
 
+    /// <remarks>
+    /// Thread safety: This method is always invoked via [RelayCommand] from the UI thread.
+    /// The await on Task.WhenAll does NOT use ConfigureAwait(false), so the continuation
+    /// resumes on the captured WPF SynchronizationContext. Property writes to Status and
+    /// StabilityScore are therefore on the UI thread. Do NOT add ConfigureAwait(false) here.
+    /// </remarks>
     [RelayCommand]
     private async Task ValidatePathsAsync()
     {

@@ -14,23 +14,49 @@ public class PointerResolutionPolishTests
     // ──────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task ScanForPointers_WithPerDepthOffsets_UsesLevel1Offset()
+    public async Task ScanForPointers_WithPerDepthOffsets_FindsWithinLimit()
     {
         var facade = new StubEngineFacade();
         var service = new PointerScannerService(facade);
 
-        // Write a pointer at main.exe+0x100 that points near target (within offset 0x500)
+        // Write a pointer at module base (0x400000) — the stub only returns data for
+        // exact address matches in ReadMemoryAsync, and the scanner reads from module base.
         var targetAddr = (nuint)0x500000;
-        var ptrAddr = (nuint)0x400100;
-        facade.WriteMemoryDirect(ptrAddr, BitConverter.GetBytes((ulong)(targetAddr - 0x10)));
+        var moduleBase = (nuint)0x400000;
+        // Write a full chunk at module base containing a pointer at offset 0
+        var chunk = new byte[4096];
+        var ptrBytes = BitConverter.GetBytes((ulong)(targetAddr - 0x10));
+        Array.Copy(ptrBytes, 0, chunk, 0, 8); // pointer at offset 0 within module
+        facade.WriteMemoryDirect(moduleBase, chunk);
 
+        // perDepthMaxOffset[0] = 0x20, so offset 0x10 is within limit
         var results = await service.ScanForPointersAsync(
             1000, targetAddr, maxDepth: 1, maxOffset: 0x2000,
-            perDepthMaxOffset: new long[] { 0x20 }); // Very tight level-1 offset
+            perDepthMaxOffset: new long[] { 0x20 });
 
-        // With maxOffset=0x20, the pointer at offset 0x10 from target SHOULD be found
-        // (0x10 < 0x20). This tests that per-depth limits are respected.
-        Assert.NotNull(results); // Scan completes without error
+        Assert.True(results.Count > 0, "Expected at least 1 pointer path with offset 0x10 within limit 0x20");
+    }
+
+    [Fact]
+    public async Task ScanForPointers_WithPerDepthOffsets_ExcludesOutsideLimit()
+    {
+        var facade = new StubEngineFacade();
+        var service = new PointerScannerService(facade);
+
+        var targetAddr = (nuint)0x500000;
+        var moduleBase = (nuint)0x400000;
+        var chunk = new byte[4096];
+        // Pointer at offset 0 that is 0x100 away from target
+        var ptrBytes = BitConverter.GetBytes((ulong)(targetAddr - 0x100));
+        Array.Copy(ptrBytes, 0, chunk, 0, 8);
+        facade.WriteMemoryDirect(moduleBase, chunk);
+
+        // perDepthMaxOffset[0] = 0x20, but the actual offset is 0x100 — should be excluded
+        var results = await service.ScanForPointersAsync(
+            1000, targetAddr, maxDepth: 1, maxOffset: 0x2000,
+            perDepthMaxOffset: new long[] { 0x20 });
+
+        Assert.Empty(results); // offset 0x100 exceeds per-depth limit 0x20
     }
 
     [Fact]
@@ -39,11 +65,19 @@ public class PointerResolutionPolishTests
         var facade = new StubEngineFacade();
         var service = new PointerScannerService(facade);
 
-        // Basic scan with default offsets — should complete without error
-        var results = await service.ScanForPointersAsync(
-            1000, 0x500000, maxDepth: 1, maxOffset: 0x2000);
+        var targetAddr = (nuint)0x500000;
+        var moduleBase = (nuint)0x400000;
+        var chunk = new byte[4096];
+        // Pointer at offset 0 that is 0x100 away from target
+        var ptrBytes = BitConverter.GetBytes((ulong)(targetAddr - 0x100));
+        Array.Copy(ptrBytes, 0, chunk, 0, 8);
+        facade.WriteMemoryDirect(moduleBase, chunk);
 
-        Assert.NotNull(results);
+        // No perDepthMaxOffset — uses default 0x2000, so offset 0x100 is within range
+        var results = await service.ScanForPointersAsync(
+            1000, targetAddr, maxDepth: 1, maxOffset: 0x2000);
+
+        Assert.True(results.Count > 0, "Expected at least 1 pointer path with offset 0x100 within default limit 0x2000");
     }
 
     // ──────────────────────────────────────────────────────────
@@ -129,6 +163,41 @@ public class PointerResolutionPolishTests
     // ──────────────────────────────────────────────────────────
     // GetMaxOffsetForDepth helper (tested indirectly via scan)
     // ──────────────────────────────────────────────────────────
+
+    [Fact]
+    public void StabilityColor_Common_MapsToGray()
+    {
+        var item = new CEAISuite.Desktop.Models.PointerPathDisplayItem { Status = "Common" };
+        Assert.Equal("#888888", item.StabilityColor);
+    }
+
+    [Fact]
+    public void SortByStability_OrdersCorrectly()
+    {
+        var items = new System.Collections.ObjectModel.ObservableCollection<CEAISuite.Desktop.Models.PointerPathDisplayItem>
+        {
+            new() { Status = "Broken", StabilityScore = 0 },
+            new() { Status = "Stable", StabilityScore = 1.0 },
+            new() { Status = "Found", StabilityScore = -1 },
+            new() { Status = "Drifted", StabilityScore = 0.5 },
+        };
+
+        var sorted = items
+            .OrderByDescending(r => r.Status switch
+            {
+                "Stable" or "Unchanged" => 3,
+                "Drifted" => 2,
+                "Found" or "Loaded" or "Common" => 1,
+                _ => 0
+            })
+            .ThenByDescending(r => r.StabilityScore)
+            .ToList();
+
+        Assert.Equal("Stable", sorted[0].Status);
+        Assert.Equal("Drifted", sorted[1].Status);
+        Assert.Equal("Found", sorted[2].Status);
+        Assert.Equal("Broken", sorted[3].Status);
+    }
 
     [Fact]
     public void PointerMapFile_SerializationRoundtrip()

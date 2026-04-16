@@ -1083,6 +1083,8 @@
                                                     ToolTip="Load a saved pointer map" />
                                             <Button Command="{Binding ComparePointerMapsCommand}" Content="Compare" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
                                                     ToolTip="Compare two pointer map files" />
+                                            <Button Command="{Binding SortByStabilityCommand}" Content="Sort" Padding="8,2" Style="{StaticResource ToolbarButton}" Margin="4,0,0,0"
+                                                    ToolTip="Sort results by stability (Stable first, Broken last)" />
                                             <TextBlock Text="{Binding StatusText}" Foreground="{DynamicResource SecondaryForeground}" VerticalAlignment="Center" Margin="8,0,0,0" FontSize="11" />
                                         </StackPanel>
                                     </StackPanel>
@@ -1124,7 +1126,33 @@
                                                 <GridViewColumn Header="Pointer Chain" Width="400" DisplayMemberBinding="{Binding Chain}" />
                                                 <GridViewColumn Header="Resolved" Width="160" DisplayMemberBinding="{Binding ResolvedAddress}" />
                                                 <GridViewColumn Header="Module" Width="120" DisplayMemberBinding="{Binding ModuleName}" />
-                                                <GridViewColumn Header="Status" Width="80" DisplayMemberBinding="{Binding Status}" />
+                                                <GridViewColumn Header="Status" Width="80">
+                                                    <GridViewColumn.CellTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding Status}">
+                                                                <TextBlock.Style>
+                                                                    <Style TargetType="TextBlock">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource PrimaryForeground}" />
+                                                                        <Style.Triggers>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="Stable">
+                                                                                <Setter Property="Foreground" Value="#22AA22" />
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="Unchanged">
+                                                                                <Setter Property="Foreground" Value="#22AA22" />
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="Drifted">
+                                                                                <Setter Property="Foreground" Value="#CCAA00" />
+                                                                            </DataTrigger>
+                                                                            <DataTrigger Binding="{Binding Status}" Value="Broken">
+                                                                                <Setter Property="Foreground" Value="#CC2222" />
+                                                                            </DataTrigger>
+                                                                        </Style.Triggers>
+                                                                    </Style>
+                                                                </TextBlock.Style>
+                                                            </TextBlock>
+                                                        </DataTemplate>
+                                                    </GridViewColumn.CellTemplate>
+                                                </GridViewColumn>
                                             </GridView>
                                         </ListView.View>
                                     </ListView>

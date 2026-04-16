@@ -77,6 +77,20 @@ internal static class LuaMemoryManagementBindings
             var bytes = data.Bytes is byte[] arr ? arr : data.Bytes.ToArray();
             engineFacade.WriteBytesAsync(pid, dest, bytes).GetAwaiter().GetResult();
         });
+
+        // fillMemory(address, size, byteValue) — fill region with a single byte value
+        script.Globals["fillMemory"] = (Action<DynValue, double, double>)((addrArg, size, byteVal) =>
+        {
+            var pid = RequireProcess(engine);
+            var addr = ResolveAddressArg(addrArg, pid, engineFacade, autoAssembler);
+            var byteCount = (int)size;
+            if (byteCount < 1 || byteCount > 0x100000)
+                throw new ScriptRuntimeException("fillMemory: size must be 1..1048576");
+            var fillByte = (byte)byteVal;
+            var buffer = new byte[byteCount];
+            System.Array.Fill(buffer, fillByte);
+            engineFacade.WriteBytesAsync(pid, addr, buffer).GetAwaiter().GetResult();
+        });
     }
 
     private static DynValue RegionToTable(Script script, MemoryRegionDescriptor region)

@@ -144,7 +144,7 @@ internal static class ToolCategories
         ["memory_advanced"] = [
             "HexDump", "ListMemoryRegions", "DissectStructure", "ExportStructDefinition",
             "ChangeMemoryProtection", "AllocateMemory", "FreeMemory", "QueryMemoryProtection",
-            "BrowseMemory" ],
+            "BrowseMemory", "BatchWrite", "FillMemory" ],
         ["address_table"] = [
             "RenameAddressTableEntry", "SetEntryNotes", "GetAddressTableNode",
             "CreateAddressGroup", "MoveEntryToGroup", "ToggleScript",

@@ -204,6 +204,81 @@ public sealed partial class AiToolFunctions(
         }
     }
 
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Medium)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [Description("Write multiple values in a single operation. Each entry is 'address|type|value' separated by semicolons.")]
+    public async Task<string> BatchWrite(
+        [Description("Process ID")] int processId,
+        [Description("Semicolon-separated entries: 'addr|type|value;addr|type|value;...'")] string entries)
+    {
+        try
+        {
+            var pidError = ValidateDestructiveProcessId(processId);
+            if (pidError is not null) return pidError;
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+
+            var parts = entries.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            int succeeded = 0, failed = 0;
+            var errors = new List<string>();
+
+            foreach (var part in parts)
+            {
+                var fields = part.Split('|', 3);
+                if (fields.Length < 3) { failed++; errors.Add($"Invalid entry: '{part}'"); continue; }
+
+                try
+                {
+                    var resolvedAddr = await TryResolveToHex(processId, fields[0].Trim()).ConfigureAwait(false);
+                    var dt = Enum.Parse<MemoryDataType>(fields[1].Trim(), ignoreCase: true);
+                    var addr = AddressTableService.ParseAddress(resolvedAddr);
+                    if (patchUndoService is not null)
+                        await patchUndoService.WriteWithUndoAsync(processId, addr, dt, fields[2].Trim()).ConfigureAwait(false);
+                    else
+                        await engineFacade.WriteValueAsync(processId, addr, dt, fields[2].Trim()).ConfigureAwait(false);
+                    succeeded++;
+                }
+                catch (Exception ex) { failed++; errors.Add($"{fields[0]}: {ex.Message}"); }
+            }
+
+            return ToJson(new { succeeded, failed, total = parts.Length, errors = errors.Count > 0 ? errors : null });
+        }
+        catch (Exception ex) { return $"BatchWrite failed: {ex.Message}"; }
+    }
+
+    [Destructive]
+    [MaxResultSize(MaxResultSizeAttribute.Small)]
+    [InterruptBehavior(ToolInterruptMode.MustComplete)]
+    [Description("Fill a memory region with a repeating byte pattern.")]
+    public async Task<string> FillMemory(
+        [Description("Process ID")] int processId,
+        [Description("Start address (hex or symbolic)")] string address,
+        [Description("Number of bytes to fill")] int length,
+        [Description("Byte pattern in hex (e.g. '90' for NOP, 'CC' for INT3, '00' for zero)")] string pattern = "00")
+    {
+        try
+        {
+            var pidError = ValidateDestructiveProcessId(processId);
+            if (pidError is not null) return pidError;
+            if (!IsProcessAlive(processId)) return $"Process {processId} is no longer running.";
+            if (length < 1 || length > 0x100000) return "Length must be 1..1048576 bytes.";
+
+            var resolvedAddr = await TryResolveToHex(processId, address).ConfigureAwait(false);
+            var addr = AddressTableService.ParseAddress(resolvedAddr);
+            var patternBytes = Convert.FromHexString(pattern.Replace(" ", "", StringComparison.Ordinal));
+            if (patternBytes.Length == 0) return "Pattern must not be empty.";
+
+            // Build the fill buffer by repeating the pattern
+            var fillBuffer = new byte[length];
+            for (int i = 0; i < length; i++)
+                fillBuffer[i] = patternBytes[i % patternBytes.Length];
+
+            var written = await engineFacade.WriteBytesAsync(processId, addr, fillBuffer).ConfigureAwait(false);
+            return $"Filled {written} bytes at 0x{(ulong)addr:X} with pattern {pattern}.";
+        }
+        catch (Exception ex) { return $"FillMemory failed: {ex.Message}"; }
+    }
+
     [ConcurrencySafe]
     [MaxResultSize(MaxResultSizeAttribute.Medium)]
     [Description("Start a new memory scan. Returns result count.")]

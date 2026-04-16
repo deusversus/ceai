@@ -378,10 +378,14 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Int16 => BitConverter.ToInt16(bytes, 0).ToString(CultureInfo.InvariantCulture),
             MemoryDataType.Int32 => BitConverter.ToInt32(bytes, 0).ToString(CultureInfo.InvariantCulture),
             MemoryDataType.Int64 => BitConverter.ToInt64(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.UInt16 => BitConverter.ToUInt16(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.UInt32 => BitConverter.ToUInt32(bytes, 0).ToString(CultureInfo.InvariantCulture),
+            MemoryDataType.UInt64 => BitConverter.ToUInt64(bytes, 0).ToString(CultureInfo.InvariantCulture),
             MemoryDataType.Float => BitConverter.ToSingle(bytes, 0).ToString("G9", CultureInfo.InvariantCulture),
             MemoryDataType.Double => BitConverter.ToDouble(bytes, 0).ToString("G17", CultureInfo.InvariantCulture),
             MemoryDataType.Pointer => FormatPointer(bytes),
             MemoryDataType.String => ExtractNullTerminatedString(bytes),
+            MemoryDataType.WideString => ExtractNullTerminatedWideString(bytes),
             MemoryDataType.ByteArray => Convert.ToHexString(bytes),
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
@@ -411,7 +415,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 var closeHandle = ShouldCloseHandle(processId);
                 try
                 {
-                    if (!WriteProcessMemory(handle, (IntPtr)address, bytes, bytes.Length, out var bytesWritten) || bytesWritten != bytes.Length)
+                    if (!WriteWithAutoProtect(handle, (IntPtr)address, bytes, bytes.Length, out var bytesWritten))
                     {
                         throw new InvalidOperationException(
                             $"Unable to write memory at 0x{address:X} in process {processId}.");
@@ -444,7 +448,7 @@ public sealed class WindowsEngineFacade : IEngineFacade
                 var closeHandle = ShouldCloseHandle(processId);
                 try
                 {
-                    if (!WriteProcessMemory(handle, (IntPtr)address, data, data.Length, out var bytesWritten))
+                    if (!WriteWithAutoProtect(handle, (IntPtr)address, data, data.Length, out var bytesWritten))
                         throw new InvalidOperationException(
                             $"Unable to write {data.Length} bytes at 0x{address:X} in process {processId}.");
 
@@ -546,15 +550,16 @@ public sealed class WindowsEngineFacade : IEngineFacade
         dataType switch
         {
             MemoryDataType.Byte => 1,
-            MemoryDataType.Int16 => sizeof(short),
-            MemoryDataType.Int32 => sizeof(int),
-            MemoryDataType.Int64 => sizeof(long),
+            MemoryDataType.Int16 or MemoryDataType.UInt16 => sizeof(short),
+            MemoryDataType.Int32 or MemoryDataType.UInt32 => sizeof(int),
+            MemoryDataType.Int64 or MemoryDataType.UInt64 => sizeof(long),
             MemoryDataType.Float => sizeof(float),
             MemoryDataType.Double => sizeof(double),
             MemoryDataType.Pointer => string.Equals(TryGetArchitectureCached(processId), "x86", StringComparison.OrdinalIgnoreCase)
                 ? sizeof(int)
                 : sizeof(long),
-            MemoryDataType.String => 256, // read up to 256 bytes for null-terminated strings
+            MemoryDataType.String => 256,
+            MemoryDataType.WideString => 512, // UTF-16: 256 chars × 2 bytes
             MemoryDataType.ByteArray => 64,
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
@@ -566,10 +571,14 @@ public sealed class WindowsEngineFacade : IEngineFacade
             MemoryDataType.Int16 => BitConverter.GetBytes(short.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Int32 => BitConverter.GetBytes(int.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Int64 => BitConverter.GetBytes(long.Parse(value, CultureInfo.InvariantCulture)),
+            MemoryDataType.UInt16 => BitConverter.GetBytes(ushort.Parse(value, CultureInfo.InvariantCulture)),
+            MemoryDataType.UInt32 => BitConverter.GetBytes(uint.Parse(value, CultureInfo.InvariantCulture)),
+            MemoryDataType.UInt64 => BitConverter.GetBytes(ulong.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Float => BitConverter.GetBytes(float.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Double => BitConverter.GetBytes(double.Parse(value, CultureInfo.InvariantCulture)),
             MemoryDataType.Pointer => ConvertPointerValue(processId, value),
             MemoryDataType.String => System.Text.Encoding.UTF8.GetBytes(value + '\0'),
+            MemoryDataType.WideString => System.Text.Encoding.Unicode.GetBytes(value + '\0'),
             MemoryDataType.ByteArray => Convert.FromHexString(value.Replace(" ", "", StringComparison.Ordinal)),
             _ => throw new ArgumentOutOfRangeException(nameof(dataType), dataType, "Unsupported memory data type.")
         };
@@ -602,6 +611,51 @@ public sealed class WindowsEngineFacade : IEngineFacade
         var length = nullIdx >= 0 ? nullIdx : bytes.Length;
         return System.Text.Encoding.UTF8.GetString(bytes, 0, length);
     }
+
+    private static string ExtractNullTerminatedWideString(byte[] bytes)
+    {
+        // Find null terminator (two zero bytes at an even offset)
+        int length = bytes.Length;
+        for (int i = 0; i < bytes.Length - 1; i += 2)
+        {
+            if (bytes[i] == 0 && bytes[i + 1] == 0)
+            {
+                length = i;
+                break;
+            }
+        }
+        return System.Text.Encoding.Unicode.GetString(bytes, 0, length);
+    }
+
+    /// <summary>
+    /// Write bytes with auto-VirtualProtect: if the initial write fails (e.g., read-only page),
+    /// temporarily change protection to PAGE_READWRITE, write, then restore original protection.
+    /// This matches CE's transparent write behavior.
+    /// </summary>
+    private static bool WriteWithAutoProtect(IntPtr handle, IntPtr address, byte[] buffer, int size, out int bytesWritten)
+    {
+        if (WriteProcessMemory(handle, address, buffer, size, out bytesWritten) && bytesWritten == size)
+            return true;
+
+        // First attempt failed — try changing page protection
+        const uint PAGE_READWRITE = 0x04;
+        if (!VirtualProtectEx(handle, address, (IntPtr)size, PAGE_READWRITE, out var oldProtect))
+            return false;
+
+        try
+        {
+            return WriteProcessMemory(handle, address, buffer, size, out bytesWritten) && bytesWritten == size;
+        }
+        finally
+        {
+            // Restore original protection regardless of write success
+            VirtualProtectEx(handle, address, (IntPtr)size, oldProtect, out _);
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool VirtualProtectEx(IntPtr hProcess, IntPtr lpAddress, IntPtr dwSize, uint flNewProtect, out uint lpflOldProtect);
 
     // ──────────────────────────────────────────────────────────
     // Process information helpers (Phase 12A)

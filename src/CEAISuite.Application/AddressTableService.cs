@@ -19,6 +19,17 @@ public sealed record AddressTableEntry(
     bool IsLocked,
     string? LockedValue);
 
+/// <summary>Freeze behavior when an address table entry is locked.</summary>
+public enum FreezeMode
+{
+    /// <summary>Re-write the exact locked value each tick (default CE behavior).</summary>
+    Exact,
+    /// <summary>Increment the value by 1 each tick.</summary>
+    Increment,
+    /// <summary>Decrement the value by 1 each tick.</summary>
+    Decrement
+}
+
 /// <summary>
 /// A node in the address table tree. Can be a group (has children, no address)
 /// or a leaf entry (has address/value, no children).
@@ -123,6 +134,9 @@ public sealed class AddressTableNode : INotifyPropertyChanged
     }
 
     public string? LockedValue { get; set; }
+
+    /// <summary>Freeze behavior: Exact (default), Increment, or Decrement.</summary>
+    public FreezeMode FreezeMode { get; set; } = FreezeMode.Exact;
 
     // Pointer chain fields (CE-style multi-level pointer resolution)
     public bool IsPointer { get; set; }
@@ -542,7 +556,10 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
                 }
                 node.ResolvedAddress = resolvedAddr;
 
-                var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, node.DataType, cancellationToken).ConfigureAwait(false);
+                // Honor IsUnicode: use WideString for string reads on Unicode-flagged entries
+                var effectiveType = (node.DataType == MemoryDataType.String && node.IsUnicode == true)
+                    ? MemoryDataType.WideString : node.DataType;
+                var typed = await engineFacade.ReadValueAsync(processId, resolvedAddr, effectiveType, cancellationToken).ConfigureAwait(false);
                 node.PreviousValue = node.CurrentValue;
 
                 // Format the display value: hex mode, unsigned mode, or default
@@ -565,7 +582,15 @@ public sealed class AddressTableService(IEngineFacade engineFacade, ILogger<Addr
 
                 if (node.IsLocked && node.LockedValue is not null)
                 {
-                    await engineFacade.WriteValueAsync(processId, resolvedAddr, node.DataType, node.LockedValue, cancellationToken).ConfigureAwait(false);
+                    var writeValue = node.LockedValue;
+                    // Freeze modes: adjust the locked value before writing
+                    if (node.FreezeMode != FreezeMode.Exact && long.TryParse(node.LockedValue, CultureInfo.InvariantCulture, out var numVal))
+                    {
+                        numVal += node.FreezeMode == FreezeMode.Increment ? 1 : -1;
+                        writeValue = numVal.ToString(CultureInfo.InvariantCulture);
+                        node.LockedValue = writeValue;
+                    }
+                    await engineFacade.WriteValueAsync(processId, resolvedAddr, node.DataType, writeValue, cancellationToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)

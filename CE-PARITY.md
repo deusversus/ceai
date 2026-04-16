@@ -355,9 +355,161 @@ Everything else in the tables above that isn't shelved. ~50 features at 1-2 sess
 
 ---
 
+## Dependency Graph
+
+Features that unlock other features. Work these in dependency order.
+
+```
+Tier 0 (independent — can be parallelized):
+  [18] Disk-backed scan results
+  [19] IncreasedBy/DecreasedBy scan
+  [20] String/Unicode scanning
+  [59] Step Over fix
+  [37] Backward disassembly
+  [79] Hotkey execution
+
+Tier 1 dependencies:
+  [38] Code analysis engine ──┬──→ [39] Jump line visualization
+                              ├──→ [44] Cross-reference annotations
+                              ├──→ [45] String reference detection
+                              └──→ [142] Code dissection → structure inference
+
+  [63] FPU/XMM registers ────→ [79] Trace FPU/XMM display (extends trace entries)
+  [64] Trace visualization ───→ [65] Trace search
+                              ├──→ [66] Trace save/load
+                              └──→ [67] Trace comparison
+
+  [111] Reverse pointer map ──→ [112] Multi-level recursive scan (depth 7+)
+                              └──→ [113] Multi-threaded pointer workers
+
+  [95] Advanced form widgets ─→ [96] Canvas drawing
+                              ├──→ [97] Menus
+                              └──→ [98] File dialogs
+
+  [81] Custom type evaluation → [9] Full custom type system (scan + display)
+```
+
+---
+
+## Validation Criteria
+
+How we know each tier is actually done — tested against real-world usage.
+
+### Tier 0 Validation
+
+| Gap | Done When |
+|-----|-----------|
+| Disk-backed scan results | Unknown Initial Value scan on BDFFHD.exe (Unity, ~2GB virtual) returns >100K results and refines to <100 in 3-4 iterations without OOM or truncation |
+| IncreasedBy/DecreasedBy | Can find a health value by: unknown initial → take damage → "Decreased by [amount]" → find exact address in 3-4 scans |
+| String scanning | Can search for player name / item name in BDFFHD and get correct address(es) |
+| Step Over | Step over a `call` instruction without entering the callee. Verify RIP lands at instruction after the call. |
+| Backward disassembly | Scroll up in disassembler view. Each line is a valid instruction. No garbage/misaligned decode. |
+| Hotkey execution | Load a community CT file with hotkeys. Press the hotkey. The cheat activates/deactivates. |
+
+### Tier 1 Validation
+
+| Gap | Done When |
+|-----|-----------|
+| Code analysis | Run DissectCode on BDFFHD main module. Produces call list, jump targets, string references. Accessible from UI. |
+| Jump lines | Visual lines connect jump/call instructions to their targets in the disassembler view |
+| Inline assembler | Double-click an instruction → type `nop` → instruction is NOPed in target memory |
+| Register modification | Set a BP on a health-write instruction. Configure "set [register] to 999". Health stays at 999. |
+| Form designer widgets | Load a community CT that creates a Lua GUI with ComboBox + ListView. Form displays correctly. |
+| Reverse pointer map | Pointer scan to depth 5+ completes in <60 seconds on BDFFHD |
+
+### Tier 2 Validation
+
+General: each feature has a unit test AND a manual smoke test documented inline.
+
+---
+
+## Architecture Notes
+
+Where in the codebase each major gap lives — so future sessions know where to start.
+
+### Scanning gaps (#18-35)
+
+- **Engine contract**: `src/CEAISuite.Engine.Abstractions/ScannerContracts.cs` — `ScanType` enum, `IScanEngine` interface
+- **Engine impl**: `src/CEAISuite.Engine.Windows/WindowsScanEngine.cs` — all scan logic, `MaxScanResults` constant
+- **Application**: `src/CEAISuite.Application/ScanService.cs` — scan state, undo history
+- **ViewModel**: `src/CEAISuite.Desktop/ViewModels/ScannerViewModel.cs`
+- **Disk-backed storage**: New. Needs a `FileBackedScanResultStore` replacing the in-memory `List<ScanResultEntry>`. Reference CE's `TScanfilewriter` pattern.
+
+### Disassembly gaps (#36-49)
+
+- **Engine contract**: `src/CEAISuite.Engine.Abstractions/DisassemblyContracts.cs`
+- **Engine impl**: `src/CEAISuite.Engine.Windows/WindowsDisassemblyEngine.cs` (149 lines — thin Iced wrapper)
+- **Application**: `src/CEAISuite.Application/DisassemblyService.cs`
+- **ViewModel**: `src/CEAISuite.Desktop/ViewModels/DisassemblerViewModel.cs`
+- **Code analysis**: New. Needs `ICodeAnalysisEngine` + `WindowsCodeAnalysisEngine` + `CodeAnalysisService`. Will be the largest new subsystem.
+- **Jump lines**: New. WPF custom rendering in the disassembler view (Canvas overlay or adorner).
+
+### Debugger gaps (#50-75)
+
+- **Stepping**: `src/CEAISuite.Engine.Windows/WindowsSteppingEngine.cs` — `StepOverAsync` at line 112 is the stub
+- **VEH agent**: `native/veh_agent/veh_agent.c` — may need CMD_GET_CONTEXT for StepOver/register read
+- **Registers**: `src/CEAISuite.Desktop/ViewModels/DebuggerViewModel.cs` — `RegisterSnapshot` lacks FPU/XMM
+- **Trace UI**: New ViewModel + XAML panel needed
+
+### Address table gaps (#76-91)
+
+- **Service**: `src/CEAISuite.Application/AddressTableService.cs`
+- **Node model**: In same file, `AddressTableNode` class
+- **CT parser**: `src/CEAISuite.Application/CheatTableParser.cs`
+- **Hotkeys**: `src/CEAISuite.Application/GlobalHotkeyService.cs` — registration works, execution doesn't connect to address table actions
+
+### Lua gaps (#92-110)
+
+- **Bindings**: `src/CEAISuite.Engine.Lua/` — all `Lua*Bindings.cs` files
+- **Form host**: `src/CEAISuite.Desktop/Services/LuaFormHostService.cs`
+- **New widgets**: Add to `CeFormBindings.cs` and `LuaFormHostService.cs`
+
+### Pointer scanner gaps (#111-121)
+
+- **Service**: `src/CEAISuite.Application/PointerScannerService.cs` (~350 lines)
+- **Reverse map**: New. Major new data structure — needs custom memory allocator or memory-mapped file for the radix tree.
+
+---
+
+## Risk Flags
+
+Items that touch native code, change core architecture, or have high regression potential:
+
+| Item | Risk | Reason |
+|------|------|--------|
+| #18 Disk-backed scan results | **HIGH** | Changes the fundamental data structure of the scanner. Every scan path touches this. Regression risk to all scan tests. |
+| #38 Code analysis engine | **MEDIUM** | New subsystem, isolated. But will need integration hooks into disassembler view. |
+| #59 Step Over | **MEDIUM** | Needs either CMD_GET_CONTEXT in VEH agent (native change) or pre-step disassembly to detect CALL instructions. |
+| #79 Hotkey execution | **MEDIUM** | Connects GlobalHotkeyService to AddressTableService toggle/activate actions. Must handle thread affinity (hotkeys fire on background thread, address table is UI-bound). |
+| #95 Form widgets | **LOW** | Additive — new widget types don't change existing ones. |
+| #111 Reverse pointer map | **HIGH** | New memory-intensive data structure. Could cause OOM on large processes if not designed carefully. |
+
+---
+
+## Sprint Planning Template
+
+Copy this for each sprint:
+
+```markdown
+### Sprint [N] — [Theme]
+**Date:** YYYY-MM-DD
+**Target items:** #X, #Y, #Z
+**Validation:** [which criteria from above]
+**Sessions planned:** N
+
+#### Results
+- [ ] Item #X — status
+- [ ] Item #Y — status
+- [ ] Item #Z — status
+**Tests added:** N
+**Parity after sprint:** X%
+```
+
+---
+
 ## Tracking Changes
 
-| Date | What Changed | New Parity |
-|------|-------------|------------|
+| Date | What Changed | Parity |
+|------|-------------|--------|
 | 2026-04-16 | Initial creation from 4-agent CE 7.5 source comparison | ~35-40% |
 | | | |
